@@ -18,8 +18,10 @@ gdt_flush:
     mov gs, ax
     mov ss, ax
 
-    ; 刷新 CS: 跳转到代码段
-    jmp 0x08:.reload_cs    ; 0x08 = GDT_KERNEL_CODE
+    ; 刷新 CS: 用 push + retf 实现远跳转（避免 NASM 标签地址计算问题）
+    push 0x08              ; 目标 CS = 内核代码段
+    push .reload_cs        ; 目标 EIP = .reload_cs
+    retf                   ; 远返回，同时刷新 CS 和 EIP
 
 .reload_cs:
     ret

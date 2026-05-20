@@ -56,6 +56,11 @@ gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -I $SRC/include \
     -c $SRC/ipc/syscall.c -o $BUILD/syscall.o
 
+gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
+    -I $SRC/include \
+    -c $SRC/serial.c -o $BUILD/serial.o
+
 echo "[4/5] Linking kernel.elf..."
 ld -m elf_i386 -T $SRC/linker.ld \
     -o $BUILD/kernel.elf \
@@ -69,7 +74,8 @@ ld -m elf_i386 -T $SRC/linker.ld \
     $BUILD/pmm.o \
     $BUILD/vmm.o \
     $BUILD/scheduler.o \
-    $BUILD/syscall.o
+    $BUILD/syscall.o \
+    $BUILD/serial.o
 
 objcopy -O binary $BUILD/kernel.elf $BUILD/kernel.bin
 

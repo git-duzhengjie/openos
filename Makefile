@@ -47,11 +47,12 @@ OS_IMG    := $(BUILD_DIR)/openos.img
 
 # 源文件
 BOOT_SRC_FILE := $(BOOT_SRC)/boot.asm
-KERNEL_C_FILES := $(KERNEL_SRC)/kernel.c $(KERNEL_SRC)/idt.c
-KERNEL_ASM_FILES := $(KERNEL_SRC)/entry.asm $(KERNEL_SRC)/isr.asm
+KERNEL_C_FILES := $(KERNEL_SRC)/kernel.c $(KERNEL_SRC)/vga.c $(KERNEL_SRC)/string.c
+KERNEL_ASM_FILES := $(KERNEL_SRC)/entry.asm
 
 # 目标文件
-KERNEL_OBJS := $(BUILD_DIR)/kernel.o $(BUILD_DIR)/entry.o $(BUILD_DIR)/idt.o $(BUILD_DIR)/isr.o
+KERNEL_OBJS := $(patsubst $(KERNEL_SRC)/%.c,$(BUILD_DIR)/%.o,$(KERNEL_C_FILES)) \
+               $(patsubst $(KERNEL_SRC)/%.asm,$(BUILD_DIR)/%.o,$(KERNEL_ASM_FILES))
 
 # ============================================================
 # 默认目标：构建
@@ -62,25 +63,25 @@ all: $(OS_IMG)
 # 构建引导加载程序
 # ============================================================
 $(BOOT_BIN): $(BOOT_SRC_FILE) | $(BUILD_DIR)
-	$(WSL_PREFIX) $(ASM) -f bin $(BOOT_SRC_FILE) -o $(BOOT_BIN)
+	@echo 正在汇编引导加载程序 $<...
+	$(WSL_PREFIX) $(ASM) -f bin $< -o $@
 
 # ============================================================
-# 构建内核
+# 内核编译规则
 # ============================================================
-$(BUILD_DIR)/entry.o: $(KERNEL_SRC)/entry.asm | $(BUILD_DIR)
+$(BUILD_DIR)/%.o: $(KERNEL_SRC)/%.c | $(BUILD_DIR)
+	@echo 正在编译 $<...
+	$(WSL_PREFIX) $(CC) $(CFLAGS) $< -c -o $@
+
+$(BUILD_DIR)/%.o: $(KERNEL_SRC)/%.asm | $(BUILD_DIR)
+	@echo 正在汇编 $<...
 	$(WSL_PREFIX) $(ASM) $(ASMFLAGS) $< -o $@
 
-$(BUILD_DIR)/isr.o: $(KERNEL_SRC)/isr.asm | $(BUILD_DIR)
-	$(WSL_PREFIX) $(ASM) $(ASMFLAGS) $< -o $@
-
-$(BUILD_DIR)/kernel.o: $(KERNEL_SRC)/kernel.c | $(BUILD_DIR)
-	$(WSL_PREFIX) $(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILD_DIR)/idt.o: $(KERNEL_SRC)/idt.c | $(BUILD_DIR)
-	$(WSL_PREFIX) $(CC) $(CFLAGS) -c $< -o $@
-
+# ============================================================
 # 链接内核
-$(KERNEL_ELF): $(KERNEL_OBJS) $(KERNEL_SRC)/linker.ld
+# ============================================================
+$(KERNEL_ELF): $(KERNEL_OBJS)
+	@echo 正在链接内核...
 	$(WSL_PREFIX) $(LD) $(LDFLAGS) -o $@ $(KERNEL_OBJS)
 	$(WSL_PREFIX) objcopy -O binary $@ $(KERNEL_BIN)
 
@@ -88,6 +89,7 @@ $(KERNEL_ELF): $(KERNEL_OBJS) $(KERNEL_SRC)/linker.ld
 # 生成磁盘镜像
 # ============================================================
 $(OS_IMG): $(BOOT_BIN) $(KERNEL_ELF)
+	@echo 正在生成磁盘镜像...
 	$(WSL_PREFIX) dd if=/dev/zero of=$(OS_IMG) bs=512 count=2880 2>/dev/null
 	$(WSL_PREFIX) dd if=$(BOOT_BIN) of=$(OS_IMG) bs=512 count=1 conv=notrunc 2>/dev/null
 	$(WSL_PREFIX) dd if=$(KERNEL_BIN) of=$(OS_IMG) bs=512 seek=1 conv=notrunc 2>/dev/null
@@ -100,6 +102,7 @@ $(OS_IMG): $(BOOT_BIN) $(KERNEL_ELF)
 # 在QEMU中运行
 # ============================================================
 run: $(OS_IMG)
+	@echo 启动QEMU...
 	$(WSL_PREFIX) $(QEMU) -drive format=raw,file=$(OS_IMG) -m 512M -vga std
 
 run-debug: $(OS_IMG)

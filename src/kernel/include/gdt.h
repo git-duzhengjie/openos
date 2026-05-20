@@ -17,10 +17,16 @@
 #define GDT_ACCESS_USER_CODE 0xFA /* 存在、ring3、代码、可执行、已读取 */
 #define GDT_ACCESS_USER_DATA 0xF2 /* 存在、ring3、数据、可写 */
 
-/* 标志 (高4位) */
-#define GDT_FLAG_4K   0xC0    /* 4KB粒度 */
-#define GDT_FLAG_32   0x40    /* 32位代码/数据 */
-#define GDT_FLAG_LIM  0x80    /* limit页面粒度 */
+/* 标志 (高4位，作为4-bit值传入 gdt_set_gate 的 flags 参数) */
+#define GDT_GRAN_4K    0x8    /* 4KB粒度 (G=1) */
+#define GDT_DB_32BIT   0x4    /* 32位代码/数据 (D=1, 必须设1) */
+#define GDT_LONG_MODE  0x2    /* 长模式 (L=1) - 32位模式设0 */
+#define GDT_AVL        0x1    /* 可用位 (AVL) - 通常设0 */
+
+/* 向后兼容的旧宏名 */
+#define GDT_FLAG_4K    GDT_GRAN_4K
+#define GDT_FLAG_32    GDT_DB_32BIT
+#define GDT_FLAG_LIM   GDT_LONG_MODE
 
 /* 段选择子索引 */
 #define GDT_KERNEL_CODE 0x08   /* 内核代码段 (index=1, RPL=0) */

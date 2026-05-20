@@ -104,6 +104,14 @@ add_custom_command(
     COMMENT "Compiling gdt.c..."
 )
 
+# serial.c
+add_custom_command(
+    OUTPUT ${BUILD_DIR}/serial.o
+    COMMAND ${CMAKE_C_COMPILER} ${CMAKE_C_FLAGS_INIT} -c ${CMAKE_SOURCE_DIR}/src/kernel/serial.c -o ${BUILD_DIR}/serial.o
+    DEPENDS ${CMAKE_SOURCE_DIR}/src/kernel/serial.c
+    COMMENT "Compiling serial.c..."
+)
+
 # pmm.c
 add_custom_command(
     OUTPUT ${BUILD_DIR}/pmm.o
@@ -154,6 +162,7 @@ add_custom_command(
             ${BUILD_DIR}/vmm.o
             ${BUILD_DIR}/scheduler.o
             ${BUILD_DIR}/syscall.o
+            ${BUILD_DIR}/serial.o
     DEPENDS
         ${BUILD_DIR}/entry.o
         ${BUILD_DIR}/isr.o
@@ -166,6 +175,7 @@ add_custom_command(
         ${BUILD_DIR}/vmm.o
         ${BUILD_DIR}/scheduler.o
         ${BUILD_DIR}/syscall.o
+        ${BUILD_DIR}/serial.o
         ${CMAKE_SOURCE_DIR}/src/kernel/linker.ld
     COMMENT "Linking kernel..."
 )

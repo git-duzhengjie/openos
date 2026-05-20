@@ -4,6 +4,8 @@
 
 #include "../include/process.h"
 #include "../include/pmm.h"
+#include "../include/idt.h"
+#include "../include/serial.h"   // ← 新增：注册 IRQ 处理函数
 
 #ifndef NULL
 #define NULL ((void*)0)
@@ -28,12 +30,24 @@ static struct {
 
 #define SCHED_TICKS_PER_QUANTUM 10
 
+/* ============================================================
+ * 定时器中断处理 (IRQ0 → INT 32)
+ * ============================================================ */
+static void timer_handler(registers_t *regs) {
+    (void)regs;
+    serial_write("T");  /* 每个tick打印一个T */
+    sched_tick();
+}
+
 /* 初始化调度器 */
 void sched_init(void) {
     for (int i = 0; i < 8; i++) sched.queues[i] = NULL;
     sched.current = NULL;
     sched.current_ticks = 0;
     sched.initialized = 1;
+
+    /* 注册定时器中断处理 */
+    isr_install_handler(32, timer_handler);
 
     /* 创建 idle 线程 */
     uint32_t idle_stack_top = (uint32_t)pmm_alloc_page() + 4096;
@@ -129,7 +143,6 @@ process_t *proc_create(const char *name, uint32_t entry, uint32_t esp) {
     p->pid = (uint32_t)p;
     p->state = PROC_RUNNING;
     p->cr3 = 0;
-    /* 复制名字 */
     for (int i = 0; name[i] && i < 31; i++) p->name[i] = name[i];
     return p;
 }
@@ -157,7 +170,6 @@ thread_t *thread_create(uint32_t pid, const char *name, uint32_t entry, uint32_t
     t->kernel_eip = entry;
     t->kernel_stack = (uint32_t)stack_base;
     t->kernel_stack_top = stack_top;
-    /* 复制名字到 name 字段... (thread_t 没有 name，直接跳过) */
     (void)name;
     return t;
 }

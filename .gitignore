@@ -16,3 +16,6 @@ Thumbs.db
 
 # 日志
 *.log
+task-summary-20260520-ph2-build-fix.md
+task-summary-20260520-serial-debug.md
+src/kernel/sched/scheduler.c.new_thread_create
