@@ -165,18 +165,18 @@ void kernel_main(void) {
 	disable_cursor();  // 禁止光标闪烁
 
 	terminal_write("========================================\n");
-	terminal_write("        openos v0.1 - 开源智能操作系统\n");
+	terminal_write("        openos v0.1 - Open Source OS\n");
 	terminal_write("========================================\n\n");
 
-	terminal_write("[INFO] 内核已加载到内存\n");
-	terminal_write("[INFO] 保护模式已启用\n");
+	terminal_write("[INFO] Kernel loaded into memory\n");
+	terminal_write("[INFO] Protected mode enabled\n");
 
-	// 初始化IDT
-	terminal_write("[INFO] 初始化中断描述符表...\n");
+	// Initialize IDT
+	terminal_write("[INFO] Initializing IDT...\n");
 	idt_init();
-	terminal_write("[INFO] IDT初始化完成\n");
+	terminal_write("[INFO] IDT initialized\n");
 
-	terminal_write("[INFO] 系统初始化中...\n\n");
+	terminal_write("[INFO] System initializing...\n\n");
 
 	terminal_write("  ____                   \n");
 	terminal_write(" / __ \\                  \n");
@@ -187,13 +187,13 @@ void kernel_main(void) {
 	terminal_write("       | |                \n");
 	terminal_write("       |_|                \n\n");
 
-	terminal_write("[INFO] 系统就绪!\n");
-	terminal_write("[INFO] 内核地址: ");
+	terminal_write("[INFO] System ready!\n");
+	terminal_write("[INFO] Kernel address: ");
 	terminal_write_hex((unsigned int)&kernel_main);
 	terminal_write("\n");
-	terminal_write("[INFO] CPU模式: 32位保护模式\n");
-	terminal_write("[INFO] 中断: 已启用\n");
-	terminal_write("[INFO] 内存映射: VGA文本模式 0xB8000\n\n");
+	terminal_write("[INFO] CPU mode: 32-bit protected mode\n");
+	terminal_write("[INFO] Interrupts: enabled\n");
+	terminal_write("[INFO] Memory map: VGA text mode 0xB8000\n\n");
 
 	terminal_write("openos$ ");
 
