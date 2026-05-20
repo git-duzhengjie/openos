@@ -1,0 +1,17 @@
+# 构建输出
+build/
+*.o
+*.iso
+*.bin
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# 系统文件
+Thumbs.db
+.DS_Store
+
+# 日志
+*.log
