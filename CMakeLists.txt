@@ -26,16 +26,6 @@ set(CMAKE_ASM_FLAGS_INIT "-f elf32")
 set(CMAKE_EXE_LINKER_FLAGS_INIT "-m elf_i386 -T ${CMAKE_SOURCE_DIR}/src/kernel/linker.ld")
 
 # ============================================================
-# 源文件
-# ============================================================
-set(BOOT_SRC "${CMAKE_SOURCE_DIR}/src/boot/boot.asm")
-set(KERNEL_C_SRC "${CMAKE_SOURCE_DIR}/src/kernel/kernel.c")
-set(KERNEL_IDT_SRC "${CMAKE_SOURCE_DIR}/src/kernel/idt.c")
-set(KERNEL_ENTRY_SRC "${CMAKE_SOURCE_DIR}/src/kernel/entry.asm")
-set(KERNEL_ISR_SRC "${CMAKE_SOURCE_DIR}/src/kernel/isr.asm")
-set(KERNEL_LINKER "${CMAKE_SOURCE_DIR}/src/kernel/linker.ld")
-
-# ============================================================
 # 输出目录
 # ============================================================
 set(BUILD_DIR "${CMAKE_SOURCE_DIR}/target")
@@ -49,44 +39,101 @@ file(MAKE_DIRECTORY ${ISO_DIR}/boot)
 # ============================================================
 add_custom_command(
     OUTPUT ${BUILD_DIR}/boot.bin
-    COMMAND ${CMAKE_ASM_COMPILER} -f bin ${BOOT_SRC} -o ${BUILD_DIR}/boot.bin
-    DEPENDS ${BOOT_SRC}
+    COMMAND ${CMAKE_ASM_COMPILER} -f bin ${CMAKE_SOURCE_DIR}/src/boot/boot.asm -o ${BUILD_DIR}/boot.bin
+    DEPENDS ${CMAKE_SOURCE_DIR}/src/boot/boot.asm
     COMMENT "Assembling bootloader..."
 )
 
 # ============================================================
-# 2. 编译内核对象文件
+# 2. Phase 2 内核对象文件
 # ============================================================
+
 # entry.asm
 add_custom_command(
     OUTPUT ${BUILD_DIR}/entry.o
-    COMMAND ${CMAKE_ASM_COMPILER} ${CMAKE_ASM_FLAGS_INIT} ${KERNEL_ENTRY_SRC} -o ${BUILD_DIR}/entry.o
-    DEPENDS ${KERNEL_ENTRY_SRC}
-    COMMENT "Assembling entry.S..."
+    COMMAND ${CMAKE_ASM_COMPILER} ${CMAKE_ASM_FLAGS_INIT} ${CMAKE_SOURCE_DIR}/src/kernel/entry.asm -o ${BUILD_DIR}/entry.o
+    DEPENDS ${CMAKE_SOURCE_DIR}/src/kernel/entry.asm
+    COMMENT "Assembling entry.asm..."
 )
 
 # isr.asm
 add_custom_command(
     OUTPUT ${BUILD_DIR}/isr.o
-    COMMAND ${CMAKE_ASM_COMPILER} ${CMAKE_ASM_FLAGS_INIT} ${KERNEL_ISR_SRC} -o ${BUILD_DIR}/isr.o
-    DEPENDS ${KERNEL_ISR_SRC}
-    COMMENT "Assembling ISR..."
+    COMMAND ${CMAKE_ASM_COMPILER} ${CMAKE_ASM_FLAGS_INIT} ${CMAKE_SOURCE_DIR}/src/kernel/isr.asm -o ${BUILD_DIR}/isr.o
+    DEPENDS ${CMAKE_SOURCE_DIR}/src/kernel/isr.asm
+    COMMENT "Assembling isr.asm..."
+)
+
+# gdt_flush.asm
+add_custom_command(
+    OUTPUT ${BUILD_DIR}/gdt_flush.o
+    COMMAND ${CMAKE_ASM_COMPILER} ${CMAKE_ASM_FLAGS_INIT} ${CMAKE_SOURCE_DIR}/src/kernel/gdt_flush.asm -o ${BUILD_DIR}/gdt_flush.o
+    DEPENDS ${CMAKE_SOURCE_DIR}/src/kernel/gdt_flush.asm
+    COMMENT "Assembling gdt_flush.asm..."
+)
+
+# context_switch.asm
+add_custom_command(
+    OUTPUT ${BUILD_DIR}/context_switch.o
+    COMMAND ${CMAKE_ASM_COMPILER} ${CMAKE_ASM_FLAGS_INIT} ${CMAKE_SOURCE_DIR}/src/kernel/sched/context_switch.asm -o ${BUILD_DIR}/context_switch.o
+    DEPENDS ${CMAKE_SOURCE_DIR}/src/kernel/sched/context_switch.asm
+    COMMENT "Assembling context_switch.asm..."
 )
 
 # kernel.c
 add_custom_command(
     OUTPUT ${BUILD_DIR}/kernel.o
-    COMMAND ${CMAKE_C_COMPILER} ${CMAKE_C_FLAGS_INIT} -c ${KERNEL_C_SRC} -o ${BUILD_DIR}/kernel.o
-    DEPENDS ${KERNEL_C_SRC}
+    COMMAND ${CMAKE_C_COMPILER} ${CMAKE_C_FLAGS_INIT} -c ${CMAKE_SOURCE_DIR}/src/kernel/kernel.c -o ${BUILD_DIR}/kernel.o
+    DEPENDS ${CMAKE_SOURCE_DIR}/src/kernel/kernel.c
     COMMENT "Compiling kernel.c..."
 )
 
 # idt.c
 add_custom_command(
     OUTPUT ${BUILD_DIR}/idt.o
-    COMMAND ${CMAKE_C_COMPILER} ${CMAKE_C_FLAGS_INIT} -c ${KERNEL_IDT_SRC} -o ${BUILD_DIR}/idt.o
-    DEPENDS ${KERNEL_IDT_SRC}
+    COMMAND ${CMAKE_C_COMPILER} ${CMAKE_C_FLAGS_INIT} -c ${CMAKE_SOURCE_DIR}/src/kernel/idt.c -o ${BUILD_DIR}/idt.o
+    DEPENDS ${CMAKE_SOURCE_DIR}/src/kernel/idt.c
     COMMENT "Compiling idt.c..."
+)
+
+# gdt.c
+add_custom_command(
+    OUTPUT ${BUILD_DIR}/gdt.o
+    COMMAND ${CMAKE_C_COMPILER} ${CMAKE_C_FLAGS_INIT} -c ${CMAKE_SOURCE_DIR}/src/kernel/gdt.c -o ${BUILD_DIR}/gdt.o
+    DEPENDS ${CMAKE_SOURCE_DIR}/src/kernel/gdt.c
+    COMMENT "Compiling gdt.c..."
+)
+
+# pmm.c
+add_custom_command(
+    OUTPUT ${BUILD_DIR}/pmm.o
+    COMMAND ${CMAKE_C_COMPILER} ${CMAKE_C_FLAGS_INIT} -c ${CMAKE_SOURCE_DIR}/src/kernel/mm/pmm.c -o ${BUILD_DIR}/pmm.o
+    DEPENDS ${CMAKE_SOURCE_DIR}/src/kernel/mm/pmm.c
+    COMMENT "Compiling pmm.c..."
+)
+
+# vmm.c
+add_custom_command(
+    OUTPUT ${BUILD_DIR}/vmm.o
+    COMMAND ${CMAKE_C_COMPILER} ${CMAKE_C_FLAGS_INIT} -c ${CMAKE_SOURCE_DIR}/src/kernel/mm/vmm.c -o ${BUILD_DIR}/vmm.o
+    DEPENDS ${CMAKE_SOURCE_DIR}/src/kernel/mm/vmm.c
+    COMMENT "Compiling vmm.c..."
+)
+
+# scheduler.c
+add_custom_command(
+    OUTPUT ${BUILD_DIR}/scheduler.o
+    COMMAND ${CMAKE_C_COMPILER} ${CMAKE_C_FLAGS_INIT} -c ${CMAKE_SOURCE_DIR}/src/kernel/sched/scheduler.c -o ${BUILD_DIR}/scheduler.o
+    DEPENDS ${CMAKE_SOURCE_DIR}/src/kernel/sched/scheduler.c
+    COMMENT "Compiling scheduler.c..."
+)
+
+# syscall.c
+add_custom_command(
+    OUTPUT ${BUILD_DIR}/syscall.o
+    COMMAND ${CMAKE_C_COMPILER} ${CMAKE_C_FLAGS_INIT} -c ${CMAKE_SOURCE_DIR}/src/kernel/ipc/syscall.c -o ${BUILD_DIR}/syscall.o
+    DEPENDS ${CMAKE_SOURCE_DIR}/src/kernel/ipc/syscall.c
+    COMMENT "Compiling syscall.c..."
 )
 
 # ============================================================
@@ -98,14 +145,28 @@ add_custom_command(
             -o ${BUILD_DIR}/kernel.elf
             ${BUILD_DIR}/entry.o
             ${BUILD_DIR}/isr.o
+            ${BUILD_DIR}/gdt_flush.o
+            ${BUILD_DIR}/context_switch.o
             ${BUILD_DIR}/kernel.o
             ${BUILD_DIR}/idt.o
+            ${BUILD_DIR}/gdt.o
+            ${BUILD_DIR}/pmm.o
+            ${BUILD_DIR}/vmm.o
+            ${BUILD_DIR}/scheduler.o
+            ${BUILD_DIR}/syscall.o
     DEPENDS
         ${BUILD_DIR}/entry.o
         ${BUILD_DIR}/isr.o
+        ${BUILD_DIR}/gdt_flush.o
+        ${BUILD_DIR}/context_switch.o
         ${BUILD_DIR}/kernel.o
         ${BUILD_DIR}/idt.o
-        ${KERNEL_LINKER}
+        ${BUILD_DIR}/gdt.o
+        ${BUILD_DIR}/pmm.o
+        ${BUILD_DIR}/vmm.o
+        ${BUILD_DIR}/scheduler.o
+        ${BUILD_DIR}/syscall.o
+        ${CMAKE_SOURCE_DIR}/src/kernel/linker.ld
     COMMENT "Linking kernel..."
 )
 

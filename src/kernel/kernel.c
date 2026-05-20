@@ -1,229 +1,129 @@
 // ============================================================
 // openos - 内核主函数
+// Phase 2: GDT / PMM / VMM / Scheduler / Syscall
 // ============================================================
 
-// VGA文本模式缓冲区 (80x25)
-#define VGA_BUF ((volatile char *)0xb8000)
-#define VGA_WIDTH 80
-#define VGA_HEIGHT 25
-
-// 颜色定义
-enum vga_color
-{
-	VGA_BLACK = 0,
-	VGA_BLUE = 1,
-	VGA_GREEN = 2,
-	VGA_CYAN = 3,
-	VGA_RED = 4,
-	VGA_MAGENTA = 5,
-	VGA_BROWN = 6,
-	VGA_LIGHT_GREY = 7,
-	VGA_DARK_GREY = 8,
-	VGA_LIGHT_BLUE = 9,
-	VGA_LIGHT_GREEN = 10,
-	VGA_LIGHT_CYAN = 11,
-	VGA_LIGHT_RED = 12,
-	VGA_LIGHT_MAGENTA = 13,
-	VGA_YELLOW = 14,
-	VGA_WHITE = 15,
-};
-
-// 当前光标位置
-static int cursor_x = 0;
-static int cursor_y = 0;
-
-// 合成颜色属性字节
-static inline char make_color(enum vga_color fg, enum vga_color bg)
-{
-	return (char)(fg | bg << 4);
-}
-
-// 获取VGA字符条目
-static inline unsigned short vga_entry(char ch, char color)
-{
-	return (unsigned short)ch | (unsigned short)color << 8;
-}
+// 内核模块头文件
+#include "include/gdt.h"
+#include "include/pmm.h"
+#include "include/vmm.h"
+#include "include/process.h"
+#include "include/syscall.h"
 
 // ============================================================
-// I/O 端口操作 (必须在 move_cursor 之前声明)
+// VGA 输出
 // ============================================================
-static inline void outb(unsigned short port, unsigned char val)
-{
+static int cur_x = 0;
+static int cur_y = 2;
+
+static inline void outb(unsigned short port, unsigned char val) {
 	__asm__ volatile("outb %0, %1" : : "a"(val), "Nd"(port));
 }
 
-static inline unsigned char inb(unsigned short port)
-{
-	unsigned char ret;
-	__asm__ volatile("inb %1, %0" : "=a"(ret) : "Nd"(port));
-	return ret;
-}
-
-// 移动硬件光标
-static void move_cursor(int x, int y)
-{
-	unsigned short pos = y * VGA_WIDTH + x;
+static void move_cursor(int x, int y) {
+	unsigned short pos = y * 80 + x;
 	outb(0x3d4, 14);
 	outb(0x3d5, (unsigned char)(pos >> 8));
 	outb(0x3d4, 15);
-	outb(0x3d5, (unsigned char)(pos));
+	outb(0x3d5, (unsigned char)pos);
 }
 
-// 禁用光标 (消除闪烁)
-static void disable_cursor(void)
-{
-	outb(0x3d4, 0x0A);
-	outb(0x3d5, 0x20); // 设置光标起始扫描线高位，禁用光标
+void terminal_clear(void) {
+	volatile unsigned short *buf = (volatile unsigned short *)0xB8000;
+	for (int i = 0; i < 80 * 25; i++)
+		buf[i] = 0x0A00 | ' ';
+	cur_x = 0; cur_y = 2;
+	move_cursor(cur_x, cur_y);
 }
 
-// 默认颜色：黑底绿字 (高可读性)
-#define COLOR_DEFAULT 0x0A // 0x0A = 黑底(0) + 绿字(10)
-
-// 清屏
-void terminal_clear(void)
-{
-	char color = COLOR_DEFAULT;
-	volatile unsigned short *buf = (volatile unsigned short *)VGA_BUF;
-	for (int i = 0; i < VGA_WIDTH * VGA_HEIGHT; i++)
-	{
-		buf[i] = vga_entry(' ', color);
+void terminal_putchar(char c) {
+	volatile unsigned short *buf = (volatile unsigned short *)0xB8000;
+	if (c == '\n') { cur_x = 0; cur_y++; }
+	else if (c == '\r') { cur_x = 0; }
+	else if (c == '\t') { cur_x = (cur_x + 8) & ~7; }
+	else { buf[cur_y * 80 + cur_x] = (0x0A << 8) | (unsigned char)c; cur_x++; }
+	if (cur_x >= 80) { cur_x = 0; cur_y++; }
+	if (cur_y >= 25) {
+		for (int y = 1; y < 25; y++)
+			for (int x = 0; x < 80; x++)
+				buf[(y-1)*80+x] = buf[y*80+x];
+		for (int x = 0; x < 80; x++)
+			buf[24*80+x] = (0x0A<<8)|' ';
+		cur_y = 24;
 	}
-	cursor_x = 0;
-	cursor_y = 0;
-	move_cursor(cursor_x, cursor_y);
+	move_cursor(cur_x, cur_y);
 }
 
-// 滚动屏幕
-static void terminal_scroll(void)
-{
-	volatile unsigned short *buf = (volatile unsigned short *)VGA_BUF;
-	char color = COLOR_DEFAULT;
-
-	for (int y = 1; y < VGA_HEIGHT; y++)
-	{
-		for (int x = 0; x < VGA_WIDTH; x++)
-		{
-			buf[(y - 1) * VGA_WIDTH + x] = buf[y * VGA_WIDTH + x];
-		}
-	}
-	for (int x = 0; x < VGA_WIDTH; x++)
-	{
-		buf[(VGA_HEIGHT - 1) * VGA_WIDTH + x] = vga_entry(' ', color);
-	}
-	cursor_y = VGA_HEIGHT - 1;
+void terminal_write(const char *str) {
+	while (*str) terminal_putchar(*str++);
 }
 
-// 输出单个字符
-void terminal_putchar(char c)
-{
-	volatile unsigned short *buf = (volatile unsigned short *)VGA_BUF;
-	char color = COLOR_DEFAULT;
-
-	if (c == '\n')
-	{
-		cursor_x = 0;
-		cursor_y++;
-	}
-	else if (c == '\r')
-	{
-		cursor_x = 0;
-	}
-	else if (c == '\t')
-	{
-		cursor_x = (cursor_x + 8) & ~7;
-	}
-	else
-	{
-		buf[cursor_y * VGA_WIDTH + cursor_x] = vga_entry(c, color);
-		cursor_x++;
-	}
-
-	if (cursor_x >= VGA_WIDTH)
-	{
-		cursor_x = 0;
-		cursor_y++;
-	}
-	if (cursor_y >= VGA_HEIGHT)
-	{
-		terminal_scroll();
-	}
-
-	move_cursor(cursor_x, cursor_y);
-}
-
-// 输出字符串
-void terminal_write(const char *str)
-{
-	while (*str)
-	{
-		terminal_putchar(*str++);
-	}
-}
-
-// 输出十六进制数 (调试用)
-void terminal_write_hex(unsigned int num)
-{
-	const char *hex_digits = "0123456789ABCDEF";
+void terminal_write_hex(unsigned int num) {
+	const char *hex = "0123456789ABCDEF";
 	terminal_write("0x");
 	for (int i = 28; i >= 0; i -= 4)
-	{
-		terminal_putchar(hex_digits[(num >> i) & 0x0F]);
-	}
+		terminal_putchar(hex[(num >> i) & 0x0F]);
 }
-
-// ============================================================
-// 外部函数声明
-// ============================================================
-extern void idt_init(void);
 
 // ============================================================
 // 内核主函数
 // ============================================================
 void kernel_main(void)
 {
-	// 强制清空 VGA 缓冲区（直接操作硬件）
-	volatile unsigned char *vga = (volatile unsigned char *)0xb8000;
-	int i;
-	for (i = 0; i < 80 * 25 * 2; i += 2)
-	{
-		vga[i] = ' ';	   // 字符：空格
-		vga[i + 1] = 0x0A; // 颜色：黑底绿字
+	/* 强制清空 VGA 缓冲区 */
+	volatile unsigned char *vga = (volatile unsigned char *)0xB8000;
+	for (int i = 0; i < 80 * 25 * 2; i += 2) {
+		vga[i] = ' ';
+		vga[i+1] = 0x0A;
 	}
 
 	terminal_clear();
-	disable_cursor(); // 禁止光标闪烁
 
 	terminal_write("========================================\n");
-	terminal_write("        openos v0.1 - Open Source OS\n");
+	terminal_write("        openos v0.2 - Phase 2\n");
+	terminal_write("        GDT / PMM / VMM / Sched\n");
 	terminal_write("========================================\n\n");
-	terminal_write("[INFO] Kernel loaded into memory\n");
-	terminal_write("[INFO] Protected mode enabled\n");
 
-	// Initialize IDT
-	terminal_write("[INFO] Initializing IDT...\n");
+	/* ---- Phase 2 模块初始化顺序 ---- */
+	terminal_write("[1] Initializing GDT... ");
+	gdt_init();
+	terminal_write("[OK]\n");
+
+	terminal_write("[2] Initializing IDT... ");
 	idt_init();
-	terminal_write("[INFO] IDT initialized\n");
+	terminal_write("[OK]\n");
 
-	terminal_write("[INFO] System initializing...\n\n");
-	terminal_write("  _  _     _             \n");
-	terminal_write(" | || |___| |___ _ _    \n");
-	terminal_write(" | __ / -_|   / -_) ' \\  \n");
-	terminal_write(" |_||_\\___|_\\___|_||_|  \n");
-	terminal_write("                         \n");
-	terminal_write("   Hello openos!         \n\n");
+	terminal_write("[3] Initializing PMM (Physical Memory)...\n");
+	pmm_init(0x9000 + 0x10000);
+	terminal_write("      PMM ready\n");
 
-	terminal_write("[INFO] System ready!\n");
-	terminal_write("[INFO] Kernel address: ");
-	terminal_write_hex((unsigned int)&kernel_main);
-	terminal_write("\n");
-	terminal_write("[INFO] CPU mode: 32-bit protected mode\n");
-	terminal_write("[INFO] Interrupts: enabled\n");
-	terminal_write("[INFO] Memory map: VGA text mode 0xB8000\n\n");
+	terminal_write("[4] Initializing VMM (Virtual Memory)...\n");
+	vmm_init();
+	terminal_write("      VMM CR3 loaded\n");
 
-	terminal_write("openos$ ");
+	terminal_write("[5] Initializing Scheduler... ");
+	sched_init();
+	terminal_write("[OK]\n");
 
-	while (1)
-	{
+	terminal_write("[6] Initializing Syscall... ");
+	syscall_init();
+	terminal_write("[OK]\n");
+
+	terminal_write("\n========================================\n");
+	terminal_write("   _  _     _             \n");
+	terminal_write("  | || |___| |___ _ _     \n");
+	terminal_write("  | __ / -_|   / -_) ' \\   \n");
+	terminal_write("  |_||_\\___|_\\___|_||_|   \n");
+	terminal_write("                           \n");
+	terminal_write("  Phase 2: Kernel Core Ready!\n");
+	terminal_write("========================================\n\n");
+
+	terminal_write("[INFO] Paging enabled (4GB identity map)\n");
+	terminal_write("[INFO] Scheduler: MLFQ (8 queues)\n");
+	terminal_write("[INFO] Syscall: INT 0x80 ready\n");
+	terminal_write("\nopenos$ ");
+
+	while (1) {
 		__asm__ volatile("hlt");
 	}
 }
