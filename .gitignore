@@ -3,6 +3,7 @@ build/
 *.o
 *.iso
 *.bin
+target/
 
 # IDE
 .vscode/
