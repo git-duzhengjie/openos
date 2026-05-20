@@ -1,183 +1,76 @@
 /* ============================================================
- * openos - 虚拟内存管理实现
+ * openos - 虚拟内存管理 (VMM) 实现
+ * 使用 4 级页表 (PML4 → PDPT → PD → PT)
  * ============================================================ */
 
-#include "include/vmm.h"
-#include "include/pmm.h"
+#include "../include/vmm.h"
+#include "../include/pmm.h"
 
-/* 外部函数 */
 extern void flush_tlb(void);
 
 /* 页表基址 */
-static uint64_t kernel_pml4_phys = 0;
-static pte_t *kernel_pml4 = NULL;
+static uint32_t kernel_pml4_phys = 0;
+static uint32_t *kernel_pml4 = 0;
 
-/* VGA */
-#define VGA_BASE ((volatile uint16_t *)0xB8000)
-static int vga_col = 0, vga_row = 1;
+/* VGA 调试输出 */
+static int dbg_col = 0;
+static int dbg_row = 3;
 
-static void vga_putc(char c, uint8_t fg, uint8_t bg)
-{
-    if (c == '\n') {
-        vga_col = 0;
-        vga_row++;
-    } else {
-        VGA_BASE[vga_row * 80 + vga_col] = (uint16_t)((bg << 12) | (fg << 8) | c);
-        vga_col++;
-        if (vga_col >= 80) {
-            vga_col = 0;
-            vga_row++;
-        }
-    }
-    (void)fg; (void)bg;
+static void vga_putc(char c, uint8_t fg, uint8_t bg) {
+    volatile uint16_t *vga = (volatile uint16_t *)0xB8000;
+    if (c == '\n') { dbg_col = 0; dbg_row++; }
+    else { vga[dbg_row * 80 + dbg_col] = (uint16_t)((bg << 12) | (fg << 8) | c); dbg_col++; if (dbg_col >= 80) { dbg_col = 0; dbg_row++; } }
 }
 
-/* 获取/设置 CR3 */
-static inline uint64_t get_cr3(void)
-{
-    uint64_t val;
-    __asm__ volatile ("mov %%cr3, %0" : "=r"(val));
-    return val;
+#ifndef NULL
+#define NULL 0
+#endif
+
+/* 启用分页 (CR3) */
+static void enable_paging(uint32_t pml4_phys) {
+    __asm__ volatile(
+        "movl %0, %%eax\n"
+        "movl %%eax, %%cr3\n"
+        "movl %%cr4, %%eax\n"
+        "orl $0x00000010, %%eax\n"
+        "movl %%eax, %%cr4\n"
+        "movl %%cr0, %%eax\n"
+        "orl $0x80000000, %%eax\n"
+        "movl %%eax, %%cr0\n"
+        : : "r"(pml4_phys) : "eax");
 }
 
-static inline void set_cr3(uint64_t cr3)
-{
-    __asm__ volatile ("mov %0, %%cr3" : : "r"(cr3));
-}
-
-/* ============================================================
- * 初始化虚拟内存
- * ============================================================ */
-void vmm_init(void)
-{
-    vga_putc('[', 0x0A); vga_putc('V', 0x0A); vga_putc('M', 0x0A); vga_putc('M', 0x0A);
-    vga_putc(']', 0x0A); vga_putc(' ', 0x0A);
-    vga_putc('i', 0x0A); vga_putc('n', 0x0A); vga_putc('i', 0x0A); vga_putc('t', 0x0A);
-    vga_putc('i', 0x0A); vga_putc('a', 0x0A); vga_putc('l', 0x0A); vga_putc('i', 0x0A);
-    vga_putc('z', 0x0A); vga_putc('i', 0x0A); vga_putc('n', 0x0A); vga_putc('g', 0x0A);
-    vga_putc('.', 0x0A); vga_putc('.', 0x0A); vga_putc('\n', 0x0A);
-
+/* 初始化 VMM */
+void vmm_init(void) {
     /* 分配 PML4 */
-    kernel_pml4 = (pte_t *)pmm_alloc_page();
-    if (!kernel_pml4) {
-        vga_putc('[', 0x04); vga_putc('E', 0x04); vga_putc('R', 0x04); vga_putc('R', 0x04);
-        vga_putc(']', 0x04); vga_putc(' ', 0x04);
-        vga_putc('n', 0x04); vga_putc('o', 0x04); vga_putc(' ', 0x04);
-        vga_putc('m', 0x04); vga_putc('e', 0x04); vga_putc('m', 0x04); vga_putc('o', 0x04);
-        vga_putc('r', 0x04); vga_putc('y', 0x04); vga_putc('\n', 0x04);
-        while(1) __asm__ volatile("hlt");
-        return;
-    }
+    kernel_pml4 = (uint32_t *)pmm_alloc_page();
+    if (!kernel_pml4) { while(1); }
+    for (uint32_t i = 0; i < 1024; i++) kernel_pml4[i] = 0;
+    kernel_pml4_phys = ((uint32_t)kernel_pml4) & 0xFFFFF000;
 
-    kernel_pml4_phys = (uint64_t)kernel_pml4 & 0xFFFFFFFFFFFFF000ULL;
+    /* 分配 PDPT (0x0 ~ 0xFFFF FFFF) */
+    uint32_t *pdpt = (uint32_t *)pmm_alloc_page();
+    if (!pdpt) { while(1); }
+    for (uint32_t i = 0; i < 1024; i++) pdpt[i] = 0;
+    kernel_pml4[0] = ((uint32_t)pdpt) | 3; /* present, rw */
 
-    /* 清空 PML4 */
-    for (int i = 0; i < 512; i++)
-        kernel_pml4[i].val = 0;
+    /* 分配 PD，每个 PD 项映射 4MB */
+    uint32_t *pd = (uint32_t *)pmm_alloc_page();
+    if (!pd) { while(1); }
+    for (uint32_t i = 0; i < 1024; i++) pd[i] = (i * 0x400000U) | 3; /* 4MB each */
+    pdpt[0] = ((uint32_t)pd) | 3;
 
-    /* Identity-map 前 4GB (0x00000000 - 0xFFFFFFFF) */
-    vga_putc(' ', 0x0A); vga_putc('i', 0x0A); vga_putc('d', 0x0A);
-    vga_putc('e', 0x0A); vga_putc('n', 0x0A); vga_putc('t', 0x0A);
-    vga_putc('i', 0x0A); vga_putc('t', 0x0A); vga_putc('y', 0x0A);
-    vga_putc(' ', 0x0A); vga_putc('m', 0x0A); vga_putc('a', 0x0A);
-    vga_putc('p', 0x0A); vga_putc(' ', 0x0A);
-    vga_putc('0', 0x0A); vga_putc('-', 0x0A); vga_putc('4', 0x0A);
-    vga_putc('G', 0x0A); vga_putc('B', 0x0A); vga_putc(' ', 0x0A);
+    /* 启用分页 */
+    enable_paging(kernel_pml4_phys);
+    flush_tlb();
 
-    uint64_t pml4_idx = 0;  /* PML4[0] -> 前4GB */
-    uint64_t pdpt_phys = (uint64_t)pmm_alloc_page() & 0xFFFFFFFFFFFFF000ULL;
-    kernel_pml4[pml4_idx].val = pdpt_phys | PTE_PRESENT | PTE_RW | PTE_GLOBAL;
-
-    pte_t *pdpt = (pte_t *)(pdpt_phys);
-    for (int pdpt_i = 0; pdpt_i < 4; pdpt_i++) {
-        uint64_t pd_phys = (uint64_t)pmm_alloc_page() & 0xFFFFFFFFFFFFF000ULL;
-        pdpt[pdpt_i].val = pd_phys | PTE_PRESENT | PTE_RW | PTE_GLOBAL;
-
-        pte_t *pd = (pte_t *)pd_phys;
-        for (int pd_i = 0; pd_i < 512; pd_i++) {
-            uint64_t pt_phys = (uint64_t)pmm_alloc_page() & 0xFFFFFFFFFFFFF000ULL;
-            pd[pd_i].val = pt_phys | PTE_PRESENT | PTE_RW | PTE_GLOBAL;
-
-            pte_t *pt = (pte_t *)pt_phys;
-            for (int pt_i = 0; pt_i < 512; pt_i++) {
-                uint64_t page_base = (pdpt_i * 512 + pd_i) * 512 + pt_i;
-                uint64_t phys_addr = page_base * PAGE_SIZE;
-                pt[pt_i].val = phys_addr | PTE_PRESENT | PTE_RW | PTE_GLOBAL;
-            }
-        }
-    }
-
-    vga_putc('[', 0x02); vga_putc('O', 0x02); vga_putc('K', 0x02); vga_putc(']', 0x02);
-    vga_putc('\n', 0x02);
-
-    /* 加载 CR3 */
-    set_cr3(kernel_pml4_phys);
-    vga_putc('[', 0x0A); vga_putc('V', 0x0A); vga_putc('M', 0x0A); vga_putc('M', 0x0A);
-    vga_putc(']', 0x0A); vga_putc(' ', 0x0A); vga_putc('C', 0x0A);
-    vga_putc('R', 0x0A); vga_putc('3', 0x0A); vga_putc(' ', 0x0A);
-    vga_putc('l', 0x0A); vga_putc('o', 0x0A); vga_putc('a', 0x0A);
-    vga_putc('d', 0x0A); vga_putc('e', 0x0A); vga_putc('d', 0x0A);
-    vga_putc('\n', 0x0A);
+    /* 调试输出 (字符打印) */
+    dbg_row = 3; dbg_col = 0;
+    const char *msg = "[VMM] initialized. paging 0-4GB\n";
+    for (int i = 0; msg[i]; i++) vga_putc(msg[i], 0x0A, 0);
 }
 
-/* ============================================================
- * 获取 CR3
- * ============================================================ */
-uint64_t vmm_get_cr3(void)
-{
-    return get_cr3();
-}
-
-/* ============================================================
- * 加载 CR3
- * ============================================================ */
-void vmm_load_cr3(uint64_t pml4)
-{
-    set_cr3(pml4);
-    __asm__ volatile ("mov %%cr4, %%eax; mov %%eax, %%cr4" : : : "eax");
-}
-
-/* ============================================================
- * 切换到新的页表
- * ============================================================ */
-void vmm_switch_pml4(uint64_t pml4_phys)
-{
-    set_cr3(pml4_phys);
-}
-
-/* ============================================================
- * 映射单个页
- * ============================================================ */
-void vmm_map_page(uint64_t vaddr, uint64_t paddr, uint64_t flags)
-{
-    (void)vaddr; (void)paddr; (void)flags;
-    /* 占位，后续完善 */
-}
-
-/* ============================================================
- * 取消映射
- * ============================================================ */
-void vmm_unmap_page(uint64_t vaddr)
-{
-    (void)vaddr;
-}
-
-/* ============================================================
- * 分配新页表
- * ============================================================ */
-uint64_t vmm_alloc_page_table(void)
-{
-    void *page = pmm_alloc_page();
-    if (!page) return 0;
-    return (uint64_t)page & 0xFFFFFFFFFFFFF000ULL;
-}
-
-/* ============================================================
- * 分配虚拟+物理页
- * ============================================================ */
-void *vmm_alloc_page(void)
-{
-    void *phys = pmm_alloc_page();
-    if (!phys) return NULL;
-    return phys;
+/* 刷新 TLB */
+void flush_tlb(void) {
+    __asm__ volatile("movl %%cr3, %%eax\nmovl %%eax, %%cr3\n" : : : "eax");
 }

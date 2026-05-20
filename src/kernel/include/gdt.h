@@ -82,7 +82,8 @@ typedef struct {
 void gdt_init(void);                    /* 初始化GDT */
 void gdt_set_gate(int num, uint32_t base, uint32_t limit,
                  uint8_t access, uint8_t flags);  /* 设置单个GDT条目 */
-void gdt_flush(void);                   /* 加载GDTR */
+void gdt_flush(uint32_t gdt_ptr);               /* 加载GDTR (参数: gdtr_t*) */
+void tss_flush(void);                    /* 加载TSS */
 void tss_init(uint32_t esp0);           /* 初始化TSS */
 void tss_set_stack(uint32_t esp0);     /* 设置内核栈 */
 

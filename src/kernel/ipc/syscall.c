@@ -2,9 +2,10 @@
  * openos - 系统调用实现
  * ============================================================ */
 
-#include "include/syscall.h"
-#include "include/process.h"
-#include "include/vmm.h"
+#include "../include/syscall.h"
+#include "../include/process.h"
+#include "../include/vmm.h"
+#include "../include/pmm.h"
 
 /* VGA */
 #define VGA ((volatile uint16_t *)0xB8000)

@@ -40,7 +40,7 @@ void gdt_set_gate(int num, uint32_t base, uint32_t limit,
 void gdt_init(void)
 {
     /* 清空 TSS */
-    for (int i = 0; i < sizeof(tss_t); i++)
+    for (uint32_t i = 0; i < sizeof(tss_t); i++)
         ((uint8_t *)&tss)[i] = 0;
 
     /* 设置 TSS 描述符 (base=0, limit=sizeof(tss_t)-1) */
@@ -83,3 +83,5 @@ void tss_set_stack(uint32_t esp0)
 {
     tss.esp0 = esp0;
 }
+
+/* tss_flush 在 gdt_flush.asm 中实现 */

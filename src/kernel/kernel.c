@@ -5,6 +5,7 @@
 
 // 内核模块头文件
 #include "include/gdt.h"
+#include "include/idt.h"
 #include "include/pmm.h"
 #include "include/vmm.h"
 #include "include/process.h"

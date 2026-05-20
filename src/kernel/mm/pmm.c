@@ -2,8 +2,12 @@
  * openos - 物理内存管理实现
  * ============================================================ */
 
-#include "include/pmm.h"
-#include "include/gdt.h"
+#include "../include/pmm.h"
+#include "../include/gdt.h"
+
+#ifndef NULL
+#define NULL ((void*)0)
+#endif
 
 /* 全局 PMM 状态 */
 static pmm_info_t pmm = {0};
