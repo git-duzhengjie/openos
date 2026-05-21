@@ -8,6 +8,7 @@
 #include "process.h"
 #include "heap.h"
 #include "keyboard.h"
+#include "vga.h"
 
 /* 外部符号 */
 extern void gdt_init(void);
@@ -70,6 +71,9 @@ void kernel_main(void) {
     
     /* 初始化键盘驱动 */
     keyboard_init();
+    
+    /* 初始化VGA控制台 */
+    vga_init();
     
     /* 初始化调度器 */
     sched_init();
