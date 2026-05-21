@@ -5,6 +5,7 @@
 [bits 32]
 [extern isr_handler]         ; C语言中断处理函数
 [extern irq_handler]         ; C语言IRQ处理函数
+[extern syscall_dispatch]  ; 系统调用分发函数
 
 section .text
 
@@ -95,6 +96,17 @@ IRQ 13, 45  ; FPU
 IRQ 14, 46  ; 主ATA
 IRQ 15, 47  ; 从ATA
 
+; ============================================================
+; 系统调用入口 (int 0x80)
+; ============================================================
+global isr128
+isr128:
+    cli                      ; 关闭中断（防止重入）
+    push 0                   ; 无错误码，压栈 0
+    push 128                 ; 中断号 = 0x80
+    jmp syscall_common_stub
+
+
 ; ----------------------------------------------------------
 ; 通用ISR存根
 ; ----------------------------------------------------------
@@ -140,3 +152,83 @@ irq_common_stub:
     add esp, 8               ; 清理错误码和中断号
     sti                      ; 开启中断
     iret                     ; 中断返回
+; ----------------------------------------------------------
+; 系统调用通用存根 (int 0x80)
+; ----------------------------------------------------------
+syscall_common_stub:
+    ; 此时栈布局：
+    ; ESP+0   = 中断号 (128)
+    ; ESP+4   = 错误码 (0)
+    ; ESP+8   = 用户 EIP
+    ; ESP+12  = 用户 CS
+    ; ESP+16  = 用户 EFLAGS
+    
+    ; 保存用户寄存器
+    pusha                    ; 保存 EAX, ECX, EDX, EBX, ESP, EBP, ESI, EDI
+    push ds
+    push es
+    push fs
+    push gs
+    
+    ; 设置内核数据段
+    mov ax, 0x10            ; 内核数据段选择子
+    mov ds, ax
+    mov es, ax
+    mov fs, ax
+    mov gs, ax
+    
+    ; 此时栈布局：
+    ; ESP+0   = GS
+    ; ESP+4   = FS
+    ; ESP+8   = ES
+    ; ESP+12  = DS
+    ; ESP+16  = EDI (用户 EDI, arg5)
+    ; ESP+20  = ESI (用户 ESI, arg4)
+    ; ESP+24  = EBP
+    ; ESP+28  = ESP (pusha 之前的)
+    ; ESP+32  = EBX (用户 EBX, arg1)
+    ; ESP+36  = EDX (用户 EDX, arg3)
+    ; ESP+40  = ECX (用户 ECX, arg2)
+    ; ESP+44  = EAX (用户 EAX, 系统调用号)
+    ; ESP+48  = 中断号 (128)
+    ; ESP+52  = 错误码 (0)
+    ; ESP+56  = 用户 EIP
+    ; ESP+60  = 用户 CS
+    ; ESP+64  = 用户 EFLAGS
+    
+    ; 提取参数
+    mov eax, [esp + 44]     ; EAX = 系统调用号
+    mov ebx, [esp + 32]     ; EBX = arg1
+    mov ecx, [esp + 40]     ; ECX = arg2
+    mov edx, [esp + 36]     ; EDX = arg3
+    mov esi, [esp + 20]     ; ESI = arg4
+    mov edi, [esp + 16]     ; EDI = arg5
+    
+    ; 调用 syscall_dispatch(num, a, b, c, d, e)
+    ; C calling convention: 参数从右到左压栈
+    push edi                 ; arg5 = e
+    push esi                 ; arg4 = d
+    push edx                 ; arg3 = c
+    push ecx                 ; arg2 = b
+    push ebx                 ; arg1 = a
+    push eax                 ; num
+    
+    call syscall_dispatch
+    add esp, 24             ; 清理栈 (6 args * 4 bytes)
+    
+    ; 返回值在 EAX 中，需要保存到栈中保存的用户 EAX 位置
+    ; 注意：add esp, 24 之后，ESP 恢复到 pusha 之前的位置
+    ; 所以 [esp + 44] 仍然是保存的用户 EAX
+    mov [esp + 44], eax     ; 修改保存的 EAX 值
+    
+    ; 恢复寄存器
+    pop gs
+    pop fs
+    pop es
+    pop ds
+    popa                     ; 恢复 EAX, ECX, EDX, EBX, ESP, EBP, ESI, EDI
+                              ; 此时 EAX = 系统调用返回值
+    
+    add esp, 8              ; 清理错误码和中断号
+    sti                      ; 开启中断
+    iret                     ; 返回用户态

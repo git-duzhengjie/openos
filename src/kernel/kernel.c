@@ -4,6 +4,7 @@
  */
 
 #include "types.h"
+#include "../include/syscall.h"
 #include "serial.h"
 #include "process.h"
 #include "heap.h"
@@ -74,6 +75,20 @@ void kernel_main(void) {
     
     /* 初始化VGA控制台 */
     vga_init();
+
+    /* 测试系统调用接口 (int 0x80) */
+    serial_write("[TEST] Testing syscall interface (int 0x80)...\n");
+    serial_write("[TEST] Calling SYS_GETPID...\n");
+    
+    /* 调用系统调用：SYS_GETPID (EAX=20) */
+    uint32_t pid = 0;
+    asm volatile("int $0x80" : "=a"(pid) : "a"(SYS_GETPID));
+    
+    serial_write("[TEST] SYS_GETPID returned: ");
+    serial_write_hex(pid);
+    serial_write("\n");
+    
+    serial_write("[TEST] Syscall test done\n");
     
     /* 初始化调度器 */
     sched_init();

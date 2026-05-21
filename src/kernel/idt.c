@@ -287,6 +287,9 @@ void idt_init(void) {
 	idt_set_gate(46, (uint32_t)irq14, 0x08, 0x8E);
 	idt_set_gate(47, (uint32_t)irq15, 0x08, 0x8E);
 
+	/* 系统调用 (int 0x80) - 用户态可调用 */
+	idt_set_gate(128, (uint32_t)isr128, 0x08, 0xEE);
+
 	/* 加载IDT */
 	__asm__ volatile ("lidt %0" : : "m"(idt_ptr));
 	

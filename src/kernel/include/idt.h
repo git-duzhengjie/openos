@@ -73,6 +73,8 @@ extern void isr28(void);  /* 保留 */
 extern void isr29(void);  /* 保留 */
 extern void isr30(void);  /* 安全异常 */
 extern void isr31(void);  /* 保留 */
+extern void isr128(void);  /* int 0x80 - 系统调用 */
+
 
 /* IRQ处理函数 (PIC已重映射到32-47) */
 extern void irq0(void);   /* PIT定时器 */
