@@ -5,6 +5,7 @@
 
 #include "../include/vmm.h"
 #include "../include/pmm.h"
+#include "../include/serial.h"
 
 #ifndef NULL
 #define NULL ((void*)0)
@@ -64,7 +65,7 @@ static uint32_t *get_or_create_pte(uint32_t vaddr, int alloc) {
     }
     
     uint32_t pt_phys = kernel_pgd[pgd_idx] & ~0xFFF;
-    return (uint32_t *)(pt_phys | 0x80000000);  /* 恒等映射: 0x80000000 映射 0 */
+    return (uint32_t *)pt_phys;
 }
 
 /* ============================================================

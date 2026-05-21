@@ -6,13 +6,14 @@
 #include "types.h"
 #include "serial.h"
 #include "process.h"
+#include "heap.h"
+#include "keyboard.h"
 
 /* 外部符号 */
 extern void gdt_init(void);
 extern void idt_init(void);
 extern void pmm_init(uint32_t kernel_end);
 extern void vmm_init(void);
-extern void heap_init(void);
 extern void sched_init(void);
 extern void sched_start(void);
 extern void sched_add_thread(thread_t *t);
@@ -64,9 +65,11 @@ void kernel_main(void) {
     vmm_init();
     serial_write("[OK] VMM\n");
     
-    /* 堆初始化（暂时禁用，待修复 VMM 页错误处理） */
-    /* heap_init(); */
-    serial_write("[OK] HEAP (skip)\n");
+    heap_init();
+    serial_write("[OK] HEAP\n");
+    
+    /* 初始化键盘驱动 */
+    keyboard_init();
     
     /* 初始化调度器 */
     sched_init();

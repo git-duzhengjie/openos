@@ -1,6 +1,6 @@
 /* ============================================================
  * openos - 内核堆内存分配器
- * 基于物理页分配 + VMM 映射的简单分配器
+ * 显式空闲链表 + 首次适应 + 相邻合并
  * ============================================================ */
 
 #include "../include/heap.h"
@@ -8,98 +8,188 @@
 #include "../include/vmm.h"
 
 #ifndef NULL
-#define NULL ((void*)0)
+#define NULL ((void *)0)
 #endif
 
-/* 堆区域配置 */
-#define KERNEL_HEAP_START   0xC0000000   /* 3GB 虚拟地址起始 */
-#define KERNEL_HEAP_END     0xD0000000   /* 4GB 虚拟地址结束 */
-#define HEAP_CHUNK_SIZE     4096         /* 最小分配粒度: 1页 */
+/* 堆区域：内核高端地址 */
+#define HEAP_START  0x00400000UL   /* 4MB处，在恒等映射范围内 */
+#define HEAP_END    0x00C00000UL   /* 12MB处，8MB堆空间 */
 
-/* 当前堆顶（已映射区域的最高地址） */
-static uint32_t heap_current = KERNEL_HEAP_START;
+/* 分配头部（4字节）：块总大小，低2位保留 */
+typedef struct alloc_header {
+    uint32_t size;   /* 块总大小（含头部），低2位保留 */
+} alloc_header_t;
 
-/* 分配一个堆页（用于 kmalloc 的底层） */
-static void *kmalloc_page(void) {
-    void *phys = pmm_alloc_page();
-    if (!phys) return NULL;
-    
-    /* 映射到虚拟地址 */
-    vmm_map_page(heap_current, (uint32_t)phys, VMM_RW | VMM_USER);
-    heap_current += PAGE_SIZE;
-    
-    return (void *)((uint32_t)phys);
-}
+/* 空闲块（复用同一片内存，分配时低2位=0） */
+typedef struct free_block {
+    uint32_t        size;   /* 同 alloc_header_t.size */
+    struct free_block *next; /* 下一个空闲块 */
+} free_block_t;
 
-/* 获取当前堆顶的虚拟地址（已映射） */
-uint32_t heap_get_current(void) {
-    return heap_current;
-}
+/* size 字段的 flag 位 */
+#define BLK_ALLOC   0x1UL  /* 已分配 */
+#define BLK_SIZE(v) ((v) & ~0x3UL)
 
-/* 扩展堆（分配物理页并映射到虚拟地址） */
-static void *expand_heap(uint32_t size) {
-    /* 对齐到页边界 */
-    size = (size + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
-    
-    uint32_t old_heap = heap_current;
-    heap_current += size;
-    
-    /* 检查是否超出堆上限 */
-    if (heap_current > KERNEL_HEAP_END) {
-        heap_current = old_heap;
-        return NULL;
-    }
-    
-    /* 分配物理页并映射 */
-    uint32_t vaddr = old_heap;
-    while (size > 0) {
+/* 全局状态 */
+static free_block_t *g_free_list = NULL;
+static uint32_t      g_heap_top = (uint32_t)HEAP_START;
+
+/* ---- 内部：扩展堆，返回新的虚拟地址起点 ---- */
+static uint32_t heap_expand(uint32_t nbytes)
+{
+    uint32_t pages = (nbytes + 4095) / 4096;
+    uint32_t vaddr = g_heap_top;
+
+    for (uint32_t i = 0; i < pages; i++) {
+        if (g_heap_top >= (uint32_t)HEAP_END)
+            return 0;
         void *phys = pmm_alloc_page();
-        if (!phys) {
-            /* 失败，回滚 */
-            heap_current = old_heap;
-            return NULL;
-        }
-        vmm_map_page(vaddr, (uint32_t)phys, VMM_RW | VMM_USER);
-        vaddr += PAGE_SIZE;
-        size -= PAGE_SIZE;
+        if (!phys)
+            return 0;
+        vmm_map_page(g_heap_top, (uint32_t)phys, VMM_RW);
+        g_heap_top += 4096;
     }
-    
-    return (void *)old_heap;
+    return vaddr;
+}
+
+/* ---- 公共：返回当前堆顶虚拟地址 ---- */
+uint32_t heap_get_current(void)
+{
+    return g_heap_top;
+}
+
+/* ---- 初始化堆 ---- */
+void heap_init(void)
+{
+    g_heap_top  = (uint32_t)HEAP_START;
+    g_free_list = NULL;
+
+    /* 预分配 16KB */
+    uint32_t start = heap_expand(16 * 1024);
+    if (!start)
+        return;
+
+    free_block_t *fb = (free_block_t *)start;
+    fb->size = 16 * 1024;
+    fb->next = NULL;
+    g_free_list = fb;
 }
 
 /* ============================================================
  * kmalloc - 分配内核内存
  * ============================================================ */
-void *kmalloc(uint32_t size) {
-    if (size == 0) return NULL;
-    
-    /* 最小分配粒度: 1页 */
-    uint32_t actual = (size + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
-    
-    return expand_heap(actual);
-}
+void *kmalloc(uint32_t size)
+{
+    if (size == 0)
+        return NULL;
 
-/* ============================================================
- * kfree - 释放内核内存（当前实现为 no-op）
- * ============================================================ */
-void kfree(void *ptr) {
-    (void)ptr;
-    /* 简化实现：目前不释放物理页
-     * 后续可实现页帧链表或更复杂的释放机制 */
-}
+    /* 对齐到 8 字节 + 头部 */
+    uint32_t total = (size + 7 + sizeof(alloc_header_t)) & ~7UL;
+    if (total < sizeof(free_block_t))
+        total = sizeof(free_block_t);
 
-/* ============================================================
- * 堆初始化
- * ============================================================ */
-void heap_init(void) {
-    heap_current = KERNEL_HEAP_START;
-    
-    /* 确保起始区域已映射 */
-    for (uint32_t v = KERNEL_HEAP_START; v < KERNEL_HEAP_START + PAGE_SIZE; v += PAGE_SIZE) {
-        void *phys = pmm_alloc_page();
-        if (phys) {
-            vmm_map_page(v, (uint32_t)phys, VMM_RW | VMM_USER);
+    /* ---- 搜索空闲链表（首次适应）---- */
+    free_block_t *prev = NULL;
+    free_block_t *cur  = g_free_list;
+
+    while (cur) {
+        if (BLK_SIZE(cur->size) >= total) {
+            /* 可以分配 */
+            uint32_t old_size = BLK_SIZE(cur->size);
+
+            if (old_size >= total + sizeof(free_block_t)) {
+                /* 分裂：剩余部分形成新的空闲块 */
+                free_block_t *remain =
+                    (free_block_t *)((uint32_t)cur + total);
+                remain->size = old_size - total;
+                remain->next = cur->next;
+
+                if (prev)
+                    prev->next = remain;
+                else
+                    g_free_list = remain;
+
+                cur->size = total | BLK_ALLOC;
+            } else {
+                /* 整块分配 */
+                if (prev)
+                    prev->next = cur->next;
+                else
+                    g_free_list = cur->next;
+
+                cur->size = old_size | BLK_ALLOC;
+            }
+
+            /* 返回用户指针（跳过头部）*/
+            alloc_header_t *hdr = (alloc_header_t *)cur;
+            return (void *)(hdr + 1);
         }
+        prev = cur;
+        cur  = cur->next;
     }
-    heap_current = KERNEL_HEAP_START + PAGE_SIZE;
+
+    /* ---- 没找到，扩展堆 ---- */
+    uint32_t needed_pages = (total + 4095) / 4096;
+    uint32_t new_vaddr    = heap_expand(needed_pages * 4096);
+    if (!new_vaddr)
+        return NULL;
+
+    /* 把新页面作为空闲块插入链表头部 */
+    free_block_t *nb = (free_block_t *)new_vaddr;
+    nb->size = needed_pages * 4096;
+    nb->next = g_free_list;
+    g_free_list = nb;
+
+    /* 递归分配（这次一定能分到）*/
+    return kmalloc(size);
+}
+
+/* ============================================================
+ * kfree - 释放内核内存
+ * ========================================================== */
+void kfree(void *ptr)
+{
+    if (!ptr)
+        return;
+
+    alloc_header_t *hdr = (alloc_header_t *)ptr - 1;
+    if (!(hdr->size & BLK_ALLOC))
+        return; /* 重复释放，忽略 */
+
+    /* 转成空闲块 */
+    free_block_t *blk = (free_block_t *)hdr;
+    blk->size = BLK_SIZE(hdr->size);   /* 清除 flag */
+    /* blk->next 会在下面设置 */
+
+    /* ---- 按地址顺序插入空闲链表（便于合并）---- */
+    free_block_t *prev = NULL;
+    free_block_t *cur  = g_free_list;
+
+    while (cur && cur < blk) {
+        prev = cur;
+        cur  = cur->next;
+    }
+
+    blk->next = cur;
+    if (prev)
+        prev->next = blk;
+    else
+        g_free_list = blk;
+
+    /* ---- 合并后面的块 ---- */
+    if (blk->next &&
+        (uint32_t)blk + BLK_SIZE(blk->size) ==
+        (uint32_t)blk->next) {
+        blk->size += BLK_SIZE(blk->next->size);
+        blk->next  = blk->next->next;
+        cur = blk->next;  /* 更新 cur 供后面用 */
+    }
+
+    /* ---- 合并前面的块 ---- */
+    if (prev &&
+        (uint32_t)prev + BLK_SIZE(prev->size) ==
+        (uint32_t)blk) {
+        prev->size += BLK_SIZE(blk->size);
+        prev->next  = blk->next;
+    }
 }

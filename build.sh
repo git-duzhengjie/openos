@@ -70,6 +70,11 @@ gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
     -I $SRC/include \
+    -c $SRC/drivers/keyboard.c -o $BUILD/keyboard.o
+
+gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
+    -I $SRC/include \
     -c $SRC/vga.c -o $BUILD/vga.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
@@ -95,7 +100,8 @@ ld -m elf_i386 -T $SRC/linker.ld \
     $BUILD/syscall.o \
     $BUILD/serial.o \
     $BUILD/vga.o \
-    $BUILD/string.o
+    $BUILD/string.o \
+    $BUILD/keyboard.o
 
 objcopy -O binary $BUILD/kernel.elf $BUILD/kernel.bin
 
