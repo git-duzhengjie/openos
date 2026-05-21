@@ -144,31 +144,48 @@ void *vmm_alloc_page(void) {
 /* ============================================================
  * 页错误处理
  * ============================================================ */
-extern void page_fault_handler(uint32_t fault_addr, uint32_t error_code);
+/* ============================================================
+ * 页错误处理 (ISR 14)
+ * 通过 isr_install_handler(14, page_fault_handler) 注册
+ *
+ * Page fault error code bits:
+ *   bit 0 (0x01): P    - 0=page not present, 1=protection violation
+ *   bit 1 (0x02): W/R  - 0=read, 1=write
+ *   bit 2 (0x04): U/S  - 0=supervisor, 1=user
+ * ============================================================
+ */
+void page_fault_handler(registers_t *regs) {
+    uint32_t fault_addr;
+    __asm__ volatile ("movl %%cr2, %0" : "=r"(fault_addr));
+    uint32_t err = regs->err_code;
 
-void page_fault_handler(uint32_t fault_addr, uint32_t error_code) {
-    (void)fault_addr;
-    (void)error_code;
-    /* 页错误处理:
-     * - 读取 CR2 获取错误地址
-     * - error_code 包含异常信息
-     * - 可以动态分配物理页并映射
-     */
-    vga_puts("\n[PF] addr=");
-    uint32_t cr2;
-    __asm__ volatile ("movl %%cr2, %0" : "=r"(cr2));
-    vga_hex(cr2);
-    
-    /* 简化处理：分配并映射缺失的页 */
-    uint32_t vaddr = cr2 & ~0xFFF;
-    void *phys = pmm_alloc_page();
-    if (phys) {
-        vmm_map_page(vaddr, (uint32_t)phys, VMM_RW | VMM_USER);
-        vga_puts(" -> mapped\n");
-        return;
+    if (err & 0x01) {
+        vga_puts("\n[PF] protection fault!");
+        goto pf_halt;
     }
-    
-    vga_puts(" NO PHYSICAL MEMORY - HALT\n");
+
+    void *phys = pmm_alloc_page();
+    if (!phys) {
+        vga_puts("\n[PF] no physical memory!");
+        goto pf_halt;
+    }
+
+    uint32_t vaddr = fault_addr & ~0xFFF;
+    vmm_map_page(vaddr, (uint32_t)phys, VMM_RW);
+
+    vga_puts("\n[PF] mapped v=0x");
+    vga_hex(fault_addr);
+    vga_puts(" -> p=0x");
+    vga_hex((uint32_t)phys);
+    vga_puts("\n");
+    return;
+
+pf_halt:
+    vga_puts(" [PF] addr=0x");
+    vga_hex(fault_addr);
+    vga_puts(" err=0x");
+    vga_hex(err);
+    vga_puts("\nHALT\n");
     __asm__ volatile ("cli; hlt");
 }
 
@@ -217,4 +234,10 @@ void vmm_init(void) {
     );
     
     vga_puts("[VMM] paging ON\n");
+    
+    /* 注册页错误处理 */
+    extern void isr_install_handler(uint8_t num, isr_t handler);
+    extern void page_fault_handler(registers_t *regs);
+    isr_install_handler(14, page_fault_handler);
+    vga_puts("[VMM] PF handler registered\n");
 }

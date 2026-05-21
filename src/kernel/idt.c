@@ -236,7 +236,10 @@ void idt_init(void) {
 	idt_ptr.limit = sizeof(idt) - 1;
 	idt_ptr.base = (uint32_t)&idt;
 
-	/* 重新映射PIC */
+	/* 先初始化PIT（必须在pic_remap之前，否则PIT可能立即触发） */
+	pit_init();
+
+	/* 重新映射PIC（在PIT运行后才解除IRQ0 mask） */
 	pic_remap(0x20, 0x28);
 
 	/* 设置ISR门 (0-31) */
@@ -296,9 +299,6 @@ void idt_init(void) {
 
 	/* 加载IDT */
 	__asm__ volatile ("lidt %0" : : "m"(idt_ptr));
-
-	/* 初始化PIT定时器 */
-	pit_init();
 
 	/* 开启中断 */
 	__asm__ volatile ("sti");

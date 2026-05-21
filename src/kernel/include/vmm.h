@@ -6,6 +6,7 @@
 #define KERNEL_VMM_H
 
 #include <stdint.h>
+#include "idt.h"
 
 /* 页大小和偏移 */
 #define PAGE_SIZE    4096
@@ -37,7 +38,7 @@ void vmm_load_cr3(uint32_t cr3);                 /* 加载新 CR3 */
 void *vmm_alloc_page(void);                      /* 分配虚拟+物理页并映射 */
 uint32_t vmm_alloc_page_table(void);             /* 分配一个新的页表(4KB对齐) */
 
-/* 页错误处理 (由 isr.asm 调用) */
-void page_fault_handler(uint32_t fault_addr, uint32_t error_code);
+/* 页错误处理 (由 IDT ISR 14 调用) */
+void page_fault_handler(registers_t *regs);
 
 #endif /* KERNEL_VMM_H */
