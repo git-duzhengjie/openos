@@ -19,3 +19,9 @@ Thumbs.db
 task-summary-20260520-ph2-build-fix.md
 task-summary-20260520-serial-debug.md
 src/kernel/sched/scheduler.c.new_thread_create
+fix_tmr_err.py
+fix_tmr_err.py
+fix_tmr_err.py
+modify_build_vga.py
+test_vga.py
+modify_serial.py
