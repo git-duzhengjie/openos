@@ -21,32 +21,6 @@ static uint32_t kernel_pgt0[1024];   /* 0-4MB */
 /* 当前 CR3 值 */
 static uint32_t current_cr3 = 0;
 
-/* VGA 调试输出 */
-static int vga_col = 0;
-static int vga_row = 0;
-
-static void vga_putc(char c) {
-    volatile uint16_t *vga = (volatile uint16_t *)0xB8000;
-    if (c == '\n') {
-        vga_col = 0;
-        vga_row++;
-        return;
-    }
-    vga[vga_row * 80 + vga_col] = (uint16_t)(0x0A00 | c);
-    vga_col++;
-    if (vga_col >= 80) { vga_col = 0; vga_row++; }
-}
-
-static void vga_puts(const char *s) {
-    while (*s) vga_putc(*s++);
-}
-
-static void vga_hex(uint32_t v) {
-    const char *hex = "0123456789ABCDEF";
-    vga_puts("0x");
-    for (int i = 28; i >= 0; i -= 4) vga_putc(hex[(v >> i) & 0xF]);
-}
-
 /* ============================================================
  * 查找/分配页表
  * ============================================================ */
@@ -161,32 +135,32 @@ void page_fault_handler(registers_t *regs) {
     uint32_t err = regs->err_code;
 
     if (err & 0x01) {
-        vga_puts("\n[PF] protection fault!");
+/* GPF FIX:         vga_puts("\n[PF] protection fault!"); */
         goto pf_halt;
     }
 
     void *phys = pmm_alloc_page();
     if (!phys) {
-        vga_puts("\n[PF] no physical memory!");
+/* GPF FIX:         vga_puts("\n[PF] no physical memory!"); */
         goto pf_halt;
     }
 
     uint32_t vaddr = fault_addr & ~0xFFF;
     vmm_map_page(vaddr, (uint32_t)phys, VMM_RW);
 
-    vga_puts("\n[PF] mapped v=0x");
-    vga_hex(fault_addr);
-    vga_puts(" -> p=0x");
-    vga_hex((uint32_t)phys);
-    vga_puts("\n");
+/* GPF FIX:     vga_puts("\n[PF] mapped v=0x"); */
+/* GPF FIX:     vga_hex(fault_addr); */
+/* GPF FIX:     vga_puts(" -> p=0x"); */
+/* GPF FIX:     vga_hex((uint32_t)phys); */
+/* GPF FIX:     vga_puts("\n"); */
     return;
 
 pf_halt:
-    vga_puts(" [PF] addr=0x");
-    vga_hex(fault_addr);
-    vga_puts(" err=0x");
-    vga_hex(err);
-    vga_puts("\nHALT\n");
+/* GPF FIX:     vga_puts(" [PF] addr=0x"); */
+/* GPF FIX:     vga_hex(fault_addr); */
+/* GPF FIX:     vga_puts(" err=0x"); */
+/* GPF FIX:     vga_hex(err); */
+/* GPF FIX:     vga_puts("\nHALT\n"); */
     __asm__ volatile ("cli; hlt");
 }
 
@@ -194,7 +168,7 @@ pf_halt:
  * VMM 初始化 - 恒等映射全部物理内存
  * ============================================================ */
 void vmm_init(void) {
-    vga_puts("[VMM] init\n");
+    serial_write("[VMM] init\n");
     
     /* 清空页目录和第一个页表 */
     for (int i = 0; i < 1024; i++) {
@@ -221,7 +195,7 @@ void vmm_init(void) {
         kernel_pgd[pgd_idx] = ((uint32_t)pt) | 3;
     }
     
-    vga_puts("[VMM] mapping 0-512MB done\n");
+    serial_write("[VMM] mapping 0-512MB done\n");
     
     /* 加载 CR3 并开启分页 */
     __asm__ volatile ("movl %0, %%cr3" : : "r"(kernel_pgd) : "memory");
@@ -234,11 +208,11 @@ void vmm_init(void) {
         ::: "eax"
     );
     
-    vga_puts("[VMM] paging ON\n");
+    serial_write("[VMM] paging ON\n");
     
     /* 注册页错误处理 */
     extern void isr_install_handler(uint8_t num, isr_t handler);
     extern void page_fault_handler(registers_t *regs);
     isr_install_handler(14, page_fault_handler);
-    vga_puts("[VMM] PF handler registered\n");
+    serial_write("[VMM] PF handler registered\n");
 }

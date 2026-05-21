@@ -3,6 +3,9 @@
 #include "../include/vga.h"
 #include "../include/io.h"
 
+/* VGA 初始化标志 - 防止未初始化访问 */
+static int vga_ok = 0;
+
 /* VGA 状态 */
 static uint16_t *vga_mem = (uint16_t *)VGA_MEMORY;
 static int vga_x = 0;
@@ -50,7 +53,9 @@ void vga_init(void) {
     vga_color = 0x07;  /* 亮灰 on 黑 */
     vga_clear();
     vga_enable_cursor(0, 15);
+    vga_ok = 1;
 }
+
 
 /* 清屏 */
 void vga_clear(void) {
@@ -71,6 +76,9 @@ void vga_set_color(uint8_t fg, uint8_t bg) {
 
 /* 输出单个字符 */
 void vga_putc(char c) {
+    /* 防止未初始化访问 */
+    if (!vga_ok) return;
+
     if (c == '\n') {
         vga_x = 0;
         vga_y++;
@@ -101,6 +109,9 @@ void vga_putc(char c) {
 
 /* 输出字符串 */
 void vga_write(const char *str) {
+    /* 防止未初始化访问 */
+    if (!vga_ok) return;
+
     while (*str) {
         vga_putc(*str++);
     }

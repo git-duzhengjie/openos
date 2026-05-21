@@ -3,6 +3,7 @@
  * ============================================================ */
 
 #include "../include/serial.h"
+#include "../include/vga.h"
 
 #define COM1 0x3F8
 
@@ -33,6 +34,7 @@ void serial_putc(char c) {
     /* 等待发送保持寄存器空 */
     while ((inb(COM1 + 5) & 0x20) == 0);
     outb(COM1, (uint8_t)c);
+    vga_putc(c);
 }
 
 /* 发送字符串（自动处理 \n → \r\n） */
@@ -42,6 +44,7 @@ void serial_write(const char *s) {
             serial_putc('\r');
         serial_putc(s[i]);
     }
+    vga_write(s);
 }
 
 /* 发送 32 位十六进制数 */
