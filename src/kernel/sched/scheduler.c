@@ -56,15 +56,17 @@ void sched_init(void) {
     sched.current = NULL;
     sched.current_ticks = 0;
     sched.need_resched = 0;
-    sched.initialized = 1;
 
+    /* 创建 idle 线程并加入运行队列 */
     uint32_t idle_stack = (uint32_t)pmm_alloc_page() + 4096;
     thread_t *idle = thread_create(0, "idle", (uint32_t)idle_entry, idle_stack);
     if (idle) {
         idle->priority = PRIORITY_IDLE;
-        idle->state = PROC_RUNNING;
-        sched.current = idle;
+        idle->state = PROC_READY;
+        enqueue(idle);
     }
+    
+    sched.initialized = 1;
 }
 
 void sched_add_thread(thread_t *t) {

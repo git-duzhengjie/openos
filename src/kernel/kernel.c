@@ -74,7 +74,10 @@ void kernel_main(void) {
     /* 初始化调度器 */
     sched_init();
     
-    /* 创建测试线程 */
+    /* 开启中断（调度器已初始化，可以接收定时器中断） */
+    __asm__ volatile ("sti");
+    
+    /* 创建测试线程 - 暂时注释掉，避免输出干扰
     uint32_t stack_a = (uint32_t)pmm_alloc_page() + 4096;
     uint32_t stack_b = (uint32_t)pmm_alloc_page() + 4096;
     
@@ -82,7 +85,8 @@ void kernel_main(void) {
     thread_t *tb = thread_create(1, "test_b", (uint32_t)test_proc_b, stack_b);
     
     if (ta) { sched_add_thread(ta); }
-    if (tb) { sched_add_thread(tb); }
+    if (tb) { sched_add_thread(tb);
+    */
     
     /* 启动调度 */
     sched_start();

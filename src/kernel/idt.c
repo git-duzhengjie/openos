@@ -289,7 +289,6 @@ void idt_init(void) {
 
 	/* 加载IDT */
 	__asm__ volatile ("lidt %0" : : "m"(idt_ptr));
-
-	/* 开启中断 */
-	__asm__ volatile ("sti");
+	
+	/* 注意：不在这里开启中断，由 kernel.c 在 sched_init() 后开启 */
 }
