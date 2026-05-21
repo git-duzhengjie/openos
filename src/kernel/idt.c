@@ -14,6 +14,9 @@ static idt_ptr_t idt_ptr;
 /* 中断处理函数数组 */
 static isr_t interrupt_handlers[256] = {0};
 
+/* 定时器中断专用处理函数（在 timer_isr.asm 中）*/
+extern void timer_isr_entry(void);
+
 /* ============================================================
  * PIC (可编程中断控制器) 操作
  * ============================================================ */
@@ -54,6 +57,32 @@ static void pic_remap(int offset1, int offset2) {
 	/* 清除所有IRQ屏蔽 */
 	outb(0x21, 0x0);
 	outb(0xA1, 0x0);
+}
+
+/*
+ * 初始化PIT (可编程间隔定时器)
+ * 设置定时器频率为约100Hz (每10ms一次中断)
+ */
+static void pit_init(void) {
+	/* 计算分频值: PIT频率 1193182 Hz / 目标频率 */
+	uint32_t divisor = 1193182 / 100;  /* 约100Hz */
+	
+	/* 发送控制字:
+	 * 二进制: 00110110
+	 * - 通道0 (00)
+	 * - 先低字节后高字节 (11)
+	 * - 模式3: 方波发生器 (011)
+	 * - 二进制计数 (0)
+	 */
+	outb(0x43, 0x36);
+	
+	/* 发送分频值 (先低字节后高字节) */
+	outb(0x40, (uint8_t)(divisor & 0xFF));
+	outb(0x40, (uint8_t)((divisor >> 8) & 0xFF));
+	
+	/* 确认写入 - 读取状态 */
+	uint8_t status = inb(0x61);
+	(void)status;  /* 避免未使用警告 */
 }
 
 /* ============================================================
@@ -245,7 +274,10 @@ void idt_init(void) {
 	idt_set_gate(31, (uint32_t)isr31, 0x08, 0x8E);
 
 	/* 设置IRQ门 (32-47) */
-	idt_set_gate(32, (uint32_t)irq0, 0x08, 0x8E);
+	/* INT 32 使用专用定时器处理函数 */
+	idt_set_gate(32, (uint32_t)timer_isr_entry, 0x08, 0x8E);
+	
+	/* 其他IRQ */
 	idt_set_gate(33, (uint32_t)irq1, 0x08, 0x8E);
 	idt_set_gate(34, (uint32_t)irq2, 0x08, 0x8E);
 	idt_set_gate(35, (uint32_t)irq3, 0x08, 0x8E);
@@ -264,6 +296,9 @@ void idt_init(void) {
 
 	/* 加载IDT */
 	__asm__ volatile ("lidt %0" : : "m"(idt_ptr));
+
+	/* 初始化PIT定时器 */
+	pit_init();
 
 	/* 开启中断 */
 	__asm__ volatile ("sti");

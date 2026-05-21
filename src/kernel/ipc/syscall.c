@@ -72,7 +72,7 @@ uint32_t syscall_dispatch(uint32_t num,
         return 0;
 
     case SYS_YIELD:
-        sched_schedule();
+        sched_yield();
         return 0;
 
     case SYS_MALLOC:

@@ -19,6 +19,7 @@ nasm -f elf32 $SRC/entry.asm -o $BUILD/entry.o
 nasm -f elf32 $SRC/isr.asm -o $BUILD/isr.o
 nasm -f elf32 $SRC/gdt_flush.asm -o $BUILD/gdt_flush.o
 nasm -f elf32 $SRC/sched/context_switch.asm -o $BUILD/context_switch.o
+nasm -f elf32 $SRC/timer_isr.asm -o $BUILD/timer_isr.o
 
 echo "[3/5] Compiling kernel C files..."
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
@@ -49,6 +50,11 @@ gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
     -I $SRC/include \
+    -c $SRC/mm/heap.c -o $BUILD/heap.o
+
+gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
+    -I $SRC/include \
     -c $SRC/sched/scheduler.c -o $BUILD/scheduler.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
@@ -61,6 +67,16 @@ gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -I $SRC/include \
     -c $SRC/serial.c -o $BUILD/serial.o
 
+gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
+    -I $SRC/include \
+    -c $SRC/vga.c -o $BUILD/vga.o
+
+gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
+    -I $SRC/include \
+    -c $SRC/string.c -o $BUILD/string.o
+
 echo "[4/5] Linking kernel.elf..."
 ld -m elf_i386 -T $SRC/linker.ld \
     -o $BUILD/kernel.elf \
@@ -68,14 +84,18 @@ ld -m elf_i386 -T $SRC/linker.ld \
     $BUILD/isr.o \
     $BUILD/gdt_flush.o \
     $BUILD/context_switch.o \
+    $BUILD/timer_isr.o \
     $BUILD/kernel.o \
     $BUILD/idt.o \
     $BUILD/gdt.o \
     $BUILD/pmm.o \
     $BUILD/vmm.o \
+    $BUILD/heap.o \
     $BUILD/scheduler.o \
     $BUILD/syscall.o \
-    $BUILD/serial.o
+    $BUILD/serial.o \
+    $BUILD/vga.o \
+    $BUILD/string.o
 
 objcopy -O binary $BUILD/kernel.elf $BUILD/kernel.bin
 

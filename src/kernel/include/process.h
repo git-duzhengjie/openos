@@ -117,4 +117,15 @@ uint32_t sys_getpid(void);
 uint32_t sys_gettid(void);
 void sys_exit(int code);
 
+/* 调度器核心函数 */
+void sched_init(void);
+void sched_start(void);
+void sched_add_thread(thread_t *t);
+void sched_remove_thread(thread_t *t);
+void sched_yield(void);
+thread_t *sched_get_current(void);
+int sched_need_resched(void);
+void sched_set_need_resched(int need);
+void sched_tick(void);
+
 #endif /* KERNEL_PROCESS_H */

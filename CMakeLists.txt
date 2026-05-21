@@ -80,6 +80,14 @@ add_custom_command(
     COMMENT "Assembling context_switch.asm..."
 )
 
+# timer_isr.asm
+add_custom_command(
+    OUTPUT ${BUILD_DIR}/timer_isr.o
+    COMMAND ${CMAKE_ASM_COMPILER} ${CMAKE_ASM_FLAGS_INIT} ${CMAKE_SOURCE_DIR}/src/kernel/timer_isr.asm -o ${BUILD_DIR}/timer_isr.o
+    DEPENDS ${CMAKE_SOURCE_DIR}/src/kernel/timer_isr.asm
+    COMMENT "Assembling timer_isr.asm..."
+)
+
 # kernel.c
 add_custom_command(
     OUTPUT ${BUILD_DIR}/kernel.o
@@ -155,6 +163,7 @@ add_custom_command(
             ${BUILD_DIR}/isr.o
             ${BUILD_DIR}/gdt_flush.o
             ${BUILD_DIR}/context_switch.o
+            ${BUILD_DIR}/timer_isr.o
             ${BUILD_DIR}/kernel.o
             ${BUILD_DIR}/idt.o
             ${BUILD_DIR}/gdt.o
@@ -168,6 +177,7 @@ add_custom_command(
         ${BUILD_DIR}/isr.o
         ${BUILD_DIR}/gdt_flush.o
         ${BUILD_DIR}/context_switch.o
+        ${BUILD_DIR}/timer_isr.o
         ${BUILD_DIR}/kernel.o
         ${BUILD_DIR}/idt.o
         ${BUILD_DIR}/gdt.o

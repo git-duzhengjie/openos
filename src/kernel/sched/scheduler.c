@@ -1,6 +1,4 @@
-/* ============================================================
- * openos - 多级反馈队列调度器
- * ============================================================ */
+/* scheduler.c - Preemptive Round-Robin Scheduler */
 
 #include "../include/process.h"
 #include "../include/pmm.h"
@@ -19,39 +17,13 @@ static struct {
     thread_t *current;
     uint32_t current_ticks;
     int initialized;
-} sched = {{0}, 0, 0, 0};
+    int need_resched;
+} sched = {{0}, 0, 0, 0, 0};
 
-static void timer_handler(registers_t *regs) {
-    (void)regs;
-    serial_write("T");
-    sched_tick();
-}
-
-void sched_init(void) {
-    for (int i = 0; i < 8; i++) sched.queues[i] = NULL;
-    sched.current = NULL;
-    sched.current_ticks = 0;
-    sched.initialized = 1;
-
-    isr_install_handler(32, timer_handler);
-
-    /* 创建idle但不加入队列 - 只在没有其他线程时使用 */
-    uint32_t idle_stack = (uint32_t)pmm_alloc_page() + 4096;
-    thread_t *idle = thread_create(0, "idle", (uint32_t)idle_entry, idle_stack);
-    if (idle) {
-        idle->priority = PRIORITY_IDLE;  /* 7 */
-        idle->state = PROC_RUNNING;
-        sched.current = idle;  /* idle作为初始current，但不在队列里 */
-        serial_write("[INIT] idle=current (not in queue)\n");
-    }
-}
-
-/* 内部函数：加入队列尾部 */
 static void enqueue(thread_t *t) {
     int prio = t->priority;
     t->next = NULL;
     t->prev = NULL;
-    
     if (!sched.queues[prio]) {
         sched.queues[prio] = t;
     } else {
@@ -62,19 +34,6 @@ static void enqueue(thread_t *t) {
     }
 }
 
-/* 内部函数：从队列头部取出并移除 */
-static thread_t *dequeue_head(int prio) {
-    thread_t *t = sched.queues[prio];
-    if (t) {
-        sched.queues[prio] = t->next;
-        if (t->next) t->next->prev = NULL;
-        t->next = NULL;
-        t->prev = NULL;
-    }
-    return t;
-}
-
-/* 内部函数：从队列移除指定线程 */
 static void remove_from_queue(thread_t *t) {
     if (!t) return;
     int prio = t->priority;
@@ -85,49 +44,75 @@ static void remove_from_queue(thread_t *t) {
     t->prev = NULL;
 }
 
+static thread_t *pick_next(void) {
+    for (int i = 0; i < 8; i++) {
+        if (sched.queues[i]) return sched.queues[i];
+    }
+    return NULL;
+}
+
+void sched_init(void) {
+    for (int i = 0; i < 8; i++) sched.queues[i] = NULL;
+    sched.current = NULL;
+    sched.current_ticks = 0;
+    sched.need_resched = 0;
+    sched.initialized = 1;
+
+    uint32_t idle_stack = (uint32_t)pmm_alloc_page() + 4096;
+    thread_t *idle = thread_create(0, "idle", (uint32_t)idle_entry, idle_stack);
+    if (idle) {
+        idle->priority = PRIORITY_IDLE;
+        idle->state = PROC_RUNNING;
+        sched.current = idle;
+    }
+}
+
 void sched_add_thread(thread_t *t) {
     if (!t || t->state == PROC_RUNNING) return;
     t->state = PROC_READY;
     enqueue(t);
-    serial_write("[ADD] thread added\n");
 }
 
 void sched_remove_thread(thread_t *t) {
     remove_from_queue(t);
 }
 
-/* 从优先级0-7找第一个就绪线程 */
-static thread_t *pick_next(void) {
-    for (int i = 0; i < 8; i++) {
-        if (sched.queues[i]) {
-            return sched.queues[i];
-        }
-    }
-    return NULL;
+thread_t *sched_get_current(void) {
+    return sched.current;
 }
 
-void sched_schedule(void) {
-    if (!sched.initialized || !sched.current) return;
-    
-    thread_t *next = pick_next();
-    if (!next || next == sched.current) return;
-    
-    /* 从队列移除next */
-    remove_from_queue(next);
-    
-    /* 当前线程重新入队 */
-    thread_t *prev = sched.current;
-    if (prev->priority != PRIORITY_IDLE) {  /* idle不加入队列 */
-        prev->state = PROC_READY;
-        enqueue(prev);
+int sched_need_resched(void) {
+    return sched.need_resched;
+}
+
+void sched_set_need_resched(int need) {
+    sched.need_resched = need;
+}
+
+void sched_start(void) {
+    thread_t *first = pick_next();
+    if (!first) {
+        serial_write("[SCHED] No threads!\n");
+        return;
     }
     
-    /* 切换 */
-    sched.current = next;
-    next->state = PROC_RUNNING;
+    remove_from_queue(first);
+    sched.current = first;
+    first->state = PROC_RUNNING;
     sched.current_ticks = 0;
     
-    context_switch(prev, next);
+    serial_write("[SCHED] Starting first thread\n");
+    
+    __asm__ volatile(
+        "mov %0, %%esp\n"
+        "pop %%gs\n"
+        "pop %%fs\n"
+        "pop %%es\n"
+        "pop %%ds\n"
+        "popa\n"
+        "iret\n"
+        : : "r"(first->kernel_esp)
+    );
 }
 
 void sched_tick(void) {
@@ -135,46 +120,58 @@ void sched_tick(void) {
     sched.current_ticks++;
     if (sched.current_ticks >= 10) {
         sched.current_ticks = 0;
-        sched_schedule();
+        sched.need_resched = 1;
     }
 }
 
-void sched_yield(void) {
-    if (!sched.initialized || !sched.current) return;
+thread_t *timer_schedule_handler(void) {
+    if (!sched.initialized || !sched.current) {
+        serial_write("[TMR-ERR]\n");
+        return NULL;
+    }
+    if (!sched.need_resched) return NULL;
     
     thread_t *next = pick_next();
-    if (!next) return;  /* 没有其他线程 */
-    
-    if (next == sched.current) {
-        serial_write("[YIELD] only current in queue\n");
-        return;
+    if (!next || next == sched.current) {
+        sched.need_resched = 0;
+        return NULL;
     }
     
-    /* 从队列移除next */
     remove_from_queue(next);
     
-    /* 当前线程入队（除非是idle） */
     thread_t *prev = sched.current;
     if (prev->priority != PRIORITY_IDLE) {
         prev->state = PROC_READY;
         enqueue(prev);
     }
     
-    /* 切换 */
+    sched.current = next;
+    next->state = PROC_RUNNING;
+    sched.current_ticks = 0;
+    sched.need_resched = 0;
+    
+    return next;
+}
+
+void sched_yield(void) {
+    if (!sched.initialized || !sched.current) return;
+    
+    thread_t *next = pick_next();
+    if (!next) return;
+    if (next == sched.current) return;
+    
+    remove_from_queue(next);
+    
+    thread_t *prev = sched.current;
+    if (prev->priority != PRIORITY_IDLE) {
+        prev->state = PROC_READY;
+        enqueue(prev);
+    }
+    
     sched.current = next;
     next->state = PROC_RUNNING;
     sched.current_ticks = 0;
     
-    serial_write("[YIELD] switched\n");
-    context_switch(prev, next);
-}
-
-thread_t *sched_get_current(void) { return sched.current; }
-
-void sched_switch_to(thread_t *next) {
-    if (!next || next == sched.current) return;
-    thread_t *prev = sched.current;
-    sched.current = next;
     context_switch(prev, next);
 }
 
@@ -197,31 +194,38 @@ thread_t *thread_create(uint32_t pid, const char *name, uint32_t entry, uint32_t
     
     t->id = (uint32_t)t;
     t->pid = pid;
-    t->priority = PRIORITY_NORMAL;  /* 3 */
+    t->priority = PRIORITY_NORMAL;
     t->state = PROC_READY;
+    (void)name;
     
-    /* 清空栈 */
     char *stack_base = (char *)((uint32_t)stack_top - 4096);
     for (int i = 0; i < 4096; i++) stack_base[i] = 0;
     
-    /* 栈帧：pushad + EFLAGS + EIP */
+    /* Stack frame matching timer_isr save format:
+     * [GS][FS][ES][DS][EDI][ESI][EBP][ESP_skip][EBX][EDX][ECX][EAX][EIP][CS][EFLAGS]
+     */
     uint32_t *sp = (uint32_t *)stack_top;
-    *(--sp) = entry;      /* EIP */
-    *(--sp) = 0x202;     /* EFLAGS (IF=1) */
-    *(--sp) = 0;         /* EAX */
-    *(--sp) = 0;         /* ECX */
-    *(--sp) = 0;         /* EDX */
-    *(--sp) = 0;         /* EBX */
-    *(--sp) = 0;         /* ESP (skip) */
-    *(--sp) = 0;         /* EBP */
-    *(--sp) = 0;         /* ESI */
-    *(--sp) = 0;         /* EDI */
+    
+    *(--sp) = 0x202;     /* EFLAGS: IF=1 */
+    *(--sp) = 0x08;      /* CS */
+    *(--sp) = entry;     /* EIP */
+    *(--sp) = 0;          /* EAX */
+    *(--sp) = 0;          /* ECX */
+    *(--sp) = 0;          /* EDX */
+    *(--sp) = 0;          /* EBX */
+    *(--sp) = 0;          /* ESP (skip) */
+    *(--sp) = 0;          /* EBP */
+    *(--sp) = 0;          /* ESI */
+    *(--sp) = 0;          /* EDI */
+    *(--sp) = 0x10;       /* DS */
+    *(--sp) = 0x10;       /* ES */
+    *(--sp) = 0x10;       /* FS */
+    *(--sp) = 0x10;       /* GS */
     
     t->kernel_esp = (uint32_t)sp;
     t->kernel_eip = entry;
     t->kernel_stack = (uint32_t)stack_base;
     t->kernel_stack_top = stack_top;
-    (void)name;
     return t;
 }
 
@@ -230,7 +234,7 @@ void thread_sleep(uint32_t ms) {
     if (sched.current) {
         remove_from_queue(sched.current);
         sched.current->state = PROC_BLOCKED;
-        sched_schedule();
+        sched.need_resched = 1;
     }
 }
 
@@ -250,7 +254,7 @@ void sys_exit(int code) {
     if (sched.current) {
         remove_from_queue(sched.current);
         sched.current->state = PROC_ZOMBIE;
-        sched_schedule();
+        sched.need_resched = 1;
     }
     while (1) { __asm__ volatile("hlt"); }
 }

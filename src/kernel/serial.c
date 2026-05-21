@@ -43,3 +43,12 @@ void serial_write(const char *s) {
         serial_putc(s[i]);
     }
 }
+
+/* 发送 32 位十六进制数 */
+void serial_write_hex(uint32_t val) {
+    serial_write("0x");
+    for (int i = 28; i >= 0; i -= 4) {
+        uint8_t nibble = (val >> i) & 0xF;
+        serial_putc(nibble < 10 ? '0' + nibble : 'A' + nibble - 10);
+    }
+}
