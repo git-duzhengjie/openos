@@ -9,6 +9,8 @@
 #include "serial.h"
 #include "process.h"
 #include "../proc/process.h"
+#include "../fs/vfs.h"
+#include "../fs/ramfs.h"
 #include "heap.h"
 #include "keyboard.h"
 #include "vga.h"
@@ -104,6 +106,30 @@ void kernel_main(void) {
     /* 初始化进程表 */
     proc_table_init();
     serial_write("[OK] PROC TABLE\n");
+
+    /* 初始化 VFS + ramfs */
+    vfs_init();
+    ramfs_init();
+    serial_write("[OK] VFS + ramfs\n");
+
+    /* VFS 测试 */
+    vfs_mkdir("/dev", 0755);
+    vfs_mkdir("/tmp", 0755);
+    int fd = vfs_open("/hello.txt", O_CREAT | O_RDWR, 0644);
+    if (fd >= 0) {
+        vfs_write(fd, "Hello from openos VFS!", 22);
+        vfs_seek(fd, 0, SEEK_SET);
+        char buf[64];
+        int n = vfs_read(fd, buf, 63);
+        if (n > 0) {
+            buf[n] = '\0';
+            serial_write("[VFS] Read back: ");
+            serial_write(buf);
+            serial_write("\n");
+        }
+        vfs_close(fd);
+    }
+    serial_write("[OK] VFS TEST\n");
 
     /* 初始化调度器 */
     sched_init();

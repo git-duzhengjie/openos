@@ -93,6 +93,16 @@ gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -I $SRC/include \
     -c $SRC/proc/process.c -o $BUILD/process.o
 
+gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
+    -I $SRC/include \
+    -c $SRC/fs/vfs.c -o $BUILD/vfs.o
+
+gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
+    -I $SRC/include \
+    -c $SRC/fs/ramfs.c -o $BUILD/ramfs.o
+
 echo "[4/5] Linking kernel.elf..."
 ld -m elf_i386 -T $SRC/linker.ld \
     -o $BUILD/kernel.elf \
@@ -115,7 +125,9 @@ ld -m elf_i386 -T $SRC/linker.ld \
     $BUILD/string.o \
     $BUILD/keyboard.o \
     $BUILD/usermode.o \
-    $BUILD/process.o
+    $BUILD/process.o \
+    $BUILD/vfs.o \
+    $BUILD/ramfs.o
 
 objcopy -O binary $BUILD/kernel.elf $BUILD/kernel.bin
 

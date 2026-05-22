@@ -22,6 +22,14 @@
 #define SYS_WAIT        222
 #define SYS_WAITPID     223
 #define SYS_GETPPID     224
+#define SYS_OPEN        225
+#define SYS_CLOSE       226
+#define SYS_READ_FD     227
+#define SYS_WRITE_FD    228
+#define SYS_SEEK        229
+#define SYS_MKDIR       230
+#define SYS_UNLINK      231
+#define SYS_RMDIR       232
 
 /* 调用号通过 EAX 传递，参数通过 EBX/ECX/EDX/ESI/EDI */
 uint32_t syscall_handler(uint32_t syscall_num,

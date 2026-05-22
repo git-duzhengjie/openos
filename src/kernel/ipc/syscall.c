@@ -7,6 +7,7 @@
 #include "../include/vmm.h"
 #include "../include/pmm.h"
 #include "../proc/process.h"
+#include "../fs/vfs.h"
 
 /* VGA */
 #define VGA ((volatile uint16_t *)0xB8000)
@@ -97,6 +98,36 @@ uint32_t syscall_dispatch(uint32_t num,
 
     case SYS_GETPPID:
         return sys_getppid();
+
+    case SYS_OPEN:
+        return (uint32_t)vfs_open((const char *)a, (int)b, (int)c);
+
+    case SYS_CLOSE:
+        return (uint32_t)vfs_close((int)a);
+
+    case SYS_READ_FD:
+        {
+            /* 简化：直接读取到用户缓冲区 */
+            int fd = (int)a;
+            char *buf = (char *)b;
+            uint32_t count = c;
+            return (uint32_t)vfs_read(fd, buf, count);
+        }
+
+    case SYS_WRITE_FD:
+        return (uint32_t)vfs_write((int)a, (const void *)b, (uint32_t)c);
+
+    case SYS_SEEK:
+        return (uint32_t)vfs_seek((int)a, (int)b, (int)c);
+
+    case SYS_MKDIR:
+        return (uint32_t)vfs_mkdir((const char *)a, (int)b);
+
+    case SYS_UNLINK:
+        return (uint32_t)vfs_unlink((const char *)a);
+
+    case SYS_RMDIR:
+        return (uint32_t)vfs_rmdir((const char *)a);
 
     default:
         return 0xFFFFFFFF;
