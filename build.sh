@@ -20,6 +20,7 @@ nasm -f elf32 $SRC/isr.asm -o $BUILD/isr.o
 nasm -f elf32 $SRC/gdt_flush.asm -o $BUILD/gdt_flush.o
 nasm -f elf32 $SRC/sched/context_switch.asm -o $BUILD/context_switch.o
 nasm -f elf32 $SRC/timer_isr.asm -o $BUILD/timer_isr.o
+nasm -f elf32 $SRC/switch_to_user.asm -o $BUILD/switch_to_user.o
 
 echo "[3/5] Compiling kernel C files..."
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
@@ -82,6 +83,11 @@ gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -I $SRC/include \
     -c $SRC/string.c -o $BUILD/string.o
 
+gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
+    -I $SRC/include \
+    -c $SRC/usermode.c -o $BUILD/usermode.o
+
 echo "[4/5] Linking kernel.elf..."
 ld -m elf_i386 -T $SRC/linker.ld \
     -o $BUILD/kernel.elf \
@@ -90,6 +96,7 @@ ld -m elf_i386 -T $SRC/linker.ld \
     $BUILD/gdt_flush.o \
     $BUILD/context_switch.o \
     $BUILD/timer_isr.o \
+    $BUILD/switch_to_user.o \
     $BUILD/kernel.o \
     $BUILD/idt.o \
     $BUILD/gdt.o \
@@ -101,7 +108,8 @@ ld -m elf_i386 -T $SRC/linker.ld \
     $BUILD/serial.o \
     $BUILD/vga.o \
     $BUILD/string.o \
-    $BUILD/keyboard.o
+    $BUILD/keyboard.o \
+    $BUILD/usermode.o
 
 objcopy -O binary $BUILD/kernel.elf $BUILD/kernel.bin
 

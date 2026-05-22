@@ -31,8 +31,8 @@
 /* 段选择子索引 */
 #define GDT_KERNEL_CODE 0x08   /* 内核代码段 (index=1, RPL=0) */
 #define GDT_KERNEL_DATA 0x10   /* 内核数据段 (index=2, RPL=0) */
-#define GDT_USER_CODE   0x18   /* 用户代码段 (index=3, RPL=3) */
-#define GDT_USER_DATA   0x20   /* 用户数据段 (index=4, RPL=3) */
+#define GDT_USER_CODE   0x1B   /* 用户代码段 (index=3, RPL=3) */
+#define GDT_USER_DATA   0x23   /* 用户数据段 (index=4, RPL=3) */
 
 /* TSS 段选择子 */
 #define GDT_TSS 0x28           /* index=5 */

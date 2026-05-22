@@ -5,6 +5,7 @@
 
 #include "types.h"
 #include "../include/syscall.h"
+#include "../include/usermode.h"
 #include "serial.h"
 #include "process.h"
 #include "heap.h"
@@ -17,6 +18,9 @@ extern void idt_init(void);
 extern void pmm_init(uint32_t kernel_end);
 extern void vmm_init(void);
 extern void sched_init(void);
+extern void tss_init(uint32_t esp0);
+extern void tss_flush(void);
+extern void pit_start(void);
 extern void sched_start(void);
 extern void sched_add_thread(thread_t *t);
 extern thread_t *thread_create(uint32_t pid, const char *name, uint32_t entry, uint32_t stack_top);
@@ -61,6 +65,13 @@ void kernel_main(void) {
     gdt_init();
     serial_write("[OK] GDT\n");
     
+    /* 初始化并加载 TSS (修复 invalid tss type) */
+    extern uint32_t kernel_stack_top[];
+    tss_init((uint32_t)kernel_stack_top);
+    extern void tss_flush(void);
+    tss_flush();
+    serial_write("[OK] TSS\n");
+    
     idt_init();
     serial_write("[OK] IDT\n");
     
@@ -75,7 +86,7 @@ void kernel_main(void) {
     
     /* 初始化VGA控制台 */
     vga_init();
-
+    
     /* 测试系统调用接口 (int 0x80) */
     serial_write("[TEST] Testing syscall interface (int 0x80)...\n");
     serial_write("[TEST] Calling SYS_GETPID...\n");
@@ -87,14 +98,19 @@ void kernel_main(void) {
     serial_write("[TEST] SYS_GETPID returned: ");
     serial_write_hex(pid);
     serial_write("\n");
-    
     serial_write("[TEST] Syscall test done\n");
     
     /* 初始化调度器 */
     sched_init();
     
+    /* 启动定时器（调度器已初始化） */
+    pit_start();
+    
     /* 开启中断（调度器已初始化，可以接收定时器中断） */
     __asm__ volatile ("sti");
+    
+    /* 测试用户态切换（必须在 sti 之后，确保 IF=1） */
+    test_user_mode_switch();
     
     /* 创建测试线程 - 暂时注释掉，避免输出干扰
     uint32_t stack_a = (uint32_t)pmm_alloc_page() + 4096;

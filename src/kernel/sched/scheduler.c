@@ -64,6 +64,7 @@ void sched_init(void) {
         idle->priority = PRIORITY_IDLE;
         idle->state = PROC_READY;
         enqueue(idle);
+        sched.current = idle;
     }
     
     sched.initialized = 1;

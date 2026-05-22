@@ -1,6 +1,8 @@
 /* ============================================================
  * openos - 虚拟内存管理 (VMM) 实现
- * 32位保护模式，2级页表，恒等映射
+ * 32位保护模式，2级页表
+ * 使用 PMM 动态分配页表 + 恒等映射 0-256MB
+ * v10: 修复 vmm_map_page 动态分配缺失的页表
  * ============================================================ */
 
 #include "../include/vmm.h"
@@ -11,208 +13,176 @@
 #define NULL ((void*)0)
 #endif
 
-/* 硬编码页目录 - 固定在 .bss 中 */
-__attribute__((aligned(4096)))
-static uint32_t kernel_pgd[1024];
+/* 页目录（链接器放置在 0x1CAE0） */
+static uint32_t kernel_pgd[1024] __attribute__((aligned(4096)));
 
-__attribute__((aligned(4096)))
-static uint32_t kernel_pgt0[1024];   /* 0-4MB */
+/* 恒等映射范围：0 - 256MB（支持用户栈在 0xBF000000） */
+#define IDENTITY_END  (256 * 1024 * 1024)  /* 256MB */
 
-/* 当前 CR3 值 */
-static uint32_t current_cr3 = 0;
+/* 页目录物理基址 */
+static uint32_t kernel_pgd_phys;
 
 /* ============================================================
- * 查找/分配页表
+ * 初始化虚拟内存
  * ============================================================ */
-static uint32_t *get_or_create_pte(uint32_t vaddr, int alloc) {
-    uint32_t pgd_idx = vaddr >> 22;
-    uint32_t pte_idx = (vaddr >> 12) & 0x3FF;
+void vmm_init(void) {
+    serial_write("[VMM] Init start\n");
     
-    if (!(kernel_pgd[pgd_idx] & 1)) {
-        if (!alloc) return NULL;
-        /* 分配一个新页表 */
-        void *pt = pmm_alloc_page();
-        if (!pt) return NULL;
-        /* 清零并映射 */
-        for (int i = 0; i < 1024; i++) ((uint32_t *)pt)[i] = 0;
-        kernel_pgd[pgd_idx] = ((uint32_t)pt) | 3;  /* present + rw */
+    /* 清空页目录 */
+    for (int i = 0; i < 1024; i++) {
+        kernel_pgd[i] = 0;
     }
     
-    uint32_t pt_phys = kernel_pgd[pgd_idx] & ~0xFFF;
-    return (uint32_t *)pt_phys;
+    /* 计算并保存页目录物理地址 */
+    /* kernel_pgd 在 .bss 段，位于 identity 区域 0-256MB 内 */
+    __asm__ volatile ("mov %%cr3, %0" : : "r"(kernel_pgd_phys));
+    /* 由于还没启用分页，kernel_pgd 虚拟地址 = 物理地址 */
+    kernel_pgd_phys = (uint32_t)kernel_pgd;
+    serial_write("[VMM] kernel_pgd_phys=");
+    serial_write_hex(kernel_pgd_phys);
+    serial_write("\n");
+    
+    /* 计算需要多少个页表（每个覆盖 4MB） */
+    int num_pt = IDENTITY_END / (4 * 1024 * 1024);  /* 256MB / 4MB = 64 */
+    
+    /* 分配页表并建立恒等映射 */
+    for (int pgd_idx = 0; pgd_idx < num_pt; pgd_idx++) {
+        uint32_t pt_phys = (uint32_t)pmm_alloc_page();
+        if (!pt_phys) {
+            serial_write("[VMM] FAILED to alloc page table!\n");
+            return;
+        }
+        
+        /* 设置 PDE，恒等映射 */
+        kernel_pgd[pgd_idx] = pt_phys | 3;
+        
+        /* 初始化 PTE */
+        uint32_t *pt = (uint32_t *)pt_phys;
+        for (int pte_idx = 0; pte_idx < 1024; pte_idx++) {
+            uint32_t phys = (pgd_idx << 22) | (pte_idx << 12);
+            pt[pte_idx] = phys | 3;
+        }
+    }
+    
+    /* 递归映射：PDE[1023] 指向页目录自身 */
+    kernel_pgd[1023] = (uint32_t)kernel_pgd | 3;
+    
+    /* 加载 CR3 */
+    __asm__ volatile ("mov %0, %%cr3" : : "r"((uint32_t)kernel_pgd));
+    
+    /* 启用分页 */
+    uint32_t cr0;
+    __asm__ volatile ("mov %%cr0, %0" : "=r"(cr0));
+    cr0 |= 0x80000000;
+    __asm__ volatile ("mov %0, %%cr0" : : "r"(cr0));
+    
+    serial_write("[VMM] Paging enabled!\n");
+    
+    /* 验证递归映射 */
+    uint32_t *rec = (uint32_t *)0xFFFFF000;
+    serial_write("[VMM] RecVerify=");
+    serial_write_hex(rec[1023]);
+    serial_write(" expect=");
+    serial_write_hex(kernel_pgd[1023]);
+    serial_write("\n");
+    serial_write("[VMM] Done!\n");
 }
 
 /* ============================================================
- * 映射一个页
+ * 映射一个页（核心函数，v10 修复：动态分配缺失的 PDE）
  * ============================================================ */
 void vmm_map_page(uint32_t vaddr, uint32_t paddr, uint32_t flags) {
-    /* 4KB 对齐 */
     vaddr &= ~0xFFF;
     paddr &= ~0xFFF;
     
-    uint32_t *pte = get_or_create_pte(vaddr, 1);
-    if (!pte) return;
-    
     uint32_t pgd_idx = vaddr >> 22;
     uint32_t pte_idx = (vaddr >> 12) & 0x3FF;
     
-    pte[pte_idx] = paddr | (flags & ~0xFFF) | 1;
+    /* 如果 PDE 不存在，动态分配页表 */
+    if ((kernel_pgd[pgd_idx] & 1) == 0) {
+        serial_write("[VMM] PDE missing for pgd_idx=");
+        serial_write_hex(pgd_idx);
+        serial_write(", allocating PT...\n");
+        
+        /* 分配新的页表 */
+        uint32_t pt_phys = (uint32_t)pmm_alloc_page();
+        if (!pt_phys) {
+            serial_write("[VMM] FAILED: cannot alloc page table!\n");
+            return;
+        }
+        
+        /* 清空页表 */
+        uint32_t *pt = (uint32_t *)pt_phys;
+        for (int i = 0; i < 1024; i++) {
+            pt[i] = 0;
+        }
+        
+        /* 通过递归映射设置 PDE */
+        uint32_t *pgd_rec = (uint32_t *)(0xFFFFF000 + (pgd_idx << 2));
+        *pgd_rec = pt_phys | (flags & 0x07) | 1;  /* inherit U/S from flags */
+        
+        serial_write("[VMM] PDE[");
+        serial_write_hex(pgd_idx);
+        serial_write("] = ");
+        serial_write_hex(pt_phys | 3);
+        serial_write("\n");
+    }
     
-    /* 刷新 TLB */
-    __asm__ volatile ("invlpg (%0)" : : "r"(vaddr) : "memory");
+    /* 通过递归映射访问页表并设置 PTE */
+    uint32_t *pte = (uint32_t *)(0xFFC00000 + (pgd_idx << 12));
+    pte[pte_idx] = (paddr & ~0xFFF) | (flags & 0xFFF);
+    
+    /* 调试：打印 PTE 值 */
+    serial_write("[VMM] Mapped: virt=");
+    serial_write_hex(vaddr);
+    serial_write(" phys=");
+    serial_write_hex(paddr);
+    serial_write(" pte=");
+    serial_write_hex(pte[pte_idx]);
+    serial_write("\n");
+    
+    __asm__ volatile ("invlpg (%0)" : : "r"(vaddr));
 }
 
 /* ============================================================
- * 取消映射一个页
+ * 取消映射
  * ============================================================ */
 void vmm_unmap_page(uint32_t vaddr) {
     vaddr &= ~0xFFF;
-    
-    uint32_t *pte = get_or_create_pte(vaddr, 0);
-    if (!pte) return;
-    
     uint32_t pgd_idx = vaddr >> 22;
     uint32_t pte_idx = (vaddr >> 12) & 0x3FF;
-    
+    if ((kernel_pgd[pgd_idx] & 1) == 0) return;
+    uint32_t *pte = (uint32_t *)(0xFFC00000 + (pgd_idx << 12));
     pte[pte_idx] = 0;
-    __asm__ volatile ("invlpg (%0)" : : "r"(vaddr) : "memory");
+    __asm__ volatile ("invlpg (%0)" : : "r"(vaddr));
 }
 
 /* ============================================================
- * 获取当前 CR3
+ * 获取/设置 CR3
  * ============================================================ */
 uint32_t vmm_get_cr3(void) {
     uint32_t cr3;
-    __asm__ volatile ("movl %%cr3, %0" : "=r"(cr3));
+    __asm__ volatile ("mov %%cr3, %0" : "=r"(cr3));
     return cr3;
 }
 
-/* ============================================================
- * 加载新的 CR3
- * ============================================================ */
 void vmm_load_cr3(uint32_t cr3) {
-    __asm__ volatile ("movl %0, %%cr3" : : "r"(cr3) : "memory");
-    current_cr3 = cr3;
+    __asm__ volatile ("mov %0, %%cr3" : : "r"(cr3));
 }
 
 /* ============================================================
- * 分配一个页表（4KB对齐）
- * ============================================================ */
-uint32_t vmm_alloc_page_table(void) {
-    void *pt = pmm_alloc_page();
-    if (!pt) return 0;
-    for (int i = 0; i < 1024; i++) ((uint32_t *)pt)[i] = 0;
-    return (uint32_t)pt;
-}
-
-/* ============================================================
- * 分配虚拟页（分配物理页并映射）
+ * 分配虚拟页
  * ============================================================ */
 void *vmm_alloc_page(void) {
-    void *phys = pmm_alloc_page();
+    uint32_t phys = (uint32_t)pmm_alloc_page();
     if (!phys) return NULL;
-    /* 用 vmm_map_page 恒等映射 */
-    vmm_map_page((uint32_t)phys, (uint32_t)phys, VMM_RW | VMM_USER);
-    return phys;
+    static uint32_t next_virt = 0xC0000000;
+    uint32_t virt = next_virt;
+    next_virt += 4096;
+    vmm_map_page(virt, phys, VMM_RW);
+    return (void *)virt;
 }
 
-/* ============================================================
- * 页错误处理
- * ============================================================ */
-/* ============================================================
- * 页错误处理 (ISR 14)
- * 通过 isr_install_handler(14, page_fault_handler) 注册
- *
- * Page fault error code bits:
- *   bit 0 (0x01): P    - 0=page not present, 1=protection violation
- *   bit 1 (0x02): W/R  - 0=read, 1=write
- *   bit 2 (0x04): U/S  - 0=supervisor, 1=user
- * ============================================================
- */
-void page_fault_handler(registers_t *regs) {
-    uint32_t fault_addr;
-    __asm__ volatile ("movl %%cr2, %0" : "=r"(fault_addr));
-    uint32_t err = regs->err_code;
-
-    if (err & 0x01) {
-/* GPF FIX:         vga_puts("\n[PF] protection fault!"); */
-        goto pf_halt;
-    }
-
-    void *phys = pmm_alloc_page();
-    if (!phys) {
-/* GPF FIX:         vga_puts("\n[PF] no physical memory!"); */
-        goto pf_halt;
-    }
-
-    uint32_t vaddr = fault_addr & ~0xFFF;
-    vmm_map_page(vaddr, (uint32_t)phys, VMM_RW);
-
-/* GPF FIX:     vga_puts("\n[PF] mapped v=0x"); */
-/* GPF FIX:     vga_hex(fault_addr); */
-/* GPF FIX:     vga_puts(" -> p=0x"); */
-/* GPF FIX:     vga_hex((uint32_t)phys); */
-/* GPF FIX:     vga_puts("\n"); */
-    return;
-
-pf_halt:
-/* GPF FIX:     vga_puts(" [PF] addr=0x"); */
-/* GPF FIX:     vga_hex(fault_addr); */
-/* GPF FIX:     vga_puts(" err=0x"); */
-/* GPF FIX:     vga_hex(err); */
-/* GPF FIX:     vga_puts("\nHALT\n"); */
-    __asm__ volatile ("cli; hlt");
-}
-
-/* ============================================================
- * VMM 初始化 - 恒等映射全部物理内存
- * ============================================================ */
-void vmm_init(void) {
-    serial_write("[VMM] init\n");
-    
-    /* 清空页目录和第一个页表 */
-    for (int i = 0; i < 1024; i++) {
-        kernel_pgd[i] = 0;
-        kernel_pgt0[i] = 0;
-    }
-    
-    /* 恒等映射 0-4MB（第一个页表已静态分配）*/
-    for (int i = 0; i < 1024; i++) {
-        kernel_pgt0[i] = (i << 12) | 3;
-    }
-    kernel_pgd[0] = ((uint32_t)kernel_pgt0) | 3;
-    
-    /* 恒等映射 4MB-512MB：动态分配页表 */
-    /* QEMU -m 512M → 512MB = 128个页目录项 */
-    for (int pgd_idx = 1; pgd_idx < 128; pgd_idx++) {
-        void *pt = pmm_alloc_page();
-        if (!pt) break;
-        uint32_t *pt_virt = (uint32_t *)pt;  /* 分页未开启，物理地址=虚拟地址 */
-        for (int i = 0; i < 1024; i++) {
-            uint32_t phys = (pgd_idx << 22) | (i << 12);
-            pt_virt[i] = phys | 3;
-        }
-        kernel_pgd[pgd_idx] = ((uint32_t)pt) | 3;
-    }
-    
-    serial_write("[VMM] mapping 0-512MB done\n");
-    
-    /* 加载 CR3 并开启分页 */
-    __asm__ volatile ("movl %0, %%cr3" : : "r"(kernel_pgd) : "memory");
-    current_cr3 = (uint32_t)kernel_pgd;
-    
-    __asm__ volatile (
-        "movl %%cr0, %%eax\n"
-        "orl  $0x80000000, %%eax\n"
-        "movl %%eax, %%cr0\n"
-        ::: "eax"
-    );
-    
-    serial_write("[VMM] paging ON\n");
-    
-    /* 注册页错误处理 */
-    extern void isr_install_handler(uint8_t num, isr_t handler);
-    extern void page_fault_handler(registers_t *regs);
-    isr_install_handler(14, page_fault_handler);
-    serial_write("[VMM] PF handler registered\n");
+uint32_t vmm_alloc_page_table(void) {
+    return (uint32_t)pmm_alloc_page();
 }

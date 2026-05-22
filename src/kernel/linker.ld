@@ -48,4 +48,8 @@ SECTIONS
 
     /* 结束地址 (调试用) */
     __kernel_end = .;
+    
+    /* 内核栈顶地址 (栈向低地址增长) */
+    . = 0x90000;
+    kernel_stack_top = .;
 }

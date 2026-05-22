@@ -145,8 +145,6 @@ static const char *exception_messages[] = {
 	"Reserved",
 	"Reserved",
 	"Reserved",
-	"Reserved",
-	"Reserved",
 	"Reserved"
 };
 
@@ -226,10 +224,7 @@ void idt_init(void) {
 	idt_ptr.limit = sizeof(idt) - 1;
 	idt_ptr.base = (uint32_t)&idt;
 
-	/* 先初始化PIT（必须在pic_remap之前，否则PIT可能立即触发） */
-	pit_init();
-
-	/* 重新映射PIC（在PIT运行后才解除IRQ0 mask） */
+	/* 重新映射PIC */
 	pic_remap(0x20, 0x28);
 
 	/* 设置ISR门 (0-31) */
@@ -294,4 +289,9 @@ void idt_init(void) {
 	__asm__ volatile ("lidt %0" : : "m"(idt_ptr));
 	
 	/* 注意：不在这里开启中断，由 kernel.c 在 sched_init() 后开启 */
+}
+
+/* 导出 pit_init 供 kernel.c 调用 */
+void pit_start(void) {
+	pit_init();
 }
