@@ -6,6 +6,7 @@
 #include "../include/process.h"
 #include "../include/vmm.h"
 #include "../include/pmm.h"
+#include "../proc/process.h"
 
 /* VGA */
 #define VGA ((volatile uint16_t *)0xB8000)
@@ -84,6 +85,18 @@ uint32_t syscall_dispatch(uint32_t num,
     case SYS_FREE:
         pmm_free_page((void *)a);
         return 0;
+
+    case SYS_FORK:
+        return sys_fork();
+
+    case SYS_WAIT:
+        return sys_wait((int *)a);
+
+    case SYS_WAITPID:
+        return sys_waitpid(a, (int *)b, (int)c);
+
+    case SYS_GETPPID:
+        return sys_getppid();
 
     default:
         return 0xFFFFFFFF;

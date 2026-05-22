@@ -17,6 +17,11 @@
 #define SYS_FREE        74
 #define SYS_SLEEP       200
 #define SYS_YIELD       201
+#define SYS_FORK        220
+#define SYS_EXEC        221
+#define SYS_WAIT        222
+#define SYS_WAITPID     223
+#define SYS_GETPPID     224
 
 /* 调用号通过 EAX 传递，参数通过 EBX/ECX/EDX/ESI/EDI */
 uint32_t syscall_handler(uint32_t syscall_num,

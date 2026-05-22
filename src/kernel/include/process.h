@@ -59,6 +59,7 @@ typedef struct process {
     uint32_t pid;             /* 进程ID */
     char name[32];            /* 进程名 */
     process_state_t state;    /* 进程状态 */
+    uint32_t ppid;            /* 父进程ID */
     thread_t *threads;        /* 线程链表 */
     uint32_t thread_count;    /* 线程数量 */
 

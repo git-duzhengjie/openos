@@ -88,6 +88,11 @@ gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -I $SRC/include \
     -c $SRC/usermode.c -o $BUILD/usermode.o
 
+gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
+    -I $SRC/include \
+    -c $SRC/proc/process.c -o $BUILD/process.o
+
 echo "[4/5] Linking kernel.elf..."
 ld -m elf_i386 -T $SRC/linker.ld \
     -o $BUILD/kernel.elf \
@@ -109,7 +114,8 @@ ld -m elf_i386 -T $SRC/linker.ld \
     $BUILD/vga.o \
     $BUILD/string.o \
     $BUILD/keyboard.o \
-    $BUILD/usermode.o
+    $BUILD/usermode.o \
+    $BUILD/process.o
 
 objcopy -O binary $BUILD/kernel.elf $BUILD/kernel.bin
 
@@ -120,6 +126,6 @@ dd if=$BUILD/kernel.bin of=$BUILD/openos.img bs=512 seek=1 conv=notrunc 2>/dev/n
 
 echo ""
 echo "========================================="
-echo "  openos Phase 2 Build Successful!"
+echo "  openos Phase 3 Build Successful!"
 echo "  Output: target/openos.img"
 echo "========================================="

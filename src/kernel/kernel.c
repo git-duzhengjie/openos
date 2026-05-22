@@ -8,6 +8,7 @@
 #include "../include/usermode.h"
 #include "serial.h"
 #include "process.h"
+#include "../proc/process.h"
 #include "heap.h"
 #include "keyboard.h"
 #include "vga.h"
@@ -100,6 +101,10 @@ void kernel_main(void) {
     serial_write("\n");
     serial_write("[TEST] Syscall test done\n");
     
+    /* 初始化进程表 */
+    proc_table_init();
+    serial_write("[OK] PROC TABLE\n");
+
     /* 初始化调度器 */
     sched_init();
     
