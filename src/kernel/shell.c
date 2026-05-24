@@ -74,15 +74,38 @@ static void make_path(const char *arg, char *out) {
 /* ---- 内置命令 ---- */
 
 static void cmd_ls(const char *path) {
+    serial_write("[LS] enter, path=\"");
+    serial_write(path ? path : "(null)");
+    serial_write("\"\n");
     char full[MAX_PATH];
     make_path(path, full);
+    serial_write("[LS] full=\"");
+    serial_write(full);
+    serial_write("\"\n");
     
     dentry_t *d = vfs_path_lookup(full);
+    serial_write("[LS] d=0x");
+    serial_write_hex((uint32_t)d);
+    if (d && d->inode) {
+        serial_write(" inode=0x");
+        serial_write_hex((uint32_t)d->inode);
+        serial_write(" mode=0x");
+        serial_write_hex(d->inode->mode);
+    }
+    serial_write(" child=0x");
+    serial_write_hex(d ? (uint32_t)d->child : 0);
+    if (d && d->child) {
+        serial_write(" first_child=\"");
+        serial_write(d->child->name);
+        serial_write("\"");
+    }
+    serial_write("\n");
+    
     if (!d || !d->inode) {
         serial_write("ls: not found\n");
         return;
     }
-    if ((d->inode->mode & 0xFF) != FS_DIR) {
+    if ((d->inode->mode & 0x0F) != FS_DIR) {
         serial_write(full);
         serial_write("\n");
         return;
@@ -92,7 +115,7 @@ static void cmd_ls(const char *path) {
     dentry_t *child = d->child;
     while (child) {
         serial_write(child->name);
-        if (child->inode && (child->inode->mode & 0xFF) == FS_DIR)
+        if (child->inode && (child->inode->mode & 0x0F) == FS_DIR)
             serial_write("/");
         serial_write("  ");
         child = child->sibling;
@@ -100,6 +123,7 @@ static void cmd_ls(const char *path) {
     }
     if (idx > 0) serial_write("\n");
 }
+
 
 static void cmd_cat(const char *path) {
     char full[MAX_PATH];
@@ -155,12 +179,13 @@ static void cmd_cd(const char *path) {
     char full[MAX_PATH];
     make_path(path, full);
     dentry_t *d = vfs_path_lookup(full);
-    if (!d || !d->inode || (d->inode->mode & 0xFF) != FS_DIR) {
+    if (!d || !d->inode || (d->inode->mode & 0x0F) != FS_DIR) {
         serial_write("cd: not a directory\n");
         return;
     }
     int i;
     for (i = 0; full[i] && i < MAX_PATH - 1; i++) cwd[i] = full[i];
+    while (i > 1 && cwd[i-1] == '/') i--;  /* strip trailing slashes */
     cwd[i] = '\0';
 }
 
@@ -172,6 +197,11 @@ static void cmd_pwd(void) {
 static void cmd_rm(const char *path) {
     char full[MAX_PATH];
     make_path(path, full);
+    dentry_t *d = vfs_path_lookup(full);
+    if (d && d->inode && (d->inode->mode & 0x0F) == FS_DIR) {
+        serial_write("rm: cannot remove directory, use rmdir\n");
+        return;
+    }
     if (vfs_unlink(full) < 0)
         serial_write("rm: failed\n");
 }

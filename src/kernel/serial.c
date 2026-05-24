@@ -44,7 +44,6 @@ void serial_write(const char *s) {
             serial_putc('\r');
         serial_putc(s[i]);
     }
-    vga_write(s);
 }
 
 /* 发送 32 位十六进制数 */

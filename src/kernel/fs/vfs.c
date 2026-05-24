@@ -105,7 +105,20 @@ static int split_path(const char *path, char parts[][MAX_NAME], int max_parts) {
 }
 
 dentry_t *vfs_path_lookup(const char *path) {
-    if (!path || path[0] != '/') return NULL;
+    if (!path) return NULL;
+    serial_write("[VFS] lookup: \"");
+    serial_write(path);
+    serial_write("\"\n");
+    /* handle "." and "./path" */
+    if (path[0] == 0x2E && (path[1] == 0x2F || path[1] == 0x00)) {  /* "." or "./" */
+        serial_write("[VFS] dot -> root\n");
+        return root_dentry;
+    }
+    if (path[0] == 0x2F && path[1] == 0x2E && path[2] == 0x00) {  /* "/." */
+        serial_write("[VFS] slashdot -> root\n");
+        return root_dentry;
+    }
+    if (path[0] != 0x2F) return NULL;
     if (path[1] == '\0') return root_dentry;  /* "/" */
     
     char parts[16][MAX_NAME];
@@ -138,13 +151,29 @@ dentry_t *vfs_path_lookup(const char *path) {
 
 /* ---- 在目录下创建目录项 ---- */
 static dentry_t *create_dentry_under(dentry_t *parent, const char *name, uint32_t mode) {
+    serial_write("[CREATE] enter, parent=0x");
+    serial_write_hex((uint32_t)parent);
+    serial_write("\n");
     if (!parent) return NULL;
     
     dentry_t *d = alloc_dentry();
-    if (!d) return NULL;
+    if (!d) {
+        serial_write("[CREATE] alloc_dentry failed\n");
+        return NULL;
+    }
+    serial_write("[CREATE] d=0x");
+    serial_write_hex((uint32_t)d);
+    serial_write("\n");
     
     inode_t *ip = alloc_inode();
-    if (!ip) { free_dentry(d); return NULL; }
+    if (!ip) {
+        serial_write("[CREATE] alloc_inode failed\n");
+        free_dentry(d);
+        return NULL;
+    }
+    serial_write("[CREATE] ip=0x");
+    serial_write_hex((uint32_t)ip);
+    serial_write("\n");
     
     ip->mode = mode;
     d->inode = ip;
@@ -152,20 +181,33 @@ static dentry_t *create_dentry_under(dentry_t *parent, const char *name, uint32_
         d->name[i] = name[i];
     d->parent = parent;
     
-    /* 设置 ramfs ops（默认文件系统） */
+    /* 调用 ramfs ops，默认文件系统 */
     ramfs_setup_inode(ip, mode);
     
-    /* 加入父目录的子链表 */
+    /* 链接到父目录的链表 */
+    serial_write("[CREATE] before link: parent->child=0x");
+    serial_write_hex((uint32_t)parent->child);
+    serial_write("\n");
     if (!parent->child) {
         parent->child = d;
+        serial_write("[CREATE] parent->child was NULL, set to d\n");
     } else {
         dentry_t *sib = parent->child;
         while (sib->sibling) sib = sib->sibling;
         sib->sibling = d;
+        serial_write("[CREATE] appended to sibling list\n");
     }
+    serial_write("[CREATE] after link: parent->child=0x");
+    serial_write_hex((uint32_t)parent->child);
+    serial_write(" child->sibling=0x");
+    serial_write_hex(parent->child ? (uint32_t)parent->child->sibling : 0);
+    serial_write(" d->sibling=0x");
+    serial_write_hex((uint32_t)d->sibling);
+    serial_write("\n");
     
     return d;
 }
+
 
 /* ---- VFS 初始化 ---- */
 void vfs_init(void) {
@@ -218,6 +260,7 @@ void vfs_init_fds(void) {
 }
 
 /* ---- 文件操作 ---- */
+static dentry_t *create_dentry_under(dentry_t *parent, const char *name, uint32_t mode);
 int vfs_open(const char *path, int flags, int mode) {
     dentry_t *d = vfs_path_lookup(path);
     
@@ -342,10 +385,16 @@ int vfs_seek(int fd, int offset, int whence) {
 }
 
 int vfs_mkdir(const char *path, int mode) {
+    serial_write("[MKDIR] enter, path=\"");
+    serial_write(path ? path : "(null)");
+    serial_write("\"\n");
     dentry_t *d = vfs_path_lookup(path);
-    if (d) return -1;  /* 已存在 */
+    if (d) {
+        serial_write("[MKDIR] already exists\n");
+        return -1;  /* already exists */
+    }
     
-    /* 找父目录 */
+    /* find parent directory */
     char parent_path[MAX_PATH];
     char dirname[MAX_NAME];
     int last_slash = -1, i;
@@ -367,16 +416,31 @@ int vfs_mkdir(const char *path, int mode) {
         dirname[fi++] = path[i];
     dirname[fi] = '\0';
     
-    dentry_t *parent = vfs_path_lookup(parent_path);
-    if (!parent) return -1;
+    serial_write("[MKDIR] parent_path=\"");
+    serial_write(parent_path);
+    serial_write("\" dirname=\"");
+    serial_write(dirname);
+    serial_write("\"\n");
     
+    dentry_t *parent = vfs_path_lookup(parent_path);
+    if (!parent) {
+        serial_write("[MKDIR] parent not found\n");
+        return -1;
+    }
+    
+    serial_write("[MKDIR] calling create_dentry_under\n");
     dentry_t *nd = create_dentry_under(parent, dirname, FS_DIR | (mode & 0xFFFF));
+    serial_write("[MKDIR] result: nd=0x");
+    serial_write_hex((uint32_t)nd);
+    serial_write("\n");
     return nd ? 0 : -1;
 }
 
+
+
 int vfs_rmdir(const char *path) {
     dentry_t *d = vfs_path_lookup(path);
-    if (!d || !d->inode || (d->inode->mode & 0xFF) != FS_DIR) return -1;
+    if (!d || !d->inode || (d->inode->mode & 0x0F) != FS_DIR) return -1;
     if (d->child) return -1;  /* 非空目录 */
     
     /* 从父目录的子链表中移除 */
@@ -398,7 +462,7 @@ int vfs_rmdir(const char *path) {
 int vfs_unlink(const char *path) {
     dentry_t *d = vfs_path_lookup(path);
     if (!d || !d->inode) return -1;
-    if ((d->inode->mode & 0xFF) == FS_DIR) return -1;
+    if ((d->inode->mode & 0x0F) == FS_DIR) return -1;
     
     dentry_t *parent = d->parent;
     if (parent) {
@@ -417,7 +481,7 @@ int vfs_unlink(const char *path) {
 
 dentry_t *vfs_readdir(const char *path, int index) {
     dentry_t *d = vfs_path_lookup(path);
-    if (!d || !d->inode || (d->inode->mode & 0xFF) != FS_DIR) return NULL;
+    if (!d || !d->inode || (d->inode->mode & 0x0F) != FS_DIR) return NULL;
     
     dentry_t *child = d->child;
     for (int i = 0; i < index && child; i++)
