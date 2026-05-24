@@ -4,6 +4,7 @@
 
 #include "shell.h"
 #include "serial.h"
+#include "vga.h"
 #include "string.h"
 #include "types.h"
 #include "pmm.h"
@@ -15,6 +16,12 @@
 #ifndef NULL
 #define NULL ((void*)0)
 #endif
+
+/* 打印到 VGA + 串口 */
+static void print(const char *s) {
+    vga_write(s);
+    serial_write(s);
+}
 
 /* inb 辅助 */
 static inline uint8_t inb(uint16_t port) {
@@ -34,9 +41,9 @@ static char cwd[MAX_PATH] = "/";
 
 /* ---- 辅助函数 ---- */
 static void shell_prompt(void) {
-    serial_write("openos:");
-    serial_write(cwd);
-    serial_write("$ ");
+    print("openos:");
+    print(cwd);
+    print("$ ");
 }
 
 static int split_args(char *buf, char *argv[], int max) {
@@ -74,54 +81,32 @@ static void make_path(const char *arg, char *out) {
 /* ---- 内置命令 ---- */
 
 static void cmd_ls(const char *path) {
-    serial_write("[LS] enter, path=\"");
-    serial_write(path ? path : "(null)");
-    serial_write("\"\n");
     char full[MAX_PATH];
     make_path(path, full);
-    serial_write("[LS] full=\"");
-    serial_write(full);
-    serial_write("\"\n");
     
     dentry_t *d = vfs_path_lookup(full);
-    serial_write("[LS] d=0x");
-    serial_write_hex((uint32_t)d);
-    if (d && d->inode) {
-        serial_write(" inode=0x");
-        serial_write_hex((uint32_t)d->inode);
-        serial_write(" mode=0x");
-        serial_write_hex(d->inode->mode);
-    }
-    serial_write(" child=0x");
-    serial_write_hex(d ? (uint32_t)d->child : 0);
-    if (d && d->child) {
-        serial_write(" first_child=\"");
-        serial_write(d->child->name);
-        serial_write("\"");
-    }
-    serial_write("\n");
     
     if (!d || !d->inode) {
-        serial_write("ls: not found\n");
+        print("ls: not found\n");
         return;
     }
     if ((d->inode->mode & 0xF000) != FS_DIR) {
-        serial_write(full);
-        serial_write("\n");
+        print(full);
+        print("\n");
         return;
     }
     
     int idx = 0;
     dentry_t *child = d->child;
     while (child) {
-        serial_write(child->name);
+        print(child->name);
         if (child->inode && (child->inode->mode & 0xF000) == FS_DIR)
-            serial_write("/");
-        serial_write("  ");
+            print("/");
+        print("  ");
         child = child->sibling;
         idx++;
     }
-    if (idx > 0) serial_write("\n");
+    if (idx > 0) print("\n");
 }
 
 
@@ -131,7 +116,7 @@ static void cmd_cat(const char *path) {
     
     int fd = vfs_open(full, O_RDONLY, 0);
     if (fd < 0) {
-        serial_write("cat: cannot open\n");
+        print("cat: cannot open\n");
         return;
     }
     
@@ -139,9 +124,9 @@ static void cmd_cat(const char *path) {
     int n;
     while ((n = vfs_read(fd, buf, 255)) > 0) {
         buf[n] = '\0';
-        serial_write(buf);
+        print(buf);
     }
-    serial_write("\n");
+    print("\n");
     vfs_close(fd);
 }
 
@@ -149,7 +134,7 @@ static void cmd_mkdir(const char *path) {
     char full[MAX_PATH];
     make_path(path, full);
     if (vfs_mkdir(full, 0755) < 0)
-        serial_write("mkdir: failed\n");
+        print("mkdir: failed\n");
 }
 
 static void cmd_touch(const char *path) {
@@ -157,7 +142,7 @@ static void cmd_touch(const char *path) {
     make_path(path, full);
     int fd = vfs_open(full, O_CREAT | O_RDWR, 0644);
     if (fd < 0) {
-        serial_write("touch: failed\n");
+        print("touch: failed\n");
         return;
     }
     vfs_close(fd);
@@ -165,10 +150,10 @@ static void cmd_touch(const char *path) {
 
 static void cmd_echo(int argc, char *argv[]) {
     for (int i = 1; i < argc; i++) {
-        if (i > 1) serial_write(" ");
-        serial_write(argv[i]);
+        if (i > 1) print(" ");
+        print(argv[i]);
     }
-    serial_write("\n");
+    print("\n");
 }
 
 static void cmd_cd(const char *path) {
@@ -180,7 +165,7 @@ static void cmd_cd(const char *path) {
     make_path(path, full);
     dentry_t *d = vfs_path_lookup(full);
     if (!d || !d->inode || (d->inode->mode & 0xF000) != FS_DIR) {
-        serial_write("cd: not a directory\n");
+        print("cd: not a directory\n");
         return;
     }
     int i;
@@ -190,8 +175,8 @@ static void cmd_cd(const char *path) {
 }
 
 static void cmd_pwd(void) {
-    serial_write(cwd);
-    serial_write("\n");
+    print(cwd);
+    print("\n");
 }
 
 static void cmd_rm(const char *path) {
@@ -199,11 +184,11 @@ static void cmd_rm(const char *path) {
     make_path(path, full);
     dentry_t *d = vfs_path_lookup(full);
     if (d && d->inode && (d->inode->mode & 0xF000) == FS_DIR) {
-        serial_write("rm: cannot remove directory, use rmdir\n");
+        print("rm: cannot remove directory, use rmdir\n");
         return;
     }
     if (vfs_unlink(full) < 0)
-        serial_write("rm: failed\n");
+        print("rm: failed\n");
 }
 
 static void cmd_write(const char *path, const char *data) {
@@ -211,7 +196,7 @@ static void cmd_write(const char *path, const char *data) {
     make_path(path, full);
     int fd = vfs_open(full, O_CREAT | O_RDWR, 0644);
     if (fd < 0) {
-        serial_write("write: cannot open\n");
+        print("write: cannot open\n");
         return;
     }
     int len = 0;
@@ -221,24 +206,24 @@ static void cmd_write(const char *path, const char *data) {
 }
 
 static void cmd_help(void) {
-    serial_write("openos shell - Available commands:\n");
-    serial_write("  ls [path]       - List directory\n");
-    serial_write("  cat <file>      - Display file content\n");
-    serial_write("  mkdir <dir>     - Create directory\n");
-    serial_write("  touch <file>    - Create empty file\n");
-    serial_write("  rm <file>       - Delete file\n");
-    serial_write("  write <f> <txt> - Write text to file\n");
-    serial_write("  echo <text>     - Print text\n");
-    serial_write("  cd [path]       - Change directory\n");
-    serial_write("  pwd             - Print working directory\n");
-    serial_write("  help            - Show this help\n");
-    serial_write("  clear           - Clear screen\n");
+    print("openos shell - Available commands:\n");
+    print("  ls [path]       - List directory\n");
+    print("  cat <file>      - Display file content\n");
+    print("  mkdir <dir>     - Create directory\n");
+    print("  touch <file>    - Create empty file\n");
+    print("  rm <file>       - Delete file\n");
+    print("  write <f> <txt> - Write text to file\n");
+    print("  echo <text>     - Print text\n");
+    print("  cd [path]       - Change directory\n");
+    print("  pwd             - Print working directory\n");
+    print("  help            - Show this help\n");
+    print("  clear           - Clear screen\n");
 }
 
 /* ---- Shell 主循环 ---- */
 void shell_run(void) {
-    serial_write("\n=== openos shell ===\n");
-    serial_write("Type 'help' for commands\n\n");
+    print("\n=== openos shell ===\n");
+    print("Type 'help' for commands\n\n");
     
     cmd_buf[0] = '\0';
     cmd_pos = 0;
@@ -263,7 +248,7 @@ void shell_run(void) {
         
         if (c == '\r' || c == '\n') {
             cmd_buf[cmd_pos] = '\0';
-            serial_write("\n");
+            print("\n");
             
             /* 解析命令 */
             char *argv[MAX_ARGS];
@@ -275,16 +260,16 @@ void shell_run(void) {
                     cmd_ls(argc > 1 ? argv[1] : ".");
                 } else if (strcmp(cmd, "cat") == 0) {
                     if (argc > 1) cmd_cat(argv[1]);
-                    else serial_write("cat: missing argument\n");
+                    else print("cat: missing argument\n");
                 } else if (strcmp(cmd, "mkdir") == 0) {
                     if (argc > 1) cmd_mkdir(argv[1]);
-                    else serial_write("mkdir: missing argument\n");
+                    else print("mkdir: missing argument\n");
                 } else if (strcmp(cmd, "touch") == 0) {
                     if (argc > 1) cmd_touch(argv[1]);
-                    else serial_write("touch: missing argument\n");
+                    else print("touch: missing argument\n");
                 } else if (strcmp(cmd, "rm") == 0) {
                     if (argc > 1) cmd_rm(argv[1]);
-                    else serial_write("rm: missing argument\n");
+                    else print("rm: missing argument\n");
                 } else if (strcmp(cmd, "echo") == 0) {
                     cmd_echo(argc, argv);
                 } else if (strcmp(cmd, "cd") == 0) {
@@ -293,18 +278,18 @@ void shell_run(void) {
                     cmd_pwd();
                 } else if (strcmp(cmd, "write") == 0) {
                     if (argc > 2) cmd_write(argv[1], argv[2]);
-                    else serial_write("write: need file and text\n");
+                    else print("write: need file and text\n");
                 } else if (strcmp(cmd, "help") == 0) {
                     cmd_help();
                 } else if (strcmp(cmd, "clear") == 0) {
-                    serial_write("\x1b[2J\x1b[H");
+                    vga_clear();
                 } else if (strcmp(cmd, "yield") == 0) {
                     /* 协作式调度测试：主动让出 CPU */
                     serial_write("[YIELD] giving up CPU...\n");
                     __asm__ volatile("int $0x80" : : "a"(201) : "memory");
                 } else {
-                    serial_write(cmd);
-                    serial_write(": command not found\n");
+                    print(cmd);
+                    print(": command not found\n");
                 }
             }
             
@@ -316,13 +301,13 @@ void shell_run(void) {
             if (cmd_pos > 0) {
                 cmd_pos--;
                 cmd_buf[cmd_pos] = '\0';
-                serial_write("\b \b");
+                print("\b \b");
             }
         } else if (c >= ' ' && cmd_pos < CMD_BUF_SIZE - 1) {
             cmd_buf[cmd_pos++] = c;
             /* 回显 */
             char echo[2] = {c, '\0'};
-            serial_write(echo);
+            print(echo);
         }
     }
 }
