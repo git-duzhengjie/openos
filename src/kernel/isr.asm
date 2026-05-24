@@ -113,6 +113,9 @@ isr128:
 isr_common_stub:
     pusha                    ; 保存通用寄存器
     push ds                  ; 保存数据段
+    push es
+    push fs
+    push gs
 
     mov ax, 0x10             ; 加载内核数据段
     mov ds, ax
@@ -124,7 +127,10 @@ isr_common_stub:
     call isr_handler
     add esp, 4               ; 清理栈
 
-    pop ds                   ; 恢复数据段
+    pop gs                   ; 恢复段寄存器
+    pop fs
+    pop es
+    pop ds
     popa                     ; 恢复通用寄存器
     add esp, 8               ; 清理错误码和中断号
     sti                      ; 开启中断
@@ -136,6 +142,9 @@ isr_common_stub:
 irq_common_stub:
     pusha                    ; 保存通用寄存器
     push ds                  ; 保存数据段
+    push es
+    push fs
+    push gs
 
     mov ax, 0x10             ; 加载内核数据段
     mov ds, ax
@@ -147,7 +156,10 @@ irq_common_stub:
     call irq_handler
     add esp, 4               ; 清理栈
 
-    pop ds                   ; 恢复数据段
+    pop gs                   ; 恢复段寄存器
+    pop fs
+    pop es
+    pop ds
     popa                     ; 恢复通用寄存器
     add esp, 8               ; 清理错误码和中断号
     sti                      ; 开启中断

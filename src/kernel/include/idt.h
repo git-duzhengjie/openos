@@ -22,13 +22,24 @@ typedef struct {
     uint32_t base;          /* IDT基地址 */
 } __attribute__((packed)) idt_ptr_t;
 
-/* 中断帧 (保存寄存器状态) */
+/* 中断帧 (保存寄存器状态) - 栈布局与 isr_common_stub 完全匹配 */
 typedef struct {
-    uint32_t ds;            /* 数据段 */
-    uint32_t edi, esi, ebp, esp, ebx, edx, ecx, eax; /* 通用寄存器 */
+    /* 段寄存器 (isr_common_stub 按 gs,fs,es,ds 顺序 push) */
+    uint32_t gs;
+    uint32_t fs;
+    uint32_t es;
+    uint32_t ds;
+    /* 通用寄存器 (pusha 顺序: EDI在栈顶最低地址) */
+    uint32_t edi, esi, ebp, esp_skip, ebx, edx, ecx, eax;
+    /* ISR 宏压入 (int_no 在更低地址，err_code 在更高地址) */
     uint32_t int_no;        /* 中断号 */
-    uint32_t err_code;      /* 错误码 */
-    uint32_t eip, cs, eflags, user_esp, user_ss; /* CPU自动压入 */
+    uint32_t err_code;      /* 错误码 (有错误码的异常) 或 0 */
+    /* CPU 自动压入 */
+    uint32_t eip;
+    uint32_t cs;
+    uint32_t eflags;
+    uint32_t user_esp;
+    uint32_t user_ss;
 } __attribute__((packed)) registers_t;
 
 /* 中断处理函数类型 */

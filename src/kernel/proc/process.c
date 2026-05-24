@@ -3,11 +3,10 @@
  * ============================================================ */
 
 #include "process.h"
-#include "../include/process.h"
-#include "../include/pmm.h"
-#include "../include/vmm.h"
-#include "../include/serial.h"
-#include "../include/string.h"
+#include "pmm.h"
+#include "vmm.h"
+#include "serial.h"
+#include "string.h"
 
 #ifndef NULL
 #define NULL ((void*)0)

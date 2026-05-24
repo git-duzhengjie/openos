@@ -1,4 +1,4 @@
-﻿; ============================================================
+; ============================================================
 ; openos - 定时器中断处理 (抢占式调度)
 ; ============================================================
 
@@ -14,40 +14,30 @@ extern sched_get_current
 
 global timer_isr_entry
 timer_isr_entry:
-    ; === 调试：输出 'T' 到串口 (0x3F8) ===
-    push eax
-    push edx
-    mov edx, 0x3F8
-    mov al, 'T'
-    out dx, al
-    pop edx
-    pop eax
-    ; === 调试结束 ===
-    
     ; 保存所有寄存器
     pushad
     push ds
-    push es
     push fs
+    push es
     push gs
     
     mov ax, 0x10
     mov ds, ax
+    mov fs, ax
     mov es, ax
+    mov gs, ax
     
-    ; ESP 现在指向保存的上下文顶部
-    ; 保存当前线程的 ESP（在调用任何 C 函数之前）
-    ; 先获取当前线程指针
+    ; 在调度前保存当前线程的 kernel_esp
+    ; (必须在 timer_schedule_handler 之前，因为 handler 会修改 sched.current)
     call sched_get_current
     test eax, eax
-    jz .skip_save_esp
-    mov [eax + T_KERNEL_ESP], esp    ; 保存 ISR 上下文的 ESP
-.skip_save_esp:
+    jz .skip_save
+    mov [eax + T_KERNEL_ESP], esp
+.skip_save:
     
     call sched_tick
     call timer_schedule_handler
     
-    ; EAX = 新线程指针 (NULL = 不切换)
     test eax, eax
     jz .no_switch
     
@@ -61,8 +51,8 @@ timer_isr_entry:
     
     ; 恢复寄存器
     pop gs
-    pop fs
     pop es
+    pop fs
     pop ds
     popad
     

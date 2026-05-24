@@ -5,6 +5,7 @@
 
 #include "include/idt.h"
 #include "include/io.h"
+#include "serial.h"
 
 /* IDT表 (256个条目) */
 static idt_entry_t idt[256];
@@ -168,27 +169,52 @@ static void terminal_write(const char *str) {
  * ISR处理函数 (由isr.asm调用)
  */
 void isr_handler(registers_t *regs) {
+	/* 调试：打印栈原始内容 */
+	uint32_t *stk = (uint32_t*)regs;
+	serial_write("isr_dbg: ");
+	for (int i = 0; i < 16; i++) {
+		serial_write_hex(stk[i]); serial_write(" ");
+	}
+	serial_write("\n");
+
 	/* 调用已注册的处理函数 */
 	if (interrupt_handlers[regs->int_no]) {
 		isr_t handler = interrupt_handlers[regs->int_no];
 		handler(regs);
 	} else {
 		/* 未注册处理函数，显示异常信息 */
-		terminal_write("\n!!! EXCEPTION: ");
-		terminal_write(exception_messages[regs->int_no]);
-		terminal_write(" !!!\n");
+		serial_write("\n!!! EXCEPTION: ");
+		serial_write(exception_messages[regs->int_no]);
+		serial_write(" !!!\n");
 
-		/* 页错误打印错误地址 */
+		/* GPF: 打印错误码和 EIP 帮助调试 */
+		if (regs->int_no == 13) {
+			/* error_code 在栈上 (ISR_ERRCODE push 的) */
+			uint32_t err = regs->err_code;
+			serial_write("  [GPF] err=0x");
+			/* 简单 hex 输出 */
+			{ const char hex[] = "0123456789ABCDEF"; int i; for(i=28;i>=0;i-=4) { char tmp[2]; tmp[0]=hex[(err>>i)&0xF]; tmp[1]=0; serial_write(tmp); } }
+			serial_write(" eip=0x");
+			{ const char hex[] = "0123456789ABCDEF"; int i; for(i=28;i>=0;i-=4) { char tmp[2]; tmp[0]=hex[(regs->eip>>i)&0xF]; tmp[1]=0; serial_write(tmp); } }
+			serial_write(" cs=0x");
+			{ const char hex[] = "0123456789ABCDEF"; int i; for(i=28;i>=0;i-=4) { char tmp[2]; tmp[0]=hex[(regs->cs>>i)&0xF]; tmp[1]=0; serial_write(tmp); } }
+			serial_write("\n");
+		}
+
+		/* 页错误打印错误地址和EIP */
 		if (regs->int_no == 14) {
 			uint32_t fault_addr;
 			__asm__ volatile ("mov %%cr2, %0" : "=r"(fault_addr));
-			terminal_write("Page Fault Address: ");
-			/* 可以添加hex输出 */
+			serial_write("Page Fault Address: 0x");
+			{ const char hex[] = "0123456789ABCDEF"; int i; for(i=28;i>=0;i-=4) { char tmp[2]; tmp[0]=hex[(fault_addr>>i)&0xF]; tmp[1]=0; serial_write(tmp); } }
+			serial_write(" eip=0x");
+			{ const char hex[] = "0123456789ABCDEF"; int i; for(i=28;i>=0;i-=4) { char tmp[2]; tmp[0]=hex[(regs->eip>>i)&0xF]; tmp[1]=0; serial_write(tmp); } }
+			serial_write("\n");
 		}
 
 		/* 严重错误，停止系统 */
 		if (regs->int_no < 8 || regs->int_no == 14) {
-			terminal_write("System Halted.\n");
+			serial_write("System Halted.\n");
 			__asm__ volatile ("cli; hlt");
 		}
 	}

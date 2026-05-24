@@ -10,7 +10,6 @@
 #endif
 
 void idle_entry(void) { while (1) { __asm__ volatile("hlt"); } }
-extern void context_switch(thread_t *prev, thread_t *next);
 
 static struct {
     thread_t *queues[8];
@@ -66,7 +65,7 @@ void sched_init(void) {
         enqueue(idle);
         sched.current = idle;
     }
-    
+
     sched.initialized = 1;
 }
 
@@ -98,15 +97,16 @@ void sched_start(void) {
         serial_write("[SCHED] No threads!\n");
         return;
     }
-    
+
     remove_from_queue(first);
     sched.current = first;
     first->state = PROC_RUNNING;
     sched.current_ticks = 0;
-    
+
     serial_write("[SCHED] Starting first thread\n");
-    
+
     __asm__ volatile(
+        "cli\n"
         "mov %0, %%esp\n"
         "pop %%gs\n"
         "pop %%fs\n"
@@ -133,49 +133,74 @@ thread_t *timer_schedule_handler(void) {
         return NULL;
     }
     if (!sched.need_resched) return NULL;
-    
+
     thread_t *next = pick_next();
     if (!next || next == sched.current) {
         sched.need_resched = 0;
         return NULL;
     }
-    
+
     remove_from_queue(next);
-    
+
     thread_t *prev = sched.current;
     if (prev->priority != PRIORITY_IDLE) {
         prev->state = PROC_READY;
         enqueue(prev);
     }
-    
+
     sched.current = next;
     next->state = PROC_RUNNING;
     sched.current_ticks = 0;
     sched.need_resched = 0;
-    
+
     return next;
 }
 
 void sched_yield(void) {
     if (!sched.initialized || !sched.current) return;
-    
+
     thread_t *next = pick_next();
     if (!next) return;
     if (next == sched.current) return;
-    
+
     remove_from_queue(next);
-    
+
     thread_t *prev = sched.current;
     if (prev->priority != PRIORITY_IDLE) {
         prev->state = PROC_READY;
         enqueue(prev);
     }
-    
+
     sched.current = next;
     next->state = PROC_RUNNING;
     sched.current_ticks = 0;
-    
-    context_switch(prev, next);
+
+    /* 构建完整栈帧，格式与 timer_isr + thread_create 一致：
+     * 从低到高: [EFLAGS][CS][EIP][pushad: EAX..EDI][DS][ES][FS][GS]
+     * ESP 指向 GS（栈顶）
+     * 必须关中断防止 timer_isr 在切换中途触发嵌套上下文切换 */
+    __asm__ volatile(
+        "cli\n"
+        "pushfl\n"          /* EFLAGS */
+        "pushl $0x08\n"     /* CS */
+        "pushl $1f\n"       /* EIP */
+        "pushal\n"          /* EAX ECX EDX EBX ESP EBP ESI EDI */
+        "push %%ds\n"
+        "push %%es\n"
+        "push %%fs\n"
+        "push %%gs\n"
+        "mov %%esp, %0\n"   /* 保存到 prev->kernel_esp */
+        "mov %1, %%esp\n"   /* 切换到 next->kernel_esp */
+        "pop %%gs\n"
+        "pop %%fs\n"
+        "pop %%es\n"
+        "pop %%ds\n"
+        "popa\n"
+        "iret\n"
+        "1:\n"
+        : "=m"(prev->kernel_esp)
+        : "m"(next->kernel_esp)
+    );
 }
 
 process_t *proc_create(const char *name, uint32_t entry, uint32_t esp) {
@@ -194,21 +219,21 @@ thread_t *thread_create(uint32_t pid, const char *name, uint32_t entry, uint32_t
     thread_t *t = (thread_t *)pmm_alloc_page();
     if (!t) return NULL;
     for (int i = 0; i < (int)sizeof(thread_t); i++) ((char *)t)[i] = 0;
-    
+
     t->id = (uint32_t)t;
     t->pid = pid;
     t->priority = PRIORITY_NORMAL;
     t->state = PROC_READY;
     (void)name;
-    
+
     char *stack_base = (char *)((uint32_t)stack_top - 4096);
     for (int i = 0; i < 4096; i++) stack_base[i] = 0;
-    
+
     /* Stack frame matching timer_isr save format:
      * [GS][FS][ES][DS][EDI][ESI][EBP][ESP_skip][EBX][EDX][ECX][EAX][EIP][CS][EFLAGS]
      */
     uint32_t *sp = (uint32_t *)stack_top;
-    
+
     *(--sp) = 0x202;     /* EFLAGS: IF=1 */
     *(--sp) = 0x08;      /* CS */
     *(--sp) = entry;     /* EIP */
@@ -224,7 +249,7 @@ thread_t *thread_create(uint32_t pid, const char *name, uint32_t entry, uint32_t
     *(--sp) = 0x10;       /* ES */
     *(--sp) = 0x10;       /* FS */
     *(--sp) = 0x10;       /* GS */
-    
+
     t->kernel_esp = (uint32_t)sp;
     t->kernel_eip = entry;
     t->kernel_stack = (uint32_t)stack_base;

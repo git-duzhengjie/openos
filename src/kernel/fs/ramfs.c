@@ -3,10 +3,10 @@
  * ============================================================ */
 
 #include "ramfs.h"
-#include "../include/serial.h"
-#include "../include/pmm.h"
-#include "../include/string.h"
-#include "../include/vmm.h"
+#include "serial.h"
+#include "pmm.h"
+#include "string.h"
+#include "vmm.h"
 
 #ifndef NULL
 #define NULL ((void*)0)

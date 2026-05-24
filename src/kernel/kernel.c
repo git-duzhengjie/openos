@@ -11,6 +11,7 @@
 #include "../proc/process.h"
 #include "../fs/vfs.h"
 #include "../fs/ramfs.h"
+#include "../shell.h"
 #include "heap.h"
 #include "keyboard.h"
 #include "vga.h"
@@ -67,6 +68,16 @@ void kernel_main(void) {
     
     gdt_init();
     serial_write("[OK] GDT\n");
+    
+    /* 初始化所有段寄存器 (防止 FS/GS 为无效值) */
+    __asm__ volatile (
+        "movw $0x10, %%ax\n\t"
+        "movw %%ax, %%ds\n\t"
+        "movw %%ax, %%es\n\t"
+        "movw %%ax, %%fs\n\t"
+        "movw %%ax, %%gs\n\t"
+        : : : "ax"
+    );
     
     /* 初始化并加载 TSS (修复 invalid tss type) */
     extern uint32_t kernel_stack_top[];
@@ -137,11 +148,24 @@ void kernel_main(void) {
     /* 启动定时器（调度器已初始化） */
     pit_start();
     
-    /* 开启中断（调度器已初始化，可以接收定时器中断） */
-    __asm__ volatile ("sti");
+    /* ⚠️ 不在此处开启中断！
+     * 必须等 sched_start() 通过 iret 启动第一个线程后，
+     * 由线程初始 EFLAGS (IF=1) 自动开启中断。
+     * 如果提前 sti，timer ISR 会把 0x90000 栈指针保存到 idle->kernel_esp，
+     * 导致后续切换到 idle 时栈帧被破坏 → GPF。
+     */
     
-    /* 测试用户态切换（必须在 sti 之后，确保 IF=1） */
-    test_user_mode_switch();
+    /* 测试用户态切换已通过 Phase 2 验证，不再自动测试 */
+    /* test_user_mode_switch(); */
+    
+    /* 启动 shell 作为内核线程 - 16KB 栈 */
+    {
+        extern void shell_run(void);
+        uint32_t shell_stack = (uint32_t)pmm_alloc_page() + 4096;
+        pmm_alloc_page(); pmm_alloc_page(); pmm_alloc_page(); /* 扩展到 16KB */
+        thread_t *sh = thread_create(1, "shell", (uint32_t)shell_run, shell_stack);
+        if (sh) sched_add_thread(sh);
+    }
     
     /* 创建测试线程 - 暂时注释掉，避免输出干扰
     uint32_t stack_a = (uint32_t)pmm_alloc_page() + 4096;

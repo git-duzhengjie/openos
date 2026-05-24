@@ -18,11 +18,11 @@ static inline uint8_t inb(uint16_t port) {
     return ret;
 }
 
-/* 初始化 COM1：波特率 38400，8N1 */
+/* 初始化 COM1：波特率 115200，8N1 */
 void serial_init(void) {
     outb(COM1 + 1, 0x00);   /* 关闭中断 */
     outb(COM1 + 3, 0x80);   /* DLAB=1，允许设置波特率 */
-    outb(COM1 + 0, 0x03);   /* 除数锁存低位：115200/38400 = 3 */
+    outb(COM1 + 0, 0x01);   /* 除数锁存低位：115200/115200 = 1 */
     outb(COM1 + 1, 0x00);   /* 除数锁存高位 */
     outb(COM1 + 3, 0x03);   /* 8位数据，无校验，1停止位 */
     outb(COM1 + 2, 0xC7);   /* 启用FIFO，清除队列 */
@@ -34,7 +34,7 @@ void serial_putc(char c) {
     /* 等待发送保持寄存器空 */
     while ((inb(COM1 + 5) & 0x20) == 0);
     outb(COM1, (uint8_t)c);
-    vga_putc(c);
+    /* vga_putc removed */
 }
 
 /* 发送字符串（自动处理 \n → \r\n） */

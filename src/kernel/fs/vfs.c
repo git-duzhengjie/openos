@@ -3,9 +3,9 @@
  * ============================================================ */
 
 #include "vfs.h"
-#include "../include/serial.h"
-#include "../include/pmm.h"
-#include "../include/string.h"
+#include "serial.h"
+#include "pmm.h"
+#include "string.h"
 #include "ramfs.h"
 
 #ifndef NULL

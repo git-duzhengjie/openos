@@ -76,6 +76,11 @@ gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
     -I $SRC/include \
+    -c $SRC/drivers/input_buffer.c -o $BUILD/input_buffer.o
+
+gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
+    -I $SRC/include \
     -c $SRC/vga.c -o $BUILD/vga.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
@@ -103,6 +108,11 @@ gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -I $SRC/include \
     -c $SRC/fs/ramfs.c -o $BUILD/ramfs.o
 
+gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
+    -I $SRC/include \
+    -c $SRC/shell.c -o $BUILD/shell.o
+
 echo "[4/5] Linking kernel.elf..."
 ld -m elf_i386 -T $SRC/linker.ld \
     -o $BUILD/kernel.elf \
@@ -124,10 +134,12 @@ ld -m elf_i386 -T $SRC/linker.ld \
     $BUILD/vga.o \
     $BUILD/string.o \
     $BUILD/keyboard.o \
+    $BUILD/input_buffer.o \
     $BUILD/usermode.o \
     $BUILD/process.o \
     $BUILD/vfs.o \
-    $BUILD/ramfs.o
+    $BUILD/ramfs.o \
+    $BUILD/shell.o
 
 objcopy -O binary $BUILD/kernel.elf $BUILD/kernel.bin
 
