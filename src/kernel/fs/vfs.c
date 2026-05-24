@@ -128,6 +128,9 @@ dentry_t *vfs_path_lookup(const char *path) {
     dentry_t *cur = root_dentry;
     
     for (int i = 0; i < n; i++) {
+        /* 跳过 "." 部分 */
+        if (parts[i][0] == 0x2E && parts[i][1] == 0x00) continue;
+        
         /* 检查挂载点 */
         if (cur->mount) cur = cur->mount;
         
@@ -440,7 +443,7 @@ int vfs_mkdir(const char *path, int mode) {
 
 int vfs_rmdir(const char *path) {
     dentry_t *d = vfs_path_lookup(path);
-    if (!d || !d->inode || (d->inode->mode & 0x0F) != FS_DIR) return -1;
+    if (!d || !d->inode || (d->inode->mode & 0xF000) != FS_DIR) return -1;
     if (d->child) return -1;  /* 非空目录 */
     
     /* 从父目录的子链表中移除 */
@@ -462,7 +465,7 @@ int vfs_rmdir(const char *path) {
 int vfs_unlink(const char *path) {
     dentry_t *d = vfs_path_lookup(path);
     if (!d || !d->inode) return -1;
-    if ((d->inode->mode & 0x0F) == FS_DIR) return -1;
+    if ((d->inode->mode & 0xF000) == FS_DIR) return -1;
     
     dentry_t *parent = d->parent;
     if (parent) {
@@ -481,7 +484,7 @@ int vfs_unlink(const char *path) {
 
 dentry_t *vfs_readdir(const char *path, int index) {
     dentry_t *d = vfs_path_lookup(path);
-    if (!d || !d->inode || (d->inode->mode & 0x0F) != FS_DIR) return NULL;
+    if (!d || !d->inode || (d->inode->mode & 0xF000) != FS_DIR) return NULL;
     
     dentry_t *child = d->child;
     for (int i = 0; i < index && child; i++)

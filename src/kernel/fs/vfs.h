@@ -8,10 +8,10 @@
 #include <stdint.h>
 
 /* 文件类型 */
-#define FS_FILE      1
-#define FS_DIR       2
-#define FS_DEVICE    3
-#define FS_PIPE      4
+#define FS_FILE      0x1000
+#define FS_DIR       0x2000
+#define FS_DEVICE    0x4000
+#define FS_PIPE      0x8000
 
 /* 打开标志 */
 #define O_RDONLY     0
