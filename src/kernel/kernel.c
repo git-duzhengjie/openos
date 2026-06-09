@@ -14,6 +14,7 @@
 #include "../shell.h"
 #include "heap.h"
 #include "keyboard.h"
+#include "chardev.h"
 #include "vga.h"
 #include "embed_hello.h"  /* 嵌入的用户程序 */
 
@@ -124,8 +125,12 @@ void kernel_main(void) {
     ramfs_init();
     serial_write("[OK] VFS + ramfs\n");
 
+    /* 初始化字符设备框架与 /dev 节点 */
+    chardev_init();
+    chardev_register_builtin_devices();
+    serial_write("[OK] CHARDEV + /dev\n");
+
     /* VFS 测试 */
-    vfs_mkdir("/dev", 0755);
     vfs_mkdir("/tmp", 0755);
     int fd = vfs_open("/hello.txt", O_CREAT | O_RDWR, 0644);
     if (fd >= 0) {

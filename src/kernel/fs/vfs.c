@@ -7,6 +7,7 @@
 #include "pmm.h"
 #include "string.h"
 #include "ramfs.h"
+#include "chardev.h"
 
 #ifndef NULL
 #define NULL ((void*)0)
@@ -152,6 +153,36 @@ dentry_t *vfs_path_lookup(const char *path) {
     return cur;
 }
 
+/* ---- 字符设备节点操作 ---- */
+static int vfs_chardev_open(file_t *f) {
+    if (!f || !f->inode || !f->inode->fs_data) return -1;
+    return chardev_open((chardev_t *)f->inode->fs_data);
+}
+
+static int vfs_chardev_close(file_t *f) {
+    if (!f || !f->inode || !f->inode->fs_data) return -1;
+    return chardev_close((chardev_t *)f->inode->fs_data);
+}
+
+static int vfs_chardev_read(file_t *f, void *buf, uint32_t count) {
+    if (!f || !f->inode || !f->inode->fs_data) return -1;
+    return chardev_read((chardev_t *)f->inode->fs_data, buf, count);
+}
+
+static int vfs_chardev_write(file_t *f, const void *buf, uint32_t count) {
+    if (!f || !f->inode || !f->inode->fs_data) return -1;
+    return chardev_write((chardev_t *)f->inode->fs_data, buf, count);
+}
+
+static file_ops_t vfs_chardev_ops = {
+    vfs_chardev_open,
+    vfs_chardev_close,
+    vfs_chardev_read,
+    vfs_chardev_write,
+    0,
+    0
+};
+
 /* ---- 在目录下创建目录项 ---- */
 static dentry_t *create_dentry_under(dentry_t *parent, const char *name, uint32_t mode) {
     serial_write("[CREATE] enter, parent=0x");
@@ -184,8 +215,13 @@ static dentry_t *create_dentry_under(dentry_t *parent, const char *name, uint32_
         d->name[i] = name[i];
     d->parent = parent;
     
-    /* 调用 ramfs ops，默认文件系统 */
-    ramfs_setup_inode(ip, mode);
+    /* 调用 ramfs ops，默认文件系统；设备节点使用专用 ops */
+    if ((mode & 0xF000) == FS_DEVICE) {
+        ip->fs_type = FS_DEVICE;
+        ip->ops = &vfs_chardev_ops;
+    } else {
+        ramfs_setup_inode(ip, mode);
+    }
     
     /* 链接到父目录的链表 */
     serial_write("[CREATE] before link: parent->child=0x");
@@ -334,7 +370,12 @@ int vfs_open(const char *path, int flags, int mode) {
     
     /* 调用文件系统 open */
     if (f->ops && f->ops->open) {
-        f->ops->open(f);
+        if (f->ops->open(f) < 0) {
+            fd_table[fd] = NULL;
+            if (f->inode) free_inode(f->inode);
+            pmm_free_page(f);
+            return -1;
+        }
     }
     
     return fd;
@@ -455,6 +496,58 @@ int vfs_mkdir(const char *path, int mode) {
 }
 
 
+
+int vfs_mknod(const char *path, int mode, const char *dev_name) {
+    dentry_t *d;
+    dentry_t *parent;
+    chardev_t *dev;
+    char parent_path[MAX_PATH];
+    char node_name[MAX_NAME];
+    int last_slash = -1;
+    int i;
+    int ni;
+
+    if (!path || !dev_name) return -1;
+    if ((mode & 0xF000) != FS_DEVICE) return -1;
+
+    dev = chardev_find(dev_name);
+    if (!dev) return -1;
+
+    d = vfs_path_lookup(path);
+    if (d) return -1;
+
+    for (i = 0; path[i]; i++) {
+        if (path[i] == '/') last_slash = i;
+    }
+
+    if (last_slash <= 0) {
+        parent_path[0] = '/';
+        parent_path[1] = '\0';
+    } else {
+        for (i = 0; i < last_slash && i < MAX_PATH - 1; i++) {
+            parent_path[i] = path[i];
+        }
+        parent_path[i] = '\0';
+    }
+
+    ni = 0;
+    for (i = last_slash + 1; path[i] && ni < MAX_NAME - 1; i++) {
+        node_name[ni++] = path[i];
+    }
+    node_name[ni] = '\0';
+
+    if (node_name[0] == '\0') return -1;
+
+    parent = vfs_path_lookup(parent_path);
+    if (!parent || !parent->inode || (parent->inode->mode & 0xF000) != FS_DIR) return -1;
+
+    d = create_dentry_under(parent, node_name, (uint32_t)mode);
+    if (!d || !d->inode) return -1;
+
+    d->inode->fs_data = dev;
+    d->inode->size = 0;
+    return 0;
+}
 
 int vfs_rmdir(const char *path) {
     dentry_t *d = vfs_path_lookup(path);

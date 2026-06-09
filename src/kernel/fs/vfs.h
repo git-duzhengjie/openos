@@ -127,8 +127,9 @@ int    vfs_write(int fd, const void *buf, uint32_t count);
 int    vfs_seek(int fd, int offset, int whence);
 int    vfs_stat(const char *path, inode_t *st);
 
-/* 目录操作 */
+/* 目录/节点操作 */
 int    vfs_mkdir(const char *path, int mode);
+int    vfs_mknod(const char *path, int mode, const char *dev_name);
 int    vfs_rmdir(const char *path);
 int    vfs_unlink(const char *path);
 dentry_t *vfs_readdir(const char *path, int index);
