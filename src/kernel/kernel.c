@@ -12,6 +12,7 @@
 #include "../fs/vfs.h"
 #include "../fs/ramfs.h"
 #include "../fs/tmpfs.h"
+#include "../net/net.h"
 #include "../shell.h"
 #include "heap.h"
 #include "keyboard.h"
@@ -137,6 +138,10 @@ void kernel_main(void) {
     blockdev_init();
     blockdev_register_builtin_devices();
     serial_write("[OK] BLOCKDEV + ram0\n");
+
+    /* 初始化最小 TCP/IP 网络栈 */
+    net_init();
+    serial_write("[OK] NET\n");
 
     /* VFS 测试：不要预创建 /tmp，避免 shell 手动 mkdir /tmp 时误报失败 */
     int fd = vfs_open("/hello.txt", O_CREAT | O_RDWR, 0644);

@@ -13,6 +13,7 @@
 #include "../fs/vfs.h"
 #include "../fs/ramfs.h"
 #include "../fs/tmpfs.h"
+#include "../net/net.h"
 #include "ext4.h"
 #include "include/io.h"
 #ifndef NULL
@@ -89,7 +90,9 @@ static const char *builtin_commands[] = {
     "help",
     "clear",
     "yield",
-    "exec"
+    "exec",
+    "netinfo",
+    "ping_self"
 };
 
 #define BUILTIN_COMMAND_COUNT (sizeof(builtin_commands) / sizeof(builtin_commands[0]))
@@ -1040,6 +1043,8 @@ static void cmd_help(void)
     print("  mkext4 [dev]    - Format test EXT4 volume (default ram0)\n");
     print("  mount_ext4 [dev] [path] - Mount EXT4 volume read-only (default ram0 /mnt)\n");
     print("  mount_tmpfs [path] - Mount tmpfs memory filesystem (default /tmp)\n");
+    print("  netinfo         - Show network stack information\n");
+    print("  ping_self       - Send ICMP echo to loopback network device\n");
     print("  help            - Show this help\n");
     print("  clear           - Clear screen\n");
     print("  yield           - Yield CPU\n");
@@ -1233,6 +1238,17 @@ void shell_run(void)
                     }
                     else
                         print("write: need file and text\n");
+                }
+                else if (strcmp(cmd, "netinfo") == 0)
+                {
+                    net_print_info();
+                }
+                else if (strcmp(cmd, "ping_self") == 0)
+                {
+                    if (net_ping_self() < 0)
+                        print("ping_self: failed\n");
+                    else
+                        print("ping_self: ok\n");
                 }
                 else if (strcmp(cmd, "help") == 0)
                 {
