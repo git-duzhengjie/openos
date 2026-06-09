@@ -8,10 +8,12 @@
 #include <stdint.h>
 
 /* 文件类型 */
-#define FS_FILE      0x1000
-#define FS_DIR       0x2000
-#define FS_DEVICE    0x4000
-#define FS_PIPE      0x8000
+#define FS_FILE          0x1000
+#define FS_DIR           0x2000
+#define FS_CHAR_DEVICE   0x4000
+#define FS_BLOCK_DEVICE  0x6000
+#define FS_DEVICE        FS_CHAR_DEVICE  /* 兼容旧代码：默认设备节点为字符设备 */
+#define FS_PIPE          0x8000
 
 /* 打开标志 */
 #define O_RDONLY     0

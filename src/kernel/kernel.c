@@ -15,6 +15,7 @@
 #include "heap.h"
 #include "keyboard.h"
 #include "chardev.h"
+#include "blockdev.h"
 #include "vga.h"
 #include "embed_hello.h"  /* 嵌入的用户程序 */
 
@@ -129,6 +130,11 @@ void kernel_main(void) {
     chardev_init();
     chardev_register_builtin_devices();
     serial_write("[OK] CHARDEV + /dev\n");
+
+    /* 初始化块设备框架与 RAM disk */
+    blockdev_init();
+    blockdev_register_builtin_devices();
+    serial_write("[OK] BLOCKDEV + ram0\n");
 
     /* VFS 测试 */
     vfs_mkdir("/tmp", 0755);

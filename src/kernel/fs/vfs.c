@@ -8,6 +8,7 @@
 #include "string.h"
 #include "ramfs.h"
 #include "chardev.h"
+#include "blockdev.h"
 
 #ifndef NULL
 #define NULL ((void*)0)
@@ -183,6 +184,118 @@ static file_ops_t vfs_chardev_ops = {
     0
 };
 
+/* ---- 块设备节点操作 ----
+ * VFS 对块设备暴露为可 seek 的字节流，内部按 sector 做整块读写。
+ * 非 sector 对齐的 read/write 使用一个 512B 临时 bounce buffer。
+ */
+static int vfs_blockdev_open(file_t *f) {
+    if (!f || !f->inode || !f->inode->fs_data) return -1;
+    f->offset = 0;
+    return blockdev_open((blockdev_t *)f->inode->fs_data);
+}
+
+static int vfs_blockdev_close(file_t *f) {
+    if (!f || !f->inode || !f->inode->fs_data) return -1;
+    return blockdev_close((blockdev_t *)f->inode->fs_data);
+}
+
+static int vfs_blockdev_read(file_t *f, void *buf, uint32_t count) {
+    blockdev_t *dev;
+    uint8_t *out;
+    uint8_t sector_buf[BLOCKDEV_SECTOR_SIZE_DEFAULT];
+    uint32_t total_size;
+    uint32_t done = 0;
+
+    if (!f || !f->inode || !f->inode->fs_data || !buf) return -1;
+    dev = (blockdev_t *)f->inode->fs_data;
+    if (dev->sector_size != BLOCKDEV_SECTOR_SIZE_DEFAULT) return -1;
+    total_size = blockdev_size_bytes(dev);
+    if ((uint32_t)f->offset >= total_size) return 0;
+    if (count > total_size - (uint32_t)f->offset) count = total_size - (uint32_t)f->offset;
+
+    out = (uint8_t *)buf;
+    while (done < count) {
+        uint32_t pos = (uint32_t)f->offset;
+        uint32_t lba = pos / dev->sector_size;
+        uint32_t off = pos % dev->sector_size;
+        uint32_t chunk = dev->sector_size - off;
+        if (chunk > count - done) chunk = count - done;
+
+        if (off == 0 && chunk == dev->sector_size) {
+            if (blockdev_read_blocks(dev, lba, 1, out + done) != 1) return done ? (int)done : -1;
+        } else {
+            if (blockdev_read_blocks(dev, lba, 1, sector_buf) != 1) return done ? (int)done : -1;
+            memcpy(out + done, sector_buf + off, chunk);
+        }
+        f->offset += chunk;
+        done += chunk;
+    }
+    return (int)done;
+}
+
+static int vfs_blockdev_write(file_t *f, const void *buf, uint32_t count) {
+    blockdev_t *dev;
+    const uint8_t *in;
+    uint8_t sector_buf[BLOCKDEV_SECTOR_SIZE_DEFAULT];
+    uint32_t total_size;
+    uint32_t done = 0;
+
+    if (!f || !f->inode || !f->inode->fs_data || !buf) return -1;
+    dev = (blockdev_t *)f->inode->fs_data;
+    if (dev->sector_size != BLOCKDEV_SECTOR_SIZE_DEFAULT) return -1;
+    total_size = blockdev_size_bytes(dev);
+    if ((uint32_t)f->offset >= total_size) return 0;
+    if (count > total_size - (uint32_t)f->offset) count = total_size - (uint32_t)f->offset;
+
+    in = (const uint8_t *)buf;
+    while (done < count) {
+        uint32_t pos = (uint32_t)f->offset;
+        uint32_t lba = pos / dev->sector_size;
+        uint32_t off = pos % dev->sector_size;
+        uint32_t chunk = dev->sector_size - off;
+        if (chunk > count - done) chunk = count - done;
+
+        if (off == 0 && chunk == dev->sector_size) {
+            if (blockdev_write_blocks(dev, lba, 1, in + done) != 1) return done ? (int)done : -1;
+        } else {
+            if (blockdev_read_blocks(dev, lba, 1, sector_buf) != 1) return done ? (int)done : -1;
+            memcpy(sector_buf + off, in + done, chunk);
+            if (blockdev_write_blocks(dev, lba, 1, sector_buf) != 1) return done ? (int)done : -1;
+        }
+        f->offset += chunk;
+        done += chunk;
+    }
+    return (int)done;
+}
+
+static int vfs_blockdev_seek(file_t *f, int offset, int whence) {
+    blockdev_t *dev;
+    int base;
+    int newpos;
+
+    if (!f || !f->inode || !f->inode->fs_data) return -1;
+    dev = (blockdev_t *)f->inode->fs_data;
+    if (whence == SEEK_SET) base = 0;
+    else if (whence == SEEK_CUR) base = f->offset;
+    else if (whence == SEEK_END) base = (int)blockdev_size_bytes(dev);
+    else return -1;
+
+    newpos = base + offset;
+    if (newpos < 0) return -1;
+    if ((uint32_t)newpos > blockdev_size_bytes(dev)) return -1;
+    f->offset = newpos;
+    return newpos;
+}
+
+static file_ops_t vfs_blockdev_ops = {
+    vfs_blockdev_open,
+    vfs_blockdev_close,
+    vfs_blockdev_read,
+    vfs_blockdev_write,
+    vfs_blockdev_seek,
+    0
+};
+
 /* ---- 在目录下创建目录项 ---- */
 static dentry_t *create_dentry_under(dentry_t *parent, const char *name, uint32_t mode) {
     serial_write("[CREATE] enter, parent=0x");
@@ -216,9 +329,12 @@ static dentry_t *create_dentry_under(dentry_t *parent, const char *name, uint32_
     d->parent = parent;
     
     /* 调用 ramfs ops，默认文件系统；设备节点使用专用 ops */
-    if ((mode & 0xF000) == FS_DEVICE) {
-        ip->fs_type = FS_DEVICE;
+    if ((mode & 0xF000) == FS_CHAR_DEVICE || (mode & 0xF000) == FS_DEVICE) {
+        ip->fs_type = FS_CHAR_DEVICE;
         ip->ops = &vfs_chardev_ops;
+    } else if ((mode & 0xF000) == FS_BLOCK_DEVICE) {
+        ip->fs_type = FS_BLOCK_DEVICE;
+        ip->ops = &vfs_blockdev_ops;
     } else {
         ramfs_setup_inode(ip, mode);
     }
@@ -427,18 +543,35 @@ int vfs_write(int fd, const void *buf, uint32_t count) {
 }
 
 int vfs_seek(int fd, int offset, int whence) {
-    if (fd < 0 || fd >= MAX_FDS_TOTAL) return -1;
-    file_t *f = fd_table[fd];
-    if (!f) return -1;
-    
+    file_t *f;
     uint32_t new_off;
-    switch (whence) {
-    case SEEK_SET: new_off = offset; break;
-    case SEEK_CUR: new_off = f->offset + offset; break;
-    case SEEK_END: new_off = f->inode->size + offset; break;
-    default: return -1;
+
+    if (fd < 0 || fd >= MAX_FDS_TOTAL) return -1;
+    f = fd_table[fd];
+    if (!f) return -1;
+
+    if (f->ops && f->ops->seek) {
+        return f->ops->seek(f, offset, whence);
     }
-    
+
+    switch (whence) {
+    case SEEK_SET:
+        if (offset < 0) return -1;
+        new_off = (uint32_t)offset;
+        break;
+    case SEEK_CUR:
+        if (offset < 0 && (uint32_t)(-offset) > f->offset) return -1;
+        new_off = f->offset + offset;
+        break;
+    case SEEK_END:
+        if (!f->inode) return -1;
+        if (offset < 0 && (uint32_t)(-offset) > f->inode->size) return -1;
+        new_off = f->inode->size + offset;
+        break;
+    default:
+        return -1;
+    }
+
     f->offset = new_off;
     return (int)new_off;
 }
@@ -500,7 +633,9 @@ int vfs_mkdir(const char *path, int mode) {
 int vfs_mknod(const char *path, int mode, const char *dev_name) {
     dentry_t *d;
     dentry_t *parent;
-    chardev_t *dev;
+    chardev_t *cdev = NULL;
+    blockdev_t *bdev = NULL;
+    uint32_t dev_type;
     char parent_path[MAX_PATH];
     char node_name[MAX_NAME];
     int last_slash = -1;
@@ -508,10 +643,19 @@ int vfs_mknod(const char *path, int mode, const char *dev_name) {
     int ni;
 
     if (!path || !dev_name) return -1;
-    if ((mode & 0xF000) != FS_DEVICE) return -1;
 
-    dev = chardev_find(dev_name);
-    if (!dev) return -1;
+    dev_type = (uint32_t)mode & 0xF000;
+    if (dev_type == FS_DEVICE) dev_type = FS_CHAR_DEVICE;
+
+    if (dev_type == FS_CHAR_DEVICE) {
+        cdev = chardev_find(dev_name);
+        if (!cdev) return -1;
+    } else if (dev_type == FS_BLOCK_DEVICE) {
+        bdev = blockdev_find(dev_name);
+        if (!bdev) return -1;
+    } else {
+        return -1;
+    }
 
     d = vfs_path_lookup(path);
     if (d) return -1;
@@ -541,11 +685,16 @@ int vfs_mknod(const char *path, int mode, const char *dev_name) {
     parent = vfs_path_lookup(parent_path);
     if (!parent || !parent->inode || (parent->inode->mode & 0xF000) != FS_DIR) return -1;
 
-    d = create_dentry_under(parent, node_name, (uint32_t)mode);
+    d = create_dentry_under(parent, node_name, ((uint32_t)mode & ~0xF000U) | dev_type);
     if (!d || !d->inode) return -1;
 
-    d->inode->fs_data = dev;
-    d->inode->size = 0;
+    if (dev_type == FS_CHAR_DEVICE) {
+        d->inode->fs_data = cdev;
+        d->inode->size = 0;
+    } else {
+        d->inode->fs_data = bdev;
+        d->inode->size = blockdev_size_bytes(bdev);
+    }
     return 0;
 }
 

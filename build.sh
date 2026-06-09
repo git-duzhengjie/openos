@@ -93,6 +93,11 @@ gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
     -I $SRC/include \
+    -c $SRC/drivers/blockdev.c -o $BUILD/blockdev.o
+
+gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
+    -I $SRC/include \
     -c $SRC/drivers/input_buffer.c -o $BUILD/input_buffer.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
@@ -157,6 +162,7 @@ ld -m elf_i386 -T $SRC/linker.ld \
     $BUILD/string.o \
     $BUILD/keyboard.o \
     $BUILD/chardev.o \
+    $BUILD/blockdev.o \
     $BUILD/input_buffer.o \
     $BUILD/usermode.o \
     $BUILD/process.o \
