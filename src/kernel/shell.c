@@ -12,7 +12,7 @@
 #include "input_buffer.h"
 #include "../fs/vfs.h"
 #include "../fs/ramfs.h"
-#include "exfat.h"
+#include "ext4.h"
 #include "include/io.h"
 #ifndef NULL
 #define NULL ((void *)0)
@@ -1025,8 +1025,8 @@ static void cmd_help(void)
     print("  cd [path]       - Change directory\n");
     print("  pwd             - Print working directory\n");
     print("  history         - Show command history\n");
-    print("  mkexfat [dev]   - Format test exFAT volume on dev (default ram0)\n");
-    print("  mount_exfat [dev] [path] - Mount exFAT volume (default ram0 /mnt)\n");
+    print("  mkext4 [dev]    - EXT4 format placeholder (use external mkfs.ext4 image)\n");
+    print("  mount_ext4 [dev] [path] - Mount EXT4 volume read-only (default ram0 /mnt)\n");
     print("  help            - Show this help\n");
     print("  clear           - Clear screen\n");
     print("  yield           - Yield CPU\n");
@@ -1176,22 +1176,22 @@ void shell_run(void)
                 {
                     cmd_history();
                 }
-                else if (strcmp(cmd, "mkexfat") == 0)
+                else if (strcmp(cmd, "mkext4") == 0)
                 {
                     const char *dev = argc > 1 ? argv[1] : "ram0";
-                    if (exfat_format_test_volume(dev) < 0)
-                        print("mkexfat: failed\n");
+                    if (ext4_format_test_volume(dev) < 0)
+                        print("mkext4: format failed\n");
                     else
-                        print("mkexfat: ok\n");
+                        print("mkext4: ok\n");
                 }
-                else if (strcmp(cmd, "mount_exfat") == 0)
+                else if (strcmp(cmd, "mount_ext4") == 0)
                 {
                     const char *dev = argc > 1 ? argv[1] : "ram0";
                     const char *path = argc > 2 ? argv[2] : "/mnt";
-                    if (exfat_mount(dev, path) < 0)
-                        print("mount_exfat: failed\n");
+                    if (ext4_mount(dev, path) < 0)
+                        print("mount_ext4: failed\n");
                     else
-                        print("mount_exfat: ok\n");
+                        print("mount_ext4: ok\n");
                 }
                 else if (strcmp(cmd, "write") == 0)
                 {
