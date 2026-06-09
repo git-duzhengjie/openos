@@ -475,12 +475,45 @@ static int exfat_file_write(file_t *f, const void *buf, uint32_t count) {
     return ret;
 }
 
+static int exfat_file_truncate(inode_t *inode, uint32_t size) {
+    exfat_node_t *node;
+    exfat_mount_t *m;
+    uint32_t bpc;
+
+    if (!inode || !inode->fs_data) return -1;
+    node = (exfat_node_t *)inode->fs_data;
+    if (node->attr & EXFAT_ATTR_DIRECTORY) return -1;
+    if (!node->mount) return -1;
+    m = node->mount;
+    bpc = m->boot.bytes_per_cluster;
+    if (bpc == 0) return -1;
+
+    if ((uint64_t)size > node->size) {
+        if (exfat_ensure_clusters(node, size) < 0) return -1;
+    } else if ((uint64_t)size < node->size && size > 0 && (size % bpc) != 0) {
+        uint8_t cluster_buf[4096];
+        uint32_t cluster = exfat_nth_cluster(node, size / bpc);
+        uint32_t off = size % bpc;
+        if (bpc > sizeof(cluster_buf)) return -1;
+        if (cluster != EXFAT_FAT_EOC) {
+            if (exfat_read_cluster(m, cluster, cluster_buf) < 0) return -1;
+            memset(cluster_buf + off, 0, bpc - off);
+            if (exfat_write_cluster(m, cluster, cluster_buf) < 0) return -1;
+        }
+    }
+
+    node->size = size;
+    inode->size = size;
+    return exfat_update_stream_entry(node);
+}
+
 static file_ops_t exfat_file_ops = {
     0,
     0,
     exfat_file_read,
     exfat_file_write,
     exfat_file_seek,
+    exfat_file_truncate,
     0
 };
 

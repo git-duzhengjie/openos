@@ -52,15 +52,17 @@ typedef int (*close_fn_t)(struct file *f);
 typedef int (*read_fn_t)(struct file *f, void *buf, uint32_t count);
 typedef int (*write_fn_t)(struct file *f, const void *buf, uint32_t count);
 typedef int (*seek_fn_t)(struct file *f, int offset, int whence);
+typedef int (*truncate_fn_t)(struct inode *inode, uint32_t size);
 typedef struct dentry *(*readdir_fn_t)(struct file *f);
 
 typedef struct file_ops {
-    open_fn_t   open;
-    close_fn_t  close;
-    read_fn_t   read;
-    write_fn_t  write;
-    seek_fn_t   seek;
-    readdir_fn_t readdir;
+    open_fn_t     open;
+    close_fn_t    close;
+    read_fn_t     read;
+    write_fn_t    write;
+    seek_fn_t     seek;
+    truncate_fn_t truncate;
+    readdir_fn_t  readdir;
 } file_ops_t;
 
 /* ---- inode ---- */
@@ -82,7 +84,7 @@ typedef struct dentry {
     struct dentry *parent;
     struct dentry *child;      /* 第一个子项 */
     struct dentry *sibling;    /* 兄弟链表 */
-    struct dentry *mount;      /* 挂载点 (非NULL=挂载了其他FS) */
+    struct dentry *mount;      /* 挂载覆盖后的根目录项 */
 } dentry_t;
 
 /* ---- 打开的文件 ---- */
@@ -128,6 +130,7 @@ int    vfs_read(int fd, void *buf, uint32_t count);
 int    vfs_write(int fd, const void *buf, uint32_t count);
 int    vfs_seek(int fd, int offset, int whence);
 int    vfs_stat(const char *path, inode_t *st);
+int    vfs_truncate(const char *path, uint32_t size);
 
 /* 目录/节点操作 */
 int    vfs_mkdir(const char *path, int mode);
@@ -142,6 +145,7 @@ int    vfs_umount(const char *path);
 
 /* 路径解析 */
 dentry_t *vfs_path_lookup(const char *path);
+int    vfs_normalize_path(const char *path, char *out, uint32_t out_size);
 
 /* 文件系统驱动内部辅助：在指定目录项下创建节点 */
 dentry_t *vfs_create_node_under(dentry_t *parent, const char *name,

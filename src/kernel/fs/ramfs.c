@@ -18,6 +18,7 @@ static int ramfs_close(file_t *f);
 static int ramfs_read(file_t *f, void *buf, uint32_t count);
 static int ramfs_write(file_t *f, const void *buf, uint32_t count);
 static int ramfs_seek(file_t *f, int offset, int whence);
+static int ramfs_truncate(inode_t *inode, uint32_t size);
 
 file_ops_t ramfs_file_ops = {
     .open    = ramfs_open,
@@ -25,6 +26,7 @@ file_ops_t ramfs_file_ops = {
     .read    = ramfs_read,
     .write   = ramfs_write,
     .seek    = ramfs_seek,
+    .truncate = ramfs_truncate,
     .readdir = NULL,
 };
 
@@ -34,6 +36,7 @@ static file_ops_t ramfs_dir_ops = {
     .read    = NULL,
     .write   = NULL,
     .seek    = NULL,
+    .truncate = NULL,
     .readdir = NULL,
 };
 
@@ -141,13 +144,64 @@ static int ramfs_seek(file_t *f, int offset, int whence) {
     uint32_t new_off;
     uint32_t size = f->inode ? f->inode->size : 0;
     switch (whence) {
-    case SEEK_SET: new_off = offset; break;
-    case SEEK_CUR: new_off = f->offset + offset; break;
-    case SEEK_END: new_off = size + offset; break;
+    case SEEK_SET:
+        if (offset < 0) return -1;
+        new_off = (uint32_t)offset;
+        break;
+    case SEEK_CUR:
+        if (offset < 0 && (uint32_t)(-offset) > f->offset) return -1;
+        new_off = f->offset + offset;
+        break;
+    case SEEK_END:
+        if (offset < 0 && (uint32_t)(-offset) > size) return -1;
+        new_off = size + offset;
+        break;
     default: return -1;
     }
     f->offset = new_off;
     return (int)new_off;
+}
+
+static int ramfs_truncate(inode_t *inode, uint32_t size) {
+    if (!inode) return -1;
+
+    ramfs_file_t *rf = (ramfs_file_t *)inode->fs_data;
+    if (!rf) {
+        rf = (ramfs_file_t *)pmm_alloc_page();
+        if (!rf) return -1;
+        for (int i = 0; i < (int)sizeof(ramfs_file_t); i++) ((char *)rf)[i] = 0;
+        inode->fs_data = rf;
+    }
+
+    uint32_t needed_blocks = 0;
+    if (size > 0) {
+        needed_blocks = (size + RAMFS_BLOCK_SIZE - 1) / RAMFS_BLOCK_SIZE;
+        if (needed_blocks > RAMFS_MAX_BLOCKS) return -1;
+    }
+
+    for (uint32_t i = needed_blocks; i < rf->nblocks; i++) {
+        if (rf->blocks[i]) {
+            pmm_free_page((void *)rf->blocks[i]);
+            rf->blocks[i] = 0;
+        }
+    }
+
+    if (needed_blocks < rf->nblocks) {
+        rf->nblocks = needed_blocks;
+    }
+
+    if (size < rf->size && needed_blocks > 0 && (size % RAMFS_BLOCK_SIZE) != 0) {
+        uint32_t last = needed_blocks - 1;
+        uint32_t off = size % RAMFS_BLOCK_SIZE;
+        if (rf->blocks[last]) {
+            uint8_t *p = (uint8_t *)rf->blocks[last];
+            for (uint32_t i = off; i < RAMFS_BLOCK_SIZE; i++) p[i] = 0;
+        }
+    }
+
+    rf->size = size;
+    inode->size = size;
+    return 0;
 }
 
 /* ---- ramfs fs_type ---- */

@@ -213,9 +213,7 @@ static void shell_save_history(void)
 
 static void shell_history_save_file(void)
 {
-    /* 当前 VFS 尚未完整实现 O_TRUNC，先删除旧历史再重建，避免旧内容残留 */
-    vfs_unlink("/.shell_history");
-    int fd = vfs_open("/.shell_history", O_CREAT | O_WRONLY, 0644);
+    int fd = vfs_open("/.shell_history", O_CREAT | O_WRONLY | O_TRUNC, 0644);
     if (fd < 0)
         return;
     for (int h = 0; h < history_count; h++)
@@ -971,11 +969,14 @@ static void cmd_write(const char *path, const char *data)
     char full[MAX_PATH];
     make_path(path, full);
 
-    /* vfs_open() does not implement O_TRUNC yet, so recreate the file to
-     * make write behave as an overwrite command instead of leaving tail data. */
-    vfs_unlink(full);
-
-    int fd = vfs_open(full, O_CREAT | O_RDWR, 0644);
+    int fd = vfs_open(full, O_CREAT | O_RDWR | O_TRUNC, 0644);
+    if (fd < 0)
+    {
+        /* Some filesystem drivers may not support truncate yet.  Fall back to
+         * recreate semantics so overwrite commands do not leave stale tails. */
+        vfs_unlink(full);
+        fd = vfs_open(full, O_CREAT | O_RDWR, 0644);
+    }
     if (fd < 0)
     {
         print("write: cannot open\n");
