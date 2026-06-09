@@ -188,7 +188,7 @@ void ramfs_init(void) {
 void ramfs_setup_inode(inode_t *ip, uint32_t mode) {
     if (!ip) return;
     ip->fs_type = ramfs_fs_type.magic;
-    if ((mode & 0xFF) == FS_DIR) {
+    if ((mode & 0xF000) == FS_DIR) {
         ip->ops = &ramfs_dir_ops;
     } else {
         ip->ops = &ramfs_file_ops;

@@ -275,7 +275,6 @@ int vfs_open(const char *path, int flags, int mode) {
         /* 提取父路径和文件名 */
         char parent_path[MAX_PATH];
         char fname[MAX_NAME];
-        int plen = 0;
         int i;
         
         /* 找最后一个 / */

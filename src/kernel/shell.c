@@ -104,6 +104,8 @@ static void shell_redraw_input_line(void)
     print(cmd_buf);
 }
 
+static void make_path(const char *arg, char *out);
+
 static void shell_complete_command(void)
 {
     const char *first_match = NULL;
@@ -167,6 +169,188 @@ static void shell_complete_command(void)
     }
     print("\n");
     shell_redraw_input_line();
+}
+
+/* 路径补全：补全命令参数中的文件/目录路径 */
+static void shell_complete_path(void)
+{
+    /* 找到最后一个空格位置（即当前正在输入的参数起点） */
+    int last_space = -1;
+    for (int i = 0; i < cmd_pos; i++)
+    {
+        if (cmd_buf[i] == ' ')
+            last_space = i;
+    }
+    if (last_space < 0)
+        return;
+
+    int arg_start = last_space + 1;
+    int arg_len = cmd_pos - arg_start;
+
+    /* 判断命令：cd / mkdir 只补目录 */
+    int only_dirs = 0;
+    if (last_space > 0)
+    {
+        char first_word[MAX_NAME];
+        int wi = 0;
+        while (wi < last_space && wi < MAX_NAME - 1)
+        {
+            first_word[wi] = cmd_buf[wi];
+            wi++;
+        }
+        first_word[wi] = '\0';
+        if (strcmp(first_word, "cd") == 0 || strcmp(first_word, "mkdir") == 0)
+            only_dirs = 1;
+    }
+
+    /* 提取当前参数作为前缀 */
+    char prefix[MAX_NAME];
+    int pi = 0;
+    for (int i = 0; i < arg_len && pi < MAX_NAME - 1; i++)
+        prefix[pi++] = cmd_buf[arg_start + i];
+    prefix[pi] = '\0';
+    int prefix_len = pi;
+
+    /* 在参数中找到最后一个 '/' 分隔符 */
+    int last_slash = -1;
+    for (int i = 0; i < prefix_len; i++)
+    {
+        if (prefix[i] == '/')
+            last_slash = i;
+    }
+
+    char dir_path[MAX_PATH];      /* 要遍历的目录全路径 */
+    char match_prefix[MAX_NAME];  /* 要匹配的名字前缀 */
+    int match_prefix_len;
+
+    if (last_slash >= 0)
+    {
+        /* 有斜杠：目录部分 = 斜杠前内容，匹配前缀 = 斜杠后内容 */
+        char dir_rel[MAX_PATH];
+        int di = 0;
+        for (int i = 0; i < last_slash && i < MAX_PATH - 1; i++)
+            dir_rel[di++] = prefix[i];
+        dir_rel[di] = '\0';
+
+        if (dir_rel[0] == '/' || last_slash == 0)
+        {
+            /* 绝对路径或以 / 开头 */
+            if (di == 0) {
+                dir_path[0] = '/';
+                dir_path[1] = '\0';
+            } else {
+                int di2 = 0;
+                for (int i = 0; dir_rel[i] && di2 < MAX_PATH - 1; i++)
+                    dir_path[di2++] = dir_rel[i];
+                dir_path[di2] = '\0';
+            }
+        }
+        else
+        {
+            /* 相对路径：拼接 cwd */
+            make_path(dir_rel, dir_path);
+        }
+
+        /* 匹配前缀 = 最后一个斜杠后的内容 */
+        int mpi = 0;
+        for (int i = last_slash + 1; i < prefix_len && mpi < MAX_NAME - 1; i++)
+            match_prefix[mpi++] = prefix[i];
+        match_prefix[mpi] = '\0';
+        match_prefix_len = mpi;
+    }
+    else
+    {
+        /* 没有斜杠：在当前目录查找，匹配前缀 = 整个参数 */
+        make_path(".", dir_path);
+        int mpi = 0;
+        for (int i = 0; i < prefix_len && mpi < MAX_NAME - 1; i++)
+            match_prefix[mpi++] = prefix[i];
+        match_prefix[mpi] = '\0';
+        match_prefix_len = mpi;
+    }
+
+    /* 查找目录 */
+    dentry_t *d = vfs_path_lookup(dir_path);
+    if (!d || !d->inode || (d->inode->mode & 0xF000) != FS_DIR)
+        return;
+
+    /* 收集匹配的子项 */
+#define MAX_PATH_MATCHES 64
+    const char *match_names[MAX_PATH_MATCHES];
+    int match_is_dir[MAX_PATH_MATCHES];
+    int match_count = 0;
+
+    dentry_t *child = d->child;
+    while (child && match_count < MAX_PATH_MATCHES)
+    {
+        int is_dir = child->inode && (child->inode->mode & 0xF000) == FS_DIR;
+        if (!only_dirs || is_dir)
+        {
+            if (shell_starts_with(child->name, match_prefix, match_prefix_len))
+            {
+                match_names[match_count] = child->name;
+                match_is_dir[match_count] = is_dir;
+                match_count++;
+            }
+        }
+        child = child->sibling;
+    }
+
+    if (match_count == 0)
+        return;
+
+    /* 计算公共前缀 */
+    const char *first = match_names[0];
+    int common_len = (int)strlen(first);
+    for (int i = 1; i < match_count; i++)
+    {
+        int len = shell_common_prefix_len(first, match_names[i]);
+        if (len < common_len)
+            common_len = len;
+    }
+
+    if (match_count == 1)
+    {
+        /* 唯一匹配：补全完整名字 */
+        const char *name = match_names[0];
+        int name_len = (int)strlen(name);
+        for (int i = match_prefix_len; i < name_len; i++)
+            shell_append_char(name[i]);
+        /* 目录追加 /，文件追加空格 */
+        if (match_is_dir[0])
+            shell_append_char('/');
+        else
+            shell_append_char(' ');
+        return;
+    }
+
+    /* 多个匹配：填入公共前缀 */
+    if (common_len > match_prefix_len)
+    {
+        for (int i = match_prefix_len; i < common_len; i++)
+            shell_append_char(first[i]);
+        return;
+    }
+
+    /* 公共前缀等于已输入内容 → 列出所有候选 */
+    print("\n");
+    for (int i = 0; i < match_count; i++)
+    {
+        print(match_names[i]);
+        if (match_is_dir[i])
+            print("/");
+        print("  ");
+    }
+    print("\n");
+    shell_redraw_input_line();
+}
+
+static void shell_complete(void)
+{
+    if (shell_is_command_completion_context())
+        shell_complete_command();
+    else
+        shell_complete_path();
 }
 
 static int split_args(char *buf, char *argv[], int max)
@@ -542,7 +726,7 @@ void shell_run(void)
         }
         else if (c == '\t')
         {
-            shell_complete_command();
+            shell_complete();
         }
         else if (c == 0x7F || c == 0x08)
         {
