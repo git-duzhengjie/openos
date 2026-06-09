@@ -783,6 +783,45 @@ static void cmd_cat(const char *path)
     vfs_close(fd);
 }
 
+static void cmd_cat_append(const char *path, const char *text)
+{
+    if (!path || !text)
+    {
+        print("cat: usage: cat >> <file> <text>\n");
+        return;
+    }
+
+    char full[MAX_PATH];
+    make_path(path, full);
+
+    int fd = vfs_open(full, O_CREAT | O_RDWR, 0644);
+    if (fd < 0)
+    {
+        print("cat: cannot open\n");
+        return;
+    }
+
+    if (vfs_seek(fd, 0, SEEK_END) < 0)
+    {
+        print("cat: seek failed\n");
+        vfs_close(fd);
+        return;
+    }
+
+    int len = strlen(text);
+    if (len > 0 && vfs_write(fd, text, len) < 0)
+    {
+        print("cat: write failed\n");
+        vfs_close(fd);
+        return;
+    }
+
+    if (vfs_write(fd, "\n", 1) < 0)
+        print("cat: write failed\n");
+
+    vfs_close(fd);
+}
+
 static void cmd_mkdir(const char *path)
 {
     char full[MAX_PATH];
@@ -813,6 +852,45 @@ static void cmd_echo(int argc, char *argv[])
         print(argv[i]);
     }
     print("\n");
+}
+
+static void cmd_echo_append(const char *path, const char *text)
+{
+    if (!path || !text)
+    {
+        print("echo: usage: echo <text> >> <file>\n");
+        return;
+    }
+
+    char full[MAX_PATH];
+    make_path(path, full);
+
+    int fd = vfs_open(full, O_CREAT | O_RDWR, 0644);
+    if (fd < 0)
+    {
+        print("echo: cannot open file\n");
+        return;
+    }
+
+    if (vfs_seek(fd, 0, SEEK_END) < 0)
+    {
+        print("echo: seek failed\n");
+        vfs_close(fd);
+        return;
+    }
+
+    int len = strlen(text);
+    if (len > 0 && vfs_write(fd, text, len) < 0)
+    {
+        print("echo: write failed\n");
+        vfs_close(fd);
+        return;
+    }
+
+    if (vfs_write(fd, "\n", 1) < 0)
+        print("echo: write failed\n");
+
+    vfs_close(fd);
 }
 
 static void cmd_cd(const char *path)
@@ -901,11 +979,13 @@ static void cmd_help(void)
     print("openos shell - Available commands:\n");
     print("  ls [path]       - List directory\n");
     print("  cat <file>      - Display file content\n");
+    print("  cat >> <file> <text> - Append text to file\n");
     print("  mkdir <dir>     - Create directory\n");
     print("  touch <file>    - Create empty file\n");
     print("  rm <file>       - Delete file\n");
     print("  write <f> <txt> - Write text to file\n");
     print("  echo <text>     - Print text\n");
+    print("  echo <text> >> <file> - Append text to file\n");
     print("  cd [path]       - Change directory\n");
     print("  pwd             - Print working directory\n");
     print("  history         - Show command history\n");
@@ -965,7 +1045,28 @@ void shell_run(void)
                 }
                 else if (strcmp(cmd, "cat") == 0)
                 {
-                    if (argc > 1)
+                    if (argc > 2 && strcmp(argv[1], ">>") == 0)
+                    {
+                        /* cat >> <file> <text ...> */
+                        if (argc > 3)
+                        {
+                            char text_buf[256];
+                            int pos = 0;
+                            for (int i = 3; i < argc; i++)
+                            {
+                                if (i > 3 && pos < 255)
+                                    text_buf[pos++] = ' ';
+                                int k = 0;
+                                while (argv[i][k] && pos < 255)
+                                    text_buf[pos++] = argv[i][k++];
+                            }
+                            text_buf[pos] = '\0';
+                            cmd_cat_append(argv[2], text_buf);
+                        }
+                        else
+                            print("cat: missing file or text\n");
+                    }
+                    else if (argc > 1)
                         cmd_cat(argv[1]);
                     else
                         print("cat: missing argument\n");
@@ -993,7 +1094,37 @@ void shell_run(void)
                 }
                 else if (strcmp(cmd, "echo") == 0)
                 {
-                    cmd_echo(argc, argv);
+                    /* echo <text...> >> <file> */
+                    int redirect = -1;
+                    for (int i = 1; i < argc - 1; i++)
+                    {
+                        if (strcmp(argv[i], ">>") == 0)
+                        {
+                            redirect = i;
+                            break;
+                        }
+                    }
+                    if (redirect > 0)
+                    {
+                        /* 拼接 >> 前面的所有参数作为文本 */
+                        char text_buf[256];
+                        int pos = 0;
+                        for (int i = 1; i < redirect; i++)
+                        {
+                            if (i > 1 && pos < 255)
+                                text_buf[pos++] = ' ';
+                            int k = 0;
+                            while (argv[i][k] && pos < 255)
+                                text_buf[pos++] = argv[i][k++];
+                        }
+                        text_buf[pos] = '\0';
+                        if (redirect + 1 < argc)
+                            cmd_echo_append(argv[redirect + 1], text_buf);
+                        else
+                            print("echo: missing filename\n");
+                    }
+                    else
+                        cmd_echo(argc, argv);
                 }
                 else if (strcmp(cmd, "cd") == 0)
                 {
