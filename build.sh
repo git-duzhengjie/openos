@@ -127,13 +127,18 @@ gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
-    -I $SRC/include \
+    -I $SRC/include -I $SRC/fs \
     -c $SRC/fs/vfs.c -o $BUILD/vfs.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
     -I $SRC/include \
     -c $SRC/fs/ramfs.c -o $BUILD/ramfs.o
+
+gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
+    -I $SRC/include -I $SRC/fs \
+    -c $SRC/fs/tmpfs.c -o $BUILD/tmpfs.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
@@ -174,6 +179,7 @@ ld -m elf_i386 -T $SRC/linker.ld \
     $BUILD/elf_loader.o \
     $BUILD/vfs.o \
     $BUILD/ramfs.o \
+    $BUILD/tmpfs.o \
     $BUILD/ext4.o \
     $BUILD/shell.o
 

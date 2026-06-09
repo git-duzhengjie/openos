@@ -12,6 +12,7 @@
 #include "input_buffer.h"
 #include "../fs/vfs.h"
 #include "../fs/ramfs.h"
+#include "../fs/tmpfs.h"
 #include "ext4.h"
 #include "include/io.h"
 #ifndef NULL
@@ -851,8 +852,19 @@ static void cmd_cat_append(const char *path, const char *text)
 
 static void cmd_mkdir(const char *path)
 {
+    if (!path || path[0] == '\0')
+    {
+        print("mkdir: usage: mkdir <path>\n");
+        return;
+    }
+
     char full[MAX_PATH];
     make_path(path, full);
+    if (vfs_path_lookup(full))
+    {
+        print("mkdir: already exists\n");
+        return;
+    }
     if (vfs_mkdir(full, 0755) < 0)
         print("mkdir: failed\n");
 }
@@ -1025,8 +1037,9 @@ static void cmd_help(void)
     print("  cd [path]       - Change directory\n");
     print("  pwd             - Print working directory\n");
     print("  history         - Show command history\n");
-    print("  mkext4 [dev]    - EXT4 format placeholder (use external mkfs.ext4 image)\n");
+    print("  mkext4 [dev]    - Format test EXT4 volume (default ram0)\n");
     print("  mount_ext4 [dev] [path] - Mount EXT4 volume read-only (default ram0 /mnt)\n");
+    print("  mount_tmpfs [path] - Mount tmpfs memory filesystem (default /tmp)\n");
     print("  help            - Show this help\n");
     print("  clear           - Clear screen\n");
     print("  yield           - Yield CPU\n");
@@ -1192,6 +1205,14 @@ void shell_run(void)
                         print("mount_ext4: failed\n");
                     else
                         print("mount_ext4: ok\n");
+                }
+                else if (strcmp(cmd, "mount_tmpfs") == 0)
+                {
+                    const char *path = argc > 1 ? argv[1] : "/tmp";
+                    if (tmpfs_mount(path) < 0)
+                        print("mount_tmpfs: failed\n");
+                    else
+                        print("mount_tmpfs: ok\n");
                 }
                 else if (strcmp(cmd, "write") == 0)
                 {

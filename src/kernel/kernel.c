@@ -11,6 +11,7 @@
 #include "../proc/process.h"
 #include "../fs/vfs.h"
 #include "../fs/ramfs.h"
+#include "../fs/tmpfs.h"
 #include "../shell.h"
 #include "heap.h"
 #include "keyboard.h"
@@ -121,10 +122,11 @@ void kernel_main(void) {
     proc_table_init();
     serial_write("[OK] PROC TABLE\n");
 
-    /* 初始化 VFS + ramfs */
+    /* 初始化 VFS + ramfs + tmpfs */
     vfs_init();
     ramfs_init();
-    serial_write("[OK] VFS + ramfs\n");
+    tmpfs_init();
+    serial_write("[OK] VFS + ramfs + tmpfs\n");
 
     /* 初始化字符设备框架与 /dev 节点 */
     chardev_init();
@@ -136,8 +138,7 @@ void kernel_main(void) {
     blockdev_register_builtin_devices();
     serial_write("[OK] BLOCKDEV + ram0\n");
 
-    /* VFS 测试 */
-    vfs_mkdir("/tmp", 0755);
+    /* VFS 测试：不要预创建 /tmp，避免 shell 手动 mkdir /tmp 时误报失败 */
     int fd = vfs_open("/hello.txt", O_CREAT | O_RDWR, 0644);
     if (fd >= 0) {
         vfs_write(fd, "Hello from openos VFS!", 22);

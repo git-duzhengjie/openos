@@ -7,6 +7,7 @@
 #include "pmm.h"
 #include "string.h"
 #include "ramfs.h"
+#include "tmpfs.h"
 #include "chardev.h"
 #include "blockdev.h"
 
@@ -422,7 +423,11 @@ dentry_t *vfs_create_node_under(dentry_t *parent, const char *name,
     ip->ops = ops;
 
     if (!ops && (mode & (FS_FILE | FS_DIR))) {
-        ramfs_setup_inode(ip, mode);
+        if (parent->inode && parent->inode->fs_type == TMPFS_MAGIC) {
+            tmpfs_setup_inode(ip, mode);
+        } else {
+            ramfs_setup_inode(ip, mode);
+        }
     }
 
     dentry_t *d = alloc_dentry();
@@ -661,7 +666,11 @@ int vfs_mount(const char *path, fs_type_t *fs) {
         root->mode = FS_DIR | S_IRUSR | S_IWUSR;
         root->fs_type = fs->magic;
         root->fs_data = fs->data;
-        ramfs_setup_inode(root, root->mode);
+        if (fs->magic == TMPFS_MAGIC) {
+            tmpfs_setup_inode(root, root->mode);
+        } else {
+            ramfs_setup_inode(root, root->mode);
+        }
     }
 
     dentry_t *md = alloc_dentry();
