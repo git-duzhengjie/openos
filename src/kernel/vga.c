@@ -36,6 +36,12 @@ static void vga_scroll(void) {
     }
 }
 
+/* 获取当前 VGA 光标位置 */
+void vga_get_xy(int *x, int *y) {
+    if (x) *x = vga_x;
+    if (y) *y = vga_y;
+}
+
 /* 更新光标位置 */
 void vga_update_cursor(int x, int y) {
     uint16_t pos = y * VGA_WIDTH + x;
@@ -44,6 +50,13 @@ void vga_update_cursor(int x, int y) {
     outb(VGA_CRTC_DATA, (pos >> 8) & 0xFF);
     outb(VGA_CRTC_ADDR, VGA_CURSOR_LOC_LOW);
     outb(VGA_CRTC_DATA, pos & 0xFF);
+}
+
+/* 设置光标位置（同时更新内部坐标） */
+void vga_set_xy(int x, int y) {
+    vga_x = x;
+    vga_y = y;
+    vga_update_cursor(x, y);
 }
 
 /* 初始化 VGA 控制台 */
@@ -87,6 +100,8 @@ void vga_putc(char c) {
             vga_x--;
             vga_mem[vga_y * VGA_WIDTH + vga_x] = vga_entry(' ', vga_color);
         }
+    } else if (c == '\r') {
+        vga_x = 0;
     } else if (c == '\t') {
         vga_x = (vga_x + 8) & ~7;
     } else {

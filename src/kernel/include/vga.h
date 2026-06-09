@@ -43,5 +43,9 @@ void vga_clear(void);
 void vga_enable_cursor(uint8_t start, uint8_t end);
 void vga_disable_cursor(void);
 void vga_update_cursor(int x, int y);
+void vga_set_xy(int x, int y);
+
+/* 获取当前光标位置 */
+void vga_get_xy(int *x, int *y);
 
 #endif /* VGA_H */

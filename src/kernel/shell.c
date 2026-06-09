@@ -1,5 +1,5 @@
 /* ============================================================
- * openos - 简易 Shell 实现 (Phase 3)
+ * openos - 简�?Shell 实现 (Phase 3)
  * ============================================================ */
 
 #include "shell.h"
@@ -17,7 +17,7 @@
 #define NULL ((void *)0)
 #endif
 
-/* 打印到 VGA + 串口 */
+/* 打印�?VGA + 串口 */
 static void print(const char *s)
 {
     vga_write(s);
@@ -28,7 +28,13 @@ static void print(const char *s)
 #define MAX_ARGS 16
 
 static char cmd_buf[CMD_BUF_SIZE];
-static int cmd_pos = 0;
+static int cmd_pos = 0;      /* 当前命令长度 */
+static int cmd_cursor = 0;   /* 当前光标在命令行内的位置 */
+
+#define SHELL_HISTORY_SIZE 16
+static char history[SHELL_HISTORY_SIZE][CMD_BUF_SIZE];
+static int history_count = 0;
+static int history_view = 0;
 
 /* 当前工作目录 */
 static char cwd[MAX_PATH] = "/";
@@ -87,14 +93,50 @@ static int shell_is_command_completion_context(void)
     return 1;
 }
 
+static void shell_pump_serial_input(void)
+{
+    while ((inb(0x3FD) & 0x01))
+    {
+        input_putc((char)inb(0x3F8));
+    }
+}
+
+static char shell_read_input_char(int wait_loops)
+{
+    char c;
+
+    while (wait_loops-- >= 0)
+    {
+        shell_pump_serial_input();
+        c = input_getc();
+        if (c)
+            return c;
+    }
+
+    return 0;
+}
 static void shell_append_char(char c)
 {
-    if (cmd_pos < CMD_BUF_SIZE - 1)
-    {
-        cmd_buf[cmd_pos++] = c;
-        cmd_buf[cmd_pos] = '\0';
-        char echo[2] = {c, '\0'};
-        print(echo);
+    if (cmd_pos >= CMD_BUF_SIZE - 1)
+        return;
+    /* 如果光标不在末尾，插入模式：右移后续字符 */
+    if (cmd_cursor < cmd_pos) {
+        for (int i = cmd_pos; i > cmd_cursor; i--)
+            cmd_buf[i] = cmd_buf[i - 1];
+    }
+    cmd_buf[cmd_cursor] = c;
+    cmd_pos++;
+    cmd_cursor++;
+    cmd_buf[cmd_pos] = '\0';
+    /* 回显：从插入点重绘到末尾，再移光标回正确位置 */
+    print(&cmd_buf[cmd_cursor - 1]);
+    int overshoot = cmd_pos - cmd_cursor;
+    if (overshoot > 0) {
+        int vx, vy;
+        vga_get_xy(&vx, &vy);
+        int target = vx - overshoot;
+        while (target < 0) { target += VGA_WIDTH; vy--; }
+        vga_set_xy(target, vy);
     }
 }
 
@@ -102,6 +144,126 @@ static void shell_redraw_input_line(void)
 {
     shell_prompt();
     print(cmd_buf);
+}
+
+static void shell_copy_str(char *dst, const char *src)
+{
+    int i = 0;
+    while (src[i] && i < CMD_BUF_SIZE - 1) {
+        dst[i] = src[i];
+        i++;
+    }
+    dst[i] = '\0';
+}
+
+static void shell_set_buffer(const char *src)
+{
+    shell_copy_str(cmd_buf, src);
+    cmd_pos = (int)strlen(cmd_buf);
+    cmd_cursor = cmd_pos;
+}
+
+static void shell_save_history(void)
+{
+    if (cmd_pos <= 0)
+        return;
+    if (history_count < SHELL_HISTORY_SIZE) {
+        shell_copy_str(history[history_count], cmd_buf);
+        history_count++;
+    } else {
+        for (int i = 1; i < SHELL_HISTORY_SIZE; i++)
+            shell_copy_str(history[i - 1], history[i]);
+        shell_copy_str(history[SHELL_HISTORY_SIZE - 1], cmd_buf);
+    }
+    history_view = history_count;
+}
+
+static void shell_clear_current_input(void)
+{
+    print("\r");
+    shell_prompt();
+    for (int i = 0; i < CMD_BUF_SIZE - 1; i++)
+        print(" ");
+    print("\r");
+    shell_prompt();
+}
+
+static void shell_replace_input(const char *src)
+{
+    shell_clear_current_input();
+    shell_set_buffer(src);
+    print(cmd_buf);
+}
+
+static void shell_move_cursor_left(void)
+{
+    if (cmd_cursor <= 0)
+        return;
+    int vx, vy;
+    vga_get_xy(&vx, &vy);
+    if (vx > 0) {
+        vx--;
+    } else if (vy > 0) {
+        vy--;
+        vx = VGA_WIDTH - 1;
+    }
+    vga_set_xy(vx, vy);
+    cmd_cursor--;
+}
+
+static void shell_move_cursor_right(void)
+{
+    if (cmd_cursor >= cmd_pos)
+        return;
+    int vx, vy;
+    vga_get_xy(&vx, &vy);
+    vx++;
+    if (vx >= VGA_WIDTH) {
+        vx = 0;
+        vy++;
+    }
+    vga_set_xy(vx, vy);
+    cmd_cursor++;
+}
+
+static void shell_history_prev(void)
+{
+    if (history_count <= 0 || history_view <= 0)
+        return;
+    history_view--;
+    shell_replace_input(history[history_view]);
+}
+
+static void shell_history_next(void)
+{
+    if (history_count <= 0 || history_view >= history_count)
+        return;
+    history_view++;
+    if (history_view == history_count)
+        shell_replace_input("");
+    else
+        shell_replace_input(history[history_view]);
+}
+
+static void shell_backspace(void)
+{
+    if (cmd_cursor <= 0)
+        return;
+    shell_move_cursor_left();
+    for (int i = cmd_cursor; i < cmd_pos - 1; i++)
+        cmd_buf[i] = cmd_buf[i + 1];
+    cmd_pos--;
+    cmd_buf[cmd_pos] = '\0';
+    print(&cmd_buf[cmd_cursor]);
+    print(" ");
+    int overshoot = cmd_pos - cmd_cursor + 1;
+    if (overshoot > 0) {
+        int vx, vy;
+        vga_get_xy(&vx, &vy);
+        int target = vx - overshoot;
+        while (target < 0) { target += VGA_WIDTH; vy--; }
+        vga_set_xy(target, vy);
+    }
 }
 
 static void make_path(const char *arg, char *out);
@@ -171,10 +333,10 @@ static void shell_complete_command(void)
     shell_redraw_input_line();
 }
 
-/* 路径补全：补全命令参数中的文件/目录路径 */
+/* 路径补全：补全命令参数中的文�?目录路径 */
 static void shell_complete_path(void)
 {
-    /* 找到最后一个空格位置（即当前正在输入的参数起点） */
+    /* 找到最后一个空格位置（即当前正在输入的参数起点�?*/
     int last_space = -1;
     for (int i = 0; i < cmd_pos; i++)
     {
@@ -211,7 +373,7 @@ static void shell_complete_path(void)
     prefix[pi] = '\0';
     int prefix_len = pi;
 
-    /* 在参数中找到最后一个 '/' 分隔符 */
+    /* 在参数中找到最后一�?'/' 分隔�?*/
     int last_slash = -1;
     for (int i = 0; i < prefix_len; i++)
     {
@@ -219,13 +381,13 @@ static void shell_complete_path(void)
             last_slash = i;
     }
 
-    char dir_path[MAX_PATH];      /* 要遍历的目录全路径 */
+    char dir_path[MAX_PATH];      /* 要遍历的目录全路�?*/
     char match_prefix[MAX_NAME];  /* 要匹配的名字前缀 */
     int match_prefix_len;
 
     if (last_slash >= 0)
     {
-        /* 有斜杠：目录部分 = 斜杠前内容，匹配前缀 = 斜杠后内容 */
+        /* 有斜杠：目录部分 = 斜杠前内容，匹配前缀 = 斜杠后内�?*/
         char dir_rel[MAX_PATH];
         int di = 0;
         for (int i = 0; i < last_slash && i < MAX_PATH - 1; i++)
@@ -234,7 +396,7 @@ static void shell_complete_path(void)
 
         if (dir_rel[0] == '/' || last_slash == 0)
         {
-            /* 绝对路径或以 / 开头 */
+            /* 绝对路径或以 / 开�?*/
             if (di == 0) {
                 dir_path[0] = '/';
                 dir_path[1] = '\0';
@@ -247,11 +409,11 @@ static void shell_complete_path(void)
         }
         else
         {
-            /* 相对路径：拼接 cwd */
+            /* 相对路径：拼�?cwd */
             make_path(dir_rel, dir_path);
         }
 
-        /* 匹配前缀 = 最后一个斜杠后的内容 */
+        /* 匹配前缀 = 最后一个斜杠后的内�?*/
         int mpi = 0;
         for (int i = last_slash + 1; i < prefix_len && mpi < MAX_NAME - 1; i++)
             match_prefix[mpi++] = prefix[i];
@@ -274,7 +436,7 @@ static void shell_complete_path(void)
     if (!d || !d->inode || (d->inode->mode & 0xF000) != FS_DIR)
         return;
 
-    /* 收集匹配的子项 */
+    /* 收集匹配的子�?*/
 #define MAX_PATH_MATCHES 64
     const char *match_names[MAX_PATH_MATCHES];
     int match_is_dir[MAX_PATH_MATCHES];
@@ -311,12 +473,12 @@ static void shell_complete_path(void)
 
     if (match_count == 1)
     {
-        /* 唯一匹配：补全完整名字 */
+        /* 唯一匹配：补全完整名�?*/
         const char *name = match_names[0];
         int name_len = (int)strlen(name);
         for (int i = match_prefix_len; i < name_len; i++)
             shell_append_char(name[i]);
-        /* 目录追加 /，文件追加空格 */
+        /* 目录追加 /，文件追加空�?*/
         if (match_is_dir[0])
             shell_append_char('/');
         else
@@ -332,7 +494,7 @@ static void shell_complete_path(void)
         return;
     }
 
-    /* 公共前缀等于已输入内容 → 列出所有候选 */
+    /* 公共前缀等于已输入内�?�?列出所有候�?*/
     print("\n");
     for (int i = 0; i < match_count; i++)
     {
@@ -577,7 +739,7 @@ static void cmd_help(void)
     print("  exec <elf>      - Execute ELF program\n");
 }
 
-/* ---- Shell 主循环 ---- */
+/* ---- Shell 主循�?---- */
 void shell_run(void)
 {
     print("\n=== openos shell ===\n");
@@ -585,23 +747,20 @@ void shell_run(void)
 
     cmd_buf[0] = '\0';
     cmd_pos = 0;
+    cmd_cursor = 0;
+    history_view = history_count;
     shell_prompt();
 
-    /* 从串口读取输入（轮询方式） */
+    /* 从串口读取输入（轮询方式�?*/
     while (1)
     {
-        /* 检查键盘输入 — 通过串口端口 0x3F8 读取 */
-        /* 简化：使用 serial_read 如果可用，否则用键盘缓冲区 */
+        /* 检查键盘输�?�?通过串口端口 0x3F8 读取 */
+        /* 简化：使用 serial_read 如果可用，否则用键盘缓冲�?*/
         /* Phase 3 先用串口回显模式 */
 
-        /* 先把串口数据灌入输入缓冲区 */
-        if ((inb(0x3FD) & 0x01))
-        {
-            char sc = inb(0x3F8);
-            input_putc(sc);
-        }
-        /* 从统一输入缓冲区读取 */
-        char c = input_getc();
+        /* 先把串口数据灌入输入缓冲�?*/
+        /* 从统一输入缓冲区读取；同时把串口数据灌入输入缓冲区 */
+        char c = shell_read_input_char(0);
 
         if (!c)
         {
@@ -613,6 +772,7 @@ void shell_run(void)
         {
             cmd_buf[cmd_pos] = '\0';
             print("\n");
+            shell_save_history();
 
             /* 解析命令 */
             char *argv[MAX_ARGS];
@@ -721,22 +881,36 @@ void shell_run(void)
             }
 
             cmd_pos = 0;
+            cmd_cursor = 0;
             cmd_buf[0] = '\0';
+            history_view = history_count;
             shell_prompt();
+        }
+        else if (c == 0x1B)
+        {
+            char c2 = shell_read_input_char(10000);
+            char c3 = shell_read_input_char(10000);
+            if (c2 == '[' || c2 == 'O')
+            {
+                if (c3 == 'A')
+                    shell_history_prev();
+                else if (c3 == 'B')
+                    shell_history_next();
+                else if (c3 == 'C')
+                    shell_move_cursor_right();
+                else if (c3 == 'D')
+                    shell_move_cursor_left();
+            }
         }
         else if (c == '\t')
         {
             shell_complete();
+            cmd_cursor = cmd_pos;
         }
         else if (c == 0x7F || c == 0x08)
         {
-            /* 退格 */
-            if (cmd_pos > 0)
-            {
-                cmd_pos--;
-                cmd_buf[cmd_pos] = '\0';
-                print("\b \b");
-            }
+            /* 退�?*/
+            shell_backspace();
         }
         else if (c >= ' ')
         {

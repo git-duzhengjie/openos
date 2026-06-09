@@ -68,9 +68,25 @@ static void keyboard_handler(registers_t *regs) {
         return;
     }
 
-    /* 扩展键 make 码（箭头等），目前不处理输入 */
+    /* 扩展键 make 码（方向键等）：转换为 ANSI 转义序列 ESC [ A/B/C/D */
     if (kb_state == 1) {
         kb_state = 0;
+        switch (sc) {
+            case 0x48: /* Up */
+                input_putc(0x1B); input_putc('['); input_putc('A');
+                break;
+            case 0x50: /* Down */
+                input_putc(0x1B); input_putc('['); input_putc('B');
+                break;
+            case 0x4D: /* Right */
+                input_putc(0x1B); input_putc('['); input_putc('C');
+                break;
+            case 0x4B: /* Left */
+                input_putc(0x1B); input_putc('['); input_putc('D');
+                break;
+            default:
+                break;
+        }
         return;
     }
 
