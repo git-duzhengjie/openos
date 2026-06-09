@@ -674,19 +674,47 @@ static void shell_complete(void)
 static int split_args(char *buf, char *argv[], int max)
 {
     int argc = 0;
-    int i = 0;
-    while (buf[i] && argc < max)
+    char *src = buf;
+    char *dst = buf;
+
+    while (*src && argc < max)
     {
-        while (buf[i] == ' ')
-            i++;
-        if (!buf[i])
+        char quote = '\0';
+
+        while (*src == ' ' || *src == '\t')
+            src++;
+        if (!*src)
             break;
-        argv[argc++] = &buf[i];
-        while (buf[i] && buf[i] != ' ')
-            i++;
-        if (buf[i])
-            buf[i++] = '\0';
+
+        argv[argc++] = dst;
+        while (*src)
+        {
+            if (quote)
+            {
+                if (*src == quote)
+                {
+                    quote = '\0';
+                    src++;
+                }
+                else
+                    *dst++ = *src++;
+            }
+            else if (*src == '\'' || *src == '"')
+            {
+                quote = *src++;
+            }
+            else if (*src == ' ' || *src == '\t')
+            {
+                src++;
+                break;
+            }
+            else
+                *dst++ = *src++;
+        }
+
+        *dst++ = '\0';
     }
+
     return argc;
 }
 
@@ -942,6 +970,11 @@ static void cmd_write(const char *path, const char *data)
 {
     char full[MAX_PATH];
     make_path(path, full);
+
+    /* vfs_open() does not implement O_TRUNC yet, so recreate the file to
+     * make write behave as an overwrite command instead of leaving tail data. */
+    vfs_unlink(full);
+
     int fd = vfs_open(full, O_CREAT | O_RDWR, 0644);
     if (fd < 0)
     {
@@ -951,7 +984,8 @@ static void cmd_write(const char *path, const char *data)
     int len = 0;
     while (data[len])
         len++;
-    vfs_write(fd, data, len);
+    if (len > 0 && vfs_write(fd, data, len) < 0)
+        print("write: failed\n");
     vfs_close(fd);
 }
 
@@ -1161,7 +1195,20 @@ void shell_run(void)
                 else if (strcmp(cmd, "write") == 0)
                 {
                     if (argc > 2)
-                        cmd_write(argv[1], argv[2]);
+                    {
+                        char text_buf[256];
+                        int pos = 0;
+                        for (int i = 2; i < argc; i++)
+                        {
+                            if (i > 2 && pos < 255)
+                                text_buf[pos++] = ' ';
+                            int k = 0;
+                            while (argv[i][k] && pos < 255)
+                                text_buf[pos++] = argv[i][k++];
+                        }
+                        text_buf[pos] = '\0';
+                        cmd_write(argv[1], text_buf);
+                    }
                     else
                         print("write: need file and text\n");
                 }
