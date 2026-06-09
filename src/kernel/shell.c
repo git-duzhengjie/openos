@@ -41,6 +41,134 @@ static void shell_prompt(void)
     print("$ ");
 }
 
+static const char *builtin_commands[] = {
+    "ls",
+    "cat",
+    "mkdir",
+    "touch",
+    "rm",
+    "write",
+    "echo",
+    "cd",
+    "pwd",
+    "help",
+    "clear",
+    "yield",
+    "exec"
+};
+
+#define BUILTIN_COMMAND_COUNT (sizeof(builtin_commands) / sizeof(builtin_commands[0]))
+
+static int shell_starts_with(const char *s, const char *prefix, int prefix_len)
+{
+    for (int i = 0; i < prefix_len; i++)
+    {
+        if (s[i] != prefix[i] || s[i] == '\0')
+            return 0;
+    }
+    return 1;
+}
+
+static int shell_common_prefix_len(const char *a, const char *b)
+{
+    int i = 0;
+    while (a[i] && b[i] && a[i] == b[i])
+        i++;
+    return i;
+}
+
+static int shell_is_command_completion_context(void)
+{
+    for (int i = 0; i < cmd_pos; i++)
+    {
+        if (cmd_buf[i] == ' ')
+            return 0;
+    }
+    return 1;
+}
+
+static void shell_append_char(char c)
+{
+    if (cmd_pos < CMD_BUF_SIZE - 1)
+    {
+        cmd_buf[cmd_pos++] = c;
+        cmd_buf[cmd_pos] = '\0';
+        char echo[2] = {c, '\0'};
+        print(echo);
+    }
+}
+
+static void shell_redraw_input_line(void)
+{
+    shell_prompt();
+    print(cmd_buf);
+}
+
+static void shell_complete_command(void)
+{
+    const char *first_match = NULL;
+    int match_count = 0;
+    int common_len = 0;
+
+    if (!shell_is_command_completion_context())
+        return;
+
+    cmd_buf[cmd_pos] = '\0';
+
+    for (int i = 0; i < (int)BUILTIN_COMMAND_COUNT; i++)
+    {
+        const char *name = builtin_commands[i];
+        if (shell_starts_with(name, cmd_buf, cmd_pos))
+        {
+            if (match_count == 0)
+            {
+                first_match = name;
+                common_len = (int)strlen(name);
+            }
+            else
+            {
+                int len = shell_common_prefix_len(first_match, name);
+                if (len < common_len)
+                    common_len = len;
+            }
+            match_count++;
+        }
+    }
+
+    if (match_count == 0)
+        return;
+
+    if (match_count == 1)
+    {
+        int len = (int)strlen(first_match);
+        for (int i = cmd_pos; i < len; i++)
+            shell_append_char(first_match[i]);
+        if (cmd_pos < CMD_BUF_SIZE - 1)
+            shell_append_char(' ');
+        return;
+    }
+
+    if (common_len > cmd_pos)
+    {
+        for (int i = cmd_pos; i < common_len; i++)
+            shell_append_char(first_match[i]);
+        return;
+    }
+
+    print("\n");
+    for (int i = 0; i < (int)BUILTIN_COMMAND_COUNT; i++)
+    {
+        const char *name = builtin_commands[i];
+        if (shell_starts_with(name, cmd_buf, cmd_pos))
+        {
+            print(name);
+            print("  ");
+        }
+    }
+    print("\n");
+    shell_redraw_input_line();
+}
+
 static int split_args(char *buf, char *argv[], int max)
 {
     int argc = 0;
@@ -288,32 +416,6 @@ void shell_run(void)
             char sc = inb(0x3F8);
             input_putc(sc);
         }
-        /*读键盘硬件端口 */
-        if ((inb(0x64) & 0x01))
-        {
-            uint8_t sc = inb(0x60);
-            if (!(sc & 0x80))
-            {
-                char kc = 0;
-                if (sc >= 0x02 && sc <= 0x0B)
-                    kc = '1' + (sc - 0x02);
-                else if (sc == 0x0E)
-                    kc = '\b';
-                else if (sc == 0x1C)
-                    kc = '\n';
-                else if (sc >= 0x10 && sc <= 0x19)
-                    kc = 'q' + (sc - 0x10);
-                else if (sc >= 0x1E && sc <= 0x26)
-                    kc = 'a' + (sc - 0x1E);
-                else if (sc >= 0x2C && sc <= 0x32)
-                    kc = 'z' + (sc - 0x2C);
-                else if (sc == 0x39)
-                    kc = ' ';
-                if (kc != 0)
-                    input_putc(kc);
-            }
-            outb(0x20, 0x20);
-        }
         /* 从统一输入缓冲区读取 */
         char c = input_getc();
 
@@ -438,6 +540,10 @@ void shell_run(void)
             cmd_buf[0] = '\0';
             shell_prompt();
         }
+        else if (c == '\t')
+        {
+            shell_complete_command();
+        }
         else if (c == 0x7F || c == 0x08)
         {
             /* 退格 */
@@ -448,12 +554,9 @@ void shell_run(void)
                 print("\b \b");
             }
         }
-        else if (c >= ' ' && cmd_pos < CMD_BUF_SIZE - 1)
+        else if (c >= ' ')
         {
-            cmd_buf[cmd_pos++] = c;
-            /* 回显 */
-            char echo[2] = {c, '\0'};
-            print(echo);
+            shell_append_char(c);
         }
     }
 }
