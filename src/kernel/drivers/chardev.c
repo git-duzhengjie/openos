@@ -7,6 +7,7 @@
 #include "../include/input_buffer.h"
 #include "../include/vga.h"
 #include "../include/serial.h"
+#include "../include/devmgr.h"
 #include "../fs/vfs.h"
 
 static chardev_t chardev_table[CHARDEV_MAX];
@@ -47,6 +48,7 @@ int chardev_register(const char *name, uint32_t major, uint32_t minor,
     dev->ops = ops;
     dev->private_data = private_data;
     dev->ref_count = 0;
+    devmgr_register(name, "platform", DEVMGR_TYPE_CHAR, major, minor, 0, dev);
     return 0;
 }
 
@@ -57,6 +59,7 @@ int chardev_unregister(const char *name) {
     for (i = 0; i < chardev_table_count; i++) {
         if (strcmp(chardev_table[i].name, name) == 0) {
             if (chardev_table[i].ref_count != 0) return -1;
+            devmgr_unregister(chardev_table[i].name);
             if (i + 1 < chardev_table_count) {
                 memcpy(&chardev_table[i], &chardev_table[chardev_table_count - 1], sizeof(chardev_t));
             }

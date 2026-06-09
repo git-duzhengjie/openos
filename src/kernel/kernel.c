@@ -13,6 +13,7 @@
 #include "../fs/ramfs.h"
 #include "../fs/tmpfs.h"
 #include "../net/net.h"
+#include "devmgr.h"
 #include "../shell.h"
 #include "heap.h"
 #include "keyboard.h"
@@ -128,6 +129,10 @@ void kernel_main(void) {
     ramfs_init();
     tmpfs_init();
     serial_write("[OK] VFS + ramfs + tmpfs\n");
+
+    /* 初始化设备管理器 */
+    devmgr_init();
+    serial_write("[OK] DEVMGR\n");
 
     /* 初始化字符设备框架与 /dev 节点 */
     chardev_init();

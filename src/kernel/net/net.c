@@ -1,6 +1,7 @@
 #include "net.h"
 #include "string.h"
 #include "vga.h"
+#include "devmgr.h"
 
 #define ETH_TYPE_IPV4 0x0800
 #define ETH_TYPE_ARP  0x0806
@@ -510,6 +511,7 @@ void net_input(net_device_t *dev, const uint8_t *frame, uint16_t len) {
 int net_register_device(net_device_t *dev) {
     if (!dev) return -1;
     if (!default_dev) default_dev = dev;
+    devmgr_register(dev->name, "net", DEVMGR_TYPE_NET, 0, 0, 0, dev);
     return 0;
 }
 

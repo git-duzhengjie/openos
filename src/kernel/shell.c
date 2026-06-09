@@ -14,6 +14,7 @@
 #include "../fs/ramfs.h"
 #include "../fs/tmpfs.h"
 #include "../net/net.h"
+#include "devmgr.h"
 #include "ext4.h"
 #include "include/io.h"
 #ifndef NULL
@@ -1045,6 +1046,9 @@ static void cmd_help(void)
     print("  mount_tmpfs [path] - Mount tmpfs memory filesystem (default /tmp)\n");
     print("  netinfo         - Show network stack information\n");
     print("  ping_self       - Send ICMP echo to loopback network device\n");
+    print("  devices         - List registered kernel devices\n");
+    print("  hotplug         - Show pending hotplug events\n");
+    print("  hotplug_poll    - Pop one hotplug event from queue\n");
     print("  help            - Show this help\n");
     print("  clear           - Clear screen\n");
     print("  yield           - Yield CPU\n");
@@ -1249,6 +1253,30 @@ void shell_run(void)
                         print("ping_self: failed\n");
                     else
                         print("ping_self: ok\n");
+                }
+                else if (strcmp(cmd, "devices") == 0)
+                {
+                    devmgr_print_devices();
+                }
+                else if (strcmp(cmd, "hotplug") == 0)
+                {
+                    devmgr_print_hotplug_events();
+                }
+                else if (strcmp(cmd, "hotplug_poll") == 0)
+                {
+                    hotplug_event_t event;
+                    if (devmgr_poll_event(&event) < 0)
+                    {
+                        print("hotplug_poll: no event\n");
+                    }
+                    else
+                    {
+                        print("hotplug_poll: ");
+                        print(devmgr_action_name(event.action));
+                        print(" ");
+                        print(event.name);
+                        print("\n");
+                    }
                 }
                 else if (strcmp(cmd, "help") == 0)
                 {

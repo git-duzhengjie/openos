@@ -6,6 +6,7 @@
 #include "../include/string.h"
 #include "../include/serial.h"
 #include "../include/pmm.h"
+#include "../include/devmgr.h"
 #include "../fs/vfs.h"
 
 static blockdev_t blockdev_table[BLOCKDEV_MAX];
@@ -51,6 +52,7 @@ int blockdev_register(const char *name, uint32_t major, uint32_t minor,
     dev->ops = ops;
     dev->private_data = private_data;
     dev->ref_count = 0;
+    devmgr_register(name, "platform", DEVMGR_TYPE_BLOCK, major, minor, 0, dev);
     return 0;
 }
 
@@ -61,6 +63,7 @@ int blockdev_unregister(const char *name) {
     for (i = 0; i < blockdev_table_count; i++) {
         if (strcmp(blockdev_table[i].name, name) == 0) {
             if (blockdev_table[i].ref_count != 0) return -1;
+            devmgr_unregister(blockdev_table[i].name);
             if (i + 1 < blockdev_table_count) {
                 memcpy(&blockdev_table[i], &blockdev_table[blockdev_table_count - 1], sizeof(blockdev_t));
             }
