@@ -44,6 +44,7 @@ static const char scancode_ascii_shift[] = {
  */
 static int kb_state = 0;
 static int shift_pressed = 0;
+static int ctrl_pressed = 0;
 
 static void keyboard_handler(registers_t *regs) {
     uint8_t sc;
@@ -60,29 +61,49 @@ static void keyboard_handler(registers_t *regs) {
 
     /* Set 1 断码：最高位为1表示键释放，直接忽略 */
     if (sc & 0x80) {
-        /* Shift 释放 */
+        /* Shift / Ctrl 释放 */
         if (sc == 0xAA || sc == 0xB6) {
             shift_pressed = 0;
+        } else if (sc == 0x9D) {
+            ctrl_pressed = 0;
         }
         kb_state = 0;
         return;
     }
 
-    /* 扩展键 make 码（方向键等）：转换为 ANSI 转义序列 ESC [ A/B/C/D */
+    /* 扩展键 make 码（方向键、编辑键等）：转换为 ANSI 转义序列 */
     if (kb_state == 1) {
         kb_state = 0;
         switch (sc) {
-            case 0x48: /* Up */
+            case 0x48: /* Up    -> ESC [ A */
                 input_putc(0x1B); input_putc('['); input_putc('A');
                 break;
-            case 0x50: /* Down */
+            case 0x50: /* Down  -> ESC [ B */
                 input_putc(0x1B); input_putc('['); input_putc('B');
                 break;
-            case 0x4D: /* Right */
+            case 0x4D: /* Right -> ESC [ C */
                 input_putc(0x1B); input_putc('['); input_putc('C');
                 break;
-            case 0x4B: /* Left */
+            case 0x4B: /* Left  -> ESC [ D */
                 input_putc(0x1B); input_putc('['); input_putc('D');
+                break;
+            case 0x52: /* Insert  -> ESC [ 2 ~ */
+                input_putc(0x1B); input_putc('['); input_putc('2'); input_putc('~');
+                break;
+            case 0x53: /* Delete  -> ESC [ 3 ~ */
+                input_putc(0x1B); input_putc('['); input_putc('3'); input_putc('~');
+                break;
+            case 0x47: /* Home    -> ESC [ H */
+                input_putc(0x1B); input_putc('['); input_putc('H');
+                break;
+            case 0x4F: /* End     -> ESC [ F */
+                input_putc(0x1B); input_putc('['); input_putc('F');
+                break;
+            case 0x49: /* Page Up   -> ESC [ 5 ~ */
+                input_putc(0x1B); input_putc('['); input_putc('5'); input_putc('~');
+                break;
+            case 0x51: /* Page Down -> ESC [ 6 ~ */
+                input_putc(0x1B); input_putc('['); input_putc('6'); input_putc('~');
                 break;
             default:
                 break;
@@ -95,10 +116,19 @@ static void keyboard_handler(registers_t *regs) {
         shift_pressed = 1;
         return;
     }
+    if (sc == 0x1D) {
+        ctrl_pressed = 1;
+        return;
+    }
     if (sc < sizeof(scancode_ascii)) {
         c = shift_pressed ? scancode_ascii_shift[sc] : scancode_ascii[sc];
         if (c) {
-            input_putc(c);
+            if (ctrl_pressed && c >= 'a' && c <= 'z')
+                input_putc(c - 'a' + 1);
+            else if (ctrl_pressed && c >= 'A' && c <= 'Z')
+                input_putc(c - 'A' + 1);
+            else
+                input_putc(c);
         }
     }
 }

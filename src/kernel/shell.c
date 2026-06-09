@@ -167,6 +167,11 @@ static void shell_save_history(void)
 {
     if (cmd_pos <= 0)
         return;
+    if (history_count > 0 && strcmp(history[history_count - 1], cmd_buf) == 0)
+    {
+        history_view = history_count;
+        return;
+    }
     if (history_count < SHELL_HISTORY_SIZE) {
         shell_copy_str(history[history_count], cmd_buf);
         history_count++;
@@ -174,6 +179,60 @@ static void shell_save_history(void)
         for (int i = 1; i < SHELL_HISTORY_SIZE; i++)
             shell_copy_str(history[i - 1], history[i]);
         shell_copy_str(history[SHELL_HISTORY_SIZE - 1], cmd_buf);
+    }
+    history_view = history_count;
+}
+
+static void shell_history_save_file(void)
+{
+    /* 当前 VFS 尚未完整实现 O_TRUNC，先删除旧历史再重建，避免旧内容残留 */
+    vfs_unlink("/.shell_history");
+    int fd = vfs_open("/.shell_history", O_CREAT | O_WRONLY, 0644);
+    if (fd < 0)
+        return;
+    for (int h = 0; h < history_count; h++)
+    {
+        int len = (int)strlen(history[h]);
+        if (len > 0)
+        {
+            vfs_write(fd, history[h], len);
+            vfs_write(fd, "\n", 1);
+        }
+    }
+    vfs_close(fd);
+}
+
+static void shell_history_load_file(void)
+{
+    int fd = vfs_open("/.shell_history", O_RDONLY, 0);
+    if (fd < 0)
+        return;
+
+    char buf[1024];
+    int n = vfs_read(fd, buf, sizeof(buf) - 1);
+    vfs_close(fd);
+    if (n <= 0)
+        return;
+    buf[n] = '\0';
+
+    history_count = 0;
+    int line_start = 0;
+    for (int i = 0; i <= n && history_count < SHELL_HISTORY_SIZE; i++)
+    {
+        if (buf[i] == '\n' || buf[i] == '\0')
+        {
+            int len = i - line_start;
+            if (len > 0)
+            {
+                if (len >= CMD_BUF_SIZE)
+                    len = CMD_BUF_SIZE - 1;
+                for (int j = 0; j < len; j++)
+                    history[history_count][j] = buf[line_start + j];
+                history[history_count][len] = '\0';
+                history_count++;
+            }
+            line_start = i + 1;
+        }
     }
     history_view = history_count;
 }
@@ -224,6 +283,68 @@ static void shell_move_cursor_right(void)
     }
     vga_set_xy(vx, vy);
     cmd_cursor++;
+}
+
+/* 移动光标到行首（Home）*/
+static void shell_move_cursor_home(void)
+{
+    if (cmd_cursor <= 0)
+        return;
+    int vx, vy;
+    vga_get_xy(&vx, &vy);
+    int total_pos = vy * VGA_WIDTH + vx;
+    int prompt_end = total_pos - cmd_cursor;
+    vga_set_xy(prompt_end % VGA_WIDTH, prompt_end / VGA_WIDTH);
+    cmd_cursor = 0;
+}
+
+/* 移动光标到行尾（End）*/
+static void shell_move_cursor_end(void)
+{
+    if (cmd_cursor >= cmd_pos)
+        return;
+    int vx, vy;
+    vga_get_xy(&vx, &vy);
+    int total_pos = vy * VGA_WIDTH + vx;
+    int prompt_end = total_pos - cmd_cursor;
+    int target = prompt_end + cmd_pos;
+    vga_set_xy(target % VGA_WIDTH, target / VGA_WIDTH);
+    cmd_cursor = cmd_pos;
+}
+
+/* 删除光标处的字符（Delete 键）*/
+static void shell_delete_char(void)
+{
+    if (cmd_cursor >= cmd_pos)
+        return;
+
+    int vx, vy;
+    vga_get_xy(&vx, &vy);
+    int original_total = vy * VGA_WIDTH + vx;
+
+    for (int i = cmd_cursor; i < cmd_pos - 1; i++)
+        cmd_buf[i] = cmd_buf[i + 1];
+    cmd_pos--;
+    cmd_buf[cmd_pos] = '\0';
+
+    /* 从光标处重绘剩余内容，并用空格清掉旧尾字符 */
+    print(&cmd_buf[cmd_cursor]);
+    print(" ");
+
+    /* 回到删除前的光标位置 */
+    vga_set_xy(original_total % VGA_WIDTH, original_total / VGA_WIDTH);
+}
+
+/* 取消当前输入行（Ctrl+C）*/
+static void shell_cancel_line(void)
+{
+    shell_move_cursor_end();
+    print("^C\n");
+    cmd_pos = 0;
+    cmd_cursor = 0;
+    cmd_buf[0] = '\0';
+    history_view = history_count;
+    shell_prompt();
 }
 
 static void shell_history_prev(void)
@@ -349,8 +470,9 @@ static void shell_complete_path(void)
     int arg_start = last_space + 1;
     int arg_len = cmd_pos - arg_start;
 
-    /* 判断命令：cd / mkdir 只补目录 */
+    /* 根据命令类型过滤补全候选 */
     int only_dirs = 0;
+    int only_files = 0;
     if (last_space > 0)
     {
         char first_word[MAX_NAME];
@@ -363,6 +485,9 @@ static void shell_complete_path(void)
         first_word[wi] = '\0';
         if (strcmp(first_word, "cd") == 0 || strcmp(first_word, "mkdir") == 0)
             only_dirs = 1;
+        else if (strcmp(first_word, "cat") == 0 || strcmp(first_word, "rm") == 0 ||
+                 strcmp(first_word, "write") == 0 || strcmp(first_word, "exec") == 0)
+            only_files = 1;
     }
 
     /* 提取当前参数作为前缀 */
@@ -446,7 +571,7 @@ static void shell_complete_path(void)
     while (child && match_count < MAX_PATH_MATCHES)
     {
         int is_dir = child->inode && (child->inode->mode & 0xF000) == FS_DIR;
-        if (!only_dirs || is_dir)
+        if ((!only_dirs || is_dir) && (!only_files || !is_dir))
         {
             if (shell_starts_with(child->name, match_prefix, match_prefix_len))
             {
@@ -494,7 +619,7 @@ static void shell_complete_path(void)
         return;
     }
 
-    /* 公共前缀等于已输入内�?�?列出所有候�?*/
+    /* 公共前缀等于已输入内容：列出所有候选 */
     print("\n");
     for (int i = 0; i < match_count; i++)
     {
@@ -502,8 +627,11 @@ static void shell_complete_path(void)
         if (match_is_dir[i])
             print("/");
         print("  ");
+        if ((i + 1) % 4 == 0)
+            print("\n");
     }
-    print("\n");
+    if (match_count % 4 != 0)
+        print("\n");
     shell_redraw_input_line();
 }
 
@@ -748,6 +876,7 @@ void shell_run(void)
     cmd_buf[0] = '\0';
     cmd_pos = 0;
     cmd_cursor = 0;
+    shell_history_load_file();
     history_view = history_count;
     shell_prompt();
 
@@ -773,6 +902,7 @@ void shell_run(void)
             cmd_buf[cmd_pos] = '\0';
             print("\n");
             shell_save_history();
+            shell_history_save_file();
 
             /* 解析命令 */
             char *argv[MAX_ARGS];
@@ -900,6 +1030,20 @@ void shell_run(void)
                     shell_move_cursor_right();
                 else if (c3 == 'D')
                     shell_move_cursor_left();
+                else if (c3 == 'H')
+                    shell_move_cursor_home();
+                else if (c3 == 'F')
+                    shell_move_cursor_end();
+                else if (c3 == '1' || c3 == '3' || c3 == '4' || c3 == '7' || c3 == '8')
+                {
+                    char c4 = shell_read_input_char(10000);
+                    if ((c3 == '1' || c3 == '7') && c4 == '~')
+                        shell_move_cursor_home();
+                    else if ((c3 == '4' || c3 == '8') && c4 == '~')
+                        shell_move_cursor_end();
+                    else if (c3 == '3' && c4 == '~')
+                        shell_delete_char();
+                }
             }
         }
         else if (c == '\t')
@@ -907,9 +1051,20 @@ void shell_run(void)
             shell_complete();
             cmd_cursor = cmd_pos;
         }
+        else if (c == 0x01)  /* Ctrl+A - 跳转到行首 */
+        {
+            shell_move_cursor_home();
+        }
+        else if (c == 0x05)  /* Ctrl+E - 跳转到行尾 */
+        {
+            shell_move_cursor_end();
+        }
+        else if (c == 0x03)  /* Ctrl+C - 取消当前行 */
+        {
+            shell_cancel_line();
+        }
         else if (c == 0x7F || c == 0x08)
         {
-            /* 退�?*/
             shell_backspace();
         }
         else if (c >= ' ')
