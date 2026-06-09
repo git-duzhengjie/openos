@@ -137,6 +137,11 @@ gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
+    -I $SRC/include -I $SRC/fs \
+    -c $SRC/fs/exfat.c -o $BUILD/exfat.o
+
+gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
     -I $SRC/include \
     -c $SRC/shell.c -o $BUILD/shell.o
 
@@ -169,6 +174,7 @@ ld -m elf_i386 -T $SRC/linker.ld \
     $BUILD/elf_loader.o \
     $BUILD/vfs.o \
     $BUILD/ramfs.o \
+    $BUILD/exfat.o \
     $BUILD/shell.o
 
 objcopy -O binary $BUILD/kernel.elf $BUILD/kernel.bin

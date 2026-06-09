@@ -363,6 +363,22 @@ static dentry_t *create_dentry_under(dentry_t *parent, const char *name, uint32_
     return d;
 }
 
+dentry_t *vfs_create_node_under(dentry_t *parent, const char *name,
+                                uint32_t mode, file_ops_t *ops,
+                                void *fs_data, uint32_t size) {
+    dentry_t *d;
+
+    if (!parent || !name || !name[0]) return NULL;
+    d = create_dentry_under(parent, name, mode);
+    if (!d || !d->inode) return NULL;
+
+    if (ops) d->inode->ops = ops;
+    d->inode->fs_data = fs_data;
+    d->inode->size = size;
+    d->inode->fs_type = mode & 0xF000;
+    return d;
+}
+
 
 /* ---- VFS 初始化 ---- */
 void vfs_init(void) {

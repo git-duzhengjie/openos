@@ -143,6 +143,11 @@ int    vfs_umount(const char *path);
 /* 路径解析 */
 dentry_t *vfs_path_lookup(const char *path);
 
+/* 文件系统驱动内部辅助：在指定目录项下创建节点 */
+dentry_t *vfs_create_node_under(dentry_t *parent, const char *name,
+                                uint32_t mode, file_ops_t *ops,
+                                void *fs_data, uint32_t size);
+
 /* 进程文件描述符管理 */
 void   vfs_init_fds(void);                        /* 初始化当前进程的 fd 表 */
 file_t *vfs_get_file(int fd);                     /* 通过 fd 获取 file */
