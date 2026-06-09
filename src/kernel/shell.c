@@ -24,6 +24,32 @@ static void print(const char *s)
     serial_write(s);
 }
 
+static void shell_print_dec(int value)
+{
+    char buf[12];
+    int i = 0;
+
+    if (value == 0)
+    {
+        print("0");
+        return;
+    }
+
+    while (value > 0 && i < (int)(sizeof(buf) - 1))
+    {
+        buf[i++] = (char)('0' + (value % 10));
+        value /= 10;
+    }
+
+    while (i > 0)
+    {
+        char out[2];
+        out[0] = buf[--i];
+        out[1] = '\0';
+        print(out);
+    }
+}
+
 #define CMD_BUF_SIZE 256
 #define MAX_ARGS 16
 
@@ -57,6 +83,7 @@ static const char *builtin_commands[] = {
     "echo",
     "cd",
     "pwd",
+    "history",
     "help",
     "clear",
     "yield",
@@ -849,6 +876,26 @@ static void cmd_write(const char *path, const char *data)
     vfs_close(fd);
 }
 
+static void cmd_history(void)
+{
+    if (history_count <= 0)
+    {
+        print("history: no commands\n");
+        return;
+    }
+
+    for (int i = 0; i < history_count; i++)
+    {
+        print("  ");
+        if (i + 1 < 10)
+            print(" ");
+        shell_print_dec(i + 1);
+        print("  ");
+        print(history[i]);
+        print("\n");
+    }
+}
+
 static void cmd_help(void)
 {
     print("openos shell - Available commands:\n");
@@ -861,6 +908,7 @@ static void cmd_help(void)
     print("  echo <text>     - Print text\n");
     print("  cd [path]       - Change directory\n");
     print("  pwd             - Print working directory\n");
+    print("  history         - Show command history\n");
     print("  help            - Show this help\n");
     print("  clear           - Clear screen\n");
     print("  yield           - Yield CPU\n");
@@ -954,6 +1002,10 @@ void shell_run(void)
                 else if (strcmp(cmd, "pwd") == 0)
                 {
                     cmd_pwd();
+                }
+                else if (strcmp(cmd, "history") == 0)
+                {
+                    cmd_history();
                 }
                 else if (strcmp(cmd, "write") == 0)
                 {
