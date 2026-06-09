@@ -19,7 +19,7 @@ static int ramfs_read(file_t *f, void *buf, uint32_t count);
 static int ramfs_write(file_t *f, const void *buf, uint32_t count);
 static int ramfs_seek(file_t *f, int offset, int whence);
 
-static file_ops_t ramfs_file_ops = {
+file_ops_t ramfs_file_ops = {
     .open    = ramfs_open,
     .close   = ramfs_close,
     .read    = ramfs_read,

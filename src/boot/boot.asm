@@ -27,10 +27,59 @@ start:
     call print_string
 
     ; 从磁盘读取内核 (LBA模式)
-    mov ah, 0x42             ; INT 13h AH=42h - 扩展读
-    mov si, dap               ; 磁盘地址包
+    ; 内核约 160KB，需要多次读取 (每次 64 扇区 = 32KB)
+    
+    ; 第1次: LBA 1 → 0x8000 (32KB)
+    mov ah, 0x42
+    mov si, dap
     int 0x13
     jc disk_error
+    mov al, '.'
+    call print_char
+    
+    ; 第2次: LBA 65 → 0x10000 (32KB)
+    mov dword [dap + 8], 65      ; 起始 LBA
+    mov word [dap + 4], 0       ; offset = 0
+    mov word [dap + 6], 0x1000  ; segment = 0x1000 → 物理地址 0x10000
+    mov ah, 0x42
+    mov si, dap
+    int 0x13
+    jc disk_error
+    mov al, '.'
+    call print_char
+    
+    ; 第3次: LBA 129 → 0x18000 (32KB)
+    mov dword [dap + 8], 129
+    mov word [dap + 4], 0       ; offset = 0
+    mov word [dap + 6], 0x1800  ; segment = 0x1800
+    mov ah, 0x42
+    mov si, dap
+    int 0x13
+    jc disk_error
+    mov al, '.'
+    call print_char
+    
+    ; 第4次: LBA 193 → 0x20000 (32KB)
+    mov dword [dap + 8], 193
+    mov word [dap + 4], 0       ; offset = 0
+    mov word [dap + 6], 0x2000  ; segment = 0x2000
+    mov ah, 0x42
+    mov si, dap
+    int 0x13
+    jc disk_error
+    mov al, '.'
+    call print_char
+    
+    ; 第5次: LBA 257 → 0x28000 (32KB)
+    mov dword [dap + 8], 257
+    mov word [dap + 4], 0       ; offset = 0
+    mov word [dap + 6], 0x2800  ; segment = 0x2800
+    mov ah, 0x42
+    mov si, dap
+    int 0x13
+    jc disk_error
+    mov al, '.'
+    call print_char
 
     mov si, ok_msg
     call print_string
@@ -64,6 +113,11 @@ print_string:
 .done:
     ret
 
+print_char:
+    mov ah, 0x0e
+    int 0x10
+    ret
+
 ; ----------------------------------------------------------
 ; 错误处理
 ; ----------------------------------------------------------
@@ -85,7 +139,7 @@ error_msg   db 'ERROR: Disk read failed!', 0x0d, 0x0a, 0
 dap:
     db 0x10                  ; DAP大小
     db 0                     ; 保留
-    dw 0x40                  ; 扇区数 (32KB / 512字节)
+    dw 0x40                  ; 扇区数 (64 扇区 = 32KB)
     dw 0x8000                ; 缓冲区偏移
     dw 0                     ; 缓冲区段
     dq 1                     ; 起始LBA扇区

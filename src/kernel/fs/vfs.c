@@ -357,9 +357,25 @@ int vfs_close(int fd) {
 }
 
 int vfs_read(int fd, void *buf, uint32_t count) {
-    if (fd < 0 || fd >= MAX_FDS_TOTAL) return -1;
+    if (fd < 0 || fd >= MAX_FDS_TOTAL) {
+        serial_write("[VFS_READ] Invalid fd\n");
+        return -1;
+    }
     file_t *f = fd_table[fd];
-    if (!f || !f->ops || !f->ops->read) return -1;
+    if (!f) {
+        serial_write("[VFS_READ] No file for fd\n");
+        return -1;
+    }
+    if (!f->ops || !f->ops->read) {
+        serial_write("[VFS_READ] No ops/read: ops=0x");
+        serial_write_hex((uint32_t)f->ops);
+        if (f->ops) {
+            serial_write(" ops->read=0x");
+            serial_write_hex((uint32_t)f->ops->read);
+        }
+        serial_write("\n");
+        return -1;
+    }
     return f->ops->read(f, buf, count);
 }
 

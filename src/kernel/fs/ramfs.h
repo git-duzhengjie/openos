@@ -28,4 +28,7 @@ void ramfs_setup_inode(inode_t *ip, uint32_t mode);
 /* 获取 ramfs 文件系统类型 */
 fs_type_t *ramfs_get_fs_type(void);
 
+/* ramfs file ops (用于调试) */
+extern file_ops_t ramfs_file_ops;
+
 #endif /* KERNEL_FS_RAMFS_H */

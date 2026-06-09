@@ -38,8 +38,14 @@ static const char scancode_ascii_shift[] = {
     '2','3','0','.',0,0,0,0
 };
 
+/* 键盘状态机：
+ * 0 = 正常
+ * 1 = 收到 0xF0 (break code 前缀)，下一个字节是断开的键
+ * 2 = 收到 0xE0 (扩展键前缀)，下一个字节是 make/break
+ * 3 = 收到 0xE0 0xF0 (扩展键 break)，下一个字节是断开的键
+ */
+static int kb_state = 0;
 static int shift_pressed = 0;
-static int release_next = 0;
 
 static void keyboard_handler(registers_t *regs) {
     uint8_t sc;
@@ -48,22 +54,51 @@ static void keyboard_handler(registers_t *regs) {
     (void)regs;
     sc = inb(KEYBOARD_DATA_PORT);
 
-    if (sc == 0xE0) { release_next = 2; return; }
-    if (sc == 0xF0) { release_next = 1; return; }
+    /* 状态机处理扫描码 */
+    switch (kb_state) {
+        case 0:
+            /* 正常状态 */
+            if (sc == 0xE0) {
+                kb_state = 2;
+                return;
+            }
+            if (sc == 0xF0) {
+                kb_state = 1;
+                return;
+            }
+            /* make code */
+            if (sc == 0x2A || sc == 0x36) {
+                shift_pressed = 1;
+                return;
+            }
+            if (sc < sizeof(scancode_ascii)) {
+                c = shift_pressed ? scancode_ascii_shift[sc] : scancode_ascii[sc];
+                if (c) {
+                    input_putc(c);
+                }
+            }
+            return;
 
-    if (release_next == 1) {
-        if (sc == 0x2A || sc == 0x36) shift_pressed = 0;
-        release_next = 0;
-        return;
-    }
-    if (release_next == 2) { release_next = 0; return; }
+        case 1:
+            /* 收到 0xF0 后：键释放 */
+            if (sc == 0x2A || sc == 0x36) {
+                shift_pressed = 0;
+            }
+            /* 其他键释放：忽略 */
+            kb_state = 0;
+            return;
 
-    /* make code */
-    if (sc == 0x2A || sc == 0x36) { shift_pressed = 1; return; }
+        case 2:
+            /* 收到 0xE0 后：扩展键 make */
+            /* 扩展键目前不处理（箭头、小键盘等） */
+            kb_state = 0;
+            return;
 
-    if (sc < sizeof(scancode_ascii)) {
-        c = shift_pressed ? scancode_ascii_shift[sc] : scancode_ascii[sc];
-        if (c) input_putc(c);
+        case 3:
+            /* 收到 0xE0 0xF0 后：扩展键 break */
+            /* 扩展键释放：忽略 */
+            kb_state = 0;
+            return;
     }
 }
 

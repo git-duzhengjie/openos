@@ -22,6 +22,18 @@ nasm -f elf32 $SRC/sched/context_switch.asm -o $BUILD/context_switch.o
 nasm -f elf32 $SRC/timer_isr.asm -o $BUILD/timer_isr.o
 nasm -f elf32 $SRC/switch_to_user.asm -o $BUILD/switch_to_user.o
 
+# 编译用户程序并嵌入内核
+echo "[2.5] Building user program..."
+USR=src/user
+if [ -f $USR/hello.c ]; then
+    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+        -fno-stack-protector -fno-builtin \
+        -c $USR/hello.c -o $BUILD/hello.o
+    ld -m elf_i386 -T $USR/user.ld -o $BUILD/hello.elf $BUILD/hello.o
+    python3 _embed_elf.py $BUILD/hello.elf $SRC/include/embed_hello.h
+    echo "  Embedded: hello.elf"
+fi
+
 echo "[3/5] Compiling kernel C files..."
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
@@ -95,8 +107,13 @@ gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
-    -I $SRC/include \
+    -I $SRC/include -I $SRC/fs -I $SRC/proc \
     -c $SRC/proc/process.c -o $BUILD/process.o
+
+gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
+    -I $SRC/include -I $SRC/proc -I $SRC/fs \
+    -c $SRC/proc/elf_loader.c -o $BUILD/elf_loader.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
@@ -137,6 +154,7 @@ ld -m elf_i386 -T $SRC/linker.ld \
     $BUILD/input_buffer.o \
     $BUILD/usermode.o \
     $BUILD/process.o \
+    $BUILD/elf_loader.o \
     $BUILD/vfs.o \
     $BUILD/ramfs.o \
     $BUILD/shell.o

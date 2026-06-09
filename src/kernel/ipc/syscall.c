@@ -6,8 +6,11 @@
 #include "../include/process.h"
 #include "../include/vmm.h"
 #include "../include/pmm.h"
+#include "../include/serial.h"
+#include "../include/vga.h"
 #include "../proc/process.h"
 #include "../fs/vfs.h"
+#include <stddef.h>  /* NULL */
 
 /* VGA */
 #define VGA ((volatile uint16_t *)0xB8000)
@@ -43,24 +46,20 @@ uint32_t syscall_dispatch(uint32_t num,
         return sys_gettid();
 
     case SYS_WRITE:
-        /* 简化: 输出到 VGA (arg1=字符串, arg2=长度) */
-        {
-            const char *s = (const char *)a;
-            int len = (int)b;
+        /* fd=1: stdout, 输出到 VGA+串口 */
+        if ((int)a == 1) {
+            const char *s = (const char *)b;
+            int len = (int)c;
+            serial_write("[USER] ");
             for (int i = 0; i < len && s[i]; i++) {
-                int row = 23;
-                static int col = 40;
-                if (s[i] == '\n') {
-                    col = 40;
-                    row++;
-                } else {
-                    VGA[row * 80 + col] = (uint16_t)(s[i] | (0x0F << 8));
-                    col++;
-                    if (col >= 80) { col = 40; row++; }
-                }
+                serial_putc(s[i]);
+                vga_putc(s[i]);
             }
+            serial_write("\n");
+            return (uint32_t)len;
         }
-        return 0;
+        /* 其他 fd: vfs_write */
+        return (uint32_t)vfs_write((int)a, (const void *)b, (uint32_t)c);
 
     case SYS_READ:
         return 0;
@@ -128,6 +127,9 @@ uint32_t syscall_dispatch(uint32_t num,
 
     case SYS_RMDIR:
         return (uint32_t)vfs_rmdir((const char *)a);
+
+    case SYS_EXEC:
+        return (uint32_t)sys_exec((const char *)a, NULL);
 
     default:
         return 0xFFFFFFFF;

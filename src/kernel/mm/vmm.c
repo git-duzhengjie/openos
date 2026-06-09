@@ -124,8 +124,14 @@ void vmm_map_page(uint32_t vaddr, uint32_t paddr, uint32_t flags) {
         serial_write("[VMM] PDE[");
         serial_write_hex(pgd_idx);
         serial_write("] = ");
-        serial_write_hex(pt_phys | 3);
+        serial_write_hex(*pgd_rec);
         serial_write("\n");
+    } else {
+        /* PDE 已存在，确保权限包含用户位 */
+        if (flags & PTE_USER) {
+            uint32_t *pgd_rec = (uint32_t *)(0xFFFFF000 + (pgd_idx << 2));
+            *pgd_rec |= PTE_USER;  /* 设置 U/S 位 */
+        }
     }
     
     /* 通过递归映射访问页表并设置 PTE */

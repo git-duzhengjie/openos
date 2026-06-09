@@ -29,8 +29,8 @@ typedef struct {
     uint32_t fs;
     uint32_t es;
     uint32_t ds;
-    /* 通用寄存器 (pusha 顺序: EDI在栈顶最低地址) */
-    uint32_t edi, esi, ebp, esp_skip, ebx, edx, ecx, eax;
+    /* 通用寄存器 (pusha 顺序: EAX在栈顶最低地址, EDI最高地址) */
+    uint32_t eax, ecx, edx, ebx, esp_skip, ebp, esi, edi;
     /* ISR 宏压入 (int_no 在更低地址，err_code 在更高地址) */
     uint32_t int_no;        /* 中断号 */
     uint32_t err_code;      /* 错误码 (有错误码的异常) 或 0 */
@@ -38,8 +38,8 @@ typedef struct {
     uint32_t eip;
     uint32_t cs;
     uint32_t eflags;
-    uint32_t user_esp;
-    uint32_t user_ss;
+    uint32_t user_esp;      /* 仅特权级切换时有 */
+    uint32_t user_ss;       /* 仅特权级切换时有 */
 } __attribute__((packed)) registers_t;
 
 /* 中断处理函数类型 */

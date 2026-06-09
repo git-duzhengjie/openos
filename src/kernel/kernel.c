@@ -15,6 +15,7 @@
 #include "heap.h"
 #include "keyboard.h"
 #include "vga.h"
+#include "embed_hello.h"  /* 嵌入的用户程序 */
 
 /* 外部符号 */
 extern void gdt_init(void);
@@ -138,9 +139,31 @@ void kernel_main(void) {
             serial_write(buf);
             serial_write("\n");
         }
-        vfs_close(fd);
+    vfs_close(fd);
     }
     serial_write("[OK] VFS TEST\n");
+
+    /* 写入嵌入的用户程序到 ramfs */
+    fd = vfs_open("/hello.elf", O_CREAT | O_RDWR, 0755);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)hello_elf, hello_elf_size);
+        vfs_close(fd);
+        serial_write("[OK] Embedded hello.elf\n");
+
+    /* 调试：检查 ramfs_file_ops 内容 */
+    {
+        extern file_ops_t ramfs_file_ops;
+        serial_write("[DEBUG] ramfs_file_ops addr=0x");
+        serial_write_hex((uint32_t)&ramfs_file_ops);
+        serial_write(" open=0x");
+        serial_write_hex((uint32_t)ramfs_file_ops.open);
+        serial_write(" read=0x");
+        serial_write_hex((uint32_t)ramfs_file_ops.read);
+        serial_write(" write=0x");
+        serial_write_hex((uint32_t)ramfs_file_ops.write);
+        serial_write("\n");
+    }
+    }
 
     /* 初始化调度器 */
     sched_init();
@@ -166,6 +189,22 @@ void kernel_main(void) {
         thread_t *sh = thread_create(1, "shell", (uint32_t)shell_run, shell_stack);
         if (sh) sched_add_thread(sh);
     }
+
+    /* 自动测试 ELF 加载 - 已禁用，避免干扰键盘输入
+    {
+        extern int sys_exec(const char *path, char *const argv[]);
+        void test_exec_thread(void) {
+            serial_write("[TEST-EXEC] Calling sys_exec...\n");
+            int r = sys_exec("/hello.elf", (char *const[]){NULL});
+            serial_write("[TEST-EXEC] sys_exec returned: ");
+            serial_write_hex(r);
+            serial_write("\n");
+        }
+        uint32_t exec_stack = (uint32_t)pmm_alloc_page() + 4096;
+        thread_t *et = thread_create(1, "test_exec", (uint32_t)test_exec_thread, exec_stack);
+        if (et) sched_add_thread(et);
+    }
+    */
     
     /* 创建测试线程 - 暂时注释掉，避免输出干扰
     uint32_t stack_a = (uint32_t)pmm_alloc_page() + 4096;
@@ -178,7 +217,9 @@ void kernel_main(void) {
     if (tb) { sched_add_thread(tb);
     */
     
-    /* 启动调度 */
+    /* 启动调度 - sti 由 iret 自动完成，不提前开启 */
+    serial_write("[KERNEL] Starting scheduler and enabling interrupts...\n");
+    
     sched_start();
     
     /* sched_start 不应该返回 */
