@@ -5,6 +5,7 @@
 #include "../include/idt.h"
 #include "../include/serial.h"
 #include "../net/sync.h"
+#include "../net/bus.h"
 
 #ifndef NULL
 #define NULL ((void*)0)
@@ -121,6 +122,7 @@ void sched_start(void) {
 
 void sched_tick(void) {
     sync_tick(1);
+    bus_reliable_tick(1);
     if (!sched.current) return;
     sched.current_ticks++;
     if (sched.current_ticks >= 10) {

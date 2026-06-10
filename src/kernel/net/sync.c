@@ -1,6 +1,7 @@
 #include "sync.h"
 #include "net.h"
 #include "discovery.h"
+#include "bus.h"
 #include "string.h"
 #include "vga.h"
 #include "serial.h"
@@ -13,44 +14,8 @@
 #define SYNC_MSG_TASK_DONE "TASK_DONE"
 #define SYNC_MSG_ACK "ACK"
 #define SYNC_DEFAULT_TTL 300U
-#define SYNC_RETRY_INTERVAL 3U
-#define SYNC_RETRY_LIMIT 4U
 #define SYNC_MSG_ID_MAX 40
 #define SYNC_PACKET_MAX 512
-#define SYNC_SEEN_MAX 32
-#define SYNC_RETRY_PEER_MAX DISCOVERY_MAX_PEERS
-
-typedef enum sync_retry_state {
-    SYNC_RETRY_EMPTY = 0,
-    SYNC_RETRY_PENDING = 1,
-    SYNC_RETRY_ACKED = 2,
-    SYNC_RETRY_FAILED = 3
-} sync_retry_state_t;
-
-typedef struct sync_retry_peer_ack {
-    int used;
-    int acked;
-    char device_id[DISCOVERY_DEVICE_ID_MAX];
-} sync_retry_peer_ack_t;
-
-typedef struct sync_retry_entry {
-    sync_retry_state_t state;
-    char msg_id[SYNC_MSG_ID_MAX];
-    char packet[SYNC_PACKET_MAX];
-    uint16_t len;
-    uint32_t first_sent;
-    uint32_t last_sent;
-    uint32_t attempts;
-    uint32_t peer_count;
-    sync_retry_peer_ack_t peers[SYNC_RETRY_PEER_MAX];
-} sync_retry_entry_t;
-
-typedef struct sync_seen_entry {
-    int used;
-    char msg_id[SYNC_MSG_ID_MAX];
-    char from[DISCOVERY_DEVICE_ID_MAX];
-    uint32_t seen_at;
-} sync_seen_entry_t;
 
 static sync_item_t items[SYNC_MAX_ITEMS];
 static sync_task_t tasks[SYNC_MAX_TASKS];
@@ -58,14 +23,6 @@ static uint32_t sync_time;
 static uint32_t local_version_counter;
 static uint32_t local_task_counter;
 static uint32_t local_msg_counter;
-static uint32_t retry_sent_total;
-static uint32_t retry_acked_total;
-static uint32_t retry_peer_acked_total;
-static uint32_t retry_directed_total;
-static uint32_t retry_failed_total;
-static uint32_t duplicate_drop_total;
-static sync_retry_entry_t retry_queue[SYNC_RETRY_MAX];
-static sync_seen_entry_t seen_table[SYNC_SEEN_MAX];
 static int sync_ready;
 
 static void print_dec(uint32_t value) {
@@ -210,27 +167,15 @@ static int peer_is_trusted_id(const char *device_id) {
     return 0;
 }
 
-static int trusted_peer_ip_by_id(const char *device_id, uint32_t *out_ip) {
+static int src_is_trusted(uint32_t src_ip, const char *from) {
     uint32_t count = discovery_peer_count();
     uint32_t i;
-    if (!device_id || !device_id[0] || !out_ip) return 0;
+    if (!from || !from[0]) return 0;
     for (i = 0; i < count; i++) {
         const discovery_peer_t *peer = discovery_peer_get(i);
-        if (peer && strcmp(peer->device_id, device_id) == 0 && peer->auth_status == DISCOVERY_AUTH_TRUSTED) {
-            *out_ip = peer->ip;
-            return 1;
+        if (peer && strcmp(peer->device_id, from) == 0 && peer->auth_status == DISCOVERY_AUTH_TRUSTED) {
+            if (peer->ip == 0 || src_ip == 0 || peer->ip == src_ip) return 1;
         }
-    }
-    return 0;
-}
-
-static int src_is_trusted(uint32_t src_ip, const char *device_id) {
-    uint32_t count = discovery_peer_count();
-    uint32_t i;
-    if (!device_id || !device_id[0]) return 0;
-    for (i = 0; i < count; i++) {
-        const discovery_peer_t *peer = discovery_peer_get(i);
-        if (peer && peer->ip == src_ip && strcmp(peer->device_id, device_id) == 0 && peer->auth_status == DISCOVERY_AUTH_TRUSTED) return 1;
     }
     return 0;
 }
@@ -240,196 +185,10 @@ static void make_msg_id(char *out, uint32_t out_size) {
     uint32_t pos = 0;
     if (!out || out_size == 0) return;
     discovery_get_local_device_id(local_id, sizeof(local_id));
-    out[0] = '\0';
+    local_msg_counter++;
     append_str(out, out_size, &pos, local_id);
     append_str(out, out_size, &pos, "-");
-    append_u32(out, out_size, &pos, local_msg_counter++);
-}
-
-static int retry_find(const char *msg_id) {
-    int i;
-    if (!msg_id || !msg_id[0]) return -1;
-    for (i = 0; i < SYNC_RETRY_MAX; i++) {
-        if (retry_queue[i].state == SYNC_RETRY_PENDING && strcmp(retry_queue[i].msg_id, msg_id) == 0) return i;
-    }
-    return -1;
-}
-
-static int retry_alloc_slot(void) {
-    int oldest = 0;
-    int i;
-    for (i = 0; i < SYNC_RETRY_MAX; i++) {
-        if (retry_queue[i].state == SYNC_RETRY_EMPTY || retry_queue[i].state == SYNC_RETRY_ACKED || retry_queue[i].state == SYNC_RETRY_FAILED) return i;
-        if (retry_queue[i].first_sent < retry_queue[oldest].first_sent) oldest = i;
-    }
-    retry_failed_total++;
-    return oldest;
-}
-
-static uint32_t retry_pending_peer_count(const sync_retry_entry_t *entry) {
-    uint32_t pending = 0;
-    uint32_t i;
-    if (!entry) return 0;
-    for (i = 0; i < entry->peer_count && i < SYNC_RETRY_PEER_MAX; i++) {
-        if (entry->peers[i].used && !entry->peers[i].acked) pending++;
-    }
-    return pending;
-}
-
-static int retry_all_peers_acked(const sync_retry_entry_t *entry) {
-    return entry && entry->peer_count > 0 && retry_pending_peer_count(entry) == 0;
-}
-
-static void retry_add_expected_peer(sync_retry_entry_t *entry, const char *device_id) {
-    uint32_t i;
-    if (!entry || !device_id || !device_id[0]) return;
-    for (i = 0; i < entry->peer_count && i < SYNC_RETRY_PEER_MAX; i++) {
-        if (entry->peers[i].used && strcmp(entry->peers[i].device_id, device_id) == 0) return;
-    }
-    if (entry->peer_count >= SYNC_RETRY_PEER_MAX) return;
-    entry->peers[entry->peer_count].used = 1;
-    entry->peers[entry->peer_count].acked = 0;
-    safe_copy(entry->peers[entry->peer_count].device_id, sizeof(entry->peers[entry->peer_count].device_id), device_id);
-    entry->peer_count++;
-}
-
-static void retry_snapshot_expected_peers(sync_retry_entry_t *entry, const char *target) {
-    uint32_t count = discovery_peer_count();
-    uint32_t i;
-    if (!entry) return;
-    if (target && target[0]) {
-        if (peer_is_trusted_id(target)) retry_add_expected_peer(entry, target);
-        return;
-    }
-    for (i = 0; i < count; i++) {
-        const discovery_peer_t *peer = discovery_peer_get(i);
-        if (peer && peer->auth_status == DISCOVERY_AUTH_TRUSTED) retry_add_expected_peer(entry, peer->device_id);
-    }
-}
-
-static void retry_track(const char *msg_id, const char *packet, uint16_t len, const char *target) {
-    int slot;
-    if (!msg_id || !msg_id[0] || !packet || len == 0) return;
-    slot = retry_alloc_slot();
-    memset(&retry_queue[slot], 0, sizeof(retry_queue[slot]));
-    retry_queue[slot].state = SYNC_RETRY_PENDING;
-    safe_copy(retry_queue[slot].msg_id, sizeof(retry_queue[slot].msg_id), msg_id);
-    retry_snapshot_expected_peers(&retry_queue[slot], target);
-    if (retry_queue[slot].peer_count == 0) {
-        retry_queue[slot].state = SYNC_RETRY_ACKED;
-        retry_acked_total++;
-        return;
-    }
-    if (len >= sizeof(retry_queue[slot].packet)) len = sizeof(retry_queue[slot].packet) - 1;
-    memcpy(retry_queue[slot].packet, packet, len);
-    retry_queue[slot].packet[len] = '\0';
-    retry_queue[slot].len = len;
-    retry_queue[slot].first_sent = sync_time;
-    retry_queue[slot].last_sent = sync_time;
-    retry_queue[slot].attempts = 1;
-    retry_sent_total++;
-}
-
-static void retry_ack_peer(const char *msg_id, const char *from) {
-    int slot = retry_find(msg_id);
-    uint32_t i;
-    if (slot < 0 || !from || !from[0]) return;
-    for (i = 0; i < retry_queue[slot].peer_count && i < SYNC_RETRY_PEER_MAX; i++) {
-        if (retry_queue[slot].peers[i].used && strcmp(retry_queue[slot].peers[i].device_id, from) == 0) {
-            if (!retry_queue[slot].peers[i].acked) {
-                retry_queue[slot].peers[i].acked = 1;
-                retry_peer_acked_total++;
-                if (retry_all_peers_acked(&retry_queue[slot])) {
-                    retry_queue[slot].state = SYNC_RETRY_ACKED;
-                    retry_acked_total++;
-                }
-            }
-            return;
-        }
-    }
-}
-
-static int seen_before(const char *from, const char *msg_id) {
-    int oldest = 0;
-    int i;
-    if (!from || !from[0] || !msg_id || !msg_id[0]) return 0;
-    for (i = 0; i < SYNC_SEEN_MAX; i++) {
-        if (seen_table[i].used && strcmp(seen_table[i].from, from) == 0 && strcmp(seen_table[i].msg_id, msg_id) == 0) {
-            seen_table[i].seen_at = sync_time;
-            duplicate_drop_total++;
-            return 1;
-        }
-        if (!seen_table[i].used) oldest = i;
-        else if (seen_table[i].seen_at < seen_table[oldest].seen_at) oldest = i;
-    }
-    memset(&seen_table[oldest], 0, sizeof(seen_table[oldest]));
-    seen_table[oldest].used = 1;
-    safe_copy(seen_table[oldest].from, sizeof(seen_table[oldest].from), from);
-    safe_copy(seen_table[oldest].msg_id, sizeof(seen_table[oldest].msg_id), msg_id);
-    seen_table[oldest].seen_at = sync_time;
-    return 0;
-}
-
-static int send_raw_packet(const char *packet, uint16_t len) {
-    if (!sync_ready || !packet || len == 0) return -1;
-    return net_send_udp_broadcast(SYNC_PORT, SYNC_PORT, (const uint8_t *)packet, len);
-}
-
-static int send_unicast_packet(uint32_t dst_ip, const char *packet, uint16_t len) {
-    if (!sync_ready || !packet || len == 0) return -1;
-    return net_send_udp(dst_ip, SYNC_PORT, SYNC_PORT, (const uint8_t *)packet, len);
-}
-
-static int send_retry_packet_to_peer(const sync_retry_entry_t *entry, const char *peer_id) {
-    uint32_t peer_ip;
-    char packet[SYNC_PACKET_MAX];
-    char current_target[DISCOVERY_DEVICE_ID_MAX];
-    uint32_t pos;
-    uint16_t len;
-    if (!entry || !peer_id || !peer_id[0] || entry->len == 0) return -1;
-    if (!trusted_peer_ip_by_id(peer_id, &peer_ip)) return -1;
-    len = entry->len;
-    if (len >= sizeof(packet)) len = sizeof(packet) - 1;
-    memcpy(packet, entry->packet, len);
-    packet[len] = '\0';
-    current_target[0] = '\0';
-    get_field(packet, "target", current_target, sizeof(current_target));
-    if (current_target[0]) {
-        if (strcmp(current_target, peer_id) != 0) return -1;
-    } else {
-        pos = (uint32_t)strlen(packet);
-        if (pos > 0 && packet[pos - 1] != '\n') append_str(packet, sizeof(packet), &pos, "\n");
-        append_str(packet, sizeof(packet), &pos, "target=");
-        append_str(packet, sizeof(packet), &pos, peer_id);
-        append_str(packet, sizeof(packet), &pos, "\n");
-        len = (uint16_t)strlen(packet);
-    }
-    return send_unicast_packet(peer_ip, packet, len);
-}
-
-static uint32_t retry_send_pending_peers(const sync_retry_entry_t *entry) {
-    uint32_t sent = 0;
-    uint32_t i;
-    if (!entry) return 0;
-    for (i = 0; i < entry->peer_count && i < SYNC_RETRY_PEER_MAX; i++) {
-        if (!entry->peers[i].used || entry->peers[i].acked) continue;
-        if (send_retry_packet_to_peer(entry, entry->peers[i].device_id) == 0) sent++;
-    }
-    return sent;
-}
-
-static int send_ack(const char *ack_for, const char *to) {
-    char msg[SYNC_PACKET_MAX];
-    char local_id[DISCOVERY_DEVICE_ID_MAX];
-    uint32_t pos = 0;
-    if (!ack_for || !ack_for[0]) return -1;
-    discovery_get_local_device_id(local_id, sizeof(local_id));
-    append_str(msg, sizeof(msg), &pos, SYNC_PROTO "\n");
-    append_str(msg, sizeof(msg), &pos, "type="); append_str(msg, sizeof(msg), &pos, SYNC_MSG_ACK); append_str(msg, sizeof(msg), &pos, "\n");
-    append_str(msg, sizeof(msg), &pos, "from="); append_str(msg, sizeof(msg), &pos, local_id); append_str(msg, sizeof(msg), &pos, "\n");
-    append_str(msg, sizeof(msg), &pos, "ack_for="); append_str(msg, sizeof(msg), &pos, ack_for); append_str(msg, sizeof(msg), &pos, "\n");
-    if (to && to[0]) { append_str(msg, sizeof(msg), &pos, "target="); append_str(msg, sizeof(msg), &pos, to); append_str(msg, sizeof(msg), &pos, "\n"); }
-    return send_raw_packet(msg, (uint16_t)strlen(msg));
+    append_u32(out, out_size, &pos, local_msg_counter);
 }
 
 static int send_packet(const char *type, const char *key, const char *value,
@@ -460,9 +219,7 @@ static int send_packet(const char *type, const char *key, const char *value,
     if (version > 0) { append_str(msg, sizeof(msg), &pos, "version="); append_u32(msg, sizeof(msg), &pos, version); append_str(msg, sizeof(msg), &pos, "\n"); }
     if (state != SYNC_TASK_EMPTY) { append_str(msg, sizeof(msg), &pos, "state="); append_str(msg, sizeof(msg), &pos, task_state_name(state)); append_str(msg, sizeof(msg), &pos, "\n"); }
     len = (uint16_t)strlen(msg);
-    if (send_raw_packet(msg, len) < 0) return -1;
-    retry_track(msg_id, msg, len, target);
-    return 0;
+    return bus_reliable_send(SYNC_PORT, msg_id, msg, len, target);
 }
 
 static void apply_put(const char *from, const char *key, const char *value, uint32_t version) {
@@ -565,12 +322,12 @@ static void handle_sync_packet(uint32_t src_ip, const uint8_t *data, uint16_t le
         if (strcmp(target, local_id) != 0) return;
     }
     if (strcmp(type, SYNC_MSG_ACK) == 0) {
-        if (ack_for[0]) retry_ack_peer(ack_for, from);
+        if (ack_for[0]) bus_reliable_ack(SYNC_PORT, ack_for, from);
         return;
     }
     if (msg_id[0]) {
-        send_ack(msg_id, from);
-        if (seen_before(from, msg_id)) return;
+        bus_reliable_send_ack(SYNC_PORT, SYNC_PROTO, msg_id, from);
+        if (bus_reliable_seen_before(SYNC_PORT, from, msg_id)) return;
     }
     if (get_field(msg, "version", version_text, sizeof(version_text))) parse_u32(version_text, &version);
     key[0] = '\0'; value[0] = '\0'; task_id[0] = '\0'; title[0] = '\0'; payload[0] = '\0'; target[0] = '\0'; result[0] = '\0';
@@ -604,14 +361,6 @@ void sync_init(void) {
     local_version_counter = 1;
     local_task_counter = 1;
     local_msg_counter = 1;
-    retry_sent_total = 0;
-    retry_acked_total = 0;
-    retry_peer_acked_total = 0;
-    retry_directed_total = 0;
-    retry_failed_total = 0;
-    duplicate_drop_total = 0;
-    memset(retry_queue, 0, sizeof(retry_queue));
-    memset(seen_table, 0, sizeof(seen_table));
     sync_ready = (net_udp_bind(SYNC_PORT, sync_udp_recv) == 0) ? 1 : 0;
 }
 
@@ -709,37 +458,11 @@ int sync_task_done(const char *task_id, const char *result) {
 }
 
 void sync_tick(uint32_t ticks) {
-    int i;
     sync_time += ticks;
-    for (i = 0; i < SYNC_RETRY_MAX; i++) {
-        uint32_t sent;
-        if (retry_queue[i].state != SYNC_RETRY_PENDING) continue;
-        if (retry_all_peers_acked(&retry_queue[i])) {
-            retry_queue[i].state = SYNC_RETRY_ACKED;
-            retry_acked_total++;
-            continue;
-        }
-        if (sync_time - retry_queue[i].last_sent < SYNC_RETRY_INTERVAL) continue;
-        if (retry_queue[i].attempts >= SYNC_RETRY_LIMIT) {
-            retry_queue[i].state = SYNC_RETRY_FAILED;
-            retry_failed_total++;
-            continue;
-        }
-        sent = retry_send_pending_peers(&retry_queue[i]);
-        retry_queue[i].attempts++;
-        retry_queue[i].last_sent = sync_time;
-        retry_sent_total += sent;
-        retry_directed_total += sent;
-    }
 }
 
 int sync_retry_pending(void) {
-    int count = 0;
-    int i;
-    for (i = 0; i < SYNC_RETRY_MAX; i++) {
-        if (retry_queue[i].state == SYNC_RETRY_PENDING) count++;
-    }
-    return count;
+    return bus_reliable_pending_port(SYNC_PORT);
 }
 
 void sync_print_info(void) {
@@ -753,39 +476,12 @@ void sync_print_info(void) {
     vga_write(sync_ready ? " ready\n" : " not ready\n");
     vga_write("items: "); print_dec((uint32_t)item_count); vga_write("/" ); print_dec(SYNC_MAX_ITEMS);
     vga_write(" tasks: "); print_dec((uint32_t)task_count); vga_write("/"); print_dec(SYNC_MAX_TASKS); vga_write("\n");
-    vga_write(" reliable: msg_id+per-peer-ACK directed-retry interval="); print_dec(SYNC_RETRY_INTERVAL); vga_write(" limit="); print_dec(SYNC_RETRY_LIMIT); vga_write(" pending="); print_dec((uint32_t)sync_retry_pending()); vga_write("\n");
+    vga_write(" reliable: bus msg_id+per-peer-ACK directed-retry interval="); print_dec(BUS_RELIABLE_RETRY_INTERVAL); vga_write(" limit="); print_dec(BUS_RELIABLE_RETRY_LIMIT); vga_write(" pending="); print_dec((uint32_t)sync_retry_pending()); vga_write("\n");
     vga_write("security: accepts packets only from discovery trusted peers\n");
 }
 
 void sync_print_reliable(void) {
-    int i;
-    int found = 0;
-    vga_write("sync reliable: sent="); print_dec(retry_sent_total);
-    vga_write(" acked="); print_dec(retry_acked_total);
-    vga_write(" peer_acked="); print_dec(retry_peer_acked_total);
-    vga_write(" directed_retry="); print_dec(retry_directed_total);
-    vga_write(" failed="); print_dec(retry_failed_total);
-    vga_write(" dup_drop="); print_dec(duplicate_drop_total);
-    vga_write(" pending="); print_dec((uint32_t)sync_retry_pending()); vga_write("\n");
-    for (i = 0; i < SYNC_RETRY_MAX; i++) {
-        if (retry_queue[i].state != SYNC_RETRY_PENDING) continue;
-        found = 1;
-        vga_write("retry "); print_dec((uint32_t)i);
-        vga_write(": msg_id="); vga_write(retry_queue[i].msg_id);
-        vga_write(" attempts="); print_dec(retry_queue[i].attempts);
-        vga_write(" peers="); print_dec(retry_queue[i].peer_count);
-        vga_write(" pending_peers="); print_dec(retry_pending_peer_count(&retry_queue[i]));
-        vga_write(" age="); print_dec(sync_time - retry_queue[i].first_sent);
-        vga_write(" last="); print_dec(sync_time - retry_queue[i].last_sent);
-        vga_write("\n");
-        for (uint32_t p = 0; p < retry_queue[i].peer_count && p < SYNC_RETRY_PEER_MAX; p++) {
-            if (!retry_queue[i].peers[p].used) continue;
-            vga_write("  peer "); print_dec(p);
-            vga_write(": "); vga_write(retry_queue[i].peers[p].device_id);
-            vga_write(retry_queue[i].peers[p].acked ? " acked\n" : " pending\n");
-        }
-    }
-    if (!found) vga_write("sync: no pending retry messages\n");
+    bus_reliable_print_port(SYNC_PORT);
 }
 
 void sync_print_items(void) {

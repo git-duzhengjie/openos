@@ -16,6 +16,7 @@
 #include "../net/net.h"
 #include "../net/discovery.h"
 #include "../net/sync.h"
+#include "../net/bus.h"
 #include "ai.h"
 #include "devmgr.h"
 #include "ext4.h"
@@ -1063,6 +1064,7 @@ static void cmd_help(void)
     print("  netinfo         - Show network stack information\n");
     print("  discovery [scan|peers|announce|bye|name <n>|caps <c>|auth|auth_secret <s>|auth_peer <id>]\n");
     print("  sync [info|items|tasks|reliable|put|del|push|push_all|offer|accept|done] - Cross-device sync/tasks\n");
+    print("  bus [info|stats|subs|pub <topic> <payload>|pub_local <topic> <payload>|sub <topic>] - Message bus\n");
     print("  ping_self       - Send ICMP echo to loopback network device\n");
     print("  ai_info         - Show AI engine status\n");
     print("  ai_ask <text>   - Ask AI engine with current backend\n");
@@ -1417,6 +1419,46 @@ void shell_run(void)
                     else
                     {
                         print("usage: sync [info|items|tasks|reliable|put <k> <v>|del <k>|push <k>|push_all|offer <id> <title> <payload> [target]|accept <id>|done <id> <result>]\n");
+                    }
+                }
+                else if (strcmp(cmd, "bus") == 0)
+                {
+                    if (argc < 2 || strcmp(argv[1], "info") == 0)
+                    {
+                        bus_print_info();
+                    }
+                    else if (strcmp(argv[1], "stats") == 0)
+                    {
+                        bus_print_stats();
+                    }
+                    else if (strcmp(argv[1], "subs") == 0)
+                    {
+                        bus_print_subscribers();
+                    }
+                    else if (strcmp(argv[1], "pub") == 0)
+                    {
+                        if (argc < 4 || bus_publish(argv[2], argv[3], BUS_PUBLISH_ALL) < 0)
+                            print("bus: publish failed\n");
+                        else
+                            print("bus: published local+remote\n");
+                    }
+                    else if (strcmp(argv[1], "pub_local") == 0)
+                    {
+                        if (argc < 4 || bus_publish(argv[2], argv[3], BUS_PUBLISH_LOCAL) < 0)
+                            print("bus: local publish failed\n");
+                        else
+                            print("bus: published local\n");
+                    }
+                    else if (strcmp(argv[1], "sub") == 0)
+                    {
+                        if (argc < 3 || bus_shell_subscribe(argv[2]) < 0)
+                            print("bus: subscribe failed\n");
+                        else
+                            print("bus: shell subscriber updated\n");
+                    }
+                    else
+                    {
+                        print("usage: bus [info|stats|subs|pub <topic> <payload>|pub_local <topic> <payload>|sub <topic>]\n");
                     }
                 }
                 else if (strcmp(cmd, "ping_self") == 0)

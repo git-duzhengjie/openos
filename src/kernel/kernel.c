@@ -15,6 +15,7 @@
 #include "../net/net.h"
 #include "../net/discovery.h"
 #include "../net/sync.h"
+#include "../net/bus.h"
 #include "ai.h"
 #include "devmgr.h"
 #include "../shell.h"
@@ -158,6 +159,10 @@ void kernel_main(void) {
     /* 初始化跨端数据同步与任务流转协议 */
     sync_init();
     serial_write("[OK] SYNC\n");
+
+    /* 初始化统一消息总线 */
+    bus_init();
+    serial_write("[OK] BUS\n");
 
     /* 初始化 AI 引擎框架 MVP */
     ai_init();
