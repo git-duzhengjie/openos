@@ -97,7 +97,15 @@ static const char *builtin_commands[] = {
     "ping_self",
     "ai_info",
     "ai_ask",
-    "ai_backend"
+    "ai_backend",
+    "ai_models",
+    "ai_model_load",
+    "ai_model_unload",
+    "ai_repo",
+    "ai_trust",
+    "ai_ed25519",
+    "ai_model_register",
+    "ai_model_scan"
 };
 
 #define BUILTIN_COMMAND_COUNT (sizeof(builtin_commands) / sizeof(builtin_commands[0]))
@@ -1053,6 +1061,13 @@ static void cmd_help(void)
     print("  ai_info         - Show AI engine status\n");
     print("  ai_ask <text>   - Ask AI engine with current backend\n");
     print("  ai_backend [local|cloud|hybrid] - Show or set AI backend\n");
+    print("  ai_models       - List AI models\n");
+    print("  ai_model_load <name> - Load and select AI model\n");
+    print("  ai_model_unload <name> - Unload AI model\n");
+    print("  ai_repo [path]  - Show or set AI model repository\n");
+    print("  ai_trust [path|load <keyfile>] - Show/set trust root or load trusted key\n");
+    print("  ai_model_register <manifest> - Register model manifest\n");
+    print("  ai_model_scan   - Scan repository and register manifests\n");
     print("  devices         - List registered kernel devices\n");
     print("  hotplug         - Show pending hotplug events\n");
     print("  hotplug_poll    - Pop one hotplug event from queue\n");
@@ -1328,6 +1343,151 @@ void shell_run(void)
                             print(response.text);
                             print("\n");
                         }
+                    }
+                }
+                else if (strcmp(cmd, "ai_models") == 0)
+                {
+                    ai_print_models();
+                }
+                else if (strcmp(cmd, "ai_model_load") == 0)
+                {
+                    if (argc < 2)
+                    {
+                        print("ai_model_load: missing model name\n");
+                    }
+                    else if (ai_model_load(argv[1]) < 0)
+                    {
+                        print("ai_model_load: failed\n");
+                    }
+                    else
+                    {
+                        print("ai_model_load: loaded ");
+                        print(argv[1]);
+                        print("\n");
+                    }
+                }
+                else if (strcmp(cmd, "ai_model_unload") == 0)
+                {
+                    if (argc < 2)
+                    {
+                        print("ai_model_unload: missing model name\n");
+                    }
+                    else if (ai_model_unload(argv[1]) < 0)
+                    {
+                        print("ai_model_unload: failed\n");
+                    }
+                    else
+                    {
+                        print("ai_model_unload: unloaded ");
+                        print(argv[1]);
+                        print("\n");
+                    }
+                }
+                else if (strcmp(cmd, "ai_repo") == 0)
+                {
+                    if (argc < 2)
+                    {
+                        ai_print_repo();
+                    }
+                    else if (ai_repo_set_path(argv[1]) < 0)
+                    {
+                        print("ai_repo: failed\n");
+                    }
+                    else
+                    {
+                        print("ai_repo: path set to ");
+                        print(ai_repo_path());
+                        print("\n");
+                    }
+                }
+                else if (strcmp(cmd, "ai_trust") == 0)
+                {
+                    if (argc < 2)
+                    {
+                        ai_print_trust();
+                    }
+                    else if (strcmp(argv[1], "load") == 0)
+                    {
+                        if (argc < 3)
+                        {
+                            print("ai_trust: missing key file\n");
+                        }
+                        else if (ai_trust_key_load_file(argv[2]) < 0)
+                        {
+                            print("ai_trust: load key failed\n");
+                        }
+                        else
+                        {
+                            print("ai_trust: loaded ");
+                            print(argv[2]);
+                            print("\n");
+                        }
+                    }
+                    else if (ai_trust_root_set_path(argv[1]) < 0)
+                    {
+                        print("ai_trust: failed\n");
+                    }
+                    else
+                    {
+                        print("ai_trust: trust root set to ");
+                        print(ai_trust_root_path());
+                        print("\n");
+                    }
+                }
+                else if (strcmp(cmd, "ai_ed25519") == 0)
+                {
+                    if (argc >= 5 && strcmp(argv[1], "verify_sha256") == 0)
+                    {
+                        int status = ai_ed25519_verify_sha256_hex(argv[2], argv[3], argv[4]);
+                        if (status == AI_STATUS_OK)
+                        {
+                            print("ai_ed25519: signature valid\n");
+                        }
+                        else
+                        {
+                            print("ai_ed25519: signature invalid or unsupported, status=");
+                            shell_print_dec(status);
+                            print("\n");
+                        }
+                    }
+                    else if (argc >= 2)
+                    {
+                        print("usage: ai_ed25519 [verify_sha256 <public_key_hex> <sha256_hex> <signature_hex>]\n");
+                    }
+                    else
+                    {
+                        ai_print_ed25519_selftest();
+                    }
+                }
+                else if (strcmp(cmd, "ai_model_register") == 0)
+                {
+                    if (argc < 2)
+                    {
+                        print("ai_model_register: missing manifest path\n");
+                    }
+                    else if (ai_model_register_manifest_file(argv[1]) < 0)
+                    {
+                        print("ai_model_register: failed\n");
+                    }
+                    else
+                    {
+                        print("ai_model_register: registered ");
+                        print(argv[1]);
+                        print("\n");
+                    }
+                }
+                else if (strcmp(cmd, "ai_model_scan") == 0)
+                {
+                    int n = ai_repo_scan();
+                    if (n < 0)
+                    {
+                        print("ai_model_scan: failed\n");
+                    }
+                    else
+                    {
+                        print("ai_model_scan: registered ");
+                        shell_print_dec(n);
+                        print(" manifest(s)\n");
                     }
                 }
                 else if (strcmp(cmd, "devices") == 0)
