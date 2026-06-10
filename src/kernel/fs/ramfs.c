@@ -20,25 +20,41 @@ static int ramfs_write(file_t *f, const void *buf, uint32_t count);
 static int ramfs_seek(file_t *f, int offset, int whence);
 static int ramfs_truncate(inode_t *inode, uint32_t size);
 
-file_ops_t ramfs_file_ops = {
-    .open    = ramfs_open,
-    .close   = ramfs_close,
-    .read    = ramfs_read,
-    .write   = ramfs_write,
-    .seek    = ramfs_seek,
-    .truncate = ramfs_truncate,
-    .readdir = NULL,
-};
+file_ops_t ramfs_file_ops;
 
-static file_ops_t ramfs_dir_ops = {
-    .open    = ramfs_open,
-    .close   = ramfs_close,
-    .read    = NULL,
-    .write   = NULL,
-    .seek    = NULL,
-    .truncate = NULL,
-    .readdir = NULL,
-};
+static file_ops_t ramfs_dir_ops;
+static fs_type_t ramfs_fs_type;
+
+void ramfs_refresh_ops(void) {
+    ramfs_fs_type.name[0] = 'r';
+    ramfs_fs_type.name[1] = 'a';
+    ramfs_fs_type.name[2] = 'm';
+    ramfs_fs_type.name[3] = 'f';
+    ramfs_fs_type.name[4] = 's';
+    ramfs_fs_type.name[5] = '\0';
+    ramfs_fs_type.magic = RAMFS_MAGIC;
+    ramfs_fs_type.lookup = NULL;
+    ramfs_fs_type.create = NULL;
+    ramfs_fs_type.mkdir = NULL;
+    ramfs_fs_type.unlink = NULL;
+    ramfs_fs_type.data = NULL;
+
+    ramfs_file_ops.open = ramfs_open;
+    ramfs_file_ops.close = ramfs_close;
+    ramfs_file_ops.read = ramfs_read;
+    ramfs_file_ops.write = ramfs_write;
+    ramfs_file_ops.seek = ramfs_seek;
+    ramfs_file_ops.truncate = ramfs_truncate;
+    ramfs_file_ops.readdir = NULL;
+
+    ramfs_dir_ops.open = ramfs_open;
+    ramfs_dir_ops.close = ramfs_close;
+    ramfs_dir_ops.read = NULL;
+    ramfs_dir_ops.write = NULL;
+    ramfs_dir_ops.seek = NULL;
+    ramfs_dir_ops.truncate = NULL;
+    ramfs_dir_ops.readdir = NULL;
+}
 
 /* ---- ramfs file ops 实现 ---- */
 static int ramfs_open(file_t *f) {
@@ -88,6 +104,10 @@ static int ramfs_read(file_t *f, void *buf, uint32_t count) {
     return (int)read_bytes;
 }
 
+int ramfs_write_fallback(file_t *f, const void *buf, uint32_t count) {
+    return ramfs_write(f, buf, count);
+}
+
 static int ramfs_write(file_t *f, const void *buf, uint32_t count) {
     if (!f || !f->inode || !buf) return -1;
     
@@ -101,13 +121,23 @@ static int ramfs_write(file_t *f, const void *buf, uint32_t count) {
     }
     
     uint32_t off = f->offset;
+    if (count > 0xFFFFFFFFu - off) {
+        serial_write("[RAMFS-W] overflow off/count\n");
+        return -1;
+    }
     uint32_t end = off + count;
     
     /* 按需分配数据块 */
     while (rf->nblocks * RAMFS_BLOCK_SIZE < end) {
-        if (rf->nblocks >= RAMFS_MAX_BLOCKS) return -1;
+        if (rf->nblocks >= RAMFS_MAX_BLOCKS) {
+            serial_write("[RAMFS-W] max blocks reached\n");
+            return -1;
+        }
         uint32_t blk = (uint32_t)pmm_alloc_page();
-        if (!blk) return -1;
+        if (!blk) {
+            serial_write("[RAMFS-W] alloc block failed\n");
+            return -1;
+        }
         /* 清零新块 */
         uint8_t *p = (uint8_t *)blk;
         for (int i = 0; i < RAMFS_BLOCK_SIZE; i++) p[i] = 0;
@@ -122,8 +152,10 @@ static int ramfs_write(file_t *f, const void *buf, uint32_t count) {
         uint32_t chunk = RAMFS_BLOCK_SIZE - block_off;
         if (chunk > count - written) chunk = count - written;
         
-        if (block_idx >= rf->nblocks || !rf->blocks[block_idx])
+        if (block_idx >= rf->nblocks || !rf->blocks[block_idx]) {
+            serial_write("[RAMFS-W] missing block\n");
             return -1;
+        }
         
         uint8_t *dst = (uint8_t *)(rf->blocks[block_idx]) + block_off;
         const uint8_t *src = (const uint8_t *)buf + written;
@@ -205,22 +237,14 @@ static int ramfs_truncate(inode_t *inode, uint32_t size) {
 }
 
 /* ---- ramfs fs_type ---- */
-static fs_type_t ramfs_fs_type = {
-    .name = "ramfs",
-    .magic = 0x858458F6,  /* RAMFS_MAGIC */
-    .lookup = NULL,
-    .create = NULL,
-    .mkdir = NULL,
-    .unlink = NULL,
-    .data = NULL,
-};
-
 fs_type_t *ramfs_get_fs_type(void) {
+    ramfs_refresh_ops();
     return &ramfs_fs_type;
 }
 
 /* ---- ramfs 初始化 ---- */
 void ramfs_init(void) {
+    ramfs_refresh_ops();
     /* VFS 已经创建了根目录，设置根 inode 的 ops */
     /* 需要在 VFS init 之后调用 */
     
@@ -241,10 +265,20 @@ void ramfs_init(void) {
 /* 这个函数由 VFS 通过 inode->fs_type 调用 */
 void ramfs_setup_inode(inode_t *ip, uint32_t mode) {
     if (!ip) return;
-    ip->fs_type = ramfs_fs_type.magic;
+    ramfs_refresh_ops();
+    ip->fs_type = RAMFS_MAGIC;
     if ((mode & 0xF000) == FS_DIR) {
         ip->ops = &ramfs_dir_ops;
     } else {
         ip->ops = &ramfs_file_ops;
+    }
+
+    if (!ip->fs_data) {
+        ramfs_file_t *rf = (ramfs_file_t *)pmm_alloc_page();
+        if (rf) {
+            for (int i = 0; i < (int)sizeof(ramfs_file_t); i++) ((char *)rf)[i] = 0;
+            rf->size = ip->size;
+            ip->fs_data = rf;
+        }
     }
 }

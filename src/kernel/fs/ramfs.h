@@ -9,7 +9,8 @@
 
 #include "vfs.h"
 
-/* ramfs 文件数据块 */
+/* ramfs 文件系统标识和文件数据块 */
+#define RAMFS_MAGIC       0x858458F6u
 #define RAMFS_BLOCK_SIZE  4096
 #define RAMFS_MAX_BLOCKS  64   /* 每文件最大 256KB */
 
@@ -22,6 +23,9 @@ typedef struct ramfs_file {
 /* 初始化 ramfs 并挂载到 / */
 void ramfs_init(void);
 
+/* 刷新 ramfs ops，避免早期 .data/.bss 清理或内存覆盖导致函数表为空 */
+void ramfs_refresh_ops(void);
+
 /* 设置 inode 的 ramfs ops */
 void ramfs_setup_inode(inode_t *ip, uint32_t mode);
 
@@ -30,5 +34,8 @@ fs_type_t *ramfs_get_fs_type(void);
 
 /* ramfs file ops (用于调试) */
 extern file_ops_t ramfs_file_ops;
+
+/* 直接调用 ramfs 写逻辑，避免跨模块通过可变 ops 表间接跳转 */
+int ramfs_write_fallback(file_t *f, const void *buf, uint32_t count);
 
 #endif /* KERNEL_FS_RAMFS_H */

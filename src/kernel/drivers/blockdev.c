@@ -257,13 +257,15 @@ static int ramdisk_write_blocks(blockdev_t *dev, uint32_t lba, uint32_t count, c
     return (int)count;
 }
 
-static blockdev_ops_t ramdisk_ops = {
-    0,
-    0,
-    ramdisk_read_blocks,
-    ramdisk_write_blocks,
-    0
-};
+static blockdev_ops_t ramdisk_ops;
+
+static void ramdisk_refresh_ops(void) {
+    ramdisk_ops.open = 0;
+    ramdisk_ops.close = 0;
+    ramdisk_ops.read_blocks = ramdisk_read_blocks;
+    ramdisk_ops.write_blocks = ramdisk_write_blocks;
+    ramdisk_ops.ioctl = 0;
+}
 
 void blockdev_register_builtin_devices(void) {
     serial_write("[BLOCKDEV] builtin begin\n");
@@ -274,6 +276,8 @@ void blockdev_register_builtin_devices(void) {
         serial_write("[ERR] ram0 alloc failed\n");
         return;
     }
+
+    ramdisk_refresh_ops();
 
     serial_write("[BLOCKDEV] register ram0\n");
     if (blockdev_register("ram0", 1, 0,

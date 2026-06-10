@@ -34,16 +34,18 @@ static mount_t mount_pool[MAX_MOUNTS];
  * 小工具函数
  * ============================================================ */
 
+#define VFS_FILE_TYPE_MASK 0xF000
+
 static int vfs_is_dir(inode_t *ip) {
-    return ip && ((ip->mode & FS_DIR) == FS_DIR);
+    return ip && ((ip->mode & VFS_FILE_TYPE_MASK) == FS_DIR);
 }
 
 static int vfs_is_file(inode_t *ip) {
-    return ip && ((ip->mode & FS_FILE) == FS_FILE);
+    return ip && ((ip->mode & VFS_FILE_TYPE_MASK) == FS_FILE);
 }
 
-// static int vfs_is_chardev(inode_t *ip) { return ip && ((ip->mode & FS_CHAR_DEVICE) == FS_CHAR_DEVICE); }
-// static int vfs_is_blockdev(inode_t *ip) { return ip && ((ip->mode & FS_BLOCK_DEVICE) == FS_BLOCK_DEVICE); }
+// static int vfs_is_chardev(inode_t *ip) { return ip && ((ip->mode & VFS_FILE_TYPE_MASK) == FS_CHAR_DEVICE); }
+// static int vfs_is_blockdev(inode_t *ip) { return ip && ((ip->mode & VFS_FILE_TYPE_MASK) == FS_BLOCK_DEVICE); }
 
 // static int path_copy_name(char *dst, const char *src, uint32_t len) { if (!dst||!src||len==0||len>=MAX_NAME) return -1; for(uint32_t i=0;i<len;i++)dst[i]=src[i]; dst[len]=0; return 0; }
 
@@ -55,6 +57,36 @@ static int is_open_write(int flags) {
 static int is_open_read(int flags) {
     int acc = flags & 3;
     return acc == O_RDONLY || acc == O_RDWR;
+}
+
+static void vfs_repair_memory_inode(inode_t *ip, inode_t *parent) {
+    if (!ip || !vfs_is_file(ip)) return;
+    if (ip->fs_type != 0 && ip->ops && ip->ops->write) return;
+
+    serial_write("[VFS-R] repair memory inode mode=");
+    serial_write_hex(ip->mode);
+    serial_write(" old_fs=");
+    serial_write_hex(ip->fs_type);
+    serial_write(" parent_fs=");
+    serial_write_hex(parent ? parent->fs_type : 0);
+    serial_write("\n");
+
+    uint32_t parent_fs = parent ? parent->fs_type : 0;
+    if (parent_fs == TMPFS_MAGIC) {
+        tmpfs_setup_inode(ip, ip->mode);
+    } else {
+        ramfs_setup_inode(ip, ip->mode);
+    }
+
+    serial_write("[VFS-R] repaired fs=");
+    serial_write_hex(ip->fs_type);
+    serial_write(" ops=");
+    serial_write_hex((uint32_t)ip->ops);
+    serial_write(" write=");
+    serial_write_hex((uint32_t)((ip->ops && ip->ops->write) ? ip->ops->write : 0));
+    serial_write(" fs_data=");
+    serial_write_hex((uint32_t)ip->fs_data);
+    serial_write("\n");
 }
 
 /* ============================================================
@@ -473,8 +505,10 @@ dentry_t *vfs_create_node_under(dentry_t *parent, const char *name,
     ip->size = size;
     ip->fs_data = fs_data;
     ip->ops = ops;
+    ip->fs_type = parent->inode ? parent->inode->fs_type : 0;
 
-    if (!ops && (mode & (FS_FILE | FS_DIR))) {
+    uint32_t type = mode & VFS_FILE_TYPE_MASK;
+    if (!ops && (type == FS_FILE || type == FS_DIR)) {
         if (parent->inode && parent->inode->fs_type == TMPFS_MAGIC) {
             tmpfs_setup_inode(ip, mode);
         } else {
@@ -494,7 +528,15 @@ dentry_t *vfs_create_node_under(dentry_t *parent, const char *name,
 }
 
 static dentry_t *create_regular_file(dentry_t *parent, const char *name, uint32_t mode) {
-    return vfs_create_node_under(parent, name, FS_FILE | mode, NULL, NULL, 0);
+    uint32_t perm = mode & (S_IRUSR | S_IWUSR);
+    if (!perm) perm = S_IRUSR | S_IWUSR;
+
+    dentry_t *d = vfs_create_node_under(parent, name, FS_FILE | perm, NULL, NULL, 0);
+    if (d && d->inode) {
+        inode_t *parent_inode = parent ? resolve_mount(parent)->inode : NULL;
+        vfs_repair_memory_inode(d->inode, parent_inode);
+    }
+    return d;
 }
 
 /* ============================================================
@@ -545,6 +587,10 @@ int vfs_open(const char *path, int flags, int mode) {
 
     d = resolve_mount(d);
     if (!d || !d->inode) return -1;
+    if (vfs_is_file(d->inode)) {
+        inode_t *parent_inode = d->parent ? resolve_mount(d->parent)->inode : NULL;
+        vfs_repair_memory_inode(d->inode, parent_inode);
+    }
     if (vfs_is_dir(d->inode) && is_open_write(flags)) return -1;
 
     if (is_open_read(flags) && !(d->inode->mode & S_IRUSR)) return -1;
@@ -558,7 +604,10 @@ int vfs_open(const char *path, int flags, int mode) {
     if (fd < 0) return -1;
 
     file_t *f = (file_t *)pmm_alloc_page();
-    if (!f) return -1;
+    if (!f) {
+        vfs_put_file(fd, NULL);
+        return -1;
+    }
     memset(f, 0, sizeof(file_t));
     f->inode = d->inode;
     f->dentry = d;
@@ -569,6 +618,7 @@ int vfs_open(const char *path, int flags, int mode) {
 
     if (f->ops && f->ops->open) {
         if (f->ops->open(f) < 0) {
+            vfs_put_file(fd, NULL);
             pmm_free_page(f);
             return -1;
         }
@@ -598,18 +648,101 @@ int vfs_read(int fd, void *buf, uint32_t count) {
 
 int vfs_write(int fd, const void *buf, uint32_t count) {
     file_t *f = vfs_get_file(fd);
-    if (!f || !buf) return -1;
-    if (!is_open_write((int)f->flags)) return -1;
-    if (vfs_is_dir(f->inode)) return -1;
-    if (!f->ops || !f->ops->write) return -1;
-    return f->ops->write(f, buf, count);
+    if (!f || !buf) {
+        serial_write("[VFS-W] bad fd/buf\n");
+        return -1;
+    }
+    if (!is_open_write((int)f->flags)) {
+        serial_write("[VFS-W] not writable flags=");
+        serial_write_hex(f->flags);
+        serial_write("\n");
+        return -1;
+    }
+    if (vfs_is_dir(f->inode)) {
+        serial_write("[VFS-W] is dir mode=");
+        serial_write_hex(f->inode ? f->inode->mode : 0);
+        serial_write("\n");
+        return -1;
+    }
+
+    if (vfs_is_file(f->inode) && (!f->ops || !f->ops->write || f->inode->fs_type == 0)) {
+        vfs_repair_memory_inode(f->inode, NULL);
+        f->ops = f->inode->ops;
+    }
+
+    int ret = -1;
+    if (f->ops && f->ops->write) {
+        ret = f->ops->write(f, buf, count);
+    } else {
+        serial_write("[VFS-W] no write ops mode=");
+        serial_write_hex(f->inode ? f->inode->mode : 0);
+        serial_write(" ops=");
+        serial_write_hex((uint32_t)f->ops);
+        serial_write("\n");
+    }
+
+    /* 临时兼容：只允许 ramfs/tmpfs 普通文件走内存文件写入兜底。
+     * 不能对 exFAT/块文件系统等其它 inode 盲目调用 ramfs 写逻辑，
+     * 否则 fs_data 布局不匹配，可能污染函数指针并触发异常。
+     */
+    if (ret < 0 && vfs_is_file(f->inode) &&
+        (f->inode->fs_type == RAMFS_MAGIC || f->inode->fs_type == TMPFS_MAGIC)) {
+        serial_write("[VFS-W] fallback memoryfs write\n");
+        ret = ramfs_write_fallback(f, buf, count);
+    }
+
+    if (ret < 0) {
+        serial_write("[VFS-W] fs write failed mode=");
+        serial_write_hex(f->inode ? f->inode->mode : 0);
+        serial_write(" size=");
+        serial_write_hex(f->inode ? f->inode->size : 0);
+        serial_write(" off=");
+        serial_write_hex(f->offset);
+        serial_write(" count=");
+        serial_write_hex(count);
+        serial_write(" fs_type=");
+        serial_write_hex(f->inode ? f->inode->fs_type : 0);
+        serial_write(" fs_data=");
+        serial_write_hex((uint32_t)(f->inode ? f->inode->fs_data : 0));
+        serial_write(" write=");
+        serial_write_hex((uint32_t)((f->ops && f->ops->write) ? f->ops->write : 0));
+        serial_write("\n");
+    }
+    return ret;
 }
 
 int vfs_seek(int fd, int offset, int whence) {
     file_t *f = vfs_get_file(fd);
     if (!f) return -1;
-    if (!f->ops || !f->ops->seek) return -1;
-    return f->ops->seek(f, offset, whence);
+
+    if (f->ops && f->ops->seek) {
+        return f->ops->seek(f, offset, whence);
+    }
+
+    /* Fallback: 普通文件可由 VFS 根据 inode size 维护偏移。
+     * 这能兼容尚未实现 seek 回调的简单文件系统节点，
+     * 例如 echo >> file 需要 SEEK_END 定位到文件尾。
+     */
+    if (!vfs_is_file(f->inode)) return -1;
+
+    uint32_t base;
+    switch (whence) {
+    case SEEK_SET:
+        base = 0;
+        break;
+    case SEEK_CUR:
+        base = f->offset;
+        break;
+    case SEEK_END:
+        base = f->inode ? f->inode->size : 0;
+        break;
+    default:
+        return -1;
+    }
+
+    if (offset < 0 && (uint32_t)(-offset) > base) return -1;
+    f->offset = offset < 0 ? base - (uint32_t)(-offset) : base + (uint32_t)offset;
+    return (int)f->offset;
 }
 
 int vfs_stat(const char *path, inode_t *st) {

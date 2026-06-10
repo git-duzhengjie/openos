@@ -78,7 +78,7 @@ static tmpfs_instance_t *tmpfs_alloc_instance(void) {
 void tmpfs_setup_inode(inode_t *ip, uint32_t mode) {
     if (!ip) return;
     ip->fs_type = TMPFS_MAGIC;
-    if ((mode & FS_DIR) == FS_DIR) {
+    if ((mode & 0xF000) == FS_DIR) {
         ip->ops = &tmpfs_dir_ops;
     } else {
         ip->ops = &ramfs_file_ops;
