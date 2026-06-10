@@ -57,6 +57,7 @@ int discovery_auth_peer(const char *device_id);
 void discovery_tick(uint32_t ticks);
 uint32_t discovery_peer_count(void);
 const discovery_peer_t *discovery_peer_get(uint32_t index);
+void discovery_get_local_device_id(char *out, uint32_t out_size);
 void discovery_print_info(void);
 void discovery_print_peers(void);
 void discovery_print_auth(void);

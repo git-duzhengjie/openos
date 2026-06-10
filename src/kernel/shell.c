@@ -15,6 +15,7 @@
 #include "../fs/tmpfs.h"
 #include "../net/net.h"
 #include "../net/discovery.h"
+#include "../net/sync.h"
 #include "ai.h"
 #include "devmgr.h"
 #include "ext4.h"
@@ -96,6 +97,7 @@ static const char *builtin_commands[] = {
     "exec",
     "netinfo",
     "discovery",
+    "sync",
     "ping_self",
     "ai_info",
     "ai_ask",
@@ -1060,6 +1062,7 @@ static void cmd_help(void)
     print("  mount_tmpfs [path] - Mount tmpfs memory filesystem (default /tmp)\n");
     print("  netinfo         - Show network stack information\n");
     print("  discovery [scan|peers|announce|bye|name <n>|caps <c>|auth|auth_secret <s>|auth_peer <id>]\n");
+    print("  sync [info|items|tasks|reliable|put|del|push|push_all|offer|accept|done] - Cross-device sync/tasks\n");
     print("  ping_self       - Send ICMP echo to loopback network device\n");
     print("  ai_info         - Show AI engine status\n");
     print("  ai_ask <text>   - Ask AI engine with current backend\n");
@@ -1339,6 +1342,81 @@ void shell_run(void)
                     else
                     {
                         print("usage: discovery [scan|peers|announce|bye|name <n>|caps <c>|auth|auth_secret <s>|auth_peer <id>]\n");
+                    }
+                }
+                else if (strcmp(cmd, "sync") == 0)
+                {
+                    if (argc < 2 || strcmp(argv[1], "info") == 0)
+                    {
+                        sync_print_info();
+                    }
+                    else if (strcmp(argv[1], "items") == 0)
+                    {
+                        sync_print_items();
+                    }
+                    else if (strcmp(argv[1], "tasks") == 0)
+                    {
+                        sync_print_tasks();
+                    }
+                    else if (strcmp(argv[1], "reliable") == 0)
+                    {
+                        sync_print_reliable();
+                    }
+                    else if (strcmp(argv[1], "put") == 0)
+                    {
+                        if (argc < 4 || sync_put(argv[2], argv[3]) < 0)
+                            print("sync: put failed\n");
+                        else
+                            print("sync: item updated and broadcast\n");
+                    }
+                    else if (strcmp(argv[1], "del") == 0)
+                    {
+                        if (argc < 3 || sync_delete(argv[2]) < 0)
+                            print("sync: delete failed\n");
+                        else
+                            print("sync: delete broadcast\n");
+                    }
+                    else if (strcmp(argv[1], "push") == 0)
+                    {
+                        if (argc < 3 || sync_broadcast_key(argv[2]) < 0)
+                            print("sync: push failed\n");
+                        else
+                            print("sync: item broadcast\n");
+                    }
+                    else if (strcmp(argv[1], "push_all") == 0)
+                    {
+                        int sent = sync_broadcast_all();
+                        print("sync: broadcast items ");
+                        shell_print_dec(sent);
+                        print("\n");
+                    }
+                    else if (strcmp(argv[1], "offer") == 0)
+                    {
+                        const char *target = 0;
+                        if (argc >= 6)
+                            target = argv[5];
+                        if (argc < 5 || sync_task_offer(argv[2], argv[3], argv[4], target) < 0)
+                            print("sync: offer failed\n");
+                        else
+                            print("sync: task offered\n");
+                    }
+                    else if (strcmp(argv[1], "accept") == 0)
+                    {
+                        if (argc < 3 || sync_task_accept(argv[2]) < 0)
+                            print("sync: accept failed\n");
+                        else
+                            print("sync: task accepted\n");
+                    }
+                    else if (strcmp(argv[1], "done") == 0)
+                    {
+                        if (argc < 4 || sync_task_done(argv[2], argv[3]) < 0)
+                            print("sync: done failed\n");
+                        else
+                            print("sync: task done\n");
+                    }
+                    else
+                    {
+                        print("usage: sync [info|items|tasks|reliable|put <k> <v>|del <k>|push <k>|push_all|offer <id> <title> <payload> [target]|accept <id>|done <id> <result>]\n");
                     }
                 }
                 else if (strcmp(cmd, "ping_self") == 0)

@@ -649,6 +649,10 @@ const discovery_peer_t *discovery_peer_get(uint32_t index) {
     return 0;
 }
 
+void discovery_get_local_device_id(char *out, uint32_t out_size) {
+    safe_copy(out, out_size, local_device_id);
+}
+
 void discovery_print_info(void) {
     vga_write("discovery: ODDP/1 udp/");
     print_dec(DISCOVERY_PORT);
