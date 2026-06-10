@@ -957,29 +957,28 @@ static void cmd_cd(const char *path)
 {
     if (!path)
     {
-        cwd[0] = '/';
-        cwd[1] = '\0';
+        vfs_chdir("/");
+        strncpy(cwd, "/", sizeof(cwd)-1);
+        cwd[sizeof(cwd)-1] = '\0';
         return;
     }
-    char full[MAX_PATH];
-    make_path(path, full);
-    dentry_t *d = vfs_path_lookup(full);
-    if (!d || !d->inode || (d->inode->mode & 0xF000) != FS_DIR)
+    if (vfs_chdir(path) < 0)
     {
-        print("cd: not a directory\n");
+        print("cd: failed\n");
         return;
     }
-    int i;
-    for (i = 0; full[i] && i < MAX_PATH - 1; i++)
-        cwd[i] = full[i];
-    while (i > 1 && cwd[i - 1] == '/')
-        i--; /* strip trailing slashes */
-    cwd[i] = '\0';
+    vfs_getcwd(cwd, sizeof(cwd));
 }
 
 static void cmd_pwd(void)
 {
-    print(cwd);
+    char buf[MAX_PATH];
+    if (vfs_getcwd(buf, sizeof(buf)) < 0)
+    {
+        print("pwd: failed\n");
+        return;
+    }
+    print(buf);
     print("\n");
 }
 

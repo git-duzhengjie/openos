@@ -70,6 +70,10 @@ typedef struct process {
     uint32_t heap_start;      /* 堆起始 */
     uint32_t heap_end;        /* 堆结束 */
 
+    /* 文件系统 */
+    void *fds[16];            /* 文件描述符表 (简单版: 指针数组) */
+    char cwd[256];            /* 当前工作目录 (绝对路径) */
+
     /* 信号 */
     uint32_t pending_signals; /* 待处理信号掩码 */
 

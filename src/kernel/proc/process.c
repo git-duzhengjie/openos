@@ -53,6 +53,11 @@ process_t *proc_alloc(void) {
             p->heap_end = 0;
             for (int j = 0; j < 31; j++) p->name[j] = 0;
             p->name[0] = '\0';
+            /* 初始化文件描述符表 */
+            for (int j = 0; j < 16; j++) p->fds[j] = NULL;
+            /* 初始化当前工作目录为 / */
+            p->cwd[0] = '/';
+            p->cwd[1] = '\0';
             return p;
         }
     }

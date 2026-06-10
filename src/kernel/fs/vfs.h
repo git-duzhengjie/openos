@@ -41,12 +41,41 @@
 /* 最大文件名 */
 #define MAX_NAME     32
 
-/* ---- 文件操作表 ---- */
+/* ---- inode 操作表 ---- */
+struct inode_ops;
 struct file_ops;
 struct inode;
 struct file;
 struct dentry;
 
+typedef struct inode *(*lookup_fn_t)(struct inode *dir, const char *name);
+typedef int (*create_fn_t)(struct inode *dir, const char *name, uint32_t mode);
+typedef int (*mkdir_fn_t)(struct inode *dir, const char *name, uint32_t mode);
+typedef int (*unlink_fn_t)(struct inode *dir, const char *name);
+typedef int (*rmdir_fn_t)(struct inode *dir, const char *name);
+typedef int (*link_fn_t)(struct inode *dir, const char *name, struct inode *target);
+typedef int (*symlink_fn_t)(struct inode *dir, const char *name, const char *target);
+typedef int (*readlink_fn_t)(struct inode *inode, char *buf, uint32_t size);
+typedef int (*rename_fn_t)(struct inode *old_dir, const char *old_name,
+                           struct inode *new_dir, const char *new_name);
+typedef int (*chmod_fn_t)(struct inode *inode, uint32_t mode);
+typedef int (*chown_fn_t)(struct inode *inode, uint32_t uid, uint32_t gid);
+
+typedef struct inode_ops {
+    lookup_fn_t  lookup;
+    create_fn_t  create;
+    mkdir_fn_t   mkdir;
+    unlink_fn_t  unlink;
+    rmdir_fn_t   rmdir;
+    link_fn_t    link;
+    symlink_fn_t symlink;
+    readlink_fn_t readlink;
+    rename_fn_t  rename;
+    chmod_fn_t   chmod;
+    chown_fn_t   chown;
+} inode_ops_t;
+
+/* ---- 文件操作表 ---- */
 typedef int (*open_fn_t)(struct file *f);
 typedef int (*close_fn_t)(struct file *f);
 typedef int (*read_fn_t)(struct file *f, void *buf, uint32_t count);
@@ -74,6 +103,7 @@ typedef struct inode {
     uint32_t ref_count;     /* 引用计数 */
     uint32_t fs_type;       /* 所属文件系统类型 */
     void     *fs_data;      /* 文件系统私有数据 */
+    inode_ops_t *iops;      /* inode 操作 */
     file_ops_t *ops;        /* 文件操作 */
 } inode_t;
 
@@ -137,6 +167,12 @@ int    vfs_mkdir(const char *path, int mode);
 int    vfs_mknod(const char *path, int mode, const char *dev_name);
 int    vfs_rmdir(const char *path);
 int    vfs_unlink(const char *path);
+int    vfs_rename(const char *oldpath, const char *newpath);
+int    vfs_link(const char *oldpath, const char *newpath);
+int    vfs_symlink(const char *target, const char *linkpath);
+int    vfs_readlink(const char *path, char *buf, uint32_t size);
+int    vfs_chmod(const char *path, uint32_t mode);
+int    vfs_chown(const char *path, uint32_t uid, uint32_t gid);
 dentry_t *vfs_readdir(const char *path, int index);
 
 /* 挂载 */
@@ -153,8 +189,14 @@ dentry_t *vfs_create_node_under(dentry_t *parent, const char *name,
                                 void *fs_data, uint32_t size);
 
 /* 进程文件描述符管理 */
+void   vfs_init_fds_for_process(void *proc);       /* 初始化给定进程的 fd 表 */
 void   vfs_init_fds(void);                        /* 初始化当前进程的 fd 表 */
 file_t *vfs_get_file(int fd);                     /* 通过 fd 获取 file */
 int    vfs_alloc_fd(void);                        /* 分配一个空闲 fd */
+int    vfs_put_file(int fd, file_t *file);        /* 把 file 放入 fd 位置 */
+
+/* 进程 cwd 管理 */
+int    vfs_chdir(const char *path);               /* 切换当前工作目录 */
+int    vfs_getcwd(char *buf, uint32_t size);      /* 获取当前工作目录 */
 
 #endif /* KERNEL_FS_VFS_H */

@@ -20,9 +20,6 @@ static dentry_t *root_dentry;
 static inode_t  *root_inode;
 static mount_t  *mount_list;
 
-/* Phase 3 简化：仍使用全局 fd 表；每进程 fd 表后续接入 proc 后再下沉。 */
-static file_t   *fd_table[MAX_FDS_TOTAL];
-
 #define MAX_INODES 256
 static inode_t  inode_pool[MAX_INODES];
 static uint32_t next_ino = 1;
@@ -267,23 +264,68 @@ static file_ops_t vfs_blockdev_ops = {
  * 路径规范化与解析
  * ============================================================ */
 
+/* ============================================================
+ * 进程 cwd 辅助（简化版，暂时 fallback 到静态变量）
+ * ============================================================ */
+#include "process.h"
+
+static file_t *fallback_fds[16];
+static int fallback_fds_inited = 0;
+static char fallback_cwd[MAX_PATH] = "/";
+
+static char *vfs_get_cwd(void) {
+    return fallback_cwd;
+}
+
+static file_t **get_current_fd_table(void) {
+    if (!fallback_fds_inited) {
+        memset(fallback_fds, 0, sizeof(fallback_fds));
+        fallback_fds_inited = 1;
+    }
+    return fallback_fds;
+}
+
+static char *vfs_resolve_to_absolute(const char *path, char *buf, uint32_t buf_size) {
+    if (!path || !buf || buf_size < 2) return NULL;
+    if (path[0] == '/') {
+        strncpy(buf, path, buf_size - 1);
+        buf[buf_size - 1] = 0;
+        return buf;
+    }
+    const char *cwd = vfs_get_cwd();
+    uint32_t cwd_len = (uint32_t)strlen(cwd);
+    uint32_t path_len = (uint32_t)strlen(path);
+    if (cwd_len + 1 + path_len + 1 > buf_size) return NULL;
+    strncpy(buf, cwd, buf_size - 1);
+    if (cwd_len > 0 && buf[cwd_len - 1] != '/') {
+        buf[cwd_len] = '/';
+        cwd_len++;
+    }
+    strncpy(buf + cwd_len, path, buf_size - 1 - cwd_len);
+    buf[buf_size - 1] = 0;
+    return buf;
+}
+
 int vfs_normalize_path(const char *path, char *out, uint32_t out_size) {
     if (!path || !out || out_size < 2) return -1;
-    if (path[0] != '/') return -1; /* cwd 尚未接入，先只接受绝对路径 */
+
+    char abs_buf[MAX_PATH];
+    const char *abs = vfs_resolve_to_absolute(path, abs_buf, sizeof(abs_buf));
+    if (!abs) return -1;
 
     char parts[32][MAX_NAME];
     uint32_t depth = 0;
     uint32_t i = 0;
 
-    while (path[i]) {
-        while (path[i] == '/') i++;
-        if (!path[i]) break;
+    while (abs[i]) {
+        while (abs[i] == '/') i++;
+        if (!abs[i]) break;
 
         char name[MAX_NAME];
         uint32_t n = 0;
-        while (path[i] && path[i] != '/') {
+        while (abs[i] && abs[i] != '/') {
             if (n + 1 >= MAX_NAME) return -1;
-            name[n++] = path[i++];
+            name[n++] = abs[i++];
         }
         name[n] = 0;
 
@@ -381,8 +423,18 @@ dentry_t *vfs_path_lookup(const char *path) {
  * VFS 初始化与内部创建辅助
  * ============================================================ */
 
+void vfs_init_fds_for_process(void *proc) {
+    process_t *p = (process_t *)proc;
+    if (!p) return;
+    for (int i = 0; i < 16; i++) p->fds[i] = NULL;
+    strncpy(p->cwd, "/", sizeof(p->cwd) - 1);
+    p->cwd[sizeof(p->cwd) - 1] = 0;
+}
+
 void vfs_init_fds(void) {
-    for (int i = 0; i < MAX_FDS_TOTAL; i++) fd_table[i] = NULL;
+    for (int i = 0; i < 16; i++) fallback_fds[i] = NULL;
+    strncpy(fallback_cwd, "/", sizeof(fallback_cwd)-1);
+    fallback_cwd[sizeof(fallback_cwd)-1] = 0;
 }
 
 void vfs_init(void) {
@@ -450,15 +502,24 @@ static dentry_t *create_regular_file(dentry_t *parent, const char *name, uint32_
  * ============================================================ */
 
 int vfs_alloc_fd(void) {
-    for (int i = 0; i < MAX_FDS_TOTAL; i++) {
-        if (!fd_table[i]) return i;
+    file_t **fds = get_current_fd_table();
+    for (int i = 0; i < 16; i++) {
+        if (!fds[i]) return i;
     }
     return -1;
 }
 
 file_t *vfs_get_file(int fd) {
-    if (fd < 0 || fd >= MAX_FDS_TOTAL) return NULL;
-    return fd_table[fd];
+    if (fd < 0 || fd >= 16) return NULL;
+    file_t **fds = get_current_fd_table();
+    return fds[fd];
+}
+
+int vfs_put_file(int fd, file_t *file) {
+    if (fd < 0 || fd >= 16) return -1;
+    file_t **fds = get_current_fd_table();
+    fds[fd] = file;
+    return 0;
 }
 
 /* ============================================================
@@ -513,7 +574,7 @@ int vfs_open(const char *path, int flags, int mode) {
         }
     }
 
-    fd_table[fd] = f;
+    vfs_put_file(fd, f);
     return fd;
 }
 
@@ -521,7 +582,7 @@ int vfs_close(int fd) {
     file_t *f = vfs_get_file(fd);
     if (!f) return -1;
     if (f->ops && f->ops->close) f->ops->close(f);
-    fd_table[fd] = NULL;
+    vfs_put_file(fd, NULL);
     pmm_free_page(f);
     return 0;
 }
@@ -630,6 +691,58 @@ int vfs_rmdir(const char *path) {
     detach_child(d);
     free_dentry(d);
     return 0;
+}
+
+/* ============================================================
+ * 新增 VFS 接口占位
+ * ============================================================ */
+int vfs_chdir(const char *path) {
+    char norm[MAX_PATH];
+    if (vfs_normalize_path(path, norm, sizeof(norm)) < 0) return -1;
+    dentry_t *d = vfs_path_lookup(norm);
+    if (!d || !vfs_is_dir(d->inode)) return -1;
+    strncpy(fallback_cwd, norm, sizeof(fallback_cwd) - 1);
+    fallback_cwd[sizeof(fallback_cwd) - 1] = 0;
+    return 0;
+}
+
+int vfs_getcwd(char *buf, uint32_t size) {
+    if (!buf || size < 2) return -1;
+    const char *cwd = vfs_get_cwd();
+    uint32_t len = (uint32_t)strlen(cwd);
+    if (len + 1 > size) return -1;
+    strncpy(buf, cwd, size);
+    return 0;
+}
+
+int vfs_rename(const char *oldpath, const char *newpath) {
+    (void)oldpath; (void)newpath;
+    return -1; /* TODO */
+}
+
+int vfs_link(const char *oldpath, const char *newpath) {
+    (void)oldpath; (void)newpath;
+    return -1; /* TODO */
+}
+
+int vfs_symlink(const char *target, const char *linkpath) {
+    (void)target; (void)linkpath;
+    return -1; /* TODO */
+}
+
+int vfs_readlink(const char *path, char *buf, uint32_t size) {
+    (void)path; (void)buf; (void)size;
+    return -1; /* TODO */
+}
+
+int vfs_chmod(const char *path, uint32_t mode) {
+    (void)path; (void)mode;
+    return -1; /* TODO */
+}
+
+int vfs_chown(const char *path, uint32_t uid, uint32_t gid) {
+    (void)path; (void)uid; (void)gid;
+    return -1; /* TODO */
 }
 
 dentry_t *vfs_readdir(const char *path, int index) {
