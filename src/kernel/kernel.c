@@ -13,6 +13,7 @@
 #include "../fs/ramfs.h"
 #include "../fs/tmpfs.h"
 #include "../net/net.h"
+#include "../net/discovery.h"
 #include "ai.h"
 #include "devmgr.h"
 #include "../shell.h"
@@ -148,6 +149,10 @@ void kernel_main(void) {
     /* 初始化最小 TCP/IP 网络栈 */
     net_init();
     serial_write("[OK] NET\n");
+
+    /* 初始化跨端设备发现协议 */
+    discovery_init();
+    serial_write("[OK] DISCOVERY\n");
 
     /* 初始化 AI 引擎框架 MVP */
     ai_init();

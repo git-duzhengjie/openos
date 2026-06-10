@@ -46,6 +46,8 @@ void net_input(net_device_t *dev, const uint8_t *frame, uint16_t len);
 int net_send_ipv4(uint32_t dst_ip, uint8_t protocol, const uint8_t *payload, uint16_t payload_len);
 int net_send_udp(uint32_t dst_ip, uint16_t src_port, uint16_t dst_port,
                  const uint8_t *data, uint16_t len);
+int net_send_udp_broadcast(uint16_t src_port, uint16_t dst_port,
+                           const uint8_t *data, uint16_t len);
 int net_udp_bind(uint16_t port, udp_recv_func_t cb);
 int net_tcp_listen(uint16_t port, tcp_recv_func_t cb);
 int net_tcp_send_syn(uint32_t dst_ip, uint16_t src_port, uint16_t dst_port);

@@ -13,6 +13,7 @@
 #define IP_PROTO_ICMP 1
 #define IP_PROTO_TCP  6
 #define IP_PROTO_UDP  17
+#define NET_IPV4_BROADCAST 0xffffffffU
 
 #define ICMP_ECHO_REPLY   0
 #define ICMP_ECHO_REQUEST 8
@@ -275,7 +276,9 @@ int net_send_ipv4(uint32_t dst_ip, uint8_t protocol, const uint8_t *payload, uin
     uint16_t total_len;
 
     if (!default_dev || payload_len + sizeof(struct ipv4_header) > NET_ETH_MTU) return -1;
-    if (arp_lookup(dst_ip, dst_mac) != 0) {
+    if (dst_ip == NET_IPV4_BROADCAST) {
+        memset(dst_mac, 0xff, sizeof(dst_mac));
+    } else if (arp_lookup(dst_ip, dst_mac) != 0) {
         if (dst_ip == default_dev->ip) {
             copy_mac(dst_mac, default_dev->mac);
             arp_insert(dst_ip, dst_mac);
@@ -353,6 +356,11 @@ int net_send_udp(uint32_t dst_ip, uint16_t src_port, uint16_t dst_port,
     udp->checksum = 0;
     memcpy(payload + sizeof(struct udp_header), data, len);
     return net_send_ipv4(dst_ip, IP_PROTO_UDP, payload, udp_len);
+}
+
+int net_send_udp_broadcast(uint16_t src_port, uint16_t dst_port,
+                           const uint8_t *data, uint16_t len) {
+    return net_send_udp(NET_IPV4_BROADCAST, src_port, dst_port, data, len);
 }
 
 static void handle_udp(uint32_t src_ip, const uint8_t *payload, uint16_t len) {

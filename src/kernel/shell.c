@@ -14,6 +14,7 @@
 #include "../fs/ramfs.h"
 #include "../fs/tmpfs.h"
 #include "../net/net.h"
+#include "../net/discovery.h"
 #include "ai.h"
 #include "devmgr.h"
 #include "ext4.h"
@@ -94,6 +95,7 @@ static const char *builtin_commands[] = {
     "yield",
     "exec",
     "netinfo",
+    "discovery",
     "ping_self",
     "ai_info",
     "ai_ask",
@@ -1057,6 +1059,7 @@ static void cmd_help(void)
     print("  mount_ext4 [dev] [path] - Mount EXT4 volume read-only (default ram0 /mnt)\n");
     print("  mount_tmpfs [path] - Mount tmpfs memory filesystem (default /tmp)\n");
     print("  netinfo         - Show network stack information\n");
+    print("  discovery [scan|peers|announce|bye|name <n>|caps <c>|auth|auth_secret <s>|auth_peer <id>]\n");
     print("  ping_self       - Send ICMP echo to loopback network device\n");
     print("  ai_info         - Show AI engine status\n");
     print("  ai_ask <text>   - Ask AI engine with current backend\n");
@@ -1269,6 +1272,74 @@ void shell_run(void)
                 else if (strcmp(cmd, "netinfo") == 0)
                 {
                     net_print_info();
+                }
+                else if (strcmp(cmd, "discovery") == 0)
+                {
+                    if (argc < 2)
+                    {
+                        discovery_print_info();
+                    }
+                    else if (strcmp(argv[1], "scan") == 0 || strcmp(argv[1], "query") == 0)
+                    {
+                        if (discovery_query() < 0)
+                            print("discovery: scan failed\n");
+                        else
+                            print("discovery: query broadcast sent\n");
+                    }
+                    else if (strcmp(argv[1], "peers") == 0)
+                    {
+                        discovery_print_peers();
+                    }
+                    else if (strcmp(argv[1], "auth") == 0)
+                    {
+                        discovery_print_auth();
+                    }
+                    else if (strcmp(argv[1], "auth_secret") == 0)
+                    {
+                        if (argc < 3 || discovery_set_auth_secret(argv[2]) < 0)
+                            print("discovery: invalid auth secret\n");
+                        else
+                            print("discovery: auth secret configured\n");
+                    }
+                    else if (strcmp(argv[1], "auth_peer") == 0)
+                    {
+                        if (argc < 3 || discovery_auth_peer(argv[2]) < 0)
+                            print("discovery: auth peer failed\n");
+                        else
+                            print("discovery: auth challenge sent\n");
+                    }
+                    else if (strcmp(argv[1], "announce") == 0)
+                    {
+                        if (discovery_announce() < 0)
+                            print("discovery: announce failed\n");
+                        else
+                            print("discovery: hello broadcast sent\n");
+                    }
+                    else if (strcmp(argv[1], "bye") == 0)
+                    {
+                        if (discovery_goodbye() < 0)
+                            print("discovery: bye failed\n");
+                        else
+                            print("discovery: bye broadcast sent\n");
+                    }
+                    else if (strcmp(argv[1], "name") == 0)
+                    {
+                        if (argc < 3 || discovery_set_local_name(argv[2]) < 0)
+                            print("discovery: invalid name\n");
+                        else
+                            print("discovery: name updated\n");
+                    }
+                    else if (strcmp(argv[1], "caps") == 0)
+                    {
+                        if (argc < 3 || discovery_set_local_capabilities(argv[2]) < 0)
+                            print("discovery: invalid capabilities\n");
+                        else
+                            print("discovery: capabilities updated\n");
+                    }
+                    else
+                    {
+                        print("usage: discovery [scan|peers|announce|bye|name <n>|caps <c>|auth|auth_secret <s>|auth_peer <id>]\n");
+                    }
                 }
                 else if (strcmp(cmd, "ping_self") == 0)
                 {

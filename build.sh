@@ -152,6 +152,11 @@ gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
+    -I $SRC/include -I $SRC/net \
+    -c $SRC/net/discovery.c -o $BUILD/discovery.o
+
+gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
     -I $SRC/include \
     -c $SRC/devmgr.c -o $BUILD/devmgr.o
 
@@ -197,6 +202,7 @@ ld -m elf_i386 -T $SRC/linker.ld \
     $BUILD/tmpfs.o \
     $BUILD/ext4.o \
     $BUILD/net.o \
+    $BUILD/discovery.o \
     $BUILD/devmgr.o \
     $BUILD/ai.o \
     $BUILD/shell.o
