@@ -1066,6 +1066,7 @@ static void cmd_help(void)
     print("  ai_model_unload <name> - Unload AI model\n");
     print("  ai_repo [path]  - Show or set AI model repository\n");
     print("  ai_trust [path|load <keyfile>] - Show/set trust root or load trusted key\n");
+    print("  ai_ed25519 [selftest|verify_sha256 <pub> <sha256> <sig>] - Test/verify Ed25519\n");
     print("  ai_model_register <manifest> - Register model manifest\n");
     print("  ai_model_scan   - Scan repository and register manifests\n");
     print("  devices         - List registered kernel devices\n");
@@ -1436,7 +1437,11 @@ void shell_run(void)
                 }
                 else if (strcmp(cmd, "ai_ed25519") == 0)
                 {
-                    if (argc >= 5 && strcmp(argv[1], "verify_sha256") == 0)
+                    if (argc < 2 || strcmp(argv[1], "selftest") == 0)
+                    {
+                        ai_print_ed25519_selftest();
+                    }
+                    else if (argc >= 5 && strcmp(argv[1], "verify_sha256") == 0)
                     {
                         int status = ai_ed25519_verify_sha256_hex(argv[2], argv[3], argv[4]);
                         if (status == AI_STATUS_OK)
@@ -1450,13 +1455,9 @@ void shell_run(void)
                             print("\n");
                         }
                     }
-                    else if (argc >= 2)
-                    {
-                        print("usage: ai_ed25519 [verify_sha256 <public_key_hex> <sha256_hex> <signature_hex>]\n");
-                    }
                     else
                     {
-                        ai_print_ed25519_selftest();
+                        print("usage: ai_ed25519 [selftest|verify_sha256 <public_key_hex> <sha256_hex> <signature_hex>]\n");
                     }
                 }
                 else if (strcmp(cmd, "ai_model_register") == 0)
