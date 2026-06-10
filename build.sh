@@ -158,6 +158,11 @@ gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
     -I $SRC/include \
+    -c $SRC/ai/ai.c -o $BUILD/ai.o
+
+gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
+    -I $SRC/include \
     -c $SRC/shell.c -o $BUILD/shell.o
 
 echo "[4/5] Linking kernel.elf..."
@@ -193,6 +198,7 @@ ld -m elf_i386 -T $SRC/linker.ld \
     $BUILD/ext4.o \
     $BUILD/net.o \
     $BUILD/devmgr.o \
+    $BUILD/ai.o \
     $BUILD/shell.o
 
 objcopy -O binary $BUILD/kernel.elf $BUILD/kernel.bin

@@ -13,6 +13,7 @@
 #include "../fs/ramfs.h"
 #include "../fs/tmpfs.h"
 #include "../net/net.h"
+#include "ai.h"
 #include "devmgr.h"
 #include "../shell.h"
 #include "heap.h"
@@ -147,6 +148,10 @@ void kernel_main(void) {
     /* 初始化最小 TCP/IP 网络栈 */
     net_init();
     serial_write("[OK] NET\n");
+
+    /* 初始化 AI 引擎框架 MVP */
+    ai_init();
+    serial_write("[OK] AI\n");
 
     /* VFS 测试：不要预创建 /tmp，避免 shell 手动 mkdir /tmp 时误报失败 */
     int fd = vfs_open("/hello.txt", O_CREAT | O_RDWR, 0644);

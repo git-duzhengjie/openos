@@ -14,6 +14,7 @@
 #include "../fs/ramfs.h"
 #include "../fs/tmpfs.h"
 #include "../net/net.h"
+#include "ai.h"
 #include "devmgr.h"
 #include "ext4.h"
 #include "include/io.h"
@@ -93,7 +94,10 @@ static const char *builtin_commands[] = {
     "yield",
     "exec",
     "netinfo",
-    "ping_self"
+    "ping_self",
+    "ai_info",
+    "ai_ask",
+    "ai_backend"
 };
 
 #define BUILTIN_COMMAND_COUNT (sizeof(builtin_commands) / sizeof(builtin_commands[0]))
@@ -1046,6 +1050,9 @@ static void cmd_help(void)
     print("  mount_tmpfs [path] - Mount tmpfs memory filesystem (default /tmp)\n");
     print("  netinfo         - Show network stack information\n");
     print("  ping_self       - Send ICMP echo to loopback network device\n");
+    print("  ai_info         - Show AI engine status\n");
+    print("  ai_ask <text>   - Ask AI engine with current backend\n");
+    print("  ai_backend [local|cloud|hybrid] - Show or set AI backend\n");
     print("  devices         - List registered kernel devices\n");
     print("  hotplug         - Show pending hotplug events\n");
     print("  hotplug_poll    - Pop one hotplug event from queue\n");
@@ -1253,6 +1260,75 @@ void shell_run(void)
                         print("ping_self: failed\n");
                     else
                         print("ping_self: ok\n");
+                }
+                else if (strcmp(cmd, "ai_info") == 0)
+                {
+                    ai_print_info();
+                }
+                else if (strcmp(cmd, "ai_backend") == 0)
+                {
+                    if (argc < 2)
+                    {
+                        print("ai_backend: ");
+                        print(ai_backend_name(ai_get_default_backend()));
+                        print("\n");
+                    }
+                    else
+                    {
+                        ai_backend_type_t backend;
+                        if (ai_parse_backend(argv[1], &backend) < 0 || ai_set_default_backend(backend) < 0)
+                        {
+                            print("ai_backend: expected local, cloud, or hybrid\n");
+                        }
+                        else
+                        {
+                            print("ai_backend: switched to ");
+                            print(ai_backend_name(backend));
+                            print("\n");
+                        }
+                    }
+                }
+                else if (strcmp(cmd, "ai_ask") == 0)
+                {
+                    if (argc < 2)
+                    {
+                        print("ai_ask: missing prompt\n");
+                    }
+                    else
+                    {
+                        char prompt_buf[AI_PROMPT_MAX];
+                        int pos = 0;
+                        for (int i = 1; i < argc; i++)
+                        {
+                            if (i > 1 && pos < (int)AI_PROMPT_MAX - 1)
+                                prompt_buf[pos++] = ' ';
+                            int k = 0;
+                            while (argv[i][k] && pos < (int)AI_PROMPT_MAX - 1)
+                                prompt_buf[pos++] = argv[i][k++];
+                        }
+                        prompt_buf[pos] = '\0';
+
+                        ai_request_t request;
+                        ai_response_t response;
+                        memset(&request, 0, sizeof(request));
+                        request.task_type = AI_TASK_CHAT;
+                        request.backend_preference = ai_get_default_backend();
+                        request.model = NULL;
+                        request.prompt = prompt_buf;
+                        request.system_prompt = "You are openos local AI assistant.";
+                        request.max_tokens = AI_RESPONSE_MAX;
+                        request.flags = 0;
+
+                        if (ai_generate(&request, &response) < 0)
+                        {
+                            print("ai_ask: failed\n");
+                        }
+                        else
+                        {
+                            print(response.text);
+                            print("\n");
+                        }
+                    }
                 }
                 else if (strcmp(cmd, "devices") == 0)
                 {
