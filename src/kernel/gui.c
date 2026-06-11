@@ -17,6 +17,7 @@ static gui_system_t g_gui;
 
 static int gui_rect_contains(const gui_rect_t *r, int x, int y);
 static gui_window_t *gui_top_window(void);
+static void gui_set_hovered_widget(gui_widget_t *wg);
 void gui_terminal_set_input_focus(int focused);
 
 static uint32_t gui_rgb(uint8_t r, uint8_t g, uint8_t b) {
@@ -216,6 +217,25 @@ static int gui_widget_can_focus(gui_widget_t *wg) {
     return wg && wg->visible && wg->enabled && wg->type == GUI_WIDGET_TEXTBOX;
 }
 
+static int gui_widget_is_clickable(gui_widget_t *wg) {
+    return wg && wg->visible && wg->enabled && wg->type == GUI_WIDGET_BUTTON;
+}
+
+static void gui_set_hovered_widget(gui_widget_t *wg) {
+    if (wg && !gui_widget_is_clickable(wg)) wg = 0;
+    if (g_gui.hovered_widget == wg) return;
+    if (g_gui.hovered_widget) g_gui.hovered_widget->hovered = 0;
+    g_gui.hovered_widget = wg;
+    if (g_gui.hovered_widget) g_gui.hovered_widget->hovered = 1;
+    gui_invalidate_all();
+}
+
+static gui_widget_t *gui_widget_at_screen(int x, int y) {
+    gui_window_t *w = gui_window_at(x, y);
+    if (!w) return 0;
+    return gui_widget_at(w, x - w->rect.x - GUI_BORDER_SIZE, y - w->rect.y - GUI_TITLE_HEIGHT);
+}
+
 static void gui_set_focused_widget(gui_widget_t *wg) {
     if (g_gui.focused_widget == wg) return;
     if (g_gui.focused_widget) g_gui.focused_widget->focused = 0;
@@ -372,14 +392,33 @@ static void gui_draw_widget(gui_widget_t *wg) {
     if (wg->type == GUI_WIDGET_LABEL) {
         gui_draw_text(ax, ay + 3, wg->text, wg->fg_color ? wg->fg_color : g_gui.colors.text_fg);
     } else if (wg->type == GUI_WIDGET_BUTTON) {
-        bg = wg->pressed ? g_gui.colors.accent : (wg->bg_color ? wg->bg_color : g_gui.colors.button_bg);
-        fg = wg->fg_color ? wg->fg_color : g_gui.colors.button_fg;
+        uint32_t light = g_gui.colors.button_border;
+        uint32_t shadow = gui_rgb(20, 20, 20);
+        int text_dx = wg->pressed ? 9 : 8;
+        int text_dy = wg->pressed ? 1 : 0;
+        if (!wg->enabled) {
+            bg = gui_rgb(170, 174, 184);
+            fg = gui_rgb(95, 98, 106);
+            light = gui_rgb(198, 202, 210);
+            shadow = gui_rgb(125, 128, 136);
+        } else if (wg->pressed) {
+            bg = g_gui.colors.accent;
+            fg = gui_rgb(255, 255, 255);
+            light = gui_rgb(20, 20, 20);
+            shadow = g_gui.colors.button_border;
+        } else if (wg->hovered) {
+            bg = gui_rgb(235, 240, 250);
+            fg = wg->fg_color ? wg->fg_color : g_gui.colors.button_fg;
+        } else {
+            bg = wg->bg_color ? wg->bg_color : g_gui.colors.button_bg;
+            fg = wg->fg_color ? wg->fg_color : g_gui.colors.button_fg;
+        }
         gui_raw_fill_rect(ax, ay, wg->rect.w, wg->rect.h, bg);
-        gui_raw_line(ax, ay, ax + wg->rect.w - 1, ay, g_gui.colors.button_border);
-        gui_raw_line(ax, ay, ax, ay + wg->rect.h - 1, g_gui.colors.button_border);
-        gui_raw_line(ax + wg->rect.w - 1, ay, ax + wg->rect.w - 1, ay + wg->rect.h - 1, gui_rgb(20, 20, 20));
-        gui_raw_line(ax, ay + wg->rect.h - 1, ax + wg->rect.w - 1, ay + wg->rect.h - 1, gui_rgb(20, 20, 20));
-        gui_draw_text(ax + 8, ay + (wg->rect.h - GUI_CHAR_H) / 2, wg->text, fg);
+        gui_raw_line(ax, ay, ax + wg->rect.w - 1, ay, light);
+        gui_raw_line(ax, ay, ax, ay + wg->rect.h - 1, light);
+        gui_raw_line(ax + wg->rect.w - 1, ay, ax + wg->rect.w - 1, ay + wg->rect.h - 1, shadow);
+        gui_raw_line(ax, ay + wg->rect.h - 1, ax + wg->rect.w - 1, ay + wg->rect.h - 1, shadow);
+        gui_draw_text(ax + text_dx, ay + (wg->rect.h - GUI_CHAR_H) / 2 + text_dy, wg->text, fg);
     } else if (wg->type == GUI_WIDGET_PANEL) {
         gui_raw_fill_rect(ax, ay, wg->rect.w, wg->rect.h, wg->bg_color);
     } else if (wg->type == GUI_WIDGET_TEXTBOX) {
@@ -526,6 +565,7 @@ void gui_destroy_window(gui_window_t *window) {
     if (g_gui.active_window == window) g_gui.active_window = 0;
     if (g_gui.drag_window == window) g_gui.drag_window = 0;
     if (g_gui.pressed_widget && g_gui.pressed_widget->owner == window) g_gui.pressed_widget = 0;
+    if (g_gui.hovered_widget && g_gui.hovered_widget->owner == window) g_gui.hovered_widget = 0;
     if (g_gui.focused_widget && g_gui.focused_widget->owner == window) g_gui.focused_widget = 0;
     memset(window, 0, sizeof(gui_window_t));
 
@@ -623,10 +663,11 @@ void gui_process_events(void) {
                     int sx = ev.x - w->rect.x - GUI_BORDER_SIZE;
                     int sy = ev.y - w->rect.y - GUI_TITLE_HEIGHT;
                     gui_widget_t *wg = gui_widget_at(w, sx, sy);
-                    if (wg && wg->type == GUI_WIDGET_BUTTON) {
+                    if (gui_widget_is_clickable(wg)) {
                         gui_set_focused_widget(0);
                         wg->pressed = 1;
                         g_gui.pressed_widget = wg;
+                        gui_invalidate_all();
                     } else if (gui_widget_can_focus(wg)) {
                         gui_set_focused_widget(wg);
                     } else {
@@ -650,11 +691,21 @@ void gui_process_events(void) {
             }
             if (g_gui.pressed_widget) {
                 gui_widget_t *wg = g_gui.pressed_widget;
+                int still_inside = 0;
+                gui_widget_t *under = gui_widget_at_screen(ev.x, ev.y);
                 wg->pressed = 0;
-                if (wg->on_click) wg->on_click(wg, wg->user_data);
                 g_gui.pressed_widget = 0;
+                still_inside = (under == wg && gui_widget_is_clickable(wg));
+                gui_invalidate_all();
+                if (still_inside) {
+                    ev.type = GUI_EVENT_BUTTON_CLICK;
+                    ev.window = wg->owner;
+                    ev.widget = wg;
+                    gui_event_push(ev);
+                }
             }
         } else if (ev.type == GUI_EVENT_MOUSE_MOVE) {
+            gui_set_hovered_widget(gui_widget_at_screen(ev.x, ev.y));
             if (g_gui.drag_window && g_gui.drag_window->dragging) {
                 gui_window_t *w = g_gui.drag_window;
                 w->rect.x = ev.x - w->drag_offset_x;
@@ -666,6 +717,10 @@ void gui_process_events(void) {
                 gui_invalidate_all();
             } else {
                 gui_invalidate_rect(ev.x - 18, ev.y - 18, 36, 36);
+            }
+        } else if (ev.type == GUI_EVENT_BUTTON_CLICK) {
+            if (ev.widget && gui_widget_is_clickable(ev.widget) && ev.widget->on_click) {
+                ev.widget->on_click(ev.widget, ev.widget->user_data);
             }
         } else if (ev.type == GUI_EVENT_WINDOW_CLOSE) {
             gui_destroy_window(ev.window);
@@ -863,6 +918,19 @@ gui_widget_t *gui_add_textbox(gui_window_t *window, int x, int y, int w, int h, 
         wg->cursor = (uint32_t)strlen(wg->text);
     }
     return wg;
+}
+
+void gui_widget_set_enabled(gui_widget_t *widget, int enabled) {
+    if (!widget) return;
+    widget->enabled = enabled ? 1 : 0;
+    if (!widget->enabled) {
+        widget->pressed = 0;
+        widget->hovered = 0;
+        if (g_gui.pressed_widget == widget) g_gui.pressed_widget = 0;
+        if (g_gui.hovered_widget == widget) g_gui.hovered_widget = 0;
+        if (g_gui.focused_widget == widget) gui_set_focused_widget(0);
+    }
+    if (widget->owner) gui_invalidate_rect(widget->owner->rect.x, widget->owner->rect.y, widget->owner->rect.w, widget->owner->rect.h);
 }
 
 void gui_terminal_clear(void) {

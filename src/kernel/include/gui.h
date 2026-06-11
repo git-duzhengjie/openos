@@ -105,6 +105,7 @@ struct gui_widget {
     int visible;
     int enabled;
     int pressed;
+    int hovered;
     int focused;
     uint32_t cursor;
 };
@@ -148,6 +149,7 @@ typedef struct gui_system {
     gui_window_t *active_window;
     gui_window_t *drag_window;
     gui_widget_t *pressed_widget;
+    gui_widget_t *hovered_widget;
     gui_widget_t *focused_widget;
     uint32_t next_window_id;
     uint32_t next_widget_id;
@@ -202,6 +204,7 @@ gui_widget_t *gui_add_label(gui_window_t *window, int x, int y, int w, int h, co
 gui_widget_t *gui_add_button(gui_window_t *window, int x, int y, int w, int h, const char *text, gui_widget_callback_t cb, void *user_data);
 gui_widget_t *gui_add_panel(gui_window_t *window, int x, int y, int w, int h, uint32_t color);
 gui_widget_t *gui_add_textbox(gui_window_t *window, int x, int y, int w, int h, const char *text);
+void gui_widget_set_enabled(gui_widget_t *widget, int enabled);
 
 void gui_event_push(gui_event_t event);
 int gui_event_pop(gui_event_t *event);
