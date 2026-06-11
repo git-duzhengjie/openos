@@ -214,11 +214,23 @@ static gui_widget_t *gui_widget_at(gui_window_t *w, int sx, int sy) {
 }
 
 static int gui_widget_can_focus(gui_widget_t *wg) {
-    return wg && wg->visible && wg->enabled && wg->type == GUI_WIDGET_TEXTBOX;
+    return wg && wg->visible && wg->enabled &&
+           (wg->type == GUI_WIDGET_TEXTBOX || wg->type == GUI_WIDGET_BUTTON);
 }
 
 static int gui_widget_is_clickable(gui_widget_t *wg) {
     return wg && wg->visible && wg->enabled && wg->type == GUI_WIDGET_BUTTON;
+}
+
+static void gui_button_activate(gui_widget_t *wg) {
+    gui_event_t ev;
+    if (!gui_widget_is_clickable(wg)) return;
+    ev.type = GUI_EVENT_BUTTON_CLICK;
+    ev.x = 0; ev.y = 0; ev.dx = 0; ev.dy = 0;
+    ev.button = 0; ev.key = 0;
+    ev.window = wg->owner;
+    ev.widget = wg;
+    gui_event_push(ev);
 }
 
 static void gui_set_hovered_widget(gui_widget_t *wg) {
@@ -241,8 +253,10 @@ static void gui_set_focused_widget(gui_widget_t *wg) {
     if (g_gui.focused_widget) g_gui.focused_widget->focused = 0;
     g_gui.focused_widget = 0;
     if (gui_widget_can_focus(wg)) {
-        uint32_t len = (uint32_t)strlen(wg->text);
-        if (wg->cursor > len) wg->cursor = len;
+        if (wg->type == GUI_WIDGET_TEXTBOX) {
+            uint32_t len = (uint32_t)strlen(wg->text);
+            if (wg->cursor > len) wg->cursor = len;
+        }
         wg->focused = 1;
         g_gui.focused_widget = wg;
         gui_terminal_set_input_focus(0);
@@ -418,6 +432,13 @@ static void gui_draw_widget(gui_widget_t *wg) {
         gui_raw_line(ax, ay, ax, ay + wg->rect.h - 1, light);
         gui_raw_line(ax + wg->rect.w - 1, ay, ax + wg->rect.w - 1, ay + wg->rect.h - 1, shadow);
         gui_raw_line(ax, ay + wg->rect.h - 1, ax + wg->rect.w - 1, ay + wg->rect.h - 1, shadow);
+        if (wg->focused && wg->enabled) {
+            uint32_t focus = gui_rgb(255, 255, 255);
+            gui_raw_line(ax + 3, ay + 3, ax + wg->rect.w - 4, ay + 3, focus);
+            gui_raw_line(ax + 3, ay + wg->rect.h - 4, ax + wg->rect.w - 4, ay + wg->rect.h - 4, focus);
+            gui_raw_line(ax + 3, ay + 3, ax + 3, ay + wg->rect.h - 4, focus);
+            gui_raw_line(ax + wg->rect.w - 4, ay + 3, ax + wg->rect.w - 4, ay + wg->rect.h - 4, focus);
+        }
         gui_draw_text(ax + text_dx, ay + (wg->rect.h - GUI_CHAR_H) / 2 + text_dy, wg->text, fg);
     } else if (wg->type == GUI_WIDGET_PANEL) {
         gui_raw_fill_rect(ax, ay, wg->rect.w, wg->rect.h, wg->bg_color);
@@ -634,8 +655,15 @@ void gui_process_events(void) {
         if (ev.type == GUI_EVENT_KEY_DOWN) {
             if (ev.key == GUI_KEY_TAB) {
                 gui_focus_next_widget();
-            } else if (g_gui.focused_widget && g_gui.focused_widget->focused) {
+            } else if (g_gui.focused_widget && g_gui.focused_widget->focused &&
+                       g_gui.focused_widget->type == GUI_WIDGET_TEXTBOX) {
                 gui_textbox_on_key(g_gui.focused_widget, ev.key);
+            } else if (g_gui.focused_widget && g_gui.focused_widget->focused &&
+                       g_gui.focused_widget->type == GUI_WIDGET_BUTTON &&
+                       (ev.key == GUI_KEY_ENTER || ev.key == GUI_KEY_SPACE)) {
+                gui_button_activate(g_gui.focused_widget);
+            } else if (g_gui.focused_widget && g_gui.focused_widget->focused) {
+                /* Focused widgets consume keys that they do not handle. */
             } else if (ev.key >= 0 && ev.key <= 255) {
                 gui_terminal_on_input((char)ev.key);
             }
@@ -664,7 +692,7 @@ void gui_process_events(void) {
                     int sy = ev.y - w->rect.y - GUI_TITLE_HEIGHT;
                     gui_widget_t *wg = gui_widget_at(w, sx, sy);
                     if (gui_widget_is_clickable(wg)) {
-                        gui_set_focused_widget(0);
+                        gui_set_focused_widget(wg);
                         wg->pressed = 1;
                         g_gui.pressed_widget = wg;
                         gui_invalidate_all();
@@ -698,10 +726,7 @@ void gui_process_events(void) {
                 still_inside = (under == wg && gui_widget_is_clickable(wg));
                 gui_invalidate_all();
                 if (still_inside) {
-                    ev.type = GUI_EVENT_BUTTON_CLICK;
-                    ev.window = wg->owner;
-                    ev.widget = wg;
-                    gui_event_push(ev);
+                    gui_button_activate(wg);
                 }
             }
         } else if (ev.type == GUI_EVENT_MOUSE_MOVE) {

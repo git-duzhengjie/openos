@@ -28,6 +28,7 @@
 #define GUI_KEY_BACKSPACE  8
 #define GUI_KEY_TAB        9
 #define GUI_KEY_ENTER      13
+#define GUI_KEY_SPACE      32
 #define GUI_KEY_DELETE     0x101
 #define GUI_KEY_LEFT       0x102
 #define GUI_KEY_RIGHT      0x103
