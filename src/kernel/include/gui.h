@@ -99,6 +99,7 @@ struct gui_widget {
 
 struct gui_window {
     uint32_t id;
+    int used;
     gui_rect_t rect;
     char title[64];
     uint32_t bg_color;
@@ -130,6 +131,7 @@ typedef struct gui_system {
     uint32_t height;
     gui_color_scheme_t colors;
     gui_window_t windows[GUI_MAX_WINDOWS];
+    uint32_t z_order[GUI_MAX_WINDOWS];
     uint32_t window_count;
     gui_window_t *active_window;
     gui_window_t *drag_window;
@@ -154,6 +156,8 @@ typedef struct gui_system {
     gui_rect_t dirty_rects[GUI_MAX_DIRTY_RECTS];
     uint32_t dirty_count;
     int full_dirty;
+    int clip_enabled;
+    gui_rect_t clip_rect;
 
     gui_terminal_t terminal;
 } gui_system_t;

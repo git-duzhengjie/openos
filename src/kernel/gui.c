@@ -1,18 +1,21 @@
 /* ============================================================
  * openos - Minimal GUI / Window System
  *
- * 支持：GUI 终端、PS/2 鼠标光标、事件队列、按钮点击、
- *       窗口拖动/置顶/关闭/最小化、双缓冲渲染。
+ * 支持：GUI 终端、PS/2 鼠标光标、事件队列、按钮点击�?
+ *       窗口拖动/置顶/关闭/最小化、双缓冲渲染�?
  * ============================================================ */
 
 #include "gui.h"
 #include "framebuffer.h"
 #include "mouse.h"
+#include "font.h"
 #include "serial.h"
 #include "string.h"
 #include "heap.h"
 
 static gui_system_t g_gui;
+
+static int gui_rect_contains(const gui_rect_t *r, int x, int y);
 
 static uint32_t gui_rgb(uint8_t r, uint8_t g, uint8_t b) {
     return ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
@@ -43,6 +46,7 @@ static void gui_copy_text(char *dst, const char *src, uint32_t cap) {
 static void gui_raw_put_pixel(int x, int y, uint32_t color) {
     if (!g_gui.initialized) return;
     if (x < 0 || y < 0 || x >= (int)g_gui.width || y >= (int)g_gui.height) return;
+    if (g_gui.clip_enabled && !gui_rect_contains(&g_gui.clip_rect, x, y)) return;
     if (g_gui.double_buffered && g_gui.backbuffer) {
         g_gui.backbuffer[(uint32_t)y * g_gui.width + (uint32_t)x] = color;
     } else {
@@ -74,50 +78,44 @@ static void gui_raw_line(int x0, int y0, int x1, int y1, uint32_t color) {
         if (e2 <= dx) { err += dx; y0 += sy; }
     }
 }
+static int gui_rect_intersect(const gui_rect_t *a, const gui_rect_t *b, gui_rect_t *out) {
+    int x1, y1, x2, y2;
+    if (!a || !b || !out) return 0;
+    x1 = a->x > b->x ? a->x : b->x;
+    y1 = a->y > b->y ? a->y : b->y;
+    x2 = (a->x + a->w) < (b->x + b->w) ? (a->x + a->w) : (b->x + b->w);
+    y2 = (a->y + a->h) < (b->y + b->h) ? (a->y + a->h) : (b->y + b->h);
+    if (x2 <= x1 || y2 <= y1) return 0;
+    out->x = x1; out->y = y1; out->w = x2 - x1; out->h = y2 - y1;
+    return 1;
+}
 
-static uint8_t gui_glyph_row(char ch, int row) {
-    static const uint8_t digits[10][8] = {
-        {0x3c,0x66,0x6e,0x76,0x66,0x66,0x3c,0x00}, {0x18,0x38,0x18,0x18,0x18,0x18,0x7e,0x00},
-        {0x3c,0x66,0x06,0x1c,0x30,0x66,0x7e,0x00}, {0x3c,0x66,0x06,0x1c,0x06,0x66,0x3c,0x00},
-        {0x0c,0x1c,0x3c,0x6c,0x7e,0x0c,0x0c,0x00}, {0x7e,0x60,0x7c,0x06,0x06,0x66,0x3c,0x00},
-        {0x1c,0x30,0x60,0x7c,0x66,0x66,0x3c,0x00}, {0x7e,0x66,0x06,0x0c,0x18,0x18,0x18,0x00},
-        {0x3c,0x66,0x66,0x3c,0x66,0x66,0x3c,0x00}, {0x3c,0x66,0x66,0x3e,0x06,0x0c,0x38,0x00}
-    };
-    static const uint8_t letters[26][8] = {
-        {0x18,0x3c,0x66,0x66,0x7e,0x66,0x66,0x00}, {0x7c,0x66,0x66,0x7c,0x66,0x66,0x7c,0x00},
-        {0x3c,0x66,0x60,0x60,0x60,0x66,0x3c,0x00}, {0x78,0x6c,0x66,0x66,0x66,0x6c,0x78,0x00},
-        {0x7e,0x60,0x60,0x7c,0x60,0x60,0x7e,0x00}, {0x7e,0x60,0x60,0x7c,0x60,0x60,0x60,0x00},
-        {0x3c,0x66,0x60,0x6e,0x66,0x66,0x3c,0x00}, {0x66,0x66,0x66,0x7e,0x66,0x66,0x66,0x00},
-        {0x7e,0x18,0x18,0x18,0x18,0x18,0x7e,0x00}, {0x1e,0x0c,0x0c,0x0c,0x0c,0x6c,0x38,0x00},
-        {0x66,0x6c,0x78,0x70,0x78,0x6c,0x66,0x00}, {0x60,0x60,0x60,0x60,0x60,0x60,0x7e,0x00},
-        {0x63,0x77,0x7f,0x6b,0x63,0x63,0x63,0x00}, {0x66,0x76,0x7e,0x7e,0x6e,0x66,0x66,0x00},
-        {0x3c,0x66,0x66,0x66,0x66,0x66,0x3c,0x00}, {0x7c,0x66,0x66,0x7c,0x60,0x60,0x60,0x00},
-        {0x3c,0x66,0x66,0x66,0x6e,0x6c,0x36,0x00}, {0x7c,0x66,0x66,0x7c,0x78,0x6c,0x66,0x00},
-        {0x3c,0x66,0x60,0x3c,0x06,0x66,0x3c,0x00}, {0x7e,0x5a,0x18,0x18,0x18,0x18,0x3c,0x00},
-        {0x66,0x66,0x66,0x66,0x66,0x66,0x3c,0x00}, {0x66,0x66,0x66,0x66,0x66,0x3c,0x18,0x00},
-        {0x63,0x63,0x63,0x6b,0x7f,0x77,0x63,0x00}, {0x66,0x66,0x3c,0x18,0x3c,0x66,0x66,0x00},
-        {0x66,0x66,0x66,0x3c,0x18,0x18,0x3c,0x00}, {0x7e,0x06,0x0c,0x18,0x30,0x60,0x7e,0x00}
-    };
-    if (ch >= '0' && ch <= '9') return digits[ch - '0'][row];
-    if (ch >= 'A' && ch <= 'Z') return letters[ch - 'A'][row];
-    if (ch >= 'a' && ch <= 'z') return letters[ch - 'a'][row];
-    if (ch == '-') return row == 3 ? 0x7e : 0x00;
-    if (ch == '_') return row == 6 ? 0xff : 0x00;
-    if (ch == '.') return row >= 5 ? 0x18 : 0x00;
-    if (ch == ':') return (row == 1 || row == 2 || row == 5 || row == 6) ? 0x18 : 0x00;
-    if (ch == '/') return (uint8_t)(0x04u << (6 - row));
-    if (ch == '\\') return (uint8_t)(0x80u >> row);
-    if (ch == '[' || ch == ']') return (row == 0 || row == 7) ? 0x3c : (ch == '[' ? 0x30 : 0x0c);
-    if (ch == '(' || ch == ')') return (ch == '(' ? (row < 2 ? 0x0c : (row > 5 ? 0x0c : 0x18)) : (row < 2 ? 0x30 : (row > 5 ? 0x30 : 0x18)));
-    if (ch == ' ') return 0x00;
-    return (row == 0 || row == 7) ? 0x7e : 0x42;
+static void gui_set_clip_rect(const gui_rect_t *rect) {
+    gui_rect_t screen;
+    gui_rect_t clipped;
+    if (!rect) {
+        g_gui.clip_enabled = 0;
+        return;
+    }
+    screen.x = 0; screen.y = 0; screen.w = (int)g_gui.width; screen.h = (int)g_gui.height;
+    if (gui_rect_intersect(rect, &screen, &clipped)) {
+        g_gui.clip_rect = clipped;
+        g_gui.clip_enabled = 1;
+    } else {
+        g_gui.clip_rect.x = 0; g_gui.clip_rect.y = 0; g_gui.clip_rect.w = 0; g_gui.clip_rect.h = 0;
+        g_gui.clip_enabled = 1;
+    }
+}
+
+static void gui_clear_clip_rect(void) {
+    g_gui.clip_enabled = 0;
 }
 
 void gui_draw_char(int x, int y, char ch, uint32_t color) {
     int row, col;
     if ((uint8_t)ch < 32 || ch == ' ') return;
     for (row = 0; row < GUI_CHAR_H; row++) {
-        uint8_t bits = gui_glyph_row(ch, row);
+        uint8_t bits = font_get_glyph_row(font_get_default(), ch, row);
         for (col = 0; col < GUI_CHAR_W; col++) {
             if (bits & (0x80u >> col)) gui_raw_put_pixel(x + col, y + row, color);
         }
@@ -170,11 +168,32 @@ static gui_rect_t gui_min_rect(gui_window_t *w) {
     return r;
 }
 
+static int gui_window_index(gui_window_t *window) {
+    uint32_t idx;
+    if (!window) return -1;
+    if (window < &g_gui.windows[0] || window >= &g_gui.windows[GUI_MAX_WINDOWS]) return -1;
+    idx = (uint32_t)(window - g_gui.windows);
+    if (!g_gui.windows[idx].used) return -1;
+    return (int)idx;
+}
+
+static gui_window_t *gui_top_window(void) {
+    int i;
+    for (i = (int)g_gui.window_count - 1; i >= 0; i--) {
+        uint32_t idx = g_gui.z_order[i];
+        if (idx < GUI_MAX_WINDOWS && g_gui.windows[idx].used) return &g_gui.windows[idx];
+    }
+    return 0;
+}
+
 static gui_window_t *gui_window_at(int x, int y) {
     int i;
     for (i = (int)g_gui.window_count - 1; i >= 0; i--) {
-        gui_window_t *w = &g_gui.windows[i];
-        if (!w->visible || (w->flags & GUI_WINDOW_FLAG_MINIMIZED)) continue;
+        uint32_t idx = g_gui.z_order[i];
+        gui_window_t *w;
+        if (idx >= GUI_MAX_WINDOWS) continue;
+        w = &g_gui.windows[idx];
+        if (!w->used || !w->visible || (w->flags & GUI_WINDOW_FLAG_MINIMIZED)) continue;
         if (gui_rect_contains(&w->rect, x, y)) return w;
     }
     return 0;
@@ -302,12 +321,23 @@ static void gui_draw_window(gui_window_t *w) {
         gui_raw_line(c.x + c.w - 4, c.y + 3, c.x + 3, c.y + c.h - 4, gui_rgb(255,255,255));
     }
 
-    gui_rect_t m = gui_min_rect(w);
-    gui_raw_fill_rect(m.x, m.y, m.w, m.h, gui_rgb(80, 90, 105));
-    gui_raw_line(m.x + 3, m.y + m.h - 4, m.x + m.w - 4, m.y + m.h - 4, gui_rgb(255,255,255));
+    if (w->flags & GUI_WINDOW_FLAG_MINIMIZABLE) {
+        gui_rect_t m = gui_min_rect(w);
+        gui_raw_fill_rect(m.x, m.y, m.w, m.h, gui_rgb(80, 90, 105));
+        gui_raw_line(m.x + 3, m.y + m.h - 4, m.x + m.w - 4, m.y + m.h - 4, gui_rgb(255,255,255));
+    }
 
-    for (i = 0; i < w->widget_count; i++) {
-        gui_draw_widget(&w->widgets[i]);
+    {
+        gui_rect_t client;
+        client.x = w->rect.x + GUI_BORDER_SIZE;
+        client.y = w->rect.y + GUI_TITLE_HEIGHT;
+        client.w = w->rect.w - GUI_BORDER_SIZE * 2;
+        client.h = w->rect.h - GUI_TITLE_HEIGHT - GUI_BORDER_SIZE;
+        gui_set_clip_rect(&client);
+        for (i = 0; i < w->widget_count; i++) {
+            gui_draw_widget(&w->widgets[i]);
+        }
+        gui_clear_clip_rect();
     }
 }
 
@@ -329,8 +359,9 @@ int gui_event_pop(gui_event_t *event) {
 static void gui_refresh_window_refs(void) {
     uint32_t i;
     g_gui.terminal.window = 0;
-    for (i = 0; i < g_gui.window_count; i++) {
+    for (i = 0; i < GUI_MAX_WINDOWS; i++) {
         uint32_t j;
+        if (!g_gui.windows[i].used) continue;
         for (j = 0; j < g_gui.windows[i].widget_count; j++) {
             g_gui.windows[i].widgets[j].owner = &g_gui.windows[i];
         }
@@ -341,26 +372,30 @@ static void gui_refresh_window_refs(void) {
 }
 
 void gui_bring_to_front(gui_window_t *window) {
-    uint32_t idx, i;
-    gui_window_t tmp;
+    int idx;
+    uint32_t pos;
+    uint32_t i;
     if (!window || g_gui.window_count < 2) return;
-    idx = (uint32_t)(window - g_gui.windows);
-    if (idx >= g_gui.window_count || idx == g_gui.window_count - 1) return;
-    tmp = g_gui.windows[idx];
-    for (i = idx; i + 1 < g_gui.window_count; i++) {
-        g_gui.windows[i] = g_gui.windows[i + 1];
+    idx = gui_window_index(window);
+    if (idx < 0) return;
+    pos = GUI_MAX_WINDOWS;
+    for (i = 0; i < g_gui.window_count; i++) {
+        if (g_gui.z_order[i] == (uint32_t)idx) { pos = i; break; }
     }
-    g_gui.windows[g_gui.window_count - 1] = tmp;
-    gui_refresh_window_refs();
-    g_gui.active_window = &g_gui.windows[g_gui.window_count - 1];
+    if (pos == GUI_MAX_WINDOWS || pos == g_gui.window_count - 1) return;
+    for (i = pos; i + 1 < g_gui.window_count; i++) {
+        g_gui.z_order[i] = g_gui.z_order[i + 1];
+    }
+    g_gui.z_order[g_gui.window_count - 1] = (uint32_t)idx;
+    g_gui.active_window = window;
 }
 
 void gui_set_active_window(gui_window_t *window) {
     uint32_t i;
-    for (i = 0; i < g_gui.window_count; i++) g_gui.windows[i].active = 0;
-    if (window) {
+    for (i = 0; i < GUI_MAX_WINDOWS; i++) g_gui.windows[i].active = 0;
+    if (window && gui_window_index(window) >= 0) {
         gui_bring_to_front(window);
-        g_gui.active_window = &g_gui.windows[g_gui.window_count - 1];
+        g_gui.active_window = window;
         g_gui.active_window->active = 1;
     } else {
         g_gui.active_window = 0;
@@ -369,14 +404,28 @@ void gui_set_active_window(gui_window_t *window) {
 }
 
 void gui_destroy_window(gui_window_t *window) {
-    uint32_t idx, i;
+    int idx;
+    uint32_t i;
+    uint32_t pos = GUI_MAX_WINDOWS;
     if (!window) return;
-    idx = (uint32_t)(window - g_gui.windows);
-    if (idx >= g_gui.window_count) return;
-    for (i = idx; i + 1 < g_gui.window_count; i++) g_gui.windows[i] = g_gui.windows[i + 1];
-    g_gui.window_count--;
+    idx = gui_window_index(window);
+    if (idx < 0) return;
+
+    for (i = 0; i < g_gui.window_count; i++) {
+        if (g_gui.z_order[i] == (uint32_t)idx) { pos = i; break; }
+    }
+    if (pos < GUI_MAX_WINDOWS) {
+        for (i = pos; i + 1 < g_gui.window_count; i++) g_gui.z_order[i] = g_gui.z_order[i + 1];
+    }
+    if (g_gui.window_count > 0) g_gui.window_count--;
+
+    if (g_gui.active_window == window) g_gui.active_window = 0;
+    if (g_gui.drag_window == window) g_gui.drag_window = 0;
+    if (g_gui.pressed_widget && g_gui.pressed_widget->owner == window) g_gui.pressed_widget = 0;
+    memset(window, 0, sizeof(gui_window_t));
+
     gui_refresh_window_refs();
-    g_gui.active_window = g_gui.window_count ? &g_gui.windows[g_gui.window_count - 1] : 0;
+    g_gui.active_window = gui_top_window();
     if (g_gui.active_window) g_gui.active_window->active = 1;
     gui_invalidate_all();
 }
@@ -404,9 +453,12 @@ static gui_window_t *gui_taskbar_window_at(int x, int y) {
     int bx = 104;
     if (y < (int)g_gui.height - GUI_TASKBAR_HEIGHT) return 0;
     for (i = 0; i < g_gui.window_count; i++) {
-        gui_window_t *w = &g_gui.windows[i];
+        uint32_t idx = g_gui.z_order[i];
+        gui_window_t *w;
         int bw;
-        if (!w->visible || !(w->flags & GUI_WINDOW_FLAG_MINIMIZED)) continue;
+        if (idx >= GUI_MAX_WINDOWS) continue;
+        w = &g_gui.windows[idx];
+        if (!w->used || !w->visible || !(w->flags & GUI_WINDOW_FLAG_MINIMIZED)) continue;
         bw = 72 + (int)strlen(w->title) * GUI_CHAR_W;
         if (bw > 180) bw = 180;
         if (x >= bx && x < bx + bw) return w;
@@ -441,14 +493,13 @@ void gui_process_events(void) {
             if (w) {
                 if (w == g_gui.terminal.window) gui_terminal_set_input_focus(1);
                 gui_set_active_window(w);
-                w = g_gui.active_window;
                 gui_rect_t close = gui_close_rect(w);
                 gui_rect_t minr = gui_min_rect(w);
                 if ((w->flags & GUI_WINDOW_FLAG_CLOSABLE) && gui_rect_contains(&close, ev.x, ev.y)) {
                     ev.type = GUI_EVENT_WINDOW_CLOSE;
                     ev.window = w;
                     gui_event_push(ev);
-                } else if (gui_rect_contains(&minr, ev.x, ev.y)) {
+                } else if ((w->flags & GUI_WINDOW_FLAG_MINIMIZABLE) && gui_rect_contains(&minr, ev.x, ev.y)) {
                     ev.type = GUI_EVENT_WINDOW_MINIMIZE;
                     ev.window = w;
                     gui_event_push(ev);
@@ -623,17 +674,24 @@ void gui_print_info(void) {
 
 gui_window_t *gui_create_window(int x, int y, int w, int h, const char *title) {
     gui_window_t *win;
+    uint32_t idx;
     if (g_gui.window_count >= GUI_MAX_WINDOWS) return 0;
-    win = &g_gui.windows[g_gui.window_count++];
+    for (idx = 0; idx < GUI_MAX_WINDOWS; idx++) {
+        if (!g_gui.windows[idx].used) break;
+    }
+    if (idx >= GUI_MAX_WINDOWS) return 0;
+    win = &g_gui.windows[idx];
     memset(win, 0, sizeof(gui_window_t));
+    win->used = 1;
     win->id = g_gui.next_window_id++;
     win->rect.x = x; win->rect.y = y; win->rect.w = w; win->rect.h = h;
     gui_copy_text(win->title, title, sizeof(win->title));
     win->bg_color = g_gui.colors.window_bg;
-    win->flags = GUI_WINDOW_FLAG_CLOSABLE;
+    win->flags = GUI_WINDOW_FLAG_CLOSABLE | GUI_WINDOW_FLAG_MINIMIZABLE;
     win->visible = 1;
+    g_gui.z_order[g_gui.window_count++] = idx;
     gui_set_active_window(win);
-    return g_gui.active_window;
+    return win;
 }
 
 static gui_widget_t *gui_alloc_widget(gui_window_t *window, gui_widget_type_t type, int x, int y, int w, int h, const char *text) {
@@ -749,6 +807,14 @@ void gui_terminal_redraw(void) {
     if (!w || !w->visible || (w->flags & GUI_WINDOW_FLAG_MINIMIZED)) return;
     ox = w->rect.x + 6;
     oy = w->rect.y + GUI_TITLE_HEIGHT + 5;
+    {
+        gui_rect_t client;
+        client.x = w->rect.x + GUI_BORDER_SIZE;
+        client.y = w->rect.y + GUI_TITLE_HEIGHT;
+        client.w = w->rect.w - GUI_BORDER_SIZE * 2;
+        client.h = w->rect.h - GUI_TITLE_HEIGHT - GUI_BORDER_SIZE;
+        gui_set_clip_rect(&client);
+    }
     for (r = 0; r < g_gui.terminal.rows; r++) {
         for (c = 0; c < g_gui.terminal.cols; c++) {
             char ch = g_gui.terminal.cells[r][c];
@@ -758,6 +824,7 @@ void gui_terminal_redraw(void) {
     gui_raw_fill_rect(ox + (int)g_gui.terminal.cursor_x * GUI_CHAR_W,
                       oy + (int)g_gui.terminal.cursor_y * (GUI_CHAR_H + 1) + GUI_CHAR_H,
                       GUI_CHAR_W - 1, 1, gui_rgb(185, 255, 185));
+    gui_clear_clip_rect();
 }
 
 static void gui_draw_taskbar(void) {
@@ -767,9 +834,12 @@ static void gui_draw_taskbar(void) {
     gui_raw_fill_rect(0, y, (int)g_gui.width, GUI_TASKBAR_HEIGHT, gui_rgb(24, 28, 38));
     gui_draw_text(8, y + 7, "OpenOS GUI", gui_rgb(255,255,255));
     for (i = 0; i < g_gui.window_count; i++) {
-        gui_window_t *w = &g_gui.windows[i];
+        uint32_t idx = g_gui.z_order[i];
+        gui_window_t *w;
         int bw;
-        if (!w->visible || !(w->flags & GUI_WINDOW_FLAG_MINIMIZED)) continue;
+        if (idx >= GUI_MAX_WINDOWS) continue;
+        w = &g_gui.windows[idx];
+        if (!w->used || !w->visible || !(w->flags & GUI_WINDOW_FLAG_MINIMIZED)) continue;
         bw = 72 + (int)strlen(w->title) * GUI_CHAR_W;
         if (bw > 180) bw = 180;
         gui_raw_fill_rect(bx, y + 3, bw, GUI_TASKBAR_HEIGHT - 6, gui_rgb(52, 68, 96));
@@ -789,7 +859,8 @@ void gui_render(void) {
     gui_draw_taskbar();
 
     for (i = 0; i < g_gui.window_count; i++) {
-        gui_draw_window(&g_gui.windows[i]);
+        uint32_t idx = g_gui.z_order[i];
+        if (idx < GUI_MAX_WINDOWS) gui_draw_window(&g_gui.windows[idx]);
     }
     gui_terminal_redraw();
     if (g_gui.cursor_visible) gui_draw_cursor();
