@@ -32,6 +32,7 @@
  * ============================================================ */
 void vmm_init(void);                              /* 初始化虚拟内存 */
 void vmm_map_page(uint32_t vaddr, uint32_t paddr, uint32_t flags);  /* 映射单个页 */
+void vmm_map_range(uint32_t vaddr, uint32_t paddr, uint32_t size, uint32_t flags);  /* 静默映射连续物理区域 */
 void vmm_unmap_page(uint32_t vaddr);             /* 取消映射 */
 uint32_t vmm_get_cr3(void);                      /* 获取当前 CR3 */
 void vmm_load_cr3(uint32_t cr3);                 /* 加载新 CR3 */

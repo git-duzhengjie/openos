@@ -19,6 +19,7 @@
 #include "../net/bus.h"
 #include "ai.h"
 #include "devmgr.h"
+#include "framebuffer.h"
 #include "ext4.h"
 #include "include/io.h"
 #ifndef NULL
@@ -1080,6 +1081,8 @@ static void cmd_help(void)
     print("  clear           - Clear screen\n");
     print("  yield           - Yield CPU\n");
     print("  exec <elf>      - Execute ELF program\n");
+    print("  fbinfo          - Show framebuffer information\n");
+    print("  fbtest          - Draw framebuffer test pattern\n");
 }
 
 /* ---- Shell 主循�?---- */
@@ -1269,6 +1272,26 @@ void shell_run(void)
                     }
                     else
                         print("write: need file and text\n");
+                }
+                else if (strcmp(cmd, "fbinfo") == 0)
+                {
+                    framebuffer_print_info();
+                    const framebuffer_info_t *info = framebuffer_get_info();
+                    print("framebuffer: ");
+                    print(info->available ? "available" : "not available");
+                    print(info->mode_set ? ", mode set\n" : ", text mode\n");
+                }
+                else if (strcmp(cmd, "fbtest") == 0)
+                {
+                    if (!framebuffer_is_available())
+                    {
+                        print("fbtest: framebuffer not available\n");
+                    }
+                    else
+                    {
+                        print("fbtest: switching to graphics mode...\n");
+                        framebuffer_test_pattern();
+                    }
                 }
                 else if (strcmp(cmd, "netinfo") == 0)
                 {

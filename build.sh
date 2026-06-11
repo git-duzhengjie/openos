@@ -108,6 +108,11 @@ gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
     -I $SRC/include \
+    -c $SRC/framebuffer.c -o $BUILD/framebuffer.o
+
+gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
+    -I $SRC/include \
     -c $SRC/string.c -o $BUILD/string.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
@@ -199,6 +204,7 @@ ld -m elf_i386 -T $SRC/linker.ld \
     $BUILD/syscall.o \
     $BUILD/serial.o \
     $BUILD/vga.o \
+    $BUILD/framebuffer.o \
     $BUILD/string.o \
     $BUILD/keyboard.o \
     $BUILD/chardev.o \

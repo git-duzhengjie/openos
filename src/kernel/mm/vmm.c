@@ -151,6 +151,47 @@ void vmm_map_page(uint32_t vaddr, uint32_t paddr, uint32_t flags) {
 }
 
 /* ============================================================
+ * 静默映射连续物理区域
+ * 适合 framebuffer/MMIO，避免大量串口日志刷屏。
+ * ============================================================ */
+void vmm_map_range(uint32_t vaddr, uint32_t paddr, uint32_t size, uint32_t flags) {
+    uint32_t va = vaddr & ~0xFFFu;
+    uint32_t pa = paddr & ~0xFFFu;
+    uint32_t end = (vaddr + size + 0xFFFu) & ~0xFFFu;
+
+    while (va < end) {
+        uint32_t pgd_idx = va >> 22;
+        uint32_t pte_idx = (va >> 12) & 0x3FF;
+
+        if ((kernel_pgd[pgd_idx] & 1) == 0) {
+            uint32_t pt_phys = (uint32_t)pmm_alloc_page();
+            if (!pt_phys) {
+                serial_write("[VMM] map_range failed: no page table\n");
+                return;
+            }
+
+            uint32_t *pt = (uint32_t *)pt_phys;
+            for (int i = 0; i < 1024; i++) {
+                pt[i] = 0;
+            }
+
+            uint32_t *pgd_rec = (uint32_t *)(0xFFFFF000 + (pgd_idx << 2));
+            *pgd_rec = (pt_phys & ~0xFFFu) | (flags & 0x07u) | PTE_PRESENT;
+        } else if (flags & PTE_USER) {
+            uint32_t *pgd_rec = (uint32_t *)(0xFFFFF000 + (pgd_idx << 2));
+            *pgd_rec |= PTE_USER;
+        }
+
+        uint32_t *pte = (uint32_t *)(0xFFC00000 + (pgd_idx << 12));
+        pte[pte_idx] = (pa & ~0xFFFu) | (flags & 0xFFFu);
+        __asm__ volatile ("invlpg (%0)" : : "r"(va));
+
+        va += PAGE_SIZE;
+        pa += PAGE_SIZE;
+    }
+}
+
+/* ============================================================
  * 取消映射
  * ============================================================ */
 void vmm_unmap_page(uint32_t vaddr) {
