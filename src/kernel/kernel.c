@@ -71,6 +71,37 @@ void test_proc_b(void) {
     }
 }
 
+static int g_shell_thread_started = 0;
+
+void kernel_start_shell_thread(void) {
+    if (g_shell_thread_started) return;
+    g_shell_thread_started = 1;
+
+    extern void shell_run(void);
+    uint32_t shell_stack = (uint32_t)pmm_alloc_page() + 4096;
+    pmm_alloc_page(); pmm_alloc_page(); pmm_alloc_page(); /* extend to 16KB */
+    thread_t *sh = thread_create(1, "shell", (uint32_t)shell_run, shell_stack);
+    if (sh) {
+        sched_add_thread(sh);
+        serial_write("[SHELL] Shell thread started on demand.\n");
+    } else {
+        serial_write("[SHELL] Failed to create shell thread.\n");
+    }
+}
+
+static void desktop_thread(void) {
+    serial_write("[GUI] Starting graphical desktop...\n");
+    if (gui_start_desktop() != 0) {
+        serial_write("[GUI] Failed to start graphical desktop.\n");
+        return;
+    }
+
+    while (1) {
+        gui_poll();
+        sched_yield();
+    }
+}
+
 void kernel_main(void) {
     serial_init();
     serial_write("\n[OpenOS] Phase 2.5 - Preemptive Scheduler\n");
@@ -236,14 +267,15 @@ void kernel_main(void) {
     /* 测试用户态切换已通过 Phase 2 验证，不再自动测�?*/
     /* test_user_mode_switch(); */
     
-    /* 启动 shell 作为内核线程 - 16KB �?*/
+    /* Start graphical desktop as the foreground UI. */
     {
-        extern void shell_run(void);
-        uint32_t shell_stack = (uint32_t)pmm_alloc_page() + 4096;
-        pmm_alloc_page(); pmm_alloc_page(); pmm_alloc_page(); /* 扩展�?16KB */
-        thread_t *sh = thread_create(1, "shell", (uint32_t)shell_run, shell_stack);
-        if (sh) sched_add_thread(sh);
+        uint32_t desktop_stack = (uint32_t)pmm_alloc_page() + 4096;
+        pmm_alloc_page(); pmm_alloc_page(); pmm_alloc_page(); /* extend to 16KB */
+        thread_t *desk = thread_create(1, "desktop", (uint32_t)desktop_thread, desktop_stack);
+        if (desk) sched_add_thread(desk);
     }
+
+    /* Shell is launched on demand from the GUI Terminal tool. */
 
     /* 自动测试 ELF 加载 - 已禁用，避免干扰键盘输入
     {

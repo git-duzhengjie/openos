@@ -18,6 +18,7 @@
 #define GUI_EVENT_QUEUE_SIZE     64u
 #define GUI_MAX_DIRTY_RECTS      32u
 #define GUI_TASKBAR_HEIGHT       24
+#define GUI_TASKBAR_START_W      88
 
 #define GUI_WINDOW_FLAG_NONE      0x00000000u
 #define GUI_WINDOW_FLAG_CLOSABLE  0x00000001u
@@ -190,6 +191,7 @@ const gui_system_t *gui_get_system(void);
 void gui_print_info(void);
 void gui_render(void);
 void gui_demo(void);
+int gui_start_desktop(void);
 void gui_poll(void);
 
 gui_window_t *gui_create_window(int x, int y, int w, int h, const char *title);
@@ -223,6 +225,8 @@ void gui_terminal_clear(void);
 void gui_terminal_redraw(void);
 void gui_terminal_on_input(char ch);
 void gui_terminal_set_input_focus(int focused);
+void gui_terminal_open(void);
+void gui_terminal_minimize(void);
 
 void gui_draw_text(int x, int y, const char *text, uint32_t color);
 void gui_draw_char(int x, int y, char ch, uint32_t color);

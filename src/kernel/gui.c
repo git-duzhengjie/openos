@@ -615,9 +615,14 @@ void gui_restore_window(gui_window_t *window) {
 void gui_show_window(gui_window_t *window) { if (window) { window->visible = 1; gui_invalidate_all(); } }
 void gui_hide_window(gui_window_t *window) { if (window) { window->visible = 0; gui_invalidate_all(); } }
 
+static int gui_taskbar_terminal_button_at(int x, int y) {
+    if (y < (int)g_gui.height - GUI_TASKBAR_HEIGHT) return 0;
+    return x >= 8 && x < 8 + GUI_TASKBAR_START_W;
+}
+
 static gui_window_t *gui_taskbar_window_at(int x, int y) {
     uint32_t i;
-    int bx = 104;
+    int bx = GUI_TASKBAR_START_W + 16;
     if (y < (int)g_gui.height - GUI_TASKBAR_HEIGHT) return 0;
     for (i = 0; i < g_gui.window_count; i++) {
         uint32_t idx = g_gui.z_order[i];
@@ -668,6 +673,10 @@ void gui_process_events(void) {
                 gui_terminal_on_input((char)ev.key);
             }
         } else if (ev.type == GUI_EVENT_MOUSE_DOWN) {
+            if (gui_taskbar_terminal_button_at(ev.x, ev.y)) {
+                gui_terminal_open();
+                continue;
+            }
             gui_window_t *tw = gui_taskbar_window_at(ev.x, ev.y);
             if (tw) {
                 gui_restore_window(tw);
@@ -846,6 +855,20 @@ int gui_start(uint32_t width, uint32_t height) {
     g_gui.double_buffered = g_gui.backbuffer ? 1 : 0;
 
     gui_terminal_init();
+    gui_render();
+    return 0;
+}
+
+int gui_start_desktop(void) {
+    if (g_gui.initialized) {
+        gui_terminal_minimize();
+        gui_render();
+        return 0;
+    }
+
+    if (gui_start(1024, 768) != 0) return -1;
+    gui_terminal_write("\n[GUI] desktop started. Click Terminal on the taskbar to open command line.\n");
+    gui_terminal_minimize();
     gui_render();
     return 0;
 }
@@ -1040,6 +1063,24 @@ void gui_terminal_set_input_focus(int focused) {
     g_gui.terminal.input_focused = focused ? 1 : 0;
 }
 
+void gui_terminal_open(void) {
+    extern void kernel_start_shell_thread(void);
+    if (!g_gui.initialized || !g_gui.terminal.window) return;
+    g_gui.terminal.enabled = 1;
+    g_gui.terminal.input_focused = 1;
+    gui_restore_window(g_gui.terminal.window);
+    gui_set_active_window(g_gui.terminal.window);
+    gui_invalidate_rect(g_gui.terminal.window->rect.x, g_gui.terminal.window->rect.y,
+                        g_gui.terminal.window->rect.w, g_gui.terminal.window->rect.h);
+    kernel_start_shell_thread();
+}
+
+void gui_terminal_minimize(void) {
+    if (!g_gui.initialized || !g_gui.terminal.window) return;
+    gui_minimize_window(g_gui.terminal.window);
+    g_gui.terminal.input_focused = 0;
+}
+
 void gui_terminal_on_input(char ch) {
     if (!g_gui.initialized || !g_gui.terminal.enabled || !g_gui.terminal.input_focused) return;
     gui_terminal_putc(ch);
@@ -1079,10 +1120,15 @@ void gui_terminal_redraw(void) {
 
 static void gui_draw_taskbar(void) {
     uint32_t i;
-    int bx = 104;
+    int bx = GUI_TASKBAR_START_W + 16;
     int y = (int)g_gui.height - GUI_TASKBAR_HEIGHT;
     gui_raw_fill_rect(0, y, (int)g_gui.width, GUI_TASKBAR_HEIGHT, gui_rgb(24, 28, 38));
-    gui_draw_text(8, y + 7, "OpenOS GUI", gui_rgb(255,255,255));
+    gui_raw_fill_rect(8, y + 3, GUI_TASKBAR_START_W, GUI_TASKBAR_HEIGHT - 6, gui_rgb(52, 68, 96));
+    gui_raw_line(8, y + 3, 8 + GUI_TASKBAR_START_W - 1, y + 3, gui_rgb(135, 170, 230));
+    gui_raw_line(8, y + 3, 8, y + GUI_TASKBAR_HEIGHT - 4, gui_rgb(135, 170, 230));
+    gui_raw_line(8 + GUI_TASKBAR_START_W - 1, y + 3, 8 + GUI_TASKBAR_START_W - 1, y + GUI_TASKBAR_HEIGHT - 4, gui_rgb(20, 24, 35));
+    gui_raw_line(8, y + GUI_TASKBAR_HEIGHT - 4, 8 + GUI_TASKBAR_START_W - 1, y + GUI_TASKBAR_HEIGHT - 4, gui_rgb(20, 24, 35));
+    gui_draw_text(20, y + 8, "Terminal", gui_rgb(255,255,255));
     for (i = 0; i < g_gui.window_count; i++) {
         uint32_t idx = g_gui.z_order[i];
         gui_window_t *w;
