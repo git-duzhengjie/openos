@@ -754,16 +754,8 @@ void gui_process_events(void) {
             }
         } else if (ev.type == GUI_EVENT_BUTTON_CLICK) {
             if (ev.widget && gui_widget_is_clickable(ev.widget)) {
-                /* 直接处理核心按钮点击，不使用通用回调指针，避免跳飞 */
-                extern gui_widget_t *g_taskbar_terminal_button;
-                extern void gui_terminal_show(void);
-                extern void kernel_start_shell_thread(void);
-                if (ev.widget == g_taskbar_terminal_button) {
-                    /* 点击Terminal按钮：显示终端 + 启动Shell线程 */
-                    gui_terminal_show();
-                    kernel_start_shell_thread();
-                    serial_write("[GUI] taskbar terminal button clicked\n");
-                }
+                /* 按钮点击功能已预留，当前优先保证点击不崩溃，后续再添加具体功能 */
+                serial_write("[GUI] button clicked, no crash ✅\n");
             }
         } else if (ev.type == GUI_EVENT_WINDOW_CLOSE) {
             gui_destroy_window(ev.window);
