@@ -49,7 +49,8 @@ typedef enum gui_widget_type {
     GUI_WIDGET_NONE = 0,
     GUI_WIDGET_LABEL,
     GUI_WIDGET_BUTTON,
-    GUI_WIDGET_PANEL
+    GUI_WIDGET_PANEL,
+    GUI_WIDGET_TEXTBOX
 } gui_widget_type_t;
 
 typedef enum gui_event_type {
@@ -95,6 +96,8 @@ struct gui_widget {
     int visible;
     int enabled;
     int pressed;
+    int focused;
+    uint32_t cursor;
 };
 
 struct gui_window {
@@ -136,6 +139,7 @@ typedef struct gui_system {
     gui_window_t *active_window;
     gui_window_t *drag_window;
     gui_widget_t *pressed_widget;
+    gui_widget_t *focused_widget;
     uint32_t next_window_id;
     uint32_t next_widget_id;
 
@@ -187,6 +191,7 @@ void gui_bring_to_front(gui_window_t *window);
 gui_widget_t *gui_add_label(gui_window_t *window, int x, int y, int w, int h, const char *text);
 gui_widget_t *gui_add_button(gui_window_t *window, int x, int y, int w, int h, const char *text, gui_widget_callback_t cb, void *user_data);
 gui_widget_t *gui_add_panel(gui_window_t *window, int x, int y, int w, int h, uint32_t color);
+gui_widget_t *gui_add_textbox(gui_window_t *window, int x, int y, int w, int h, const char *text);
 
 void gui_event_push(gui_event_t event);
 int gui_event_pop(gui_event_t *event);

@@ -16,6 +16,7 @@
 static gui_system_t g_gui;
 
 static int gui_rect_contains(const gui_rect_t *r, int x, int y);
+void gui_terminal_set_input_focus(int focused);
 
 static uint32_t gui_rgb(uint8_t r, uint8_t g, uint8_t b) {
     return ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
@@ -210,6 +211,42 @@ static gui_widget_t *gui_widget_at(gui_window_t *w, int sx, int sy) {
     return 0;
 }
 
+static int gui_widget_can_focus(gui_widget_t *wg) {
+    return wg && wg->visible && wg->enabled && wg->type == GUI_WIDGET_TEXTBOX;
+}
+
+static void gui_set_focused_widget(gui_widget_t *wg) {
+    if (g_gui.focused_widget == wg) return;
+    if (g_gui.focused_widget) g_gui.focused_widget->focused = 0;
+    g_gui.focused_widget = 0;
+    if (gui_widget_can_focus(wg)) {
+        wg->focused = 1;
+        g_gui.focused_widget = wg;
+        gui_terminal_set_input_focus(0);
+    }
+    gui_invalidate_all();
+}
+
+static void gui_textbox_on_input(gui_widget_t *wg, char ch) {
+    uint32_t len;
+    if (!gui_widget_can_focus(wg)) return;
+    len = (uint32_t)strlen(wg->text);
+    if (wg->cursor > len) wg->cursor = len;
+    if (ch == '\b') {
+        uint32_t i;
+        if (wg->cursor == 0 || len == 0) return;
+        for (i = wg->cursor - 1; i < len; i++) wg->text[i] = wg->text[i + 1];
+        wg->cursor--;
+    } else if (ch == '\n' || ch == '\r') {
+        return;
+    } else if ((uint8_t)ch >= 32 && len + 1 < sizeof(wg->text)) {
+        uint32_t i;
+        for (i = len + 1; i > wg->cursor; i--) wg->text[i] = wg->text[i - 1];
+        wg->text[wg->cursor++] = ch;
+    }
+    if (wg->owner) gui_invalidate_rect(wg->owner->rect.x, wg->owner->rect.y, wg->owner->rect.w, wg->owner->rect.h);
+}
+
 static void gui_draw_cursor(void) {
     int x = g_gui.mouse_x;
     int y = g_gui.mouse_y;
@@ -292,6 +329,20 @@ static void gui_draw_widget(gui_widget_t *wg) {
         gui_draw_text(ax + 8, ay + (wg->rect.h - GUI_CHAR_H) / 2, wg->text, fg);
     } else if (wg->type == GUI_WIDGET_PANEL) {
         gui_raw_fill_rect(ax, ay, wg->rect.w, wg->rect.h, wg->bg_color);
+    } else if (wg->type == GUI_WIDGET_TEXTBOX) {
+        uint32_t border = wg->focused ? g_gui.colors.accent : g_gui.colors.button_border;
+        uint32_t text_x = (uint32_t)(ax + 4);
+        uint32_t text_y = (uint32_t)(ay + (wg->rect.h - GUI_CHAR_H) / 2);
+        gui_raw_fill_rect(ax, ay, wg->rect.w, wg->rect.h, wg->bg_color ? wg->bg_color : gui_rgb(250, 250, 250));
+        gui_raw_line(ax, ay, ax + wg->rect.w - 1, ay, border);
+        gui_raw_line(ax, ay, ax, ay + wg->rect.h - 1, border);
+        gui_raw_line(ax + wg->rect.w - 1, ay, ax + wg->rect.w - 1, ay + wg->rect.h - 1, border);
+        gui_raw_line(ax, ay + wg->rect.h - 1, ax + wg->rect.w - 1, ay + wg->rect.h - 1, border);
+        gui_draw_text((int)text_x, (int)text_y, wg->text, wg->fg_color ? wg->fg_color : gui_rgb(20, 20, 20));
+        if (wg->focused) {
+            int cx = ax + 4 + (int)(wg->cursor * GUI_CHAR_W);
+            if (cx < ax + wg->rect.w - 3) gui_raw_line(cx, ay + 4, cx, ay + wg->rect.h - 5, gui_rgb(20, 20, 20));
+        }
     }
 }
 
@@ -422,6 +473,7 @@ void gui_destroy_window(gui_window_t *window) {
     if (g_gui.active_window == window) g_gui.active_window = 0;
     if (g_gui.drag_window == window) g_gui.drag_window = 0;
     if (g_gui.pressed_widget && g_gui.pressed_widget->owner == window) g_gui.pressed_widget = 0;
+    if (g_gui.focused_widget && g_gui.focused_widget->owner == window) g_gui.focused_widget = 0;
     memset(window, 0, sizeof(gui_window_t));
 
     gui_refresh_window_refs();
@@ -434,6 +486,7 @@ void gui_minimize_window(gui_window_t *window) {
     if (!window) return;
     window->flags |= GUI_WINDOW_FLAG_MINIMIZED;
     if (g_gui.active_window == window) g_gui.active_window = 0;
+    if (g_gui.focused_widget && g_gui.focused_widget->owner == window) gui_set_focused_widget(0);
     gui_invalidate_all();
 }
 
@@ -482,7 +535,11 @@ void gui_process_events(void) {
     gui_event_t ev;
     while (gui_event_pop(&ev)) {
         if (ev.type == GUI_EVENT_KEY_DOWN) {
-            gui_terminal_on_input(ev.key);
+            if (g_gui.focused_widget && g_gui.focused_widget->focused) {
+                gui_textbox_on_input(g_gui.focused_widget, ev.key);
+            } else {
+                gui_terminal_on_input(ev.key);
+            }
         } else if (ev.type == GUI_EVENT_MOUSE_DOWN) {
             gui_window_t *tw = gui_taskbar_window_at(ev.x, ev.y);
             if (tw) {
@@ -508,9 +565,13 @@ void gui_process_events(void) {
                     int sy = ev.y - w->rect.y - GUI_TITLE_HEIGHT;
                     gui_widget_t *wg = gui_widget_at(w, sx, sy);
                     if (wg && wg->type == GUI_WIDGET_BUTTON) {
+                        gui_set_focused_widget(0);
                         wg->pressed = 1;
                         g_gui.pressed_widget = wg;
+                    } else if (gui_widget_can_focus(wg)) {
+                        gui_set_focused_widget(wg);
                     } else {
+                        gui_set_focused_widget(0);
                         gui_rect_t tr = gui_title_rect(w);
                         if (gui_rect_contains(&tr, ev.x, ev.y)) {
                             w->dragging = 1;
@@ -520,6 +581,8 @@ void gui_process_events(void) {
                         }
                     }
                 }
+            } else {
+                gui_set_focused_widget(0);
             }
         } else if (ev.type == GUI_EVENT_MOUSE_UP) {
             if (g_gui.drag_window) {
@@ -708,6 +771,7 @@ static gui_widget_t *gui_alloc_widget(gui_window_t *window, gui_widget_type_t ty
     wg->owner = window;
     wg->visible = 1;
     wg->enabled = 1;
+    wg->cursor = (uint32_t)strlen(wg->text);
     return wg;
 }
 
@@ -724,6 +788,16 @@ gui_widget_t *gui_add_button(gui_window_t *window, int x, int y, int w, int h, c
 gui_widget_t *gui_add_panel(gui_window_t *window, int x, int y, int w, int h, uint32_t color) {
     gui_widget_t *wg = gui_alloc_widget(window, GUI_WIDGET_PANEL, x, y, w, h, "");
     if (wg) wg->bg_color = color;
+    return wg;
+}
+
+gui_widget_t *gui_add_textbox(gui_window_t *window, int x, int y, int w, int h, const char *text) {
+    gui_widget_t *wg = gui_alloc_widget(window, GUI_WIDGET_TEXTBOX, x, y, w, h, text);
+    if (wg) {
+        wg->fg_color = gui_rgb(20, 20, 20);
+        wg->bg_color = gui_rgb(250, 250, 250);
+        wg->cursor = (uint32_t)strlen(wg->text);
+    }
     return wg;
 }
 
@@ -889,8 +963,9 @@ void gui_demo(void) {
         gui_add_label(w1, 18, 22, 300, 18, "Welcome to OpenOS GUI");
         gui_add_panel(w1, 18, 52, 335, 48, gui_rgb(210, 225, 245));
         gui_add_label(w1, 28, 66, 300, 18, "Window drag, focus and buttons enabled.");
-        gui_add_button(w1, 18, 124, 120, 28, "Click", gui_demo_button, 0);
-        gui_add_button(w1, 150, 124, 120, 28, "Minimize", gui_demo_button, 0);
+        gui_add_textbox(w1, 18, 108, 260, 26, "edit me");
+        gui_add_button(w1, 18, 150, 120, 28, "Click", gui_demo_button, 0);
+        gui_add_button(w1, 150, 150, 120, 28, "Minimize", gui_demo_button, 0);
     }
     w2 = gui_create_window(500, 120, 330, 170, "About OpenOS");
     if (w2) {
