@@ -24,14 +24,21 @@ typedef struct {
 
 /* 中断帧 (保存寄存器状态) - 栈布局与 isr_common_stub 完全匹配 */
 typedef struct {
-    /* 段寄存器 (isr_common_stub 按 gs,fs,es,ds 顺序 push) */
+    /* 段寄存器 (isr_common_stub 按 ds,es,fs,gs push，最终 ESP 指向 gs) */
     uint32_t gs;
     uint32_t fs;
     uint32_t es;
     uint32_t ds;
-    /* 通用寄存器 (pusha 顺序: EAX在栈顶最低地址, EDI最高地址) */
-    uint32_t eax, ecx, edx, ebx, esp_skip, ebp, esi, edi;
-    /* ISR 宏压入 (int_no 在更低地址，err_code 在更高地址) */
+    /* pusha 之后最低地址到最高地址依次是 EDI,ESI,EBP,原ESP,EBX,EDX,ECX,EAX */
+    uint32_t edi;
+    uint32_t esi;
+    uint32_t ebp;
+    uint32_t esp_skip;
+    uint32_t ebx;
+    uint32_t edx;
+    uint32_t ecx;
+    uint32_t eax;
+    /* ISR/IRQ 宏压入：先 err_code 后 int_no，最终 int_no 在更低地址 */
     uint32_t int_no;        /* 中断号 */
     uint32_t err_code;      /* 错误码 (有错误码的异常) 或 0 */
     /* CPU 自动压入 */
