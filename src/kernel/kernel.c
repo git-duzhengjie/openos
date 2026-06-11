@@ -92,8 +92,9 @@ void kernel_start_shell_thread(void) {
 static void desktop_thread(void) {
     serial_write("[GUI] Starting graphical desktop...\n");
     if (gui_start_desktop() != 0) {
-        serial_write("[GUI] Failed to start graphical desktop.\n");
-        return;
+        serial_write("[GUI] Failed to start graphical desktop; starting shell fallback.\n");
+        kernel_start_shell_thread();
+        while (1) sched_yield();
     }
 
     while (1) {
@@ -272,10 +273,15 @@ void kernel_main(void) {
         uint32_t desktop_stack = (uint32_t)pmm_alloc_page() + 4096;
         pmm_alloc_page(); pmm_alloc_page(); pmm_alloc_page(); /* extend to 16KB */
         thread_t *desk = thread_create(1, "desktop", (uint32_t)desktop_thread, desktop_stack);
-        if (desk) sched_add_thread(desk);
+        if (desk) {
+            sched_add_thread(desk);
+        } else {
+            serial_write("[GUI] Failed to create desktop thread; starting shell fallback.\n");
+            kernel_start_shell_thread();
+        }
     }
 
-    /* Shell is launched on demand from the GUI Terminal tool. */
+    /* Shell is launched on demand from the GUI Terminal tool, or as a fallback if GUI fails. */
 
     /* 自动测试 ELF 加载 - 已禁用，避免干扰键盘输入
     {
