@@ -25,6 +25,8 @@
 #include "blockdev.h"
 #include "vga.h"
 #include "framebuffer.h"
+#include "gui.h"
+#include "mouse.h"
 #include "embed_hello.h"  /* 嵌入的用户程�?*/
 
 /* 外部符号 */
@@ -108,12 +110,18 @@ void kernel_main(void) {
     
     /* 初始化键盘驱�?*/
     keyboard_init();
+
+    /* 初始化 PS/2 鼠标驱动 */
+    mouse_init();
     
     /* 初始化VGA控制�?*/
     vga_init();
 
     /* 探测图形 framebuffer；默认不切图形模式，避免影响文本 Shell */
     framebuffer_init();
+
+    /* 初始化 GUI/窗口系统对象池；默认不切图形模式 */
+    gui_init();
     
     /* 测试系统调用接口 (int 0x80) */
     serial_write("[TEST] Testing syscall interface (int 0x80)...\n");

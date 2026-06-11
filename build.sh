@@ -88,6 +88,11 @@ gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
     -I $SRC/include \
+    -c $SRC/drivers/mouse.c -o $BUILD/mouse.o
+
+gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
+    -I $SRC/include \
     -c $SRC/drivers/chardev.c -o $BUILD/chardev.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
@@ -109,6 +114,11 @@ gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
     -I $SRC/include \
     -c $SRC/framebuffer.c -o $BUILD/framebuffer.o
+
+gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
+    -I $SRC/include \
+    -c $SRC/gui.c -o $BUILD/gui.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
@@ -205,8 +215,10 @@ ld -m elf_i386 -T $SRC/linker.ld \
     $BUILD/serial.o \
     $BUILD/vga.o \
     $BUILD/framebuffer.o \
+    $BUILD/gui.o \
     $BUILD/string.o \
     $BUILD/keyboard.o \
+    $BUILD/mouse.o \
     $BUILD/chardev.o \
     $BUILD/blockdev.o \
     $BUILD/input_buffer.o \
