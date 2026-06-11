@@ -562,6 +562,10 @@ void gui_init(void) {
     g_gui.next_widget_id = 1;
     g_gui.mouse_x = 512;
     g_gui.mouse_y = 384;
+    /* Default off avoids two cursors in QEMU/VM windows:
+     * host cursor + OpenOS software cursor. Use `cursor on` to show it.
+     */
+    g_gui.cursor_visible = 0;
     serial_write("[OK] GUI object pool\n");
 }
 
@@ -595,6 +599,14 @@ int gui_start(uint32_t width, uint32_t height) {
 
 int gui_is_ready(void) { return g_gui.initialized; }
 void gui_shutdown_to_text_note(void) { serial_write("[GUI] text mode restore is not implemented yet\n"); }
+
+void gui_set_cursor_visible(int visible) {
+    g_gui.cursor_visible = visible ? 1 : 0;
+    if (g_gui.initialized) gui_render();
+}
+
+int gui_is_cursor_visible(void) { return g_gui.cursor_visible; }
+
 const gui_system_t *gui_get_system(void) { return &g_gui; }
 
 void gui_print_info(void) {
@@ -604,6 +616,7 @@ void gui_print_info(void) {
     serial_write(" active="); gui_write_dec(g_gui.active_window ? g_gui.active_window->id : 0);
     serial_write(" events="); gui_write_dec(g_gui.event_count);
     serial_write(" dblbuf="); gui_write_dec((uint32_t)g_gui.double_buffered);
+    serial_write(" cursor="); gui_write_dec((uint32_t)g_gui.cursor_visible);
     serial_write(" mouse="); gui_write_dec((uint32_t)g_gui.mouse_x); serial_write(","); gui_write_dec((uint32_t)g_gui.mouse_y);
     serial_write("\n");
 }
@@ -779,7 +792,7 @@ void gui_render(void) {
         gui_draw_window(&g_gui.windows[i]);
     }
     gui_terminal_redraw();
-    gui_draw_cursor();
+    if (g_gui.cursor_visible) gui_draw_cursor();
     gui_flush_backbuffer();
 }
 

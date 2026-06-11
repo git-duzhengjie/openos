@@ -146,6 +146,7 @@ typedef struct gui_system {
     int mouse_y;
     uint8_t mouse_buttons;
     uint8_t last_mouse_buttons;
+    int cursor_visible;
 
     uint32_t *backbuffer;
     uint32_t backbuffer_pixels;
@@ -161,6 +162,8 @@ void gui_init(void);
 int gui_start(uint32_t width, uint32_t height);
 int gui_is_ready(void);
 void gui_shutdown_to_text_note(void);
+void gui_set_cursor_visible(int visible);
+int gui_is_cursor_visible(void);
 
 const gui_system_t *gui_get_system(void);
 void gui_print_info(void);
