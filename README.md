@@ -12,12 +12,11 @@ git clone https://github.com/git-duzhengjie/openos.git
 cd openos
 
 # 构建
-mkdir build && cd build
-cmake ..
-make
+./build.sh
 
 # 运行（需要 QEMU）
-qemu-system-x86_64 -cdrom openos.iso
+qemu-system-i386 -drive format=raw,file=target/openos.img  -m 512M -serial stdio -display gtk
+# 启动后在 OpenOS Shell 中执行：guitest
 ```
 
 ## 设计理念
