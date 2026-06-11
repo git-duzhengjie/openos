@@ -1,5 +1,5 @@
 /* ============================================================
- * openos - 简�?Shell 实现 (Phase 3)
+ * openos - 简�?Shell 实现 (Phase 3)
  * ============================================================ */
 
 #include "shell.h"
@@ -38,7 +38,7 @@ static void shell_cancel_line(void);
 static void shell_backspace(void);
 
 
-/* 打印�?VGA + 串口 */
+/* 打印�?VGA + 串口 */
 static void print(const char *s)
 {
     vga_write(s);
@@ -365,7 +365,7 @@ static void shell_delete_char(void)
     cmd_pos--;
     cmd_buf[cmd_pos] = '\0';
 
-    /* 从光标处重绘剩余内容，并用空格清掉旧尾字�?*/
+    /* 从光标处重绘剩余内容，并用空格清掉旧尾字�?*/
     print(&cmd_buf[cmd_cursor]);
     print(" ");
 
@@ -535,7 +535,7 @@ static void shell_complete_path(void)
     prefix[pi] = '\0';
     int prefix_len = pi;
 
-    /* 在参数中找到最后一�?'/' 分隔�?*/
+    /* 在参数中找到最后一�?'/' 分隔�?*/
     int last_slash = -1;
     for (int i = 0; i < prefix_len; i++)
     {
@@ -543,13 +543,13 @@ static void shell_complete_path(void)
             last_slash = i;
     }
 
-    char dir_path[MAX_PATH];      /* 要遍历的目录全路�?*/
+    char dir_path[MAX_PATH];      /* 要遍历的目录全路�?*/
     char match_prefix[MAX_NAME];  /* 要匹配的名字前缀 */
     int match_prefix_len;
 
     if (last_slash >= 0)
     {
-        /* 有斜杠：目录部分 = 斜杠前内容，匹配前缀 = 斜杠后内�?*/
+        /* 有斜杠：目录部分 = 斜杠前内容，匹配前缀 = 斜杠后内�?*/
         char dir_rel[MAX_PATH];
         int di = 0;
         for (int i = 0; i < last_slash && i < MAX_PATH - 1; i++)
@@ -558,7 +558,7 @@ static void shell_complete_path(void)
 
         if (dir_rel[0] == '/' || last_slash == 0)
         {
-            /* 绝对路径或以 / 开�?*/
+            /* 绝对路径或以 / 开�?*/
             if (di == 0) {
                 dir_path[0] = '/';
                 dir_path[1] = '\0';
@@ -571,11 +571,11 @@ static void shell_complete_path(void)
         }
         else
         {
-            /* 相对路径：拼�?cwd */
+            /* 相对路径：拼�?cwd */
             make_path(dir_rel, dir_path);
         }
 
-        /* 匹配前缀 = 最后一个斜杠后的内�?*/
+        /* 匹配前缀 = 最后一个斜杠后的内�?*/
         int mpi = 0;
         for (int i = last_slash + 1; i < prefix_len && mpi < MAX_NAME - 1; i++)
             match_prefix[mpi++] = prefix[i];
@@ -598,7 +598,7 @@ static void shell_complete_path(void)
     if (!d || !d->inode || (d->inode->mode & 0xF000) != FS_DIR)
         return;
 
-    /* 收集匹配的子�?*/
+    /* 收集匹配的子�?*/
 #define MAX_PATH_MATCHES 64
     const char *match_names[MAX_PATH_MATCHES];
     int match_is_dir[MAX_PATH_MATCHES];
@@ -635,12 +635,12 @@ static void shell_complete_path(void)
 
     if (match_count == 1)
     {
-        /* 唯一匹配：补全完整名�?*/
+        /* 唯一匹配：补全完整名�?*/
         const char *name = match_names[0];
         int name_len = (int)strlen(name);
         for (int i = match_prefix_len; i < name_len; i++)
             shell_append_char(name[i]);
-        /* 目录追加 /，文件追加空�?*/
+        /* 目录追加 /，文件追加空�?*/
         if (match_is_dir[0])
             shell_append_char('/');
         else
@@ -1077,7 +1077,7 @@ static void cmd_help(void)
     print("  mouse           - Show PS/2 mouse driver status\n");
 }
 
-/* ---- Shell 主循�?---- */
+/* ---- Shell 主循�?---- */
 void shell_run(void)
 {
     print("\n=== openos shell ===\n");
@@ -1090,23 +1090,79 @@ void shell_run(void)
     history_view = history_count;
     shell_prompt();
 
-    /* 从串口读取输入（轮询方式�?*/
+    /* 从串口读取输入（轮询方式�?*/
     while (1)
     {
-        /* 检查键盘输�?�?通过串口端口 0x3F8 读取 */
-        /* 简化：使用 serial_read 如果可用，否则用键盘缓冲�?*/
+        /* 检查键盘输�?�?通过串口端口 0x3F8 读取 */
+        /* 简化：使用 serial_read 如果可用，否则用键盘缓冲�?*/
         /* Phase 3 先用串口回显模式 */
 
-        /* 先把串口数据灌入输入缓冲�?*/
+        /* 先把串口数据灌入输入缓冲�?*/
         /* 从统一输入缓冲区读取；同时把串口数据灌入输入缓冲区 */
         char c = shell_read_input_char(0);
 
         if (!c)
         {
-            /* 图形模式下保�?GUI 事件、鼠标和重绘继续工作 */
+            /* 图形模式下保�?GUI 事件、鼠标和重绘继续工作 */
             if (gui_is_ready()) {
                 gui_poll();
             }
+            continue;
+        }
+
+        if (gui_has_focused_widget())
+        {
+            if (c == '\r' || c == '\n')
+            {
+                gui_post_key_code(GUI_KEY_ENTER);
+            }
+            else if (c == 0x1B)
+            {
+                char c2 = shell_read_input_char(10000);
+                char c3 = shell_read_input_char(10000);
+                if (c2 == '[' || c2 == 'O')
+                {
+                    if (c3 == 'C')
+                        gui_post_key_code(GUI_KEY_RIGHT);
+                    else if (c3 == 'D')
+                        gui_post_key_code(GUI_KEY_LEFT);
+                    else if (c3 == 'H')
+                        gui_post_key_code(GUI_KEY_HOME);
+                    else if (c3 == 'F')
+                        gui_post_key_code(GUI_KEY_END);
+                    else if (c3 == '1' || c3 == '3' || c3 == '4' || c3 == '7' || c3 == '8')
+                    {
+                        char c4 = shell_read_input_char(10000);
+                        if ((c3 == '1' || c3 == '7') && c4 == '~')
+                            gui_post_key_code(GUI_KEY_HOME);
+                        else if ((c3 == '4' || c3 == '8') && c4 == '~')
+                            gui_post_key_code(GUI_KEY_END);
+                        else if (c3 == '3' && c4 == '~')
+                            gui_post_key_code(GUI_KEY_DELETE);
+                    }
+                }
+            }
+            else if (c == '\t')
+            {
+                gui_post_key_code(GUI_KEY_TAB);
+            }
+            else if (c == 0x01)
+            {
+                gui_post_key_code(GUI_KEY_HOME);
+            }
+            else if (c == 0x05)
+            {
+                gui_post_key_code(GUI_KEY_END);
+            }
+            else if (c == 0x7F || c == 0x08)
+            {
+                gui_post_key_code(GUI_KEY_BACKSPACE);
+            }
+            else if (c >= ' ')
+            {
+                gui_post_key(c);
+            }
+            gui_poll();
             continue;
         }
 
@@ -1191,7 +1247,7 @@ void shell_run(void)
                     }
                     if (redirect > 0)
                     {
-                        /* 拼接 >> 前面的所有参数作为文�?*/
+                        /* 拼接 >> 前面的所有参数作为文�?*/
                         char text_buf[256];
                         int pos = 0;
                         for (int i = 1; i < redirect; i++)
@@ -1844,15 +1900,15 @@ void shell_run(void)
             shell_complete();
             cmd_cursor = cmd_pos;
         }
-        else if (c == 0x01)  /* Ctrl+A - 跳转到行�?*/
+        else if (c == 0x01)  /* Ctrl+A - 跳转到行�?*/
         {
             shell_move_cursor_home();
         }
-        else if (c == 0x05)  /* Ctrl+E - 跳转到行�?*/
+        else if (c == 0x05)  /* Ctrl+E - 跳转到行�?*/
         {
             shell_move_cursor_end();
         }
-        else if (c == 0x03)  /* Ctrl+C - 取消当前�?*/
+        else if (c == 0x03)  /* Ctrl+C - 取消当前�?*/
         {
             shell_cancel_line();
         }

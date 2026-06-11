@@ -25,6 +25,15 @@
 #define GUI_WINDOW_FLAG_TERMINAL  0x00000004u
 #define GUI_WINDOW_FLAG_MINIMIZABLE 0x00000008u
 
+#define GUI_KEY_BACKSPACE  8
+#define GUI_KEY_TAB        9
+#define GUI_KEY_ENTER      13
+#define GUI_KEY_DELETE     0x101
+#define GUI_KEY_LEFT       0x102
+#define GUI_KEY_RIGHT      0x103
+#define GUI_KEY_HOME       0x104
+#define GUI_KEY_END        0x105
+
 typedef struct gui_rect {
     int x;
     int y;
@@ -78,7 +87,7 @@ typedef struct gui_event {
     int dx;
     int dy;
     uint8_t button;
-    char key;
+    int key;
     gui_window_t *window;
     gui_widget_t *widget;
 } gui_event_t;
@@ -169,6 +178,7 @@ typedef struct gui_system {
 void gui_init(void);
 int gui_start(uint32_t width, uint32_t height);
 int gui_is_ready(void);
+int gui_has_focused_widget(void);
 void gui_shutdown_to_text_note(void);
 void gui_set_cursor_visible(int visible);
 int gui_is_cursor_visible(void);
@@ -197,6 +207,7 @@ void gui_event_push(gui_event_t event);
 int gui_event_pop(gui_event_t *event);
 void gui_process_events(void);
 void gui_post_key(char ch);
+void gui_post_key_code(int key);
 void gui_invalidate_rect(int x, int y, int w, int h);
 void gui_invalidate_all(void);
 

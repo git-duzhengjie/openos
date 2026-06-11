@@ -16,6 +16,7 @@
 static gui_system_t g_gui;
 
 static int gui_rect_contains(const gui_rect_t *r, int x, int y);
+static gui_window_t *gui_top_window(void);
 void gui_terminal_set_input_focus(int focused);
 
 static uint32_t gui_rgb(uint8_t r, uint8_t g, uint8_t b) {
@@ -220,6 +221,8 @@ static void gui_set_focused_widget(gui_widget_t *wg) {
     if (g_gui.focused_widget) g_gui.focused_widget->focused = 0;
     g_gui.focused_widget = 0;
     if (gui_widget_can_focus(wg)) {
+        uint32_t len = (uint32_t)strlen(wg->text);
+        if (wg->cursor > len) wg->cursor = len;
         wg->focused = 1;
         g_gui.focused_widget = wg;
         gui_terminal_set_input_focus(0);
@@ -227,24 +230,74 @@ static void gui_set_focused_widget(gui_widget_t *wg) {
     gui_invalidate_all();
 }
 
-static void gui_textbox_on_input(gui_widget_t *wg, char ch) {
+static void gui_focus_next_widget(void) {
+    gui_window_t *w;
+    int start = -1;
+    uint32_t i;
+    uint32_t count;
+    if (g_gui.focused_widget && g_gui.focused_widget->owner) {
+        w = g_gui.focused_widget->owner;
+    } else {
+        w = g_gui.active_window ? g_gui.active_window : gui_top_window();
+    }
+    if (!w || !w->used || !w->visible || (w->flags & GUI_WINDOW_FLAG_MINIMIZED)) return;
+    count = w->widget_count;
+    if (count == 0) return;
+    for (i = 0; i < count; i++) {
+        if (&w->widgets[i] == g_gui.focused_widget) {
+            start = (int)i;
+            break;
+        }
+    }
+    for (i = 1; i <= count; i++) {
+        uint32_t idx = (uint32_t)((start + (int)i) % (int)count);
+        if (gui_widget_can_focus(&w->widgets[idx])) {
+            gui_set_focused_widget(&w->widgets[idx]);
+            return;
+        }
+    }
+}
+
+static void gui_textbox_on_key(gui_widget_t *wg, int key) {
     uint32_t len;
+    uint32_t i;
+    int changed = 1;
     if (!gui_widget_can_focus(wg)) return;
     len = (uint32_t)strlen(wg->text);
     if (wg->cursor > len) wg->cursor = len;
-    if (ch == '\b') {
-        uint32_t i;
-        if (wg->cursor == 0 || len == 0) return;
-        for (i = wg->cursor - 1; i < len; i++) wg->text[i] = wg->text[i + 1];
-        wg->cursor--;
-    } else if (ch == '\n' || ch == '\r') {
-        return;
-    } else if ((uint8_t)ch >= 32 && len + 1 < sizeof(wg->text)) {
-        uint32_t i;
+
+    if (key == GUI_KEY_BACKSPACE) {
+        if (wg->cursor == 0 || len == 0) changed = 0;
+        else {
+            for (i = wg->cursor - 1; i < len; i++) wg->text[i] = wg->text[i + 1];
+            wg->cursor--;
+        }
+    } else if (key == GUI_KEY_DELETE) {
+        if (wg->cursor >= len) changed = 0;
+        else {
+            for (i = wg->cursor; i < len; i++) wg->text[i] = wg->text[i + 1];
+        }
+    } else if (key == GUI_KEY_LEFT) {
+        if (wg->cursor > 0) wg->cursor--;
+        else changed = 0;
+    } else if (key == GUI_KEY_RIGHT) {
+        if (wg->cursor < len) wg->cursor++;
+        else changed = 0;
+    } else if (key == GUI_KEY_HOME) {
+        if (wg->cursor != 0) wg->cursor = 0;
+        else changed = 0;
+    } else if (key == GUI_KEY_END) {
+        if (wg->cursor != len) wg->cursor = len;
+        else changed = 0;
+    } else if (key == GUI_KEY_ENTER || key == GUI_KEY_TAB) {
+        changed = 0;
+    } else if (key >= 32 && key <= 126 && len + 1 < sizeof(wg->text)) {
         for (i = len + 1; i > wg->cursor; i--) wg->text[i] = wg->text[i - 1];
-        wg->text[wg->cursor++] = ch;
+        wg->text[wg->cursor++] = (char)key;
+    } else {
+        changed = 0;
     }
-    if (wg->owner) gui_invalidate_rect(wg->owner->rect.x, wg->owner->rect.y, wg->owner->rect.w, wg->owner->rect.h);
+    if (changed && wg->owner) gui_invalidate_rect(wg->owner->rect.x, wg->owner->rect.y, wg->owner->rect.w, wg->owner->rect.h);
 }
 
 static void gui_draw_cursor(void) {
@@ -520,25 +573,31 @@ static gui_window_t *gui_taskbar_window_at(int x, int y) {
     return 0;
 }
 
-void gui_post_key(char ch) {
+void gui_post_key_code(int key) {
     gui_event_t ev;
-    if (!g_gui.initialized || !ch) return;
+    if (!g_gui.initialized || !key) return;
     ev.type = GUI_EVENT_KEY_DOWN;
     ev.x = 0; ev.y = 0; ev.dx = 0; ev.dy = 0;
-    ev.button = 0; ev.key = ch;
+    ev.button = 0; ev.key = key;
     ev.window = g_gui.active_window;
     ev.widget = 0;
     gui_event_push(ev);
+}
+
+void gui_post_key(char ch) {
+    gui_post_key_code((int)(unsigned char)ch);
 }
 
 void gui_process_events(void) {
     gui_event_t ev;
     while (gui_event_pop(&ev)) {
         if (ev.type == GUI_EVENT_KEY_DOWN) {
-            if (g_gui.focused_widget && g_gui.focused_widget->focused) {
-                gui_textbox_on_input(g_gui.focused_widget, ev.key);
-            } else {
-                gui_terminal_on_input(ev.key);
+            if (ev.key == GUI_KEY_TAB) {
+                gui_focus_next_widget();
+            } else if (g_gui.focused_widget && g_gui.focused_widget->focused) {
+                gui_textbox_on_key(g_gui.focused_widget, ev.key);
+            } else if (ev.key >= 0 && ev.key <= 255) {
+                gui_terminal_on_input((char)ev.key);
             }
         } else if (ev.type == GUI_EVENT_MOUSE_DOWN) {
             gui_window_t *tw = gui_taskbar_window_at(ev.x, ev.y);
@@ -712,6 +771,11 @@ int gui_start(uint32_t width, uint32_t height) {
 }
 
 int gui_is_ready(void) { return g_gui.initialized; }
+
+int gui_has_focused_widget(void) {
+    return g_gui.initialized && g_gui.focused_widget && g_gui.focused_widget->focused;
+}
+
 void gui_shutdown_to_text_note(void) { serial_write("[GUI] text mode restore is not implemented yet\n"); }
 
 void gui_set_cursor_visible(int visible) {
