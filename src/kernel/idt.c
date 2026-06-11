@@ -182,10 +182,20 @@ void isr_handler(registers_t *regs) {
 		isr_t handler = interrupt_handlers[regs->int_no];
 		handler(regs);
 	} else {
-		/* 未注册处理函数，显示异常信息 */
+			/* 未注册处理函数，显示异常信息 */
 		serial_write("\n!!! EXCEPTION: ");
-		serial_write(exception_messages[regs->int_no]);
+		if (regs->int_no < 32) {
+			serial_write(exception_messages[regs->int_no]);
+		} else {
+			serial_write("Unknown/Corrupt Interrupt Vector");
+		}
 		serial_write(" !!!\n");
+		serial_write("ctx int="); serial_write_hex(regs->int_no);
+		serial_write(" err="); serial_write_hex(regs->err_code);
+		serial_write(" eip="); serial_write_hex(regs->eip);
+		serial_write(" cs="); serial_write_hex(regs->cs);
+		serial_write(" eflags="); serial_write_hex(regs->eflags);
+		serial_write("\n");
 
 		/* GPF: 打印错误码和 EIP 帮助调试 */
 		if (regs->int_no == 13) {

@@ -31,6 +31,9 @@ void mouse_init(void);
 /* 获取当前鼠标状态 */
 mouse_state_t *mouse_get_state(void);
 
+/* 原子复制当前鼠标状态，并清空相对移动量 */
+void mouse_snapshot_and_clear_delta(mouse_state_t *out);
+
 /* 设置鼠标坐标范围与当前位置，GUI 切换分辨率后必须同步 */
 void mouse_set_bounds(int width, int height);
 void mouse_set_position(int x, int y);

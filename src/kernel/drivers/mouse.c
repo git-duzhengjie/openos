@@ -157,6 +157,17 @@ mouse_state_t *mouse_get_state(void) {
     return &g_mouse;
 }
 
+void mouse_snapshot_and_clear_delta(mouse_state_t *out) {
+    uint32_t flags;
+    if (!out) return;
+
+    __asm__ volatile("pushfl; popl %0; cli" : "=r"(flags) :: "memory");
+    *out = g_mouse;
+    g_mouse.dx = 0;
+    g_mouse.dy = 0;
+    __asm__ volatile("pushl %0; popfl" :: "r"(flags) : "memory", "cc");
+}
+
 void mouse_set_bounds(int width, int height) {
     if (width <= 0 || height <= 0) return;
     g_mouse.max_x = width - 1;

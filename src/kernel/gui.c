@@ -765,47 +765,46 @@ void gui_process_events(void) {
 }
 
 static void gui_poll_mouse(void) {
-    mouse_state_t *ms;
+    mouse_state_t ms;
     gui_event_t ev;
     if (!g_gui.initialized) return;
-    ms = mouse_get_state();
-    if (!ms || !ms->present) return;
 
-    if (ms->x < 0) ms->x = 0;
-    if (ms->y < 0) ms->y = 0;
-    if (ms->x > (int)g_gui.width - 1) ms->x = (int)g_gui.width - 1;
-    if (ms->y > (int)g_gui.height - 1) ms->y = (int)g_gui.height - 1;
+    mouse_snapshot_and_clear_delta(&ms);
+    if (!ms.present) return;
 
-    if (ms->x != g_gui.mouse_x || ms->y != g_gui.mouse_y) {
+    if (ms.x < 0) ms.x = 0;
+    if (ms.y < 0) ms.y = 0;
+    if (ms.x > (int)g_gui.width - 1) ms.x = (int)g_gui.width - 1;
+    if (ms.y > (int)g_gui.height - 1) ms.y = (int)g_gui.height - 1;
+
+    if (ms.x != g_gui.mouse_x || ms.y != g_gui.mouse_y) {
         gui_invalidate_rect(g_gui.mouse_x - 2, g_gui.mouse_y - 2, 22, 22);
-        gui_invalidate_rect(ms->x - 2, ms->y - 2, 22, 22);
+        gui_invalidate_rect(ms.x - 2, ms.y - 2, 22, 22);
         ev.type = GUI_EVENT_MOUSE_MOVE;
-        ev.x = ms->x;
-        ev.y = ms->y;
-        ev.dx = ms->dx;
-        ev.dy = ms->dy;
-        ev.button = ms->buttons;
+        ev.x = ms.x;
+        ev.y = ms.y;
+        ev.dx = ms.dx;
+        ev.dy = ms.dy;
+        ev.button = ms.buttons;
         ev.window = 0;
         ev.widget = 0;
         ev.key = 0;
         gui_event_push(ev);
     }
 
-    if ((ms->buttons & 1) && !(g_gui.last_mouse_buttons & 1)) {
+    if ((ms.buttons & 1) && !(g_gui.last_mouse_buttons & 1)) {
         ev.type = GUI_EVENT_MOUSE_DOWN;
-        ev.x = ms->x; ev.y = ms->y; ev.dx = 0; ev.dy = 0; ev.button = 1; ev.window = 0; ev.widget = 0;
+        ev.x = ms.x; ev.y = ms.y; ev.dx = 0; ev.dy = 0; ev.button = 1; ev.window = 0; ev.widget = 0;
         gui_event_push(ev);
-    } else if (!(ms->buttons & 1) && (g_gui.last_mouse_buttons & 1)) {
+    } else if (!(ms.buttons & 1) && (g_gui.last_mouse_buttons & 1)) {
         ev.type = GUI_EVENT_MOUSE_UP;
-        ev.x = ms->x; ev.y = ms->y; ev.dx = 0; ev.dy = 0; ev.button = 1; ev.window = 0; ev.widget = 0;
+        ev.x = ms.x; ev.y = ms.y; ev.dx = 0; ev.dy = 0; ev.button = 1; ev.window = 0; ev.widget = 0;
         gui_event_push(ev);
     }
 
-    g_gui.mouse_x = ms->x;
-    g_gui.mouse_y = ms->y;
-    g_gui.last_mouse_buttons = ms->buttons;
-    ms->dx = 0;
-    ms->dy = 0;
+    g_gui.mouse_x = ms.x;
+    g_gui.mouse_y = ms.y;
+    g_gui.last_mouse_buttons = ms.buttons;
 }
 
 void gui_init(void) {
