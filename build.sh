@@ -22,7 +22,7 @@ nasm -f elf32 $SRC/sched/context_switch.asm -o $BUILD/context_switch.o
 nasm -f elf32 $SRC/timer_isr.asm -o $BUILD/timer_isr.o
 nasm -f elf32 $SRC/switch_to_user.asm -o $BUILD/switch_to_user.o
 
-# 编译用户程序并嵌入内核
+# 编译用户程序并嵌入内�?
 echo "[2.5] Building user program..."
 USR=src/user
 if [ -f $USR/hello.c ]; then
@@ -36,167 +36,167 @@ fi
 
 echo "[3/5] Compiling kernel C files..."
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
-    -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
     -I $SRC/include \
     -c $SRC/kernel.c -o $BUILD/kernel.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
-    -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
     -I $SRC/include \
     -c $SRC/idt.c -o $BUILD/idt.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
-    -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
     -I $SRC/include \
     -c $SRC/gdt.c -o $BUILD/gdt.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
-    -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
     -I $SRC/include \
     -c $SRC/mm/pmm.c -o $BUILD/pmm.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
-    -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
     -I $SRC/include \
     -c $SRC/mm/vmm.c -o $BUILD/vmm.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
-    -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
     -I $SRC/include \
     -c $SRC/mm/heap.c -o $BUILD/heap.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
-    -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
     -I $SRC/include \
     -c $SRC/sched/scheduler.c -o $BUILD/scheduler.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
-    -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
     -I $SRC/include \
     -c $SRC/ipc/syscall.c -o $BUILD/syscall.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
-    -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
     -I $SRC/include \
     -c $SRC/serial.c -o $BUILD/serial.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
-    -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
     -I $SRC/include \
     -c $SRC/drivers/keyboard.c -o $BUILD/keyboard.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
-    -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
     -I $SRC/include \
     -c $SRC/drivers/mouse.c -o $BUILD/mouse.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
-    -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
     -I $SRC/include \
     -c $SRC/drivers/chardev.c -o $BUILD/chardev.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
-    -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
     -I $SRC/include \
     -c $SRC/drivers/blockdev.c -o $BUILD/blockdev.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
-    -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
     -I $SRC/include \
     -c $SRC/drivers/input_buffer.c -o $BUILD/input_buffer.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
-    -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
     -I $SRC/include \
     -c $SRC/vga.c -o $BUILD/vga.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
-    -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
     -I $SRC/include \
     -c $SRC/framebuffer.c -o $BUILD/framebuffer.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
-    -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
     -I $SRC/include \
     -c $SRC/gui.c -o $BUILD/gui.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
-    -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
     -I $SRC/include \
     -c $SRC/font.c -o $BUILD/font.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
-    -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
     -I $SRC/include \
     -c $SRC/string.c -o $BUILD/string.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
-    -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
     -I $SRC/include \
     -c $SRC/usermode.c -o $BUILD/usermode.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
-    -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
     -I $SRC/include -I $SRC/fs -I $SRC/proc \
     -c $SRC/proc/process.c -o $BUILD/process.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
-    -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
     -I $SRC/include -I $SRC/proc -I $SRC/fs \
     -c $SRC/proc/elf_loader.c -o $BUILD/elf_loader.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
-    -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
     -I $SRC/include -I $SRC/fs \
     -c $SRC/fs/vfs.c -o $BUILD/vfs.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
-    -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
     -I $SRC/include \
     -c $SRC/fs/ramfs.c -o $BUILD/ramfs.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
-    -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
     -I $SRC/include -I $SRC/fs \
     -c $SRC/fs/tmpfs.c -o $BUILD/tmpfs.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
-    -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
     -I $SRC/include -I $SRC/fs \
     -c $SRC/fs/ext4.c -o $BUILD/ext4.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
-    -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
     -I $SRC/include -I $SRC/net \
     -c $SRC/net/net.c -o $BUILD/net.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
-    -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
     -I $SRC/include -I $SRC/net \
     -c $SRC/net/discovery.c -o $BUILD/discovery.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
-    -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
     -I $SRC/include -I $SRC/net \
     -c $SRC/net/sync.c -o $BUILD/sync.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
-    -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
     -I $SRC/include -I $SRC/net \
     -c $SRC/net/bus.c -o $BUILD/bus.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
-    -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
     -I $SRC/include \
     -c $SRC/devmgr.c -o $BUILD/devmgr.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
-    -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
     -I $SRC/include \
     -c $SRC/ai/ai.c -o $BUILD/ai.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
-    -fno-pie -fno-stack-protector -fno-builtin -fno-pic \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
     -I $SRC/include \
     -c $SRC/shell.c -o $BUILD/shell.o
 

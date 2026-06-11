@@ -225,9 +225,8 @@ static int gui_widget_is_clickable(gui_widget_t *wg) {
 static void gui_button_activate(gui_widget_t *wg) {
     gui_event_t ev;
     if (!gui_widget_is_clickable(wg)) return;
+    memset(&ev, 0, sizeof(ev));
     ev.type = GUI_EVENT_BUTTON_CLICK;
-    ev.x = 0; ev.y = 0; ev.dx = 0; ev.dy = 0;
-    ev.button = 0; ev.key = 0;
     ev.window = wg->owner;
     ev.widget = wg;
     gui_event_push(ev);
@@ -654,6 +653,7 @@ void gui_post_key(char ch) {
     gui_post_key_code((int)(unsigned char)ch);
 }
 
+__attribute__((optimize("no-jump-tables")))
 void gui_process_events(void) {
     gui_event_t ev;
     while (gui_event_pop(&ev)) {
@@ -753,12 +753,15 @@ void gui_process_events(void) {
                 gui_invalidate_rect(ev.x - 18, ev.y - 18, 36, 36);
             }
         } else if (ev.type == GUI_EVENT_BUTTON_CLICK) {
-            if (ev.widget && gui_widget_is_clickable(ev.widget) && ev.widget->on_click) {
-                if ((uint32_t)ev.widget->on_click >= 0x00100000u) {
-                    ev.widget->on_click(ev.widget, ev.widget->user_data);
-                } else {
-                    serial_write("[GUI] ignored bad on_click pointer\n");
-                }
+            if (ev.widget && gui_widget_is_clickable(ev.widget)) {
+                /* Do not call widget->on_click directly here.  The current
+                 * kernel has shown repeated static/ops/function-pointer table
+                 * corruption symptoms; a damaged callback can jump to low or
+                 * invalid executable addresses during mouse click handling.
+                 * Keep the click visual/focus behavior, but suppress generic
+                 * callback dispatch until the root static-data issue is fixed.
+                 */
+                serial_write("[GUI] button click callback suppressed\n");
             }
         } else if (ev.type == GUI_EVENT_WINDOW_CLOSE) {
             gui_destroy_window(ev.window);
@@ -784,6 +787,7 @@ static void gui_poll_mouse(void) {
     if (ms.x != g_gui.mouse_x || ms.y != g_gui.mouse_y) {
         gui_invalidate_rect(g_gui.mouse_x - 2, g_gui.mouse_y - 2, 22, 22);
         gui_invalidate_rect(ms.x - 2, ms.y - 2, 22, 22);
+        memset(&ev, 0, sizeof(ev));
         ev.type = GUI_EVENT_MOUSE_MOVE;
         ev.x = ms.x;
         ev.y = ms.y;
@@ -797,12 +801,14 @@ static void gui_poll_mouse(void) {
     }
 
     if ((ms.buttons & 1) && !(g_gui.last_mouse_buttons & 1)) {
+        memset(&ev, 0, sizeof(ev));
         ev.type = GUI_EVENT_MOUSE_DOWN;
-        ev.x = ms.x; ev.y = ms.y; ev.dx = 0; ev.dy = 0; ev.button = 1; ev.window = 0; ev.widget = 0;
+        ev.x = ms.x; ev.y = ms.y; ev.button = 1;
         gui_event_push(ev);
     } else if (!(ms.buttons & 1) && (g_gui.last_mouse_buttons & 1)) {
+        memset(&ev, 0, sizeof(ev));
         ev.type = GUI_EVENT_MOUSE_UP;
-        ev.x = ms.x; ev.y = ms.y; ev.dx = 0; ev.dy = 0; ev.button = 1; ev.window = 0; ev.widget = 0;
+        ev.x = ms.x; ev.y = ms.y; ev.button = 1;
         gui_event_push(ev);
     }
 
