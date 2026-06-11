@@ -212,6 +212,7 @@ int gui_event_pop(gui_event_t *event);
 void gui_process_events(void);
 void gui_post_key(char ch);
 void gui_post_key_code(int key);
+int gui_should_capture_key_code(int key);
 void gui_invalidate_rect(int x, int y, int w, int h);
 void gui_invalidate_all(void);
 

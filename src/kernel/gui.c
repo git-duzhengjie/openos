@@ -856,6 +856,25 @@ int gui_has_focused_widget(void) {
     return g_gui.initialized && g_gui.focused_widget && g_gui.focused_widget->focused;
 }
 
+int gui_should_capture_key_code(int key) {
+    gui_widget_t *wg;
+
+    if (!g_gui.initialized || !g_gui.focused_widget || !g_gui.focused_widget->focused) return 0;
+
+    wg = g_gui.focused_widget;
+    if (!wg->visible || !wg->enabled) return 0;
+
+    if (key == GUI_KEY_TAB) return 1;
+
+    if (wg->type == GUI_WIDGET_TEXTBOX) return 1;
+
+    if (wg->type == GUI_WIDGET_BUTTON) {
+        return key == GUI_KEY_ENTER || key == GUI_KEY_SPACE;
+    }
+
+    return 0;
+}
+
 void gui_shutdown_to_text_note(void) { serial_write("[GUI] text mode restore is not implemented yet\n"); }
 
 void gui_set_cursor_visible(int visible) {

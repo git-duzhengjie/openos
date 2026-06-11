@@ -1112,58 +1112,34 @@ void shell_run(void)
 
         if (gui_has_focused_widget())
         {
+            int gui_key = 0;
+            int gui_text_key = 0;
+
             if (c == '\r' || c == '\n')
-            {
-                gui_post_key_code(GUI_KEY_ENTER);
-            }
-            else if (c == 0x1B)
-            {
-                char c2 = shell_read_input_char(10000);
-                char c3 = shell_read_input_char(10000);
-                if (c2 == '[' || c2 == 'O')
-                {
-                    if (c3 == 'C')
-                        gui_post_key_code(GUI_KEY_RIGHT);
-                    else if (c3 == 'D')
-                        gui_post_key_code(GUI_KEY_LEFT);
-                    else if (c3 == 'H')
-                        gui_post_key_code(GUI_KEY_HOME);
-                    else if (c3 == 'F')
-                        gui_post_key_code(GUI_KEY_END);
-                    else if (c3 == '1' || c3 == '3' || c3 == '4' || c3 == '7' || c3 == '8')
-                    {
-                        char c4 = shell_read_input_char(10000);
-                        if ((c3 == '1' || c3 == '7') && c4 == '~')
-                            gui_post_key_code(GUI_KEY_HOME);
-                        else if ((c3 == '4' || c3 == '8') && c4 == '~')
-                            gui_post_key_code(GUI_KEY_END);
-                        else if (c3 == '3' && c4 == '~')
-                            gui_post_key_code(GUI_KEY_DELETE);
-                    }
-                }
-            }
+                gui_key = GUI_KEY_ENTER;
             else if (c == '\t')
-            {
-                gui_post_key_code(GUI_KEY_TAB);
-            }
+                gui_key = GUI_KEY_TAB;
             else if (c == 0x01)
-            {
-                gui_post_key_code(GUI_KEY_HOME);
-            }
+                gui_key = GUI_KEY_HOME;
             else if (c == 0x05)
-            {
-                gui_post_key_code(GUI_KEY_END);
-            }
+                gui_key = GUI_KEY_END;
             else if (c == 0x7F || c == 0x08)
-            {
-                gui_post_key_code(GUI_KEY_BACKSPACE);
-            }
+                gui_key = GUI_KEY_BACKSPACE;
             else if (c >= ' ')
             {
-                gui_post_key(c);
+                gui_key = (unsigned char)c;
+                gui_text_key = 1;
             }
-            gui_poll();
-            continue;
+
+            if (gui_key && gui_should_capture_key_code(gui_key))
+            {
+                if (gui_text_key)
+                    gui_post_key(c);
+                else
+                    gui_post_key_code(gui_key);
+                gui_poll();
+                continue;
+            }
         }
 
         if (c == '\r' || c == '\n')
