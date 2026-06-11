@@ -54,8 +54,7 @@ static void mouse_write(uint8_t val) {
     outb(PS2_DATA_PORT, val);
 }
 
-static void mouse_irq_handler(registers_t *regs) {
-    (void)regs;
+void mouse_irq_handle(void) {
     uint8_t data = inb(PS2_DATA_PORT);
     g_mouse.irq_count++;
 
@@ -147,8 +146,7 @@ void mouse_init(void) {
         return;
     }
 
-    /* 注册 IRQ12 中断处理函数 */
-    isr_install_handler(44, mouse_irq_handler);
+    /* IRQ12 在 idt.c 中固定直连到 mouse_irq_handle()，避免函数指针表损坏导致跳飞 */
     g_mouse.present = 1;
     serial_write("[OK] PS/2 mouse\n");
 }

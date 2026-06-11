@@ -754,7 +754,11 @@ void gui_process_events(void) {
             }
         } else if (ev.type == GUI_EVENT_BUTTON_CLICK) {
             if (ev.widget && gui_widget_is_clickable(ev.widget) && ev.widget->on_click) {
-                ev.widget->on_click(ev.widget, ev.widget->user_data);
+                if ((uint32_t)ev.widget->on_click >= 0x00100000u) {
+                    ev.widget->on_click(ev.widget, ev.widget->user_data);
+                } else {
+                    serial_write("[GUI] ignored bad on_click pointer\n");
+                }
             }
         } else if (ev.type == GUI_EVENT_WINDOW_CLOSE) {
             gui_destroy_window(ev.window);

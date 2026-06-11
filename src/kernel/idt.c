@@ -5,6 +5,7 @@
 
 #include "include/idt.h"
 #include "include/io.h"
+#include "include/mouse.h"
 #include "serial.h"
 
 /* IDT表 (256个条目) */
@@ -234,10 +235,17 @@ void isr_handler(registers_t *regs) {
  * IRQ处理函数 (由isr.asm调用)
  */
 void irq_handler(registers_t *regs) {
-	/* 调用已注册的处理函数 */
-	if (interrupt_handlers[regs->int_no]) {
+	/* 鼠标 IRQ12 固定直连，绕开 interrupt_handlers[] 函数指针表 */
+	if (regs->int_no == 44) {
+		mouse_irq_handle();
+	} else if (regs->int_no < 256 && interrupt_handlers[regs->int_no]) {
 		isr_t handler = interrupt_handlers[regs->int_no];
-		handler(regs);
+		/* 低地址函数指针一定非法，避免跳到 0x00000003 这类坏地址 */
+		if ((uint32_t)handler >= 0x00100000u) {
+			handler(regs);
+		} else {
+			serial_write("[IRQ] ignored bad handler pointer\n");
+		}
 	}
 
 	/* 发送EOI (End of Interrupt) */
