@@ -359,7 +359,7 @@ void framebuffer_init(void) {
     g_fb_info.mode_set = 0;
     g_fb_info.driver_name = 0;
 
-    if (g_bga_driver.probe(&g_bga_driver) == 0) {
+    if (bga_probe(&g_bga_driver) == 0) {
         g_active_driver = &g_bga_driver;
         serial_write("[OK] framebuffer driver ready\n");
         return;
@@ -373,10 +373,10 @@ int framebuffer_is_available(void) {
 }
 
 int framebuffer_set_mode(uint32_t width, uint32_t height, uint32_t bpp) {
-    if (!g_active_driver || !g_active_driver->set_mode) {
+    if (!g_active_driver || !g_fb_info.available) {
         return -1;
     }
-    return g_active_driver->set_mode(g_active_driver, width, height, bpp);
+    return bga_set_mode(&g_bga_driver, width, height, bpp);
 }
 
 const framebuffer_info_t *framebuffer_get_info(void) {
@@ -384,26 +384,26 @@ const framebuffer_info_t *framebuffer_get_info(void) {
 }
 
 void framebuffer_clear(uint32_t color) {
-    if (g_active_driver && g_active_driver->clear) {
-        g_active_driver->clear(g_active_driver, color);
+    if (g_active_driver && g_fb_info.available) {
+        bga_clear(&g_bga_driver, color);
     }
 }
 
 void framebuffer_put_pixel(uint32_t x, uint32_t y, uint32_t color) {
-    if (g_active_driver && g_active_driver->put_pixel) {
-        g_active_driver->put_pixel(g_active_driver, x, y, color);
+    if (g_active_driver && g_fb_info.available) {
+        bga_put_pixel(&g_bga_driver, x, y, color);
     }
 }
 
 void framebuffer_fill_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t color) {
-    if (g_active_driver && g_active_driver->fill_rect) {
-        g_active_driver->fill_rect(g_active_driver, x, y, w, h, color);
+    if (g_active_driver && g_fb_info.available) {
+        bga_fill_rect(&g_bga_driver, x, y, w, h, color);
     }
 }
 
 void framebuffer_draw_line(int x0, int y0, int x1, int y1, uint32_t color) {
-    if (g_active_driver && g_active_driver->draw_line) {
-        g_active_driver->draw_line(g_active_driver, x0, y0, x1, y1, color);
+    if (g_active_driver && g_fb_info.available) {
+        bga_draw_line(&g_bga_driver, x0, y0, x1, y1, color);
     }
 }
 
