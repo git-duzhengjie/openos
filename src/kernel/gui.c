@@ -859,16 +859,30 @@ int gui_start(uint32_t width, uint32_t height) {
     return 0;
 }
 
+static void gui_create_welcome_window(void) {
+    gui_window_t *welcome;
+
+    welcome = gui_create_window(92, 84, 470, 210, "Welcome to OpenOS");
+    if (!welcome) return;
+
+    gui_add_label(welcome, 22, 26, 390, 18, "OpenOS desktop is ready.");
+    gui_add_label(welcome, 22, 54, 410, 18, "Click TERMINAL on the taskbar");
+    gui_add_label(welcome, 22, 78, 420, 18, "to open the command line tool.");
+    gui_add_label(welcome, 22, 118, 420, 18, "Tip: use cursor on/off for software mouse.");
+}
+
 int gui_start_desktop(void) {
     if (g_gui.initialized) {
         gui_terminal_minimize();
+        gui_create_welcome_window();
         gui_render();
         return 0;
     }
 
     if (gui_start(1024, 768) != 0) return -1;
-    gui_terminal_write("\n[GUI] desktop started. Click Terminal on the taskbar to open command line.\n");
+    gui_terminal_write("\n[GUI] desktop started. Click TERMINAL on the taskbar to open command line.\n");
     gui_terminal_minimize();
+    gui_create_welcome_window();
     gui_render();
     return 0;
 }
@@ -1123,12 +1137,12 @@ static void gui_draw_taskbar(void) {
     int bx = GUI_TASKBAR_START_W + 16;
     int y = (int)g_gui.height - GUI_TASKBAR_HEIGHT;
     gui_raw_fill_rect(0, y, (int)g_gui.width, GUI_TASKBAR_HEIGHT, gui_rgb(24, 28, 38));
-    gui_raw_fill_rect(8, y + 3, GUI_TASKBAR_START_W, GUI_TASKBAR_HEIGHT - 6, gui_rgb(52, 68, 96));
-    gui_raw_line(8, y + 3, 8 + GUI_TASKBAR_START_W - 1, y + 3, gui_rgb(135, 170, 230));
-    gui_raw_line(8, y + 3, 8, y + GUI_TASKBAR_HEIGHT - 4, gui_rgb(135, 170, 230));
-    gui_raw_line(8 + GUI_TASKBAR_START_W - 1, y + 3, 8 + GUI_TASKBAR_START_W - 1, y + GUI_TASKBAR_HEIGHT - 4, gui_rgb(20, 24, 35));
-    gui_raw_line(8, y + GUI_TASKBAR_HEIGHT - 4, 8 + GUI_TASKBAR_START_W - 1, y + GUI_TASKBAR_HEIGHT - 4, gui_rgb(20, 24, 35));
-    gui_draw_text(20, y + 8, "Terminal", gui_rgb(255,255,255));
+    gui_raw_fill_rect(8, y + 3, GUI_TASKBAR_START_W, GUI_TASKBAR_HEIGHT - 6, gui_rgb(64, 92, 150));
+    gui_raw_line(8, y + 3, 8 + GUI_TASKBAR_START_W - 1, y + 3, gui_rgb(170, 205, 255));
+    gui_raw_line(8, y + 3, 8, y + GUI_TASKBAR_HEIGHT - 4, gui_rgb(170, 205, 255));
+    gui_raw_line(8 + GUI_TASKBAR_START_W - 1, y + 3, 8 + GUI_TASKBAR_START_W - 1, y + GUI_TASKBAR_HEIGHT - 4, gui_rgb(12, 18, 30));
+    gui_raw_line(8, y + GUI_TASKBAR_HEIGHT - 4, 8 + GUI_TASKBAR_START_W - 1, y + GUI_TASKBAR_HEIGHT - 4, gui_rgb(12, 18, 30));
+    gui_draw_text(20, y + 8, "TERMINAL", gui_rgb(255,255,255));
     for (i = 0; i < g_gui.window_count; i++) {
         uint32_t idx = g_gui.z_order[i];
         gui_window_t *w;
