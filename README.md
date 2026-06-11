@@ -15,7 +15,7 @@ cd openos
 ./build.sh
 
 # 运行（需要 QEMU）
-qemu-system-i386 -drive format=raw,file=target/openos.img  -m 512M -serial stdio -display gtk
+qemu-system-i386 -drive format=raw,file=target/openos.img -m 512M -serial stdio -display gtk,show-cursor=off,grab-on-hover=on
 # 启动后在 OpenOS Shell 中执行：guitest
 ```
 
