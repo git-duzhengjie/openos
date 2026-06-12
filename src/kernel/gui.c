@@ -640,6 +640,7 @@ void gui_destroy_window(gui_window_t *window) {
     }
     if (g_gui.window_count > 0) g_gui.window_count--;
 
+    if (window == g_gui.terminal.window) gui_terminal_set_input_focus(0);
     if (g_gui.active_window == window) g_gui.active_window = 0;
     if (g_gui.drag_window == window) g_gui.drag_window = 0;
     if (g_gui.pressed_widget && g_gui.pressed_widget->owner == window) g_gui.pressed_widget = 0;
@@ -661,6 +662,7 @@ void gui_minimize_window(gui_window_t *window) {
     window->active = 0;
     window->dragging = 0;
 
+    if (window == g_gui.terminal.window) gui_terminal_set_input_focus(0);
     if (g_gui.active_window == window) g_gui.active_window = 0;
     if (g_gui.drag_window == window) g_gui.drag_window = 0;
     if (g_gui.pressed_widget && g_gui.pressed_widget->owner == window) g_gui.pressed_widget = 0;
@@ -743,17 +745,23 @@ void gui_process_events(void) {
             }
         } else if (ev.type == GUI_EVENT_MOUSE_DOWN) {
             if (gui_taskbar_terminal_button_at(ev.x, ev.y)) {
+                gui_set_focused_widget(0);
                 gui_terminal_open();
                 continue;
             }
             gui_window_t *tw = gui_taskbar_window_at(ev.x, ev.y);
             if (tw) {
+                if (tw == g_gui.terminal.window) gui_set_focused_widget(0);
                 gui_restore_window(tw);
+                if (tw == g_gui.terminal.window) gui_terminal_set_input_focus(1);
                 continue;
             }
             gui_window_t *w = gui_window_at(ev.x, ev.y);
             if (w) {
-                if (w == g_gui.terminal.window) gui_terminal_set_input_focus(1);
+                if (w == g_gui.terminal.window) {
+                    gui_set_focused_widget(0);
+                    gui_terminal_set_input_focus(1);
+                }
                 gui_set_active_window(w);
                 gui_rect_t close = gui_close_rect(w);
                 gui_rect_t minr = gui_min_rect(w);
@@ -984,7 +992,14 @@ int gui_has_focused_widget(void) {
 int gui_should_capture_key_code(int key) {
     gui_widget_t *wg;
 
-    if (!g_gui.initialized || !g_gui.focused_widget || !g_gui.focused_widget->focused) return 0;
+    if (!g_gui.initialized) return 0;
+
+    /* GUI Terminal is the Shell's graphical output window. Do not capture
+     * printable keys here: shell_run() must receive them so command editing,
+     * history, backspace and enter keep working. Ordinary GUI widgets are the
+     * only keyboard-capture targets.
+     */
+    if (!g_gui.focused_widget || !g_gui.focused_widget->focused) return 0;
 
     wg = g_gui.focused_widget;
     if (!wg->visible || !wg->enabled) return 0;
@@ -1170,6 +1185,7 @@ void gui_terminal_open(void) {
     if (!g_gui.initialized || !g_gui.terminal.window) return;
     g_gui.terminal.enabled = 1;
     g_gui.terminal.input_focused = 1;
+    gui_set_focused_widget(0);
     gui_restore_window(g_gui.terminal.window);
     gui_set_active_window(g_gui.terminal.window);
     gui_invalidate_rect(g_gui.terminal.window->rect.x, g_gui.terminal.window->rect.y,

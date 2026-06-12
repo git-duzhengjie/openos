@@ -1110,7 +1110,6 @@ void shell_run(void)
             continue;
         }
 
-        if (gui_has_focused_widget())
         {
             int gui_key = 0;
             int gui_text_key = 0;
