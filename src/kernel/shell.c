@@ -161,7 +161,9 @@ static int shell_is_command_completion_context(void)
 
 static void shell_pump_serial_input(void)
 {
-    while ((inb(0x3FD) & 0x01))
+    /* 每次最多读 4 个字符，避免串口持续输入时独占 CPU 导致 GUI 饥饿 */
+    int max_read = 4;
+    while ((inb(0x3FD) & 0x01) && max_read-- > 0)
     {
         input_putc((char)inb(0x3F8));
     }
@@ -1101,14 +1103,13 @@ void shell_run(void)
         /* 从统一输入缓冲区读取；同时把串口数据灌入输入缓冲区 */
         char c = shell_read_input_char(0);
 
-        if (!c)
-        {
-            /* 图形模式下保�?GUI 事件、鼠标和重绘继续工作 */
-            if (gui_is_ready()) {
-                gui_poll();
-            }
-            continue;
+        /* 每次循玏下处理 GUI 事件和鼠标更新，避免邥溉 */
+        if (gui_is_ready()) {
+            gui_poll();
         }
+
+        if (!c)
+            continue;
 
         {
             int gui_key = 0;
