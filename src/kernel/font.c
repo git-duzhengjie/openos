@@ -117,14 +117,38 @@ const font_renderer_t *font_get_default(void) {
     return &g_font8x8;
 }
 
+static const font_renderer_t *font_resolve_renderer(const font_renderer_t *renderer) {
+    const font_renderer_t *r = renderer ? renderer : font_get_default();
+    if (!r || !r->ops || !r->ops->get_glyph_row || r->width == 0 || r->height == 0) {
+        return font_get_default();
+    }
+    return r;
+}
+
+static int font_rect_contains(const font_rect_t *rect, int x, int y) {
+    if (!rect) return 1;
+    return x >= rect->x && y >= rect->y && x < rect->x + rect->w && y < rect->y + rect->h;
+}
+
+static uint32_t font_advance_for_char(const font_renderer_t *r, char ch) {
+    if (ch == '\t') return (uint32_t)r->width * FONT_DEFAULT_TAB_SPACES;
+    return (uint32_t)r->width;
+}
+
 uint8_t font_get_glyph_row(const font_renderer_t *renderer, char ch, int row) {
-    (void)renderer;
-    if (row < 0 || row >= FONT_DEFAULT_HEIGHT) return 0;
-    return font8x8_get_glyph_row_direct(ch, row);
+    const font_renderer_t *r = font_resolve_renderer(renderer);
+    if (!r || row < 0 || row >= (int)r->height) return 0;
+    return r->ops->get_glyph_row(r, ch, row);
+}
+
+uint32_t font_get_line_height(const font_renderer_t *renderer) {
+    const font_renderer_t *r = font_resolve_renderer(renderer);
+    if (!r) return 0;
+    return (uint32_t)r->height + FONT_DEFAULT_LINE_GAP;
 }
 
 uint32_t font_measure_text_width(const font_renderer_t *renderer, const char *text) {
-    const font_renderer_t *r = renderer ? renderer : font_get_default();
+    const font_renderer_t *r = font_resolve_renderer(renderer);
     uint32_t max_width = 0;
     uint32_t line_width = 0;
     if (!r || !text) return 0;
@@ -133,7 +157,7 @@ uint32_t font_measure_text_width(const font_renderer_t *renderer, const char *te
             if (line_width > max_width) max_width = line_width;
             line_width = 0;
         } else {
-            line_width += r->width;
+            line_width += font_advance_for_char(r, *text);
         }
         text++;
     }
@@ -142,14 +166,83 @@ uint32_t font_measure_text_width(const font_renderer_t *renderer, const char *te
 }
 
 uint32_t font_measure_text_height(const font_renderer_t *renderer, const char *text) {
-    const font_renderer_t *r = renderer ? renderer : font_get_default();
+    const font_renderer_t *r = font_resolve_renderer(renderer);
     uint32_t lines = 1;
     if (!r || !text) return 0;
     while (*text) {
         if (*text == '\n') lines++;
         text++;
     }
-    return lines * (uint32_t)(r->height + 2u);
+    return lines * font_get_line_height(r);
+}
+
+void font_measure_text(const font_renderer_t *renderer, const char *text, font_text_metrics_t *out_metrics) {
+    const font_renderer_t *r = font_resolve_renderer(renderer);
+    uint32_t lines = 1;
+    if (!out_metrics) return;
+    out_metrics->width = 0;
+    out_metrics->height = 0;
+    out_metrics->lines = 0;
+    if (!r || !text) return;
+    out_metrics->width = font_measure_text_width(r, text);
+    while (*text) {
+        if (*text == '\n') lines++;
+        text++;
+    }
+    out_metrics->lines = lines;
+    out_metrics->height = lines * font_get_line_height(r);
+}
+
+void font_draw_char_clipped(const font_renderer_t *renderer, font_put_pixel_fn put_pixel, void *ctx,
+                            const font_rect_t *clip, int x, int y, char ch, uint32_t color) {
+    const font_renderer_t *r = font_resolve_renderer(renderer);
+    int row;
+    int col;
+    if (!r || !put_pixel) return;
+    if ((uint8_t)ch < 32 || ch == ' ' || ch == '\t' || ch == '\n') return;
+
+    for (row = 0; row < (int)r->height; row++) {
+        uint8_t bits = font_get_glyph_row(r, ch, row);
+        for (col = 0; col < (int)r->width && col < 8; col++) {
+            int px;
+            int py;
+            if ((bits & (uint8_t)(0x80u >> col)) == 0) continue;
+            px = x + col;
+            py = y + row;
+            if (font_rect_contains(clip, px, py)) put_pixel(ctx, px, py, color);
+        }
+    }
+}
+
+void font_draw_char(const font_renderer_t *renderer, font_put_pixel_fn put_pixel, void *ctx,
+                    int x, int y, char ch, uint32_t color) {
+    font_draw_char_clipped(renderer, put_pixel, ctx, 0, x, y, ch, color);
+}
+
+void font_draw_text_clipped(const font_renderer_t *renderer, font_put_pixel_fn put_pixel, void *ctx,
+                            const font_rect_t *clip, int x, int y, const char *text, uint32_t color) {
+    const font_renderer_t *r = font_resolve_renderer(renderer);
+    int cx = x;
+    int cy = y;
+    if (!r || !put_pixel || !text) return;
+
+    while (*text) {
+        if (*text == '\n') {
+            cy += (int)font_get_line_height(r);
+            cx = x;
+        } else if (*text == '\t') {
+            cx += (int)font_advance_for_char(r, *text);
+        } else {
+            font_draw_char_clipped(r, put_pixel, ctx, clip, cx, cy, *text, color);
+            cx += (int)font_advance_for_char(r, *text);
+        }
+        text++;
+    }
+}
+
+void font_draw_text(const font_renderer_t *renderer, font_put_pixel_fn put_pixel, void *ctx,
+                    int x, int y, const char *text, uint32_t color) {
+    font_draw_text_clipped(renderer, put_pixel, ctx, 0, x, y, text, color);
 }
 
 #undef FONT_GLYPH

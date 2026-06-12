@@ -117,30 +117,17 @@ static void gui_clear_clip_rect(void) {
     g_gui.clip_enabled = 0;
 }
 
+static void gui_font_put_pixel(void *ctx, int x, int y, uint32_t color) {
+    (void)ctx;
+    gui_raw_put_pixel(x, y, color);
+}
+
 void gui_draw_char(int x, int y, char ch, uint32_t color) {
-    int row, col;
-    if ((uint8_t)ch < 32 || ch == ' ') return;
-    for (row = 0; row < GUI_CHAR_H; row++) {
-        uint8_t bits = font_get_glyph_row(font_get_default(), ch, row);
-        for (col = 0; col < GUI_CHAR_W; col++) {
-            if (bits & (0x80u >> col)) gui_raw_put_pixel(x + col, y + row, color);
-        }
-    }
+    font_draw_char(font_get_default(), gui_font_put_pixel, 0, x, y, ch, color);
 }
 
 void gui_draw_text(int x, int y, const char *text, uint32_t color) {
-    int cx = x;
-    if (!text) return;
-    while (*text) {
-        if (*text == '\n') {
-            y += GUI_CHAR_H + 2;
-            cx = x;
-        } else {
-            gui_draw_char(cx, y, *text, color);
-            cx += GUI_CHAR_W;
-        }
-        text++;
-    }
+    font_draw_text(font_get_default(), gui_font_put_pixel, 0, x, y, text, color);
 }
 
 static int gui_rect_contains(const gui_rect_t *r, int x, int y) {
