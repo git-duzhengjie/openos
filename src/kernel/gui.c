@@ -18,6 +18,7 @@ static gui_system_t g_gui;
 static int gui_rect_contains(const gui_rect_t *r, int x, int y);
 static gui_window_t *gui_top_window(void);
 static void gui_set_hovered_widget(gui_widget_t *wg);
+static void gui_demo_button(gui_widget_t *widget, void *user_data);
 void gui_terminal_set_input_focus(int focused);
 
 static uint32_t gui_rgb(uint8_t r, uint8_t g, uint8_t b) {
@@ -505,7 +506,23 @@ static void gui_draw_window(gui_window_t *w) {
 }
 
 void gui_event_push(gui_event_t event) {
-    if (g_gui.event_count >= GUI_EVENT_QUEUE_SIZE) return;
+    if (event.type == GUI_EVENT_MOUSE_MOVE && g_gui.event_count > 0) {
+        uint32_t last = (g_gui.event_tail + GUI_EVENT_QUEUE_SIZE - 1) % GUI_EVENT_QUEUE_SIZE;
+        if (g_gui.events[last].type == GUI_EVENT_MOUSE_MOVE) {
+            /* 合并连续 MOVE，避免移动事件刷满队列导致点击/拖动事件丢失。 */
+            g_gui.events[last] = event;
+            return;
+        }
+    }
+
+    if (g_gui.event_count >= GUI_EVENT_QUEUE_SIZE) {
+        /* 队列满时丢弃最老事件，保证 DOWN/UP 等关键事件可以入队。 */
+        if (event.type == GUI_EVENT_MOUSE_MOVE) {
+            return;
+        }
+        g_gui.event_head = (g_gui.event_head + 1) % GUI_EVENT_QUEUE_SIZE;
+        g_gui.event_count--;
+    }
     g_gui.events[g_gui.event_tail] = event;
     g_gui.event_tail = (g_gui.event_tail + 1) % GUI_EVENT_QUEUE_SIZE;
     g_gui.event_count++;
@@ -641,11 +658,10 @@ static gui_window_t *gui_taskbar_window_at(int x, int y) {
 void gui_post_key_code(int key) {
     gui_event_t ev;
     if (!g_gui.initialized || !key) return;
+    memset(&ev, 0, sizeof(ev));
     ev.type = GUI_EVENT_KEY_DOWN;
-    ev.x = 0; ev.y = 0; ev.dx = 0; ev.dy = 0;
-    ev.button = 0; ev.key = key;
+    ev.key = key;
     ev.window = g_gui.active_window;
-    ev.widget = 0;
     gui_event_push(ev);
 }
 
@@ -697,24 +713,27 @@ void gui_process_events(void) {
                     ev.window = w;
                     gui_event_push(ev);
                 } else {
-                    int sx = ev.x - w->rect.x - GUI_BORDER_SIZE;
-                    int sy = ev.y - w->rect.y - GUI_TITLE_HEIGHT;
-                    gui_widget_t *wg = gui_widget_at(w, sx, sy);
-                    if (gui_widget_is_clickable(wg)) {
-                        gui_set_focused_widget(wg);
-                        wg->pressed = 1;
-                        g_gui.pressed_widget = wg;
-                        gui_invalidate_all();
-                    } else if (gui_widget_can_focus(wg)) {
-                        gui_set_focused_widget(wg);
-                    } else {
+                    gui_rect_t tr = gui_title_rect(w);
+                    if (gui_rect_contains(&tr, ev.x, ev.y)) {
                         gui_set_focused_widget(0);
-                        gui_rect_t tr = gui_title_rect(w);
-                        if (gui_rect_contains(&tr, ev.x, ev.y)) {
-                            w->dragging = 1;
-                            w->drag_offset_x = ev.x - w->rect.x;
-                            w->drag_offset_y = ev.y - w->rect.y;
-                            g_gui.drag_window = w;
+                        w->dragging = 1;
+                        w->drag_offset_x = ev.x - w->rect.x;
+                        w->drag_offset_y = ev.y - w->rect.y;
+                        g_gui.drag_window = w;
+                        serial_write("[GUI] drag start\n");
+                    } else {
+                        int sx = ev.x - w->rect.x - GUI_BORDER_SIZE;
+                        int sy = ev.y - w->rect.y - GUI_TITLE_HEIGHT;
+                        gui_widget_t *wg = gui_widget_at(w, sx, sy);
+                        if (gui_widget_is_clickable(wg)) {
+                            gui_set_focused_widget(wg);
+                            wg->pressed = 1;
+                            g_gui.pressed_widget = wg;
+                            gui_invalidate_all();
+                        } else if (gui_widget_can_focus(wg)) {
+                            gui_set_focused_widget(wg);
+                        } else {
+                            gui_set_focused_widget(0);
                         }
                     }
                 }
@@ -735,6 +754,7 @@ void gui_process_events(void) {
                 still_inside = (under == wg && gui_widget_is_clickable(wg));
                 gui_invalidate_all();
                 if (still_inside) {
+                    serial_write("[GUI] button activate\n");
                     gui_button_activate(wg);
                 }
             }
@@ -754,8 +774,11 @@ void gui_process_events(void) {
             }
         } else if (ev.type == GUI_EVENT_BUTTON_CLICK) {
             if (ev.widget && gui_widget_is_clickable(ev.widget)) {
-                /* 按钮点击功能已预留，当前优先保证点击不崩溃，后续再添加具体功能 */
-                serial_write("[GUI] button clicked, no crash ✅\n");
+                serial_write("[GUI] button clicked\n");
+                /* 不做任意 on_click 间接调用，只对白名单回调做直接调用，避免跳飞。 */
+                if (ev.widget->on_click == gui_demo_button) {
+                    gui_demo_button(ev.widget, ev.widget->user_data);
+                }
             }
         } else if (ev.type == GUI_EVENT_WINDOW_CLOSE) {
             gui_destroy_window(ev.window);
@@ -778,6 +801,20 @@ static void gui_poll_mouse(void) {
     if (ms.x > (int)g_gui.width - 1) ms.x = (int)g_gui.width - 1;
     if (ms.y > (int)g_gui.height - 1) ms.y = (int)g_gui.height - 1;
 
+    if ((ms.buttons & 1u) && !(g_gui.last_mouse_buttons & 1u)) {
+        memset(&ev, 0, sizeof(ev));
+        ev.type = GUI_EVENT_MOUSE_DOWN;
+        ev.x = ms.x; ev.y = ms.y; ev.button = 1;
+        serial_write("[GUI] mouse down\n");
+        gui_event_push(ev);
+    } else if (!(ms.buttons & 1u) && (g_gui.last_mouse_buttons & 1u)) {
+        memset(&ev, 0, sizeof(ev));
+        ev.type = GUI_EVENT_MOUSE_UP;
+        ev.x = ms.x; ev.y = ms.y; ev.button = 1;
+        serial_write("[GUI] mouse up\n");
+        gui_event_push(ev);
+    }
+
     if (ms.x != g_gui.mouse_x || ms.y != g_gui.mouse_y) {
         gui_invalidate_rect(g_gui.mouse_x - 2, g_gui.mouse_y - 2, 22, 22);
         gui_invalidate_rect(ms.x - 2, ms.y - 2, 22, 22);
@@ -788,21 +825,6 @@ static void gui_poll_mouse(void) {
         ev.dx = ms.dx;
         ev.dy = ms.dy;
         ev.button = ms.buttons;
-        ev.window = 0;
-        ev.widget = 0;
-        ev.key = 0;
-        gui_event_push(ev);
-    }
-
-    if ((ms.buttons & 1) && !(g_gui.last_mouse_buttons & 1)) {
-        memset(&ev, 0, sizeof(ev));
-        ev.type = GUI_EVENT_MOUSE_DOWN;
-        ev.x = ms.x; ev.y = ms.y; ev.button = 1;
-        gui_event_push(ev);
-    } else if (!(ms.buttons & 1) && (g_gui.last_mouse_buttons & 1)) {
-        memset(&ev, 0, sizeof(ev));
-        ev.type = GUI_EVENT_MOUSE_UP;
-        ev.x = ms.x; ev.y = ms.y; ev.button = 1;
         gui_event_push(ev);
     }
 
