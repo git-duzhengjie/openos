@@ -18,6 +18,7 @@ static gui_system_t g_gui;
 static int gui_rect_contains(const gui_rect_t *r, int x, int y);
 static gui_window_t *gui_top_window(void);
 static void gui_set_hovered_widget(gui_widget_t *wg);
+static int gui_handle_window_control_at(int x, int y);
 static void gui_demo_button(gui_widget_t *widget, void *user_data);
 void gui_terminal_set_input_focus(int focused);
 
@@ -250,6 +251,42 @@ static gui_widget_t *gui_widget_at_screen(int x, int y) {
     gui_window_t *w = gui_window_at(x, y);
     if (!w) return 0;
     return gui_widget_at(w, x - w->rect.x - GUI_BORDER_SIZE, y - w->rect.y - GUI_TITLE_HEIGHT);
+}
+
+static int gui_handle_window_control_at(int x, int y) {
+    gui_window_t *w = gui_window_at(x, y);
+    gui_rect_t r;
+    if (!w) return 0;
+
+    r = gui_close_rect(w);
+    if ((w->flags & GUI_WINDOW_FLAG_CLOSABLE) && gui_rect_contains(&r, x, y)) {
+        serial_write("[GUI] direct window close\n");
+        if (g_gui.focused_widget && g_gui.focused_widget->owner == w) {
+            g_gui.focused_widget->focused = 0;
+            g_gui.focused_widget = 0;
+        }
+        if (g_gui.drag_window == w) g_gui.drag_window = 0;
+        if (g_gui.pressed_widget && g_gui.pressed_widget->owner == w) g_gui.pressed_widget = 0;
+        if (g_gui.hovered_widget && g_gui.hovered_widget->owner == w) g_gui.hovered_widget = 0;
+        gui_destroy_window(w);
+        return 1;
+    }
+
+    r = gui_min_rect(w);
+    if ((w->flags & GUI_WINDOW_FLAG_MINIMIZABLE) && gui_rect_contains(&r, x, y)) {
+        serial_write("[GUI] direct window minimize\n");
+        if (g_gui.focused_widget && g_gui.focused_widget->owner == w) {
+            g_gui.focused_widget->focused = 0;
+            g_gui.focused_widget = 0;
+        }
+        if (g_gui.drag_window == w) g_gui.drag_window = 0;
+        if (g_gui.pressed_widget && g_gui.pressed_widget->owner == w) g_gui.pressed_widget = 0;
+        if (g_gui.hovered_widget && g_gui.hovered_widget->owner == w) g_gui.hovered_widget = 0;
+        gui_minimize_window(w);
+        return 1;
+    }
+
+    return 0;
 }
 
 static void gui_set_focused_widget(gui_widget_t *wg) {
@@ -620,7 +657,7 @@ void gui_minimize_window(gui_window_t *window) {
     if (!window || !window->used) return;
 
     window->flags |= GUI_WINDOW_FLAG_MINIMIZED;
-    window->visible = 0;
+    window->visible = 1;
     window->active = 0;
     window->dragging = 0;
 
@@ -824,6 +861,10 @@ static void gui_poll_mouse(void) {
     if (ms.y > (int)g_gui.height - 1) ms.y = (int)g_gui.height - 1;
 
     if ((ms.buttons & 1u) && !(g_gui.last_mouse_buttons & 1u)) {
+        if (gui_handle_window_control_at(ms.x, ms.y)) {
+            g_gui.last_mouse_buttons = ms.buttons;
+            return;
+        }
         memset(&ev, 0, sizeof(ev));
         ev.type = GUI_EVENT_MOUSE_DOWN;
         ev.x = ms.x; ev.y = ms.y; ev.button = 1;
