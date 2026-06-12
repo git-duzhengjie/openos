@@ -23,6 +23,7 @@ typedef struct {
     uint8_t packet[3];      /* 3字节包缓存 */
     int max_x;              /* 坐标右边界，通常为屏幕宽度-1 */
     int max_y;              /* 坐标下边界，通常为屏幕高度-1 */
+    int absolute_mode;      /* 非 0 表示最近坐标来自绝对指针设备 */
 } mouse_state_t;
 
 /* 初始化 PS/2 鼠标 (IRQ12) */
@@ -37,6 +38,9 @@ void mouse_snapshot_and_clear_delta(mouse_state_t *out);
 /* 设置鼠标坐标范围与当前位置，GUI 切换分辨率后必须同步 */
 void mouse_set_bounds(int width, int height);
 void mouse_set_position(int x, int y);
+
+/* 注入绝对坐标，供 USB Tablet / 绝对指针设备使用 */
+void mouse_set_absolute_position(int x, int y, uint8_t buttons);
 
 void mouse_print_info(void);
 

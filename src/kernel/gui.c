@@ -8,6 +8,7 @@
 #include "gui.h"
 #include "framebuffer.h"
 #include "mouse.h"
+#include "usb_tablet.h"
 #include "font.h"
 #include "serial.h"
 #include "string.h"
@@ -920,6 +921,7 @@ static void gui_poll_mouse(void) {
     mouse_state_t ms;
     if (!g_gui.initialized) return;
 
+    usb_tablet_poll((int)g_gui.width, (int)g_gui.height);
     mouse_snapshot_and_clear_delta(&ms);
     if (!ms.present) return;
 

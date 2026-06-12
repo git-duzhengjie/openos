@@ -27,6 +27,7 @@
 #include "framebuffer.h"
 #include "gui.h"
 #include "mouse.h"
+#include "usb_tablet.h"
 #include "embed_hello.h"  /* 嵌入的用户程�?*/
 
 /* 外部符号 */
@@ -158,6 +159,9 @@ void kernel_main(void) {
 
     /* 初始化 PS/2 鼠标驱动 */
     mouse_init();
+
+    /* 初始化 QEMU USB Tablet 绝对坐标鼠标；失败时自动回退 PS/2 */
+    usb_tablet_init();
     
     /* 初始化VGA控制�?*/
     vga_init();

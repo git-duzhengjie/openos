@@ -181,10 +181,29 @@ void mouse_set_position(int x, int y) {
     mouse_clamp_position();
 }
 
+void mouse_set_absolute_position(int x, int y, uint8_t buttons) {
+    uint32_t flags;
+    __asm__ volatile("pushfl; popl %0; cli" : "=r"(flags) :: "memory");
+
+    int old_x = g_mouse.x;
+    int old_y = g_mouse.y;
+    g_mouse.x = x;
+    g_mouse.y = y;
+    mouse_clamp_position();
+    g_mouse.dx = g_mouse.x - old_x;
+    g_mouse.dy = g_mouse.y - old_y;
+    g_mouse.buttons = buttons & 0x07;
+    g_mouse.present = 1;
+    g_mouse.absolute_mode = 1;
+    g_mouse.packet_count++;
+
+    __asm__ volatile("pushl %0; popfl" :: "r"(flags) : "memory", "cc");
+}
+
 void mouse_print_info(void) {
     serial_write("[MOUSE] PS/2 mouse status\n");
     serial_write(g_mouse.present ? "  present=yes\n" : "  present=no\n");
     serial_write("  buttons="); serial_write_hex(g_mouse.buttons); serial_write(" last_ack="); serial_write_hex(g_mouse.last_ack); serial_write("\n");
     serial_write("  irq_bytes="); serial_write_hex(g_mouse.irq_count); serial_write(" packets="); serial_write_hex(g_mouse.packet_count); serial_write(" desync="); serial_write_hex(g_mouse.desync_count); serial_write("\n");
-    serial_write("  pos="); serial_write_hex((uint32_t)g_mouse.x); serial_write(","); serial_write_hex((uint32_t)g_mouse.y); serial_write(" bounds="); serial_write_hex((uint32_t)g_mouse.max_x); serial_write(","); serial_write_hex((uint32_t)g_mouse.max_y); serial_write("\n");
+    serial_write("  pos="); serial_write_hex((uint32_t)g_mouse.x); serial_write(","); serial_write_hex((uint32_t)g_mouse.y); serial_write(" bounds="); serial_write_hex((uint32_t)g_mouse.max_x); serial_write(","); serial_write_hex((uint32_t)g_mouse.max_y); serial_write(" absolute="); serial_write_hex((uint32_t)g_mouse.absolute_mode); serial_write("\n");
 }
