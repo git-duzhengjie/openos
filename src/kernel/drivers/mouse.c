@@ -41,10 +41,11 @@ static int mouse_clamp_int(int value, int min, int max) {
 }
 
 static void mouse_clamp_position(void) {
-    if (g_mouse.max_x <= 0) g_mouse.max_x = 1023;
-    if (g_mouse.max_y <= 0) g_mouse.max_y = 767;
-    g_mouse.x = mouse_clamp_int(g_mouse.x, 0, g_mouse.max_x);
-    g_mouse.y = mouse_clamp_int(g_mouse.y, 0, g_mouse.max_y);
+    /* bounds 未设置时用临时小范围（防止启动前坐标飞到无效区域） */
+    int mx = (g_mouse.max_x <= 0) ? 1023 : g_mouse.max_x;
+    int my = (g_mouse.max_y <= 0) ? 767 : g_mouse.max_y;
+    g_mouse.x = mouse_clamp_int(g_mouse.x, 0, mx);
+    g_mouse.y = mouse_clamp_int(g_mouse.y, 0, my);
 }
 
 static void mouse_write(uint8_t val) {
@@ -109,10 +110,12 @@ void mouse_irq_handle(void) {
 
 void mouse_init(void) {
     memset(&g_mouse, 0, sizeof(mouse_state_t));
-    g_mouse.max_x = 1023;
-    g_mouse.max_y = 767;
-    g_mouse.x = 512;
-    g_mouse.y = 384;
+    /* 初始坐标范围设为 0，等待 gui_start() 通过 mouse_set_bounds() 设置真实分辨率。
+     * clamp 时如果 max<=0 会 fallback 到 1023/767，避免启动前坐标完全失控。 */
+    g_mouse.max_x = 0;
+    g_mouse.max_y = 0;
+    g_mouse.x = 0;
+    g_mouse.y = 0;
 
     /* 使能辅助设备端口 */
     mouse_wait_input();

@@ -1045,6 +1045,7 @@ void gui_init(void) {
 int gui_start(uint32_t width, uint32_t height) {
     const framebuffer_info_t *info;
     uint32_t pixels;
+    mouse_state_t ms;
     if (!framebuffer_is_available()) return -1;
     if (framebuffer_set_mode(width, height, 32) != 0) return -1;
     info = framebuffer_get_info();
@@ -1052,11 +1053,40 @@ int gui_start(uint32_t width, uint32_t height) {
 
     g_gui.width = info->width;
     g_gui.height = info->height;
-    g_gui.initialized = 1;
-    g_gui.mouse_x = (int)(g_gui.width / 2);
-    g_gui.mouse_y = (int)(g_gui.height / 2);
+
+    /* 先设置鼠标边界为真实分辨率 */
     mouse_set_bounds((int)g_gui.width, (int)g_gui.height);
-    mouse_set_position(g_gui.mouse_x, g_gui.mouse_y);
+
+    g_gui.initialized = 1;
+
+    /* 从鼠标驱动获取当前坐标 */
+    mouse_snapshot_and_clear_delta(&ms);
+
+    /* 如果鼠标还没收到中断包，使用屏幕中心 */
+    if (ms.packet_count == 0) {
+        g_gui.mouse_x = (int)(g_gui.width / 2);
+        g_gui.mouse_y = (int)(g_gui.height / 2);
+        mouse_set_position(g_gui.mouse_x, g_gui.mouse_y);
+    } else {
+        g_gui.mouse_x = ms.x;
+        g_gui.mouse_y = ms.y;
+    }
+
+    /* 坐标边界最终检查 */
+    if (g_gui.mouse_x < 0) g_gui.mouse_x = 0;
+    if (g_gui.mouse_y < 0) g_gui.mouse_y = 0;
+    if (g_gui.mouse_x >= (int)g_gui.width) g_gui.mouse_x = (int)g_gui.width - 1;
+    if (g_gui.mouse_y >= (int)g_gui.height) g_gui.mouse_y = (int)g_gui.height - 1;
+
+    serial_write("[GUI] mouse sync: x=");
+    gui_write_dec((uint32_t)g_gui.mouse_x);
+    serial_write(" y=");
+    gui_write_dec((uint32_t)g_gui.mouse_y);
+    serial_write(" bounds=");
+    gui_write_dec(g_gui.width);
+    serial_write("x");
+    gui_write_dec(g_gui.height);
+    serial_write("\n");
 
     pixels = g_gui.width * g_gui.height;
     if (!g_gui.backbuffer || g_gui.backbuffer_pixels < pixels) {
