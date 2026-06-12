@@ -745,6 +745,7 @@ void gui_process_events(void) {
             }
         } else if (ev.type == GUI_EVENT_MOUSE_DOWN) {
             if (gui_taskbar_terminal_button_at(ev.x, ev.y)) {
+                serial_write("[GUI] taskbar terminal\n");
                 gui_set_focused_widget(0);
                 gui_terminal_open();
                 continue;
@@ -1182,7 +1183,18 @@ void gui_terminal_set_input_focus(int focused) {
 
 void gui_terminal_open(void) {
     extern void kernel_start_shell_thread(void);
-    if (!g_gui.initialized || !g_gui.terminal.window) return;
+    serial_write("[GUI] terminal open\n");
+    if (!g_gui.initialized) return;
+
+    if (!g_gui.terminal.window) {
+        serial_write("[GUI] terminal rebuild\n");
+        gui_terminal_init();
+    }
+    if (!g_gui.terminal.window) {
+        serial_write("[GUI] terminal open failed\n");
+        return;
+    }
+
     g_gui.terminal.enabled = 1;
     g_gui.terminal.input_focused = 1;
     gui_set_focused_widget(0);
@@ -1191,6 +1203,7 @@ void gui_terminal_open(void) {
     gui_invalidate_rect(g_gui.terminal.window->rect.x, g_gui.terminal.window->rect.y,
                         g_gui.terminal.window->rect.w, g_gui.terminal.window->rect.h);
     kernel_start_shell_thread();
+    serial_write("[GUI] terminal opened\n");
 }
 
 void gui_terminal_minimize(void) {
