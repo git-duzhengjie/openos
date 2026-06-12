@@ -692,6 +692,11 @@ static int gui_taskbar_terminal_button_at(int x, int y) {
     return x >= 8 && x < 8 + GUI_TASKBAR_START_W;
 }
 
+static int gui_is_taskbar_y(int y) {
+    int ty = (int)g_gui.height - GUI_TASKBAR_HEIGHT;
+    return y >= ty && y < (int)g_gui.height;
+}
+
 static gui_window_t *gui_taskbar_window_at(int x, int y) {
     uint32_t i;
     int bx = GUI_TASKBAR_START_W + 16;
@@ -736,9 +741,24 @@ static void gui_handle_mouse_down(int x, int y) {
 
     gui_window_t *tw = gui_taskbar_window_at(x, y);
     if (tw) {
-        if (tw == g_gui.terminal.window) gui_set_focused_widget(0);
+        if (tw == g_gui.terminal.window || (tw->flags & GUI_WINDOW_FLAG_TERMINAL)) {
+            serial_write("[GUI] taskbar terminal window\n");
+            gui_set_focused_widget(0);
+            gui_terminal_open();
+            return;
+        }
         gui_restore_window(tw);
-        if (tw == g_gui.terminal.window) gui_terminal_set_input_focus(1);
+        return;
+    }
+
+    if (gui_is_taskbar_y(y)) {
+        serial_write("[GUI] taskbar miss x=");
+        gui_write_dec((uint32_t)x);
+        serial_write(" y=");
+        gui_write_dec((uint32_t)y);
+        serial_write(" terminal_x=8..");
+        gui_write_dec((uint32_t)(8 + GUI_TASKBAR_START_W - 1));
+        serial_write("\n");
         return;
     }
 
