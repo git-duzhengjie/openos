@@ -747,6 +747,7 @@ static void gui_handle_mouse_down(int x, int y) {
         gui_rect_t minr;
 
         if (w == g_gui.terminal.window) {
+            serial_write("[GUI] terminal focus\n");
             gui_set_focused_widget(0);
             gui_terminal_set_input_focus(1);
         }
@@ -857,15 +858,15 @@ void gui_process_events(void) {
                 gui_button_activate(g_gui.focused_widget);
             } else if (g_gui.focused_widget && g_gui.focused_widget->focused) {
                 /* Focused widgets consume keys that they do not handle. */
-            } else if (ev.key >= 0 && ev.key <= 255) {
-                gui_terminal_on_input((char)ev.key);
+            } else {
+                /* Terminal input must flow through shell_run(), not GUI key events. */
             }
         } else if (ev.type == GUI_EVENT_MOUSE_DOWN) {
-            gui_handle_mouse_down(ev.x, ev.y);
+            /* Mouse actions are handled synchronously in gui_poll_mouse(). */
         } else if (ev.type == GUI_EVENT_MOUSE_UP) {
-            gui_handle_mouse_up(ev.x, ev.y);
+            /* Mouse actions are handled synchronously in gui_poll_mouse(). */
         } else if (ev.type == GUI_EVENT_MOUSE_MOVE) {
-            gui_handle_mouse_move(ev.x, ev.y);
+            /* Mouse actions are handled synchronously in gui_poll_mouse(). */
         } else if (ev.type == GUI_EVENT_BUTTON_CLICK) {
             if (ev.widget && gui_widget_is_clickable(ev.widget)) {
                 serial_write("[GUI] button clicked\n");
