@@ -19,6 +19,7 @@ static isr_t interrupt_handlers[256] = {0};
 
 /* 定时器中断专用处理函数（在 timer_isr.asm 中）*/
 extern void timer_isr_entry(void);
+extern uint8_t __kernel_end;
 
 /* ============================================================
  * PIC (可编程中断控制器) 操作
@@ -231,6 +232,17 @@ void isr_handler(registers_t *regs) {
 	}
 }
 
+static int irq_handler_pointer_is_safe(isr_t handler) {
+	uint32_t addr = (uint32_t)handler;
+	uint32_t kernel_end = (uint32_t)&__kernel_end;
+
+	/* OpenOS 当前内核链接在 0x8000，合法 IRQ handler 必须落在内核镜像内。
+	 * 这既允许 keyboard_handler 这类低于 1MB 的合法函数，
+	 * 又能继续拦截 0x00000003 这类明显坏函数指针。
+	 */
+	return addr >= 0x00008000u && addr < kernel_end;
+}
+
 /*
  * IRQ处理函数 (由isr.asm调用)
  */
@@ -240,11 +252,14 @@ void irq_handler(registers_t *regs) {
 		mouse_irq_handle();
 	} else if (regs->int_no < 256 && interrupt_handlers[regs->int_no]) {
 		isr_t handler = interrupt_handlers[regs->int_no];
-		/* 低地址函数指针一定非法，避免跳到 0x00000003 这类坏地址 */
-		if ((uint32_t)handler >= 0x00100000u) {
+		if (irq_handler_pointer_is_safe(handler)) {
 			handler(regs);
 		} else {
-			serial_write("[IRQ] ignored bad handler pointer\n");
+			serial_write("[IRQ] ignored bad handler pointer int=");
+			serial_write_hex(regs->int_no);
+			serial_write(" handler=");
+			serial_write_hex((uint32_t)handler);
+			serial_write("\n");
 		}
 	}
 
