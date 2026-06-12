@@ -687,7 +687,8 @@ void gui_show_window(gui_window_t *window) { if (window) { window->visible = 1; 
 void gui_hide_window(gui_window_t *window) { if (window) { window->visible = 0; gui_invalidate_all(); } }
 
 static int gui_taskbar_terminal_button_at(int x, int y) {
-    if (y < (int)g_gui.height - GUI_TASKBAR_HEIGHT) return 0;
+    int ty = (int)g_gui.height - GUI_TASKBAR_HEIGHT;
+    if (y < ty || y >= (int)g_gui.height) return 0;
     return x >= 8 && x < 8 + GUI_TASKBAR_START_W;
 }
 
@@ -801,6 +802,17 @@ static void gui_handle_mouse_down(int x, int y) {
         return;
     }
 
+    serial_write("[GUI] mouse miss x=");
+    gui_write_dec((uint32_t)x);
+    serial_write(" y=");
+    gui_write_dec((uint32_t)y);
+    serial_write(" taskbar_y=");
+    gui_write_dec((uint32_t)((int)g_gui.height - GUI_TASKBAR_HEIGHT));
+    serial_write(" screen=");
+    gui_write_dec(g_gui.width);
+    serial_write("x");
+    gui_write_dec(g_gui.height);
+    serial_write("\n");
     gui_set_focused_widget(0);
 }
 
@@ -896,10 +908,22 @@ static void gui_poll_mouse(void) {
     if (ms.y > (int)g_gui.height - 1) ms.y = (int)g_gui.height - 1;
 
     if ((ms.buttons & 1u) && !(g_gui.last_mouse_buttons & 1u)) {
-        serial_write("[GUI] mouse down\n");
+        serial_write("[GUI] mouse down x=");
+        gui_write_dec((uint32_t)ms.x);
+        serial_write(" y=");
+        gui_write_dec((uint32_t)ms.y);
+        serial_write(" btn=");
+        gui_write_dec((uint32_t)ms.buttons);
+        serial_write("\n");
         gui_handle_mouse_down(ms.x, ms.y);
     } else if (!(ms.buttons & 1u) && (g_gui.last_mouse_buttons & 1u)) {
-        serial_write("[GUI] mouse up\n");
+        serial_write("[GUI] mouse up x=");
+        gui_write_dec((uint32_t)ms.x);
+        serial_write(" y=");
+        gui_write_dec((uint32_t)ms.y);
+        serial_write(" btn=");
+        gui_write_dec((uint32_t)ms.buttons);
+        serial_write("\n");
         gui_handle_mouse_up(ms.x, ms.y);
     }
 
