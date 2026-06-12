@@ -185,7 +185,11 @@ static gui_window_t *gui_top_window(void) {
     int i;
     for (i = (int)g_gui.window_count - 1; i >= 0; i--) {
         uint32_t idx = g_gui.z_order[i];
-        if (idx < GUI_MAX_WINDOWS && g_gui.windows[idx].used) return &g_gui.windows[idx];
+        gui_window_t *w;
+        if (idx >= GUI_MAX_WINDOWS) continue;
+        w = &g_gui.windows[idx];
+        if (!w->used || !w->visible || (w->flags & GUI_WINDOW_FLAG_MINIMIZED)) continue;
+        return w;
     }
     return 0;
 }
@@ -613,10 +617,22 @@ void gui_destroy_window(gui_window_t *window) {
 }
 
 void gui_minimize_window(gui_window_t *window) {
-    if (!window) return;
+    if (!window || !window->used) return;
+
     window->flags |= GUI_WINDOW_FLAG_MINIMIZED;
+    window->visible = 0;
+    window->active = 0;
+    window->dragging = 0;
+
     if (g_gui.active_window == window) g_gui.active_window = 0;
+    if (g_gui.drag_window == window) g_gui.drag_window = 0;
+    if (g_gui.pressed_widget && g_gui.pressed_widget->owner == window) g_gui.pressed_widget = 0;
+    if (g_gui.hovered_widget && g_gui.hovered_widget->owner == window) g_gui.hovered_widget = 0;
     if (g_gui.focused_widget && g_gui.focused_widget->owner == window) gui_set_focused_widget(0);
+
+    g_gui.active_window = gui_top_window();
+    if (g_gui.active_window) g_gui.active_window->active = 1;
+
     gui_invalidate_all();
 }
 
@@ -646,7 +662,7 @@ static gui_window_t *gui_taskbar_window_at(int x, int y) {
         int bw;
         if (idx >= GUI_MAX_WINDOWS) continue;
         w = &g_gui.windows[idx];
-        if (!w->used || !w->visible || !(w->flags & GUI_WINDOW_FLAG_MINIMIZED)) continue;
+        if (!w->used || !(w->flags & GUI_WINDOW_FLAG_MINIMIZED)) continue;
         bw = 72 + (int)strlen(w->title) * GUI_CHAR_W;
         if (bw > 180) bw = 180;
         if (x >= bx && x < bx + bw) return w;
@@ -1180,7 +1196,7 @@ static void gui_draw_taskbar(void) {
         int bw;
         if (idx >= GUI_MAX_WINDOWS) continue;
         w = &g_gui.windows[idx];
-        if (!w->used || !w->visible || !(w->flags & GUI_WINDOW_FLAG_MINIMIZED)) continue;
+        if (!w->used || !(w->flags & GUI_WINDOW_FLAG_MINIMIZED)) continue;
         bw = 72 + (int)strlen(w->title) * GUI_CHAR_W;
         if (bw > 180) bw = 180;
         gui_raw_fill_rect(bx, y + 3, bw, GUI_TASKBAR_HEIGHT - 6, gui_rgb(52, 68, 96));
