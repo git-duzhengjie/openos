@@ -834,14 +834,6 @@ static void gui_handle_mouse_down(int x, int y) {
     gui_write_dec(g_gui.height);
     serial_write("\n");
 
-    if (!g_gui.terminal.window || !g_gui.terminal.window->visible ||
-        (g_gui.terminal.window->flags & GUI_WINDOW_FLAG_MINIMIZED)) {
-        serial_write("[GUI] desktop terminal fallback\n");
-        gui_set_focused_widget(0);
-        gui_terminal_open();
-        return;
-    }
-
     gui_set_focused_widget(0);
 }
 
@@ -983,10 +975,10 @@ void gui_init(void) {
     g_gui.next_widget_id = 1;
     g_gui.mouse_x = 512;
     g_gui.mouse_y = 384;
-    /* Default off avoids two cursors in QEMU/VM windows:
-     * host cursor + OpenOS software cursor. Use `cursor on` to show it.
+    /* Default on shows the OpenOS software cursor inside the GUI.
+     * Use `cursor off` to hide it when the host cursor is preferred.
      */
-    g_gui.cursor_visible = 0;
+    g_gui.cursor_visible = 1;
     serial_write("[OK] GUI object pool\n");
 }
 
