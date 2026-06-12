@@ -705,13 +705,19 @@ void gui_process_events(void) {
                 gui_rect_t close = gui_close_rect(w);
                 gui_rect_t minr = gui_min_rect(w);
                 if ((w->flags & GUI_WINDOW_FLAG_CLOSABLE) && gui_rect_contains(&close, ev.x, ev.y)) {
-                    ev.type = GUI_EVENT_WINDOW_CLOSE;
-                    ev.window = w;
-                    gui_event_push(ev);
+                    serial_write("[GUI] window close\n");
+                    gui_set_focused_widget(0);
+                    if (g_gui.drag_window == w) g_gui.drag_window = 0;
+                    if (g_gui.pressed_widget && g_gui.pressed_widget->owner == w) g_gui.pressed_widget = 0;
+                    gui_destroy_window(w);
+                    continue;
                 } else if ((w->flags & GUI_WINDOW_FLAG_MINIMIZABLE) && gui_rect_contains(&minr, ev.x, ev.y)) {
-                    ev.type = GUI_EVENT_WINDOW_MINIMIZE;
-                    ev.window = w;
-                    gui_event_push(ev);
+                    serial_write("[GUI] window minimize\n");
+                    gui_set_focused_widget(0);
+                    if (g_gui.drag_window == w) g_gui.drag_window = 0;
+                    if (g_gui.pressed_widget && g_gui.pressed_widget->owner == w) g_gui.pressed_widget = 0;
+                    gui_minimize_window(w);
+                    continue;
                 } else {
                     gui_rect_t tr = gui_title_rect(w);
                     if (gui_rect_contains(&tr, ev.x, ev.y)) {
