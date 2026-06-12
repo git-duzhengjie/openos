@@ -725,6 +725,123 @@ void gui_post_key(char ch) {
 }
 
 __attribute__((optimize("no-jump-tables")))
+static void gui_handle_mouse_down(int x, int y) {
+    if (gui_taskbar_terminal_button_at(x, y)) {
+        serial_write("[GUI] taskbar terminal\n");
+        gui_set_focused_widget(0);
+        gui_terminal_open();
+        return;
+    }
+
+    gui_window_t *tw = gui_taskbar_window_at(x, y);
+    if (tw) {
+        if (tw == g_gui.terminal.window) gui_set_focused_widget(0);
+        gui_restore_window(tw);
+        if (tw == g_gui.terminal.window) gui_terminal_set_input_focus(1);
+        return;
+    }
+
+    gui_window_t *w = gui_window_at(x, y);
+    if (w) {
+        gui_rect_t close;
+        gui_rect_t minr;
+
+        if (w == g_gui.terminal.window) {
+            gui_set_focused_widget(0);
+            gui_terminal_set_input_focus(1);
+        }
+
+        gui_set_active_window(w);
+        close = gui_close_rect(w);
+        minr = gui_min_rect(w);
+
+        if ((w->flags & GUI_WINDOW_FLAG_CLOSABLE) && gui_rect_contains(&close, x, y)) {
+            serial_write("[GUI] window close\n");
+            gui_set_focused_widget(0);
+            if (g_gui.drag_window == w) g_gui.drag_window = 0;
+            if (g_gui.pressed_widget && g_gui.pressed_widget->owner == w) g_gui.pressed_widget = 0;
+            gui_destroy_window(w);
+            return;
+        }
+
+        if ((w->flags & GUI_WINDOW_FLAG_MINIMIZABLE) && gui_rect_contains(&minr, x, y)) {
+            serial_write("[GUI] window minimize\n");
+            gui_set_focused_widget(0);
+            if (g_gui.drag_window == w) g_gui.drag_window = 0;
+            if (g_gui.pressed_widget && g_gui.pressed_widget->owner == w) g_gui.pressed_widget = 0;
+            gui_minimize_window(w);
+            return;
+        }
+
+        gui_rect_t tr = gui_title_rect(w);
+        if (gui_rect_contains(&tr, x, y)) {
+            gui_set_focused_widget(0);
+            w->dragging = 1;
+            w->drag_offset_x = x - w->rect.x;
+            w->drag_offset_y = y - w->rect.y;
+            g_gui.drag_window = w;
+            serial_write("[GUI] drag start\n");
+            return;
+        }
+
+        int sx = x - w->rect.x - GUI_BORDER_SIZE;
+        int sy = y - w->rect.y - GUI_TITLE_HEIGHT;
+        gui_widget_t *wg = gui_widget_at(w, sx, sy);
+        if (gui_widget_is_clickable(wg)) {
+            gui_set_focused_widget(wg);
+            wg->pressed = 1;
+            g_gui.pressed_widget = wg;
+            gui_invalidate_all();
+        } else if (gui_widget_can_focus(wg)) {
+            gui_set_focused_widget(wg);
+        } else {
+            gui_set_focused_widget(0);
+        }
+        return;
+    }
+
+    gui_set_focused_widget(0);
+}
+
+__attribute__((optimize("no-jump-tables")))
+static void gui_handle_mouse_up(int x, int y) {
+    if (g_gui.drag_window) {
+        g_gui.drag_window->dragging = 0;
+        g_gui.drag_window = 0;
+    }
+    if (g_gui.pressed_widget) {
+        gui_widget_t *wg = g_gui.pressed_widget;
+        int still_inside = 0;
+        gui_widget_t *under = gui_widget_at_screen(x, y);
+        wg->pressed = 0;
+        g_gui.pressed_widget = 0;
+        still_inside = (under == wg && gui_widget_is_clickable(wg));
+        gui_invalidate_all();
+        if (still_inside) {
+            serial_write("[GUI] button activate\n");
+            gui_button_activate(wg);
+        }
+    }
+}
+
+__attribute__((optimize("no-jump-tables")))
+static void gui_handle_mouse_move(int x, int y) {
+    gui_set_hovered_widget(gui_widget_at_screen(x, y));
+    if (g_gui.drag_window && g_gui.drag_window->dragging) {
+        gui_window_t *w = g_gui.drag_window;
+        w->rect.x = x - w->drag_offset_x;
+        w->rect.y = y - w->drag_offset_y;
+        if (w->rect.x < 0) w->rect.x = 0;
+        if (w->rect.y < 0) w->rect.y = 0;
+        if (w->rect.x + w->rect.w > (int)g_gui.width) w->rect.x = (int)g_gui.width - w->rect.w;
+        if (w->rect.y + w->rect.h > (int)g_gui.height - GUI_TASKBAR_HEIGHT) w->rect.y = (int)g_gui.height - GUI_TASKBAR_HEIGHT - w->rect.h;
+        gui_invalidate_all();
+    } else {
+        gui_invalidate_rect(x - 18, y - 18, 36, 36);
+    }
+}
+
+__attribute__((optimize("no-jump-tables")))
 void gui_process_events(void) {
     gui_event_t ev;
     while (gui_event_pop(&ev)) {
@@ -744,102 +861,11 @@ void gui_process_events(void) {
                 gui_terminal_on_input((char)ev.key);
             }
         } else if (ev.type == GUI_EVENT_MOUSE_DOWN) {
-            if (gui_taskbar_terminal_button_at(ev.x, ev.y)) {
-                serial_write("[GUI] taskbar terminal\n");
-                gui_set_focused_widget(0);
-                gui_terminal_open();
-                continue;
-            }
-            gui_window_t *tw = gui_taskbar_window_at(ev.x, ev.y);
-            if (tw) {
-                if (tw == g_gui.terminal.window) gui_set_focused_widget(0);
-                gui_restore_window(tw);
-                if (tw == g_gui.terminal.window) gui_terminal_set_input_focus(1);
-                continue;
-            }
-            gui_window_t *w = gui_window_at(ev.x, ev.y);
-            if (w) {
-                if (w == g_gui.terminal.window) {
-                    gui_set_focused_widget(0);
-                    gui_terminal_set_input_focus(1);
-                }
-                gui_set_active_window(w);
-                gui_rect_t close = gui_close_rect(w);
-                gui_rect_t minr = gui_min_rect(w);
-                if ((w->flags & GUI_WINDOW_FLAG_CLOSABLE) && gui_rect_contains(&close, ev.x, ev.y)) {
-                    serial_write("[GUI] window close\n");
-                    gui_set_focused_widget(0);
-                    if (g_gui.drag_window == w) g_gui.drag_window = 0;
-                    if (g_gui.pressed_widget && g_gui.pressed_widget->owner == w) g_gui.pressed_widget = 0;
-                    gui_destroy_window(w);
-                    continue;
-                } else if ((w->flags & GUI_WINDOW_FLAG_MINIMIZABLE) && gui_rect_contains(&minr, ev.x, ev.y)) {
-                    serial_write("[GUI] window minimize\n");
-                    gui_set_focused_widget(0);
-                    if (g_gui.drag_window == w) g_gui.drag_window = 0;
-                    if (g_gui.pressed_widget && g_gui.pressed_widget->owner == w) g_gui.pressed_widget = 0;
-                    gui_minimize_window(w);
-                    continue;
-                } else {
-                    gui_rect_t tr = gui_title_rect(w);
-                    if (gui_rect_contains(&tr, ev.x, ev.y)) {
-                        gui_set_focused_widget(0);
-                        w->dragging = 1;
-                        w->drag_offset_x = ev.x - w->rect.x;
-                        w->drag_offset_y = ev.y - w->rect.y;
-                        g_gui.drag_window = w;
-                        serial_write("[GUI] drag start\n");
-                    } else {
-                        int sx = ev.x - w->rect.x - GUI_BORDER_SIZE;
-                        int sy = ev.y - w->rect.y - GUI_TITLE_HEIGHT;
-                        gui_widget_t *wg = gui_widget_at(w, sx, sy);
-                        if (gui_widget_is_clickable(wg)) {
-                            gui_set_focused_widget(wg);
-                            wg->pressed = 1;
-                            g_gui.pressed_widget = wg;
-                            gui_invalidate_all();
-                        } else if (gui_widget_can_focus(wg)) {
-                            gui_set_focused_widget(wg);
-                        } else {
-                            gui_set_focused_widget(0);
-                        }
-                    }
-                }
-            } else {
-                gui_set_focused_widget(0);
-            }
+            gui_handle_mouse_down(ev.x, ev.y);
         } else if (ev.type == GUI_EVENT_MOUSE_UP) {
-            if (g_gui.drag_window) {
-                g_gui.drag_window->dragging = 0;
-                g_gui.drag_window = 0;
-            }
-            if (g_gui.pressed_widget) {
-                gui_widget_t *wg = g_gui.pressed_widget;
-                int still_inside = 0;
-                gui_widget_t *under = gui_widget_at_screen(ev.x, ev.y);
-                wg->pressed = 0;
-                g_gui.pressed_widget = 0;
-                still_inside = (under == wg && gui_widget_is_clickable(wg));
-                gui_invalidate_all();
-                if (still_inside) {
-                    serial_write("[GUI] button activate\n");
-                    gui_button_activate(wg);
-                }
-            }
+            gui_handle_mouse_up(ev.x, ev.y);
         } else if (ev.type == GUI_EVENT_MOUSE_MOVE) {
-            gui_set_hovered_widget(gui_widget_at_screen(ev.x, ev.y));
-            if (g_gui.drag_window && g_gui.drag_window->dragging) {
-                gui_window_t *w = g_gui.drag_window;
-                w->rect.x = ev.x - w->drag_offset_x;
-                w->rect.y = ev.y - w->drag_offset_y;
-                if (w->rect.x < 0) w->rect.x = 0;
-                if (w->rect.y < 0) w->rect.y = 0;
-                if (w->rect.x + w->rect.w > (int)g_gui.width) w->rect.x = (int)g_gui.width - w->rect.w;
-                if (w->rect.y + w->rect.h > (int)g_gui.height - GUI_TASKBAR_HEIGHT) w->rect.y = (int)g_gui.height - GUI_TASKBAR_HEIGHT - w->rect.h;
-                gui_invalidate_all();
-            } else {
-                gui_invalidate_rect(ev.x - 18, ev.y - 18, 36, 36);
-            }
+            gui_handle_mouse_move(ev.x, ev.y);
         } else if (ev.type == GUI_EVENT_BUTTON_CLICK) {
             if (ev.widget && gui_widget_is_clickable(ev.widget)) {
                 serial_write("[GUI] button clicked\n");
@@ -858,7 +884,6 @@ void gui_process_events(void) {
 
 static void gui_poll_mouse(void) {
     mouse_state_t ms;
-    gui_event_t ev;
     if (!g_gui.initialized) return;
 
     mouse_snapshot_and_clear_delta(&ms);
@@ -870,34 +895,17 @@ static void gui_poll_mouse(void) {
     if (ms.y > (int)g_gui.height - 1) ms.y = (int)g_gui.height - 1;
 
     if ((ms.buttons & 1u) && !(g_gui.last_mouse_buttons & 1u)) {
-        if (gui_handle_window_control_at(ms.x, ms.y)) {
-            g_gui.last_mouse_buttons = ms.buttons;
-            return;
-        }
-        memset(&ev, 0, sizeof(ev));
-        ev.type = GUI_EVENT_MOUSE_DOWN;
-        ev.x = ms.x; ev.y = ms.y; ev.button = 1;
         serial_write("[GUI] mouse down\n");
-        gui_event_push(ev);
+        gui_handle_mouse_down(ms.x, ms.y);
     } else if (!(ms.buttons & 1u) && (g_gui.last_mouse_buttons & 1u)) {
-        memset(&ev, 0, sizeof(ev));
-        ev.type = GUI_EVENT_MOUSE_UP;
-        ev.x = ms.x; ev.y = ms.y; ev.button = 1;
         serial_write("[GUI] mouse up\n");
-        gui_event_push(ev);
+        gui_handle_mouse_up(ms.x, ms.y);
     }
 
     if (ms.x != g_gui.mouse_x || ms.y != g_gui.mouse_y) {
         gui_invalidate_rect(g_gui.mouse_x - 2, g_gui.mouse_y - 2, 22, 22);
         gui_invalidate_rect(ms.x - 2, ms.y - 2, 22, 22);
-        memset(&ev, 0, sizeof(ev));
-        ev.type = GUI_EVENT_MOUSE_MOVE;
-        ev.x = ms.x;
-        ev.y = ms.y;
-        ev.dx = ms.dx;
-        ev.dy = ms.dy;
-        ev.button = ms.buttons;
-        gui_event_push(ev);
+        gui_handle_mouse_move(ms.x, ms.y);
     }
 
     g_gui.mouse_x = ms.x;
