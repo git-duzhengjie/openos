@@ -74,14 +74,27 @@ void test_proc_b(void) {
 static int g_shell_thread_started = 0;
 
 void kernel_start_shell_thread(void) {
-    if (g_shell_thread_started) return;
-    g_shell_thread_started = 1;
-
     extern void shell_run(void);
-    uint32_t shell_stack = (uint32_t)pmm_alloc_page() + 4096;
-    pmm_alloc_page(); pmm_alloc_page(); pmm_alloc_page(); /* extend to 16KB */
-    thread_t *sh = thread_create(1, "shell", (uint32_t)shell_run, shell_stack);
+    uint32_t shell_page;
+    uint32_t shell_stack;
+    thread_t *sh;
+
+    if (g_shell_thread_started) return;
+
+    shell_page = (uint32_t)pmm_alloc_page();
+    if (!shell_page) {
+        serial_write("[SHELL] Failed to allocate shell stack.\n");
+        return;
+    }
+
+    shell_stack = shell_page + 4096;
+    pmm_alloc_page();
+    pmm_alloc_page();
+    pmm_alloc_page(); /* keep previous reservation behavior */
+
+    sh = thread_create(1, "shell", (uint32_t)shell_run, shell_stack);
     if (sh) {
+        g_shell_thread_started = 1;
         sched_add_thread(sh);
         serial_write("[SHELL] Shell thread started on demand.\n");
     } else {

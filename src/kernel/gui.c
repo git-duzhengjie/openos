@@ -1210,8 +1210,9 @@ void gui_terminal_open(void) {
     gui_set_active_window(g_gui.terminal.window);
     gui_invalidate_rect(g_gui.terminal.window->rect.x, g_gui.terminal.window->rect.y,
                         g_gui.terminal.window->rect.w, g_gui.terminal.window->rect.h);
+    gui_invalidate_all();
     kernel_start_shell_thread();
-    serial_write("[GUI] terminal opened\n");
+    serial_write("[GUI] terminal activated\n");
 }
 
 void gui_terminal_minimize(void) {
