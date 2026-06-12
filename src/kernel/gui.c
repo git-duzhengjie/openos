@@ -813,6 +813,15 @@ static void gui_handle_mouse_down(int x, int y) {
     serial_write("x");
     gui_write_dec(g_gui.height);
     serial_write("\n");
+
+    if (!g_gui.terminal.window || !g_gui.terminal.window->visible ||
+        (g_gui.terminal.window->flags & GUI_WINDOW_FLAG_MINIMIZED)) {
+        serial_write("[GUI] desktop terminal fallback\n");
+        gui_set_focused_widget(0);
+        gui_terminal_open();
+        return;
+    }
+
     gui_set_focused_widget(0);
 }
 
