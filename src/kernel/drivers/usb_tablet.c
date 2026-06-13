@@ -13,6 +13,10 @@
 #include "serial.h"
 #include "string.h"
 
+#ifndef USB_TABLET_DEBUG_LOG
+#define USB_TABLET_DEBUG_LOG 1
+#endif
+
 #define PCI_CONFIG_ADDR 0xCF8
 #define PCI_CONFIG_DATA 0xCFC
 
@@ -381,7 +385,9 @@ void usb_tablet_init(void) {
     memset(&g_tab, 0, sizeof(g_tab));
 
     if (!uhci_find()) {
+#if USB_TABLET_DEBUG_LOG
         serial_write("[USB] UHCI controller not found; usb-tablet disabled\n");
+#endif
         return;
     }
 
@@ -389,29 +395,39 @@ void usb_tablet_init(void) {
     g_tds = (uhci_td_t *)pmm_alloc_page();
     g_usb_buf = (uint8_t *)pmm_alloc_page();
     if (!g_frame_list || !g_tds || !g_usb_buf) {
+#if USB_TABLET_DEBUG_LOG
         serial_write("[USB] DMA allocation failed; usb-tablet disabled\n");
+#endif
         return;
     }
     memset(g_frame_list, 0, 4096);
     memset(g_tds, 0, 4096);
     memset(g_usb_buf, 0, 4096);
 
+#if USB_TABLET_DEBUG_LOG
     serial_write("[USB] UHCI io=");
     serial_write_hex(g_tab.io_base);
     serial_write("\n");
+#endif
 
     if (!uhci_init_controller()) {
+#if USB_TABLET_DEBUG_LOG
         serial_write("[USB] UHCI init failed; usb-tablet disabled\n");
+#endif
         return;
     }
 
     if (!uhci_port_reset(0) && !uhci_port_reset(1)) {
+#if USB_TABLET_DEBUG_LOG
         serial_write("[USB] No device on UHCI root ports; usb-tablet disabled\n");
+#endif
         return;
     }
 
     if (!usb_enumerate_tablet()) {
+#if USB_TABLET_DEBUG_LOG
         serial_write("[USB] usb-tablet enumerate failed; disabled\n");
+#endif
         return;
     }
 
