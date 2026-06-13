@@ -20,11 +20,19 @@ static gui_system_t g_gui;
 #define GUI_DEBUG_LOG 0
 #endif
 
+#define GUI_TERMINAL_CURSOR_BLINK_INTERVAL 30000u
+
 static int gui_rect_contains(const gui_rect_t *r, int x, int y);
+static int gui_rect_intersect(const gui_rect_t *a, const gui_rect_t *b, gui_rect_t *out);
 static gui_window_t *gui_top_window(void);
 static void gui_set_hovered_widget(gui_widget_t *wg);
 static int gui_handle_window_control_at(int x, int y);
 static void gui_demo_button(gui_widget_t *widget, void *user_data);
+static void gui_terminal_invalidate_cursor(void);
+static void gui_terminal_invalidate_body(void);
+static int gui_terminal_point_to_cell(int x, int y, uint32_t *col, uint32_t *row);
+static void gui_terminal_update_selection(uint32_t col, uint32_t row);
+static int gui_terminal_cell_selected(uint32_t col, uint32_t row);
 void gui_terminal_set_input_focus(int focused);
 
 static uint32_t gui_rgb(uint8_t r, uint8_t g, uint8_t b) {
@@ -84,10 +92,17 @@ static void gui_raw_put_pixel(int x, int y, uint32_t color) {
 
 static void gui_raw_fill_rect(int x, int y, int w, int h, uint32_t color) {
     int yy, xx;
+    gui_rect_t rect;
+    gui_rect_t clipped;
     if (w <= 0 || h <= 0) return;
-    for (yy = y; yy < y + h; yy++) {
-        for (xx = x; xx < x + w; xx++) {
-            gui_raw_put_pixel(xx, yy, color);
+    rect.x = x; rect.y = y; rect.w = w; rect.h = h;
+    if (g_gui.clip_enabled) {
+        if (!gui_rect_intersect(&rect, &g_gui.clip_rect, &clipped)) return;
+        rect = clipped;
+    }
+    for (yy = rect.y; yy < rect.y + rect.h; yy++) {
+        for (xx = rect.x; xx < rect.x + rect.w; xx++) {
+            gui_put_pixel_unclipped(xx, yy, color);
         }
     }
 }
@@ -118,25 +133,56 @@ static int gui_rect_intersect(const gui_rect_t *a, const gui_rect_t *b, gui_rect
     return 1;
 }
 
-static void gui_set_clip_rect(const gui_rect_t *rect) {
+static void gui_apply_clip_rect(const gui_rect_t *rect) {
     gui_rect_t screen;
     gui_rect_t clipped;
+    gui_rect_t effective;
     if (!rect) {
-        g_gui.clip_enabled = 0;
+        if (g_gui.render_clip_enabled) {
+            g_gui.clip_rect = g_gui.render_clip_rect;
+            g_gui.clip_enabled = 1;
+        } else {
+            g_gui.clip_enabled = 0;
+        }
         return;
     }
     screen.x = 0; screen.y = 0; screen.w = (int)g_gui.width; screen.h = (int)g_gui.height;
-    if (gui_rect_intersect(rect, &screen, &clipped)) {
-        g_gui.clip_rect = clipped;
-        g_gui.clip_enabled = 1;
-    } else {
+    if (!gui_rect_intersect(rect, &screen, &clipped)) {
         g_gui.clip_rect.x = 0; g_gui.clip_rect.y = 0; g_gui.clip_rect.w = 0; g_gui.clip_rect.h = 0;
         g_gui.clip_enabled = 1;
+        return;
     }
+    if (g_gui.render_clip_enabled) {
+        if (!gui_rect_intersect(&clipped, &g_gui.render_clip_rect, &effective)) {
+            g_gui.clip_rect.x = 0; g_gui.clip_rect.y = 0; g_gui.clip_rect.w = 0; g_gui.clip_rect.h = 0;
+            g_gui.clip_enabled = 1;
+            return;
+        }
+        clipped = effective;
+    }
+    g_gui.clip_rect = clipped;
+    g_gui.clip_enabled = 1;
+}
+
+static void gui_set_clip_rect(const gui_rect_t *rect) {
+    gui_apply_clip_rect(rect);
 }
 
 static void gui_clear_clip_rect(void) {
-    g_gui.clip_enabled = 0;
+    gui_apply_clip_rect(0);
+}
+
+static void gui_push_render_clip(const gui_rect_t *rect) {
+    if (rect && rect->w > 0 && rect->h > 0) {
+        g_gui.render_clip_rect = *rect;
+        g_gui.render_clip_enabled = 1;
+        gui_apply_clip_rect(0);
+    }
+}
+
+static void gui_pop_render_clip(void) {
+    g_gui.render_clip_enabled = 0;
+    gui_apply_clip_rect(0);
 }
 
 static void gui_font_put_pixel(void *ctx, int x, int y, uint32_t color) {
@@ -222,12 +268,38 @@ static uint8_t gui_glyph5x7_row(char ch, int row) {
         case '7': { static const uint8_t r[7] = {31,1,2,4,8,8,8}; return r[row]; }
         case '8': { static const uint8_t r[7] = {14,17,17,14,17,17,14}; return r[row]; }
         case '9': { static const uint8_t r[7] = {14,17,17,15,1,1,14}; return r[row]; }
+        case '!': { static const uint8_t r[7] = {4,4,4,4,4,0,4}; return r[row]; }
+        case '"': { static const uint8_t r[7] = {10,10,10,0,0,0,0}; return r[row]; }
+        case '#': { static const uint8_t r[7] = {10,10,31,10,31,10,10}; return r[row]; }
+        case '$': { static const uint8_t r[7] = {4,15,20,14,5,30,4}; return r[row]; }
+        case '%': { static const uint8_t r[7] = {24,25,2,4,8,19,3}; return r[row]; }
+        case '&': { static const uint8_t r[7] = {12,18,20,8,21,18,13}; return r[row]; }
+        case '\'': { static const uint8_t r[7] = {4,4,8,0,0,0,0}; return r[row]; }
+        case '(': { static const uint8_t r[7] = {2,4,8,8,8,4,2}; return r[row]; }
+        case ')': { static const uint8_t r[7] = {8,4,2,2,2,4,8}; return r[row]; }
+        case '*': { static const uint8_t r[7] = {0,10,4,31,4,10,0}; return r[row]; }
+        case '+': { static const uint8_t r[7] = {0,4,4,31,4,4,0}; return r[row]; }
+        case ',': { static const uint8_t r[7] = {0,0,0,0,0,4,8}; return r[row]; }
         case '-': { static const uint8_t r[7] = {0,0,0,14,0,0,0}; return r[row]; }
         case '_': { static const uint8_t r[7] = {0,0,0,0,0,0,31}; return r[row]; }
         case '.': { static const uint8_t r[7] = {0,0,0,0,0,12,12}; return r[row]; }
         case ':': { static const uint8_t r[7] = {0,12,12,0,12,12,0}; return r[row]; }
+        case ';': { static const uint8_t r[7] = {0,4,4,0,0,4,8}; return r[row]; }
+        case '<': { static const uint8_t r[7] = {2,4,8,16,8,4,2}; return r[row]; }
+        case '=': { static const uint8_t r[7] = {0,0,31,0,31,0,0}; return r[row]; }
+        case '>': { static const uint8_t r[7] = {8,4,2,1,2,4,8}; return r[row]; }
+        case '?': { static const uint8_t r[7] = {14,17,1,2,4,0,4}; return r[row]; }
+        case '@': { static const uint8_t r[7] = {14,17,23,21,23,16,14}; return r[row]; }
+        case '[': { static const uint8_t r[7] = {14,8,8,8,8,8,14}; return r[row]; }
+        case '\\': { static const uint8_t r[7] = {16,8,8,4,2,2,1}; return r[row]; }
+        case ']': { static const uint8_t r[7] = {14,2,2,2,2,2,14}; return r[row]; }
+        case '^': { static const uint8_t r[7] = {4,10,17,0,0,0,0}; return r[row]; }
+        case '`': { static const uint8_t r[7] = {8,4,2,0,0,0,0}; return r[row]; }
+        case '{': { static const uint8_t r[7] = {6,8,8,16,8,8,6}; return r[row]; }
+        case '|': { static const uint8_t r[7] = {4,4,4,0,4,4,4}; return r[row]; }
+        case '}': { static const uint8_t r[7] = {12,2,2,1,2,2,12}; return r[row]; }
+        case '~': { static const uint8_t r[7] = {0,0,13,18,0,0,0}; return r[row]; }
         case '/': { static const uint8_t r[7] = {1,2,2,4,8,8,16}; return r[row]; }
-        case '+': { static const uint8_t r[7] = {0,4,4,31,4,4,0}; return r[row]; }
         case ' ': return 0;
         default: { static const uint8_t r[7] = {14,17,1,2,4,0,4}; return r[row]; }
     }
@@ -531,8 +603,26 @@ static void gui_draw_cursor(void) {
     gui_raw_line(x + 2, y + 12, x + 4, y + 10, c);
 }
 
+static void gui_rect_union_inplace(gui_rect_t *dst, const gui_rect_t *src) {
+    int x1, y1, x2, y2;
+    if (!dst || !src) return;
+    x1 = dst->x < src->x ? dst->x : src->x;
+    y1 = dst->y < src->y ? dst->y : src->y;
+    x2 = (dst->x + dst->w) > (src->x + src->w) ? (dst->x + dst->w) : (src->x + src->w);
+    y2 = (dst->y + dst->h) > (src->y + src->h) ? (dst->y + dst->h) : (src->y + src->h);
+    dst->x = x1; dst->y = y1; dst->w = x2 - x1; dst->h = y2 - y1;
+}
+
+static int gui_rects_touch_or_overlap(const gui_rect_t *a, const gui_rect_t *b) {
+    if (!a || !b) return 0;
+    return !(a->x + a->w < b->x || b->x + b->w < a->x ||
+             a->y + a->h < b->y || b->y + b->h < a->y);
+}
+
 void gui_invalidate_rect(int x, int y, int w, int h) {
+    gui_rect_t new_rect;
     gui_rect_t *r;
+    uint32_t i;
     if (!g_gui.initialized) return;
     if (w <= 0 || h <= 0) return;
     if (x < 0) { w += x; x = 0; }
@@ -541,12 +631,20 @@ void gui_invalidate_rect(int x, int y, int w, int h) {
     if (x + w > (int)g_gui.width) w = (int)g_gui.width - x;
     if (y + h > (int)g_gui.height) h = (int)g_gui.height - y;
     if (w <= 0 || h <= 0) return;
+
+    new_rect.x = x; new_rect.y = y; new_rect.w = w; new_rect.h = h;
+    for (i = 0; i < g_gui.dirty_count; i++) {
+        if (gui_rects_touch_or_overlap(&g_gui.dirty_rects[i], &new_rect)) {
+            gui_rect_union_inplace(&g_gui.dirty_rects[i], &new_rect);
+            return;
+        }
+    }
     if (g_gui.dirty_count >= GUI_MAX_DIRTY_RECTS) {
         g_gui.full_dirty = 1;
         return;
     }
     r = &g_gui.dirty_rects[g_gui.dirty_count++];
-    r->x = x; r->y = y; r->w = w; r->h = h;
+    *r = new_rect;
 }
 
 void gui_invalidate_all(void) {
@@ -965,6 +1063,142 @@ void gui_post_key(char ch) {
     gui_post_key_code((int)(unsigned char)ch);
 }
 
+static void gui_terminal_invalidate_body(void) {
+    gui_window_t *w = g_gui.terminal.window;
+    if (!g_gui.initialized || !g_gui.terminal.enabled || !w ||
+        !w->visible || (w->flags & GUI_WINDOW_FLAG_MINIMIZED)) {
+        return;
+    }
+    gui_invalidate_rect(w->rect.x + GUI_BORDER_SIZE,
+                        w->rect.y + GUI_TITLE_HEIGHT,
+                        w->rect.w - GUI_BORDER_SIZE * 2,
+                        w->rect.h - GUI_TITLE_HEIGHT - GUI_BORDER_SIZE);
+}
+
+static void gui_terminal_invalidate_cell(uint32_t col, uint32_t row) {
+    gui_window_t *w = g_gui.terminal.window;
+    int x, y;
+    if (!g_gui.initialized || !g_gui.terminal.enabled || !w ||
+        !w->visible || (w->flags & GUI_WINDOW_FLAG_MINIMIZED)) {
+        return;
+    }
+    if (col >= g_gui.terminal.cols || row >= g_gui.terminal.rows) return;
+    x = w->rect.x + 6 + (int)col * GUI_CHAR_W;
+    y = w->rect.y + GUI_TITLE_HEIGHT + 5 + (int)row * (GUI_CHAR_H + 1);
+    gui_invalidate_rect(x - 1, y - 1, GUI_CHAR_W + 2, GUI_CHAR_H + 3);
+}
+
+static void gui_terminal_invalidate_cursor_at(uint32_t col, uint32_t row) {
+    gui_window_t *w = g_gui.terminal.window;
+    int x, y;
+    if (!g_gui.initialized || !g_gui.terminal.enabled || !w ||
+        !w->visible || (w->flags & GUI_WINDOW_FLAG_MINIMIZED)) {
+        return;
+    }
+    if (row >= g_gui.terminal.rows) return;
+    if (col >= g_gui.terminal.cols) col = g_gui.terminal.cols - 1;
+    x = w->rect.x + 6 + (int)col * GUI_CHAR_W;
+    y = w->rect.y + GUI_TITLE_HEIGHT + 5 + (int)row * (GUI_CHAR_H + 1) + GUI_CHAR_H;
+    gui_invalidate_rect(x - 1, y - 1, GUI_CHAR_W + 2, 3);
+}
+
+static int gui_terminal_point_to_cell(int x, int y, uint32_t *col, uint32_t *row) {
+    gui_window_t *w = g_gui.terminal.window;
+    int ox, oy;
+    int rel_x, rel_y;
+    uint32_t c, r;
+    if (!w || !g_gui.terminal.enabled || !col || !row) return 0;
+    if (!w->visible || (w->flags & GUI_WINDOW_FLAG_MINIMIZED)) return 0;
+    ox = w->rect.x + 6;
+    oy = w->rect.y + GUI_TITLE_HEIGHT + 5;
+    rel_x = x - ox;
+    rel_y = y - oy;
+    if (rel_x < 0 || rel_y < 0) return 0;
+    c = (uint32_t)(rel_x / GUI_CHAR_W);
+    r = (uint32_t)(rel_y / (GUI_CHAR_H + 1));
+    if (c >= g_gui.terminal.cols || r >= g_gui.terminal.rows) return 0;
+    *col = c;
+    *row = r;
+    return 1;
+}
+
+static void gui_terminal_update_selection(uint32_t col, uint32_t row) {
+    uint32_t a = g_gui.terminal.selection_anchor_y * g_gui.terminal.cols + g_gui.terminal.selection_anchor_x;
+    uint32_t b = row * g_gui.terminal.cols + col;
+    if (b < a) {
+        g_gui.terminal.selection_start_x = col;
+        g_gui.terminal.selection_start_y = row;
+        g_gui.terminal.selection_end_x = g_gui.terminal.selection_anchor_x;
+        g_gui.terminal.selection_end_y = g_gui.terminal.selection_anchor_y;
+    } else {
+        g_gui.terminal.selection_start_x = g_gui.terminal.selection_anchor_x;
+        g_gui.terminal.selection_start_y = g_gui.terminal.selection_anchor_y;
+        g_gui.terminal.selection_end_x = col;
+        g_gui.terminal.selection_end_y = row;
+    }
+    g_gui.terminal.has_selection = (a != b) ? 1 : 0;
+    gui_terminal_invalidate_body();
+}
+
+static int gui_terminal_cell_selected(uint32_t col, uint32_t row) {
+    uint32_t p, s, e;
+    if (!g_gui.terminal.has_selection || g_gui.terminal.cols == 0) return 0;
+    p = row * g_gui.terminal.cols + col;
+    s = g_gui.terminal.selection_start_y * g_gui.terminal.cols + g_gui.terminal.selection_start_x;
+    e = g_gui.terminal.selection_end_y * g_gui.terminal.cols + g_gui.terminal.selection_end_x;
+    return (p >= s && p <= e) ? 1 : 0;
+}
+
+void gui_terminal_clear_selection(void) {
+    if (!g_gui.terminal.has_selection && !g_gui.terminal.selecting) return;
+    g_gui.terminal.selecting = 0;
+    g_gui.terminal.has_selection = 0;
+    gui_terminal_invalidate_body();
+}
+
+int gui_terminal_copy_selection(void) {
+    uint32_t r, c;
+    uint32_t len = 0;
+    uint32_t copied = 0;
+    if (!g_gui.initialized || !g_gui.terminal.has_selection || g_gui.terminal.cols == 0) return 0;
+    for (r = g_gui.terminal.selection_start_y; r <= g_gui.terminal.selection_end_y && r < g_gui.terminal.rows; r++) {
+        uint32_t start_c = 0;
+        uint32_t end_c = g_gui.terminal.cols - 1;
+        int last_non_space = -1;
+        if (r == g_gui.terminal.selection_start_y) start_c = g_gui.terminal.selection_start_x;
+        if (r == g_gui.terminal.selection_end_y) end_c = g_gui.terminal.selection_end_x;
+        for (c = start_c; c <= end_c && c < g_gui.terminal.cols; c++) {
+            if (g_gui.terminal.cells[r][c] != ' ') last_non_space = (int)c;
+        }
+        if (last_non_space < (int)start_c && r != g_gui.terminal.selection_end_y) {
+            if (len + 1 < GUI_TERM_CLIPBOARD_SIZE) g_gui.terminal.clipboard[len++] = '\n';
+            continue;
+        }
+        if (last_non_space >= (int)start_c) {
+            for (c = start_c; c <= (uint32_t)last_non_space && c < g_gui.terminal.cols; c++) {
+                if (len + 1 >= GUI_TERM_CLIPBOARD_SIZE) break;
+                g_gui.terminal.clipboard[len++] = g_gui.terminal.cells[r][c];
+                copied = 1;
+            }
+        }
+        if (r != g_gui.terminal.selection_end_y && len + 1 < GUI_TERM_CLIPBOARD_SIZE) {
+            g_gui.terminal.clipboard[len++] = '\n';
+        }
+        if (len + 1 >= GUI_TERM_CLIPBOARD_SIZE) break;
+    }
+    g_gui.terminal.clipboard[len] = '\0';
+    g_gui.terminal.clipboard_len = len;
+    return copied || len > 0;
+}
+
+int gui_terminal_has_clipboard_text(void) {
+    return g_gui.terminal.clipboard_len > 0 && g_gui.terminal.clipboard[0] != '\0';
+}
+
+const char *gui_terminal_get_clipboard_text(void) {
+    return gui_terminal_has_clipboard_text() ? g_gui.terminal.clipboard : "";
+}
+
 __attribute__((optimize("no-jump-tables")))
 static void gui_handle_mouse_down(int x, int y) {
     if (gui_taskbar_terminal_button_at(x, y)) {
@@ -1007,9 +1241,23 @@ static void gui_handle_mouse_down(int x, int y) {
         gui_rect_t minr;
 
         if (w == g_gui.terminal.window) {
+            uint32_t tc, trc;
             serial_write("[GUI] terminal focus\n");
             gui_set_focused_widget(0);
             gui_terminal_set_input_focus(1);
+            if (gui_terminal_point_to_cell(x, y, &tc, &trc)) {
+                g_gui.terminal.selecting = 1;
+                g_gui.terminal.selection_anchor_x = tc;
+                g_gui.terminal.selection_anchor_y = trc;
+                g_gui.terminal.selection_start_x = tc;
+                g_gui.terminal.selection_start_y = trc;
+                g_gui.terminal.selection_end_x = tc;
+                g_gui.terminal.selection_end_y = trc;
+                g_gui.terminal.has_selection = 0;
+                gui_terminal_invalidate_body();
+            } else {
+                gui_terminal_clear_selection();
+            }
         }
 
         gui_set_active_window(w);
@@ -1078,6 +1326,13 @@ static void gui_handle_mouse_down(int x, int y) {
 
 __attribute__((optimize("no-jump-tables")))
 static void gui_handle_mouse_up(int x, int y) {
+    if (g_gui.terminal.selecting) {
+        uint32_t tc, trc;
+        if (gui_terminal_point_to_cell(x, y, &tc, &trc)) {
+            gui_terminal_update_selection(tc, trc);
+        }
+        g_gui.terminal.selecting = 0;
+    }
     if (g_gui.drag_window) {
         g_gui.drag_window->dragging = 0;
         g_gui.drag_window = 0;
@@ -1100,7 +1355,13 @@ static void gui_handle_mouse_up(int x, int y) {
 __attribute__((optimize("no-jump-tables")))
 static void gui_handle_mouse_move(int x, int y) {
     gui_set_hovered_widget(gui_widget_at_screen(x, y));
-    if (g_gui.drag_window && g_gui.drag_window->dragging) {
+    if (g_gui.terminal.selecting) {
+        uint32_t tc, trc;
+        if (gui_terminal_point_to_cell(x, y, &tc, &trc)) {
+            gui_terminal_update_selection(tc, trc);
+        }
+        gui_invalidate_rect(x - 18, y - 18, 36, 36);
+    } else if (g_gui.drag_window && g_gui.drag_window->dragging) {
         gui_window_t *w = g_gui.drag_window;
         w->rect.x = x - w->drag_offset_x;
         w->rect.y = y - w->drag_offset_y;
@@ -1333,6 +1594,8 @@ int gui_should_capture_key_code(int key) {
 
     if (key == GUI_KEY_TAB) return 1;
 
+    if (key == GUI_KEY_UP || key == GUI_KEY_DOWN) return 0;
+
     if (wg->type == GUI_WIDGET_TEXTBOX) return 1;
 
     if (wg->type == GUI_WIDGET_BUTTON) {
@@ -1469,22 +1732,38 @@ void gui_terminal_init(void) {
     if (g_gui.terminal.rows > GUI_TERM_ROWS) g_gui.terminal.rows = GUI_TERM_ROWS;
     g_gui.terminal.enabled = 1;
     g_gui.terminal.input_focused = 1;
+    g_gui.terminal.cursor_visible = 1;
+    g_gui.terminal.cursor_blink_ticks = 0;
+    g_gui.terminal.selecting = 0;
+    g_gui.terminal.has_selection = 0;
+    g_gui.terminal.clipboard_len = 0;
+    g_gui.terminal.clipboard[0] = '\0';
     gui_terminal_clear();
     gui_terminal_write("OpenOS GUI terminal ready. Keyboard input is routed here.\n> ");
 }
 
 static void gui_terminal_scroll(void) {
     uint32_t r;
+    if (g_gui.terminal.rows == 0 || g_gui.terminal.cols == 0) return;
     for (r = 1; r < g_gui.terminal.rows; r++) {
         memcpy(g_gui.terminal.cells[r - 1], g_gui.terminal.cells[r], g_gui.terminal.cols);
     }
     memset(g_gui.terminal.cells[g_gui.terminal.rows - 1], ' ', g_gui.terminal.cols);
     if (g_gui.terminal.cursor_y > 0) g_gui.terminal.cursor_y--;
+    gui_terminal_invalidate_body();
 }
 
 void gui_terminal_putc(char ch) {
+    uint32_t old_x, old_y;
+    int body_dirty = 0;
     if (!g_gui.initialized || !g_gui.terminal.enabled) return;
-    if (ch == '\r') return;
+    if (g_gui.terminal.cols == 0 || g_gui.terminal.rows == 0) return;
+    if (g_gui.terminal.has_selection && ch != 0x03 && ch != 0x16) gui_terminal_clear_selection();
+
+    old_x = g_gui.terminal.cursor_x;
+    old_y = g_gui.terminal.cursor_y;
+    gui_terminal_invalidate_cursor_at(old_x, old_y);
+
     if (ch == '\n') {
         g_gui.terminal.cursor_x = 0;
         g_gui.terminal.cursor_y++;
@@ -1502,16 +1781,29 @@ void gui_terminal_putc(char ch) {
             g_gui.terminal.cursor_x = 0;
             g_gui.terminal.cursor_y++;
         }
-        if (g_gui.terminal.cursor_y >= g_gui.terminal.rows) gui_terminal_scroll();
-        g_gui.terminal.cells[g_gui.terminal.cursor_y][g_gui.terminal.cursor_x++] = ch;
+        if (g_gui.terminal.cursor_y >= g_gui.terminal.rows) {
+            gui_terminal_scroll();
+            body_dirty = 1;
+        }
+        g_gui.terminal.cells[g_gui.terminal.cursor_y][g_gui.terminal.cursor_x] = ch;
+        if (!body_dirty) gui_terminal_invalidate_cell(g_gui.terminal.cursor_x, g_gui.terminal.cursor_y);
+        g_gui.terminal.cursor_x++;
     }
-    if (g_gui.terminal.cursor_y >= g_gui.terminal.rows) gui_terminal_scroll();
+    if (g_gui.terminal.cursor_y >= g_gui.terminal.rows) {
+        gui_terminal_scroll();
+        body_dirty = 1;
+    }
+    if (!body_dirty) gui_terminal_invalidate_cursor_at(g_gui.terminal.cursor_x, g_gui.terminal.cursor_y);
+    g_gui.terminal.cursor_visible = 1;
+    g_gui.terminal.cursor_blink_ticks = 0;
     g_gui.terminal.dirty = 1;
-    if (g_gui.terminal.window) gui_invalidate_rect(g_gui.terminal.window->rect.x, g_gui.terminal.window->rect.y, g_gui.terminal.window->rect.w, g_gui.terminal.window->rect.h);
 }
 
 void gui_terminal_set_input_focus(int focused) {
     g_gui.terminal.input_focused = focused ? 1 : 0;
+    g_gui.terminal.cursor_visible = g_gui.terminal.input_focused ? 1 : 0;
+    g_gui.terminal.cursor_blink_ticks = 0;
+    gui_terminal_invalidate_cursor();
 }
 
 void gui_terminal_open(void) {
@@ -1530,6 +1822,8 @@ void gui_terminal_open(void) {
 
     g_gui.terminal.enabled = 1;
     g_gui.terminal.input_focused = 1;
+    g_gui.terminal.cursor_visible = 1;
+    g_gui.terminal.cursor_blink_ticks = 0;
     gui_set_focused_widget(0);
     gui_restore_window(g_gui.terminal.window);
     gui_set_active_window(g_gui.terminal.window);
@@ -1544,6 +1838,8 @@ void gui_terminal_minimize(void) {
     if (!g_gui.initialized || !g_gui.terminal.window) return;
     gui_minimize_window(g_gui.terminal.window);
     g_gui.terminal.input_focused = 0;
+    g_gui.terminal.cursor_visible = 0;
+    g_gui.terminal.cursor_blink_ticks = 0;
 }
 
 void gui_terminal_on_input(char ch) {
@@ -1558,11 +1854,15 @@ void gui_terminal_write(const char *text) {
 
 void gui_terminal_redraw(void) {
     uint32_t r, c;
+    uint32_t r_start = 0, r_end;
+    uint32_t c_start = 0, c_end;
     gui_window_t *w = g_gui.terminal.window;
     int ox, oy;
     if (!w || !w->visible || (w->flags & GUI_WINDOW_FLAG_MINIMIZED)) return;
     ox = w->rect.x + 6;
     oy = w->rect.y + GUI_TITLE_HEIGHT + 5;
+    r_end = g_gui.terminal.rows;
+    c_end = g_gui.terminal.cols;
     {
         gui_rect_t client;
         client.x = w->rect.x + GUI_BORDER_SIZE;
@@ -1571,16 +1871,48 @@ void gui_terminal_redraw(void) {
         client.h = w->rect.h - GUI_TITLE_HEIGHT - GUI_BORDER_SIZE;
         gui_set_clip_rect(&client);
     }
-    for (r = 0; r < g_gui.terminal.rows; r++) {
-        for (c = 0; c < g_gui.terminal.cols; c++) {
+    if (g_gui.clip_enabled && g_gui.clip_rect.w <= 0) {
+        gui_clear_clip_rect();
+        return;
+    }
+    if (g_gui.clip_enabled) {
+        int left = g_gui.clip_rect.x - ox;
+        int top = g_gui.clip_rect.y - oy;
+        int right = g_gui.clip_rect.x + g_gui.clip_rect.w - ox + GUI_CHAR_W - 1;
+        int bottom = g_gui.clip_rect.y + g_gui.clip_rect.h - oy + GUI_CHAR_H;
+        if (left > 0) c_start = (uint32_t)(left / GUI_CHAR_W);
+        if (top > 0) r_start = (uint32_t)(top / (GUI_CHAR_H + 1));
+        if (right > 0) c_end = (uint32_t)(right / GUI_CHAR_W);
+        if (bottom > 0) r_end = (uint32_t)(bottom / (GUI_CHAR_H + 1));
+        if (c_end > g_gui.terminal.cols) c_end = g_gui.terminal.cols;
+        if (r_end > g_gui.terminal.rows) r_end = g_gui.terminal.rows;
+        if (c_start > c_end) c_start = c_end;
+        if (r_start > r_end) r_start = r_end;
+    }
+    for (r = r_start; r < r_end; r++) {
+        for (c = c_start; c < c_end; c++) {
             char ch = g_gui.terminal.cells[r][c];
-            if (ch != ' ') gui_draw_char(ox + (int)c * GUI_CHAR_W, oy + (int)r * (GUI_CHAR_H + 1), ch, gui_rgb(185, 255, 185));
+            int px = ox + (int)c * GUI_CHAR_W;
+            int py = oy + (int)r * (GUI_CHAR_H + 1);
+            int selected = gui_terminal_cell_selected(c, r);
+            if (selected) {
+                gui_raw_fill_rect(px, py, GUI_CHAR_W, GUI_CHAR_H + 1, gui_rgb(70, 105, 180));
+            }
+            if (ch != ' ') {
+                gui_draw_char(px, py, ch, selected ? gui_rgb(255, 255, 255) : gui_rgb(185, 255, 185));
+            }
         }
     }
-    gui_raw_fill_rect(ox + (int)g_gui.terminal.cursor_x * GUI_CHAR_W,
-                      oy + (int)g_gui.terminal.cursor_y * (GUI_CHAR_H + 1) + GUI_CHAR_H,
-                      GUI_CHAR_W - 1, 1, gui_rgb(185, 255, 185));
+    if (g_gui.terminal.input_focused && g_gui.terminal.cursor_visible) {
+        gui_raw_fill_rect(ox + (int)g_gui.terminal.cursor_x * GUI_CHAR_W,
+                          oy + (int)g_gui.terminal.cursor_y * (GUI_CHAR_H + 1) + GUI_CHAR_H,
+                          GUI_CHAR_W - 1, 1, gui_rgb(185, 255, 185));
+    }
     gui_clear_clip_rect();
+}
+
+static void gui_terminal_invalidate_cursor(void) {
+    gui_terminal_invalidate_cursor_at(g_gui.terminal.cursor_x, g_gui.terminal.cursor_y);
 }
 
 static void gui_draw_taskbar_button(gui_rect_t rect, uint32_t fill, uint32_t light, uint32_t dark) {
@@ -1658,11 +1990,21 @@ static int gui_has_dirty(void) {
     return g_gui.full_dirty || g_gui.dirty_count > 0;
 }
 
-void gui_render(void) {
-    uint32_t i;
-    if (!g_gui.initialized) return;
-    if (g_gui.double_buffered && g_gui.backbuffer && !gui_has_dirty()) return;
+static void gui_terminal_tick_cursor(void) {
+    if (!g_gui.initialized || !g_gui.terminal.enabled || !g_gui.terminal.input_focused) return;
+    if (!g_gui.terminal.window || !g_gui.terminal.window->visible ||
+        (g_gui.terminal.window->flags & GUI_WINDOW_FLAG_MINIMIZED)) return;
 
+    g_gui.terminal.cursor_blink_ticks++;
+    if (g_gui.terminal.cursor_blink_ticks >= GUI_TERMINAL_CURSOR_BLINK_INTERVAL) {
+        g_gui.terminal.cursor_blink_ticks = 0;
+        g_gui.terminal.cursor_visible = g_gui.terminal.cursor_visible ? 0 : 1;
+        gui_terminal_invalidate_cursor();
+    }
+}
+
+static void gui_render_scene(void) {
+    uint32_t i;
     gui_raw_fill_rect(0, 0, (int)g_gui.width, (int)g_gui.height, g_gui.colors.desktop_bg);
     gui_draw_taskbar();
 
@@ -1673,6 +2015,32 @@ void gui_render(void) {
     gui_terminal_redraw();
 
     if (g_gui.cursor_visible) gui_draw_cursor();
+}
+
+void gui_render(void) {
+    uint32_t i;
+    uint32_t dirty_count;
+    gui_rect_t dirty_rects[GUI_MAX_DIRTY_RECTS];
+    if (!g_gui.initialized) return;
+    if (g_gui.double_buffered && g_gui.backbuffer && !gui_has_dirty()) return;
+
+    if (g_gui.full_dirty || !g_gui.double_buffered || !g_gui.backbuffer) {
+        gui_pop_render_clip();
+        gui_render_scene();
+        gui_flush_backbuffer();
+        return;
+    }
+
+    dirty_count = g_gui.dirty_count;
+    if (dirty_count > GUI_MAX_DIRTY_RECTS) dirty_count = GUI_MAX_DIRTY_RECTS;
+    for (i = 0; i < dirty_count; i++) dirty_rects[i] = g_gui.dirty_rects[i];
+
+    for (i = 0; i < dirty_count; i++) {
+        gui_push_render_clip(&dirty_rects[i]);
+        gui_render_scene();
+        gui_pop_render_clip();
+    }
+
     gui_flush_backbuffer();
 }
 
@@ -1680,6 +2048,7 @@ void gui_poll(void) {
     if (!g_gui.initialized) return;
     gui_poll_mouse();
     gui_process_events();
+    gui_terminal_tick_cursor();
     if (gui_has_dirty()) gui_render();
 }
 

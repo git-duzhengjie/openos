@@ -111,6 +111,8 @@ static int cmd_cursor = 0;   /* 当前光标在命令行内的位置 */
 static char history[SHELL_HISTORY_SIZE][CMD_BUF_SIZE];
 static int history_count = 0;
 static int history_view = 0;
+static char history_saved_line[CMD_BUF_SIZE];
+static int history_saved_valid = 0;
 
 /* 当前工作目录 */
 static char cwd[MAX_PATH] = "/";
@@ -228,13 +230,8 @@ static void shell_append_char(char c)
     /* 回显：从插入点重绘到末尾，再移光标回正确位置 */
     print(&cmd_buf[cmd_cursor - 1]);
     int overshoot = cmd_pos - cmd_cursor;
-    if (overshoot > 0) {
-        int vx, vy;
-        vga_get_xy(&vx, &vy);
-        int target = vx - overshoot;
-        while (target < 0) { target += VGA_WIDTH; vy--; }
-        vga_set_xy(target, vy);
-    }
+    while (overshoot-- > 0)
+        print("\b");
 }
 
 static void shell_redraw_input_line(void)
@@ -267,6 +264,8 @@ static void shell_save_history(void)
     if (history_count > 0 && strcmp(history[history_count - 1], cmd_buf) == 0)
     {
         history_view = history_count;
+        history_saved_valid = 0;
+        history_saved_line[0] = '\0';
         return;
     }
     if (history_count < SHELL_HISTORY_SIZE) {
@@ -278,6 +277,8 @@ static void shell_save_history(void)
         shell_copy_str(history[SHELL_HISTORY_SIZE - 1], cmd_buf);
     }
     history_view = history_count;
+    history_saved_valid = 0;
+    history_saved_line[0] = '\0';
 }
 
 static void shell_history_save_file(void)
@@ -301,6 +302,8 @@ static void shell_history_load_file(void)
     serial_write("[SHELL] persistent history load disabled\n");
     history_count = 0;
     history_view = 0;
+    history_saved_valid = 0;
+    history_saved_line[0] = '\0';
     return;
 }
 static void shell_clear_current_input(void)
@@ -380,6 +383,8 @@ static void shell_cancel_line(void)
     cmd_cursor = 0;
     cmd_buf[0] = '\0';
     history_view = history_count;
+    history_saved_valid = 0;
+    history_saved_line[0] = '\0';
     shell_prompt();
 }
 
@@ -387,6 +392,13 @@ static void shell_history_prev(void)
 {
     if (history_count <= 0 || history_view <= 0)
         return;
+
+    if (history_view == history_count && !history_saved_valid)
+    {
+        shell_copy_str(history_saved_line, cmd_buf);
+        history_saved_valid = 1;
+    }
+
     history_view--;
     shell_replace_input(history[history_view]);
 }
@@ -395,11 +407,18 @@ static void shell_history_next(void)
 {
     if (history_count <= 0 || history_view >= history_count)
         return;
+
     history_view++;
     if (history_view == history_count)
-        shell_replace_input("");
+    {
+        shell_replace_input(history_saved_valid ? history_saved_line : "");
+        history_saved_valid = 0;
+        history_saved_line[0] = '\0';
+    }
     else
+    {
         shell_replace_input(history[history_view]);
+    }
 }
 
 static void shell_backspace(void)
@@ -425,6 +444,18 @@ static void shell_backspace(void)
         print("\b");
 }
 
+static void shell_paste_text(const char *text)
+{
+    int i = 0;
+    if (!text) return;
+    while (text[i]) {
+        char ch = text[i++];
+        if (ch == '\r') continue;
+        if (ch == '\n' || ch == '\t') ch = ' ';
+        if ((unsigned char)ch >= 32 && (unsigned char)ch < 127)
+            shell_append_char(ch);
+    }
+}
 
 static void shell_complete_command(void)
 {
@@ -1837,6 +1868,8 @@ void shell_run(void)
             cmd_cursor = 0;
             cmd_buf[0] = '\0';
             history_view = history_count;
+            history_saved_valid = 0;
+            history_saved_line[0] = '\0';
             shell_prompt();
         }
         else if (c == 0x1B)
@@ -1882,9 +1915,18 @@ void shell_run(void)
         {
             shell_move_cursor_end();
         }
-        else if (c == 0x03)  /* Ctrl+C - 取消当前�?*/
+        else if (c == 0x03)  /* Ctrl+C - copy selection or cancel current line */
         {
-            shell_cancel_line();
+            if (gui_terminal_copy_selection()) {
+                gui_terminal_clear_selection();
+            } else {
+                shell_cancel_line();
+            }
+        }
+        else if (c == 0x16)  /* Ctrl+V - paste terminal clipboard */
+        {
+            if (gui_terminal_has_clipboard_text())
+                shell_paste_text(gui_terminal_get_clipboard_text());
         }
         else if (c == 0x7F || c == 0x08)
         {

@@ -15,6 +15,7 @@
 #define GUI_CHAR_H               8
 #define GUI_TERM_COLS            128u
 #define GUI_TERM_ROWS            48u
+#define GUI_TERM_CLIPBOARD_SIZE  1024u
 #define GUI_EVENT_QUEUE_SIZE     64u
 #define GUI_MAX_DIRTY_RECTS      32u
 #define GUI_TASKBAR_HEIGHT       24
@@ -35,6 +36,8 @@
 #define GUI_KEY_RIGHT      0x103
 #define GUI_KEY_HOME       0x104
 #define GUI_KEY_END        0x105
+#define GUI_KEY_UP         0x106
+#define GUI_KEY_DOWN       0x107
 
 typedef struct gui_rect {
     int x;
@@ -138,6 +141,18 @@ typedef struct gui_terminal {
     int enabled;
     int input_focused;
     int dirty;
+    int cursor_visible;
+    uint32_t cursor_blink_ticks;
+    int selecting;
+    int has_selection;
+    uint32_t selection_anchor_x;
+    uint32_t selection_anchor_y;
+    uint32_t selection_start_x;
+    uint32_t selection_start_y;
+    uint32_t selection_end_x;
+    uint32_t selection_end_y;
+    char clipboard[GUI_TERM_CLIPBOARD_SIZE];
+    uint32_t clipboard_len;
 } gui_terminal_t;
 
 typedef struct gui_system {
@@ -175,6 +190,8 @@ typedef struct gui_system {
     int full_dirty;
     int clip_enabled;
     gui_rect_t clip_rect;
+    int render_clip_enabled;
+    gui_rect_t render_clip_rect;
 
     gui_terminal_t terminal;
 } gui_system_t;
@@ -227,6 +244,10 @@ void gui_terminal_on_input(char ch);
 void gui_terminal_set_input_focus(int focused);
 void gui_terminal_open(void);
 void gui_terminal_minimize(void);
+int gui_terminal_copy_selection(void);
+int gui_terminal_has_clipboard_text(void);
+const char *gui_terminal_get_clipboard_text(void);
+void gui_terminal_clear_selection(void);
 
 void gui_draw_text(int x, int y, const char *text, uint32_t color);
 void gui_draw_char(int x, int y, char ch, uint32_t color);
