@@ -37,6 +37,10 @@
 #define BGA_LFB_PHYS_FALLBACK   0xE0000000u
 #define FB_VIRT_BASE            0xF0000000u
 
+#ifndef FRAMEBUFFER_DEBUG_LOG
+#define FRAMEBUFFER_DEBUG_LOG   0
+#endif
+
 #define PCI_CONFIG_ADDRESS      0x0CF8u
 #define PCI_CONFIG_DATA         0x0CFCu
 #define PCI_INVALID_VENDOR      0xFFFFu
@@ -92,8 +96,6 @@ static int pci_is_multifunction(uint8_t bus, uint8_t dev) {
 }
 
 static uint32_t pci_find_display_lfb(void) {
-    uint16_t best_vendor = 0;
-    uint16_t best_device = 0;
     uint32_t best_bar = 0;
 
     for (uint16_t bus = 0; bus < 256; bus++) {
@@ -101,19 +103,25 @@ static uint32_t pci_find_display_lfb(void) {
             uint8_t max_func = pci_is_multifunction((uint8_t)bus, dev) ? 8 : 1;
 
             for (uint8_t func = 0; func < max_func; func++) {
-                uint32_t id;
                 uint32_t class_reg;
                 uint8_t class_code;
+#if FRAMEBUFFER_DEBUG_LOG
+                uint32_t id;
                 uint8_t subclass;
+#endif
 
                 if (pci_vendor_id((uint8_t)bus, dev, func) == PCI_INVALID_VENDOR) {
                     continue;
                 }
 
+#if FRAMEBUFFER_DEBUG_LOG
                 id = pci_config_read32((uint8_t)bus, dev, func, 0x00);
+#endif
                 class_reg = pci_config_read32((uint8_t)bus, dev, func, 0x08);
                 class_code = (uint8_t)((class_reg >> 24) & 0xFFu);
+#if FRAMEBUFFER_DEBUG_LOG
                 subclass = (uint8_t)((class_reg >> 16) & 0xFFu);
+#endif
 
                 if (class_code != PCI_CLASS_DISPLAY) {
                     continue;
@@ -138,9 +146,8 @@ static uint32_t pci_find_display_lfb(void) {
 
                     /* QEMU stdvga/bochs 通常是 vendor=1234, device=1111，BAR0 是 LFB。 */
                     best_bar = addr;
-                    best_vendor = (uint16_t)(id & 0xFFFFu);
-                    best_device = (uint16_t)((id >> 16) & 0xFFFFu);
 
+#if FRAMEBUFFER_DEBUG_LOG
                     serial_write("[FB] PCI display bus=");
                     fb_serial_write_dec(bus);
                     serial_write(" dev=");
@@ -152,14 +159,15 @@ static uint32_t pci_find_display_lfb(void) {
                     serial_write(" subclass=");
                     serial_write_hex(subclass);
                     serial_write(" vendor=");
-                    serial_write_hex(best_vendor);
+                    serial_write_hex((uint16_t)(id & 0xFFFFu));
                     serial_write(" device=");
-                    serial_write_hex(best_device);
+                    serial_write_hex((uint16_t)((id >> 16) & 0xFFFFu));
                     serial_write(" bar");
                     fb_serial_write_dec(bar_index);
                     serial_write("=");
                     serial_write_hex(best_bar);
                     serial_write("\n");
+#endif
 
                     return best_bar;
                 }
@@ -167,9 +175,11 @@ static uint32_t pci_find_display_lfb(void) {
         }
     }
 
+#if FRAMEBUFFER_DEBUG_LOG
     serial_write("[FB] PCI display LFB not found, fallback=");
     serial_write_hex(BGA_LFB_PHYS_FALLBACK);
     serial_write("\n");
+#endif
     return BGA_LFB_PHYS_FALLBACK;
 }
 
@@ -200,9 +210,11 @@ static int bga_probe(framebuffer_driver_t *drv) {
 
     g_fb_info.available = 1;
     g_fb_info.driver_name = "bochs-bga";
+#if FRAMEBUFFER_DEBUG_LOG
     serial_write("[FB] Bochs/QEMU BGA found, id=");
     serial_write_hex(id);
     serial_write("\n");
+#endif
     return 0;
 }
 
@@ -250,6 +262,7 @@ static int bga_set_mode(framebuffer_driver_t *drv, uint32_t width, uint32_t heig
     g_fb_info.mode_set = 1;
     g_fb_info.driver_name = "bochs-bga";
 
+#if FRAMEBUFFER_DEBUG_LOG
     serial_write("[FB] mode set: ");
     fb_serial_write_dec(width);
     serial_write("x");
@@ -261,6 +274,7 @@ static int bga_set_mode(framebuffer_driver_t *drv, uint32_t width, uint32_t heig
     serial_write(" virt=");
     serial_write_hex(FB_VIRT_BASE);
     serial_write("\n");
+#endif
 
     return 0;
 }

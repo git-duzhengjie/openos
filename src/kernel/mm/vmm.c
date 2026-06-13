@@ -13,6 +13,10 @@
 #define NULL ((void*)0)
 #endif
 
+#ifndef VMM_DEBUG_LOG
+#define VMM_DEBUG_LOG 0
+#endif
+
 /* 页目录（链接器放置在 0x1CAE0） */
 static uint32_t kernel_pgd[1024] __attribute__((aligned(4096)));
 
@@ -26,7 +30,9 @@ static uint32_t kernel_pgd_phys;
  * 初始化虚拟内存
  * ============================================================ */
 void vmm_init(void) {
+#if VMM_DEBUG_LOG
     serial_write("[VMM] Init start\n");
+#endif
     
     /* 清空页目录 */
     for (int i = 0; i < 1024; i++) {
@@ -38,9 +44,11 @@ void vmm_init(void) {
     __asm__ volatile ("mov %%cr3, %0" : : "r"(kernel_pgd_phys));
     /* 由于还没启用分页，kernel_pgd 虚拟地址 = 物理地址 */
     kernel_pgd_phys = (uint32_t)kernel_pgd;
+#if VMM_DEBUG_LOG
     serial_write("[VMM] kernel_pgd_phys=");
     serial_write_hex(kernel_pgd_phys);
     serial_write("\n");
+#endif
     
     /* 计算需要多少个页表（每个覆盖 4MB） */
     int num_pt = IDENTITY_END / (4 * 1024 * 1024);  /* 256MB / 4MB = 64 */
@@ -76,6 +84,7 @@ void vmm_init(void) {
     cr0 |= 0x80000000;
     __asm__ volatile ("mov %0, %%cr0" : : "r"(cr0));
     
+#if VMM_DEBUG_LOG
     serial_write("[VMM] Paging enabled!\n");
     
     /* 验证递归映射 */
@@ -86,6 +95,7 @@ void vmm_init(void) {
     serial_write_hex(kernel_pgd[1023]);
     serial_write("\n");
     serial_write("[VMM] Done!\n");
+#endif
 }
 
 /* ============================================================
@@ -100,9 +110,11 @@ void vmm_map_page(uint32_t vaddr, uint32_t paddr, uint32_t flags) {
     
     /* 如果 PDE 不存在，动态分配页表 */
     if ((kernel_pgd[pgd_idx] & 1) == 0) {
+#if VMM_DEBUG_LOG
         serial_write("[VMM] PDE missing for pgd_idx=");
         serial_write_hex(pgd_idx);
         serial_write(", allocating PT...\n");
+#endif
         
         /* 分配新的页表 */
         uint32_t pt_phys = (uint32_t)pmm_alloc_page();
@@ -121,11 +133,13 @@ void vmm_map_page(uint32_t vaddr, uint32_t paddr, uint32_t flags) {
         uint32_t *pgd_rec = (uint32_t *)(0xFFFFF000 + (pgd_idx << 2));
         *pgd_rec = pt_phys | (flags & 0x07) | 1;  /* inherit U/S from flags */
         
+#if VMM_DEBUG_LOG
         serial_write("[VMM] PDE[");
         serial_write_hex(pgd_idx);
         serial_write("] = ");
         serial_write_hex(*pgd_rec);
         serial_write("\n");
+#endif
     } else {
         /* PDE 已存在，确保权限包含用户位 */
         if (flags & PTE_USER) {
@@ -138,6 +152,7 @@ void vmm_map_page(uint32_t vaddr, uint32_t paddr, uint32_t flags) {
     uint32_t *pte = (uint32_t *)(0xFFC00000 + (pgd_idx << 12));
     pte[pte_idx] = (paddr & ~0xFFF) | (flags & 0xFFF);
     
+#if VMM_DEBUG_LOG
     /* 调试：打印 PTE 值 */
     serial_write("[VMM] Mapped: virt=");
     serial_write_hex(vaddr);
@@ -146,6 +161,7 @@ void vmm_map_page(uint32_t vaddr, uint32_t paddr, uint32_t flags) {
     serial_write(" pte=");
     serial_write_hex(pte[pte_idx]);
     serial_write("\n");
+#endif
     
     __asm__ volatile ("invlpg (%0)" : : "r"(vaddr));
 }

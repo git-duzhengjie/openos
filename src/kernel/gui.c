@@ -16,6 +16,10 @@
 
 static gui_system_t g_gui;
 
+#ifndef GUI_DEBUG_LOG
+#define GUI_DEBUG_LOG 0
+#endif
+
 static int gui_rect_contains(const gui_rect_t *r, int x, int y);
 static gui_window_t *gui_top_window(void);
 static void gui_set_hovered_widget(gui_widget_t *wg);
@@ -505,7 +509,18 @@ static void gui_draw_window(gui_window_t *w) {
                       w->rect.w - GUI_BORDER_SIZE * 2, w->rect.h - GUI_TITLE_HEIGHT - GUI_BORDER_SIZE,
                       w->bg_color ? w->bg_color : g_gui.colors.window_bg);
 
-    gui_draw_text(w->rect.x + 8, w->rect.y + 7, w->title, g_gui.colors.title_fg);
+    {
+        gui_rect_t title_clip;
+        title_clip.x = w->rect.x + GUI_BORDER_SIZE + 6;
+        title_clip.y = w->rect.y + GUI_BORDER_SIZE;
+        title_clip.w = w->rect.w - GUI_BORDER_SIZE * 2 - 56;
+        title_clip.h = GUI_TITLE_HEIGHT - GUI_BORDER_SIZE;
+        if (title_clip.w > 0 && title_clip.h > 0) {
+            gui_set_clip_rect(&title_clip);
+            gui_draw_text(w->rect.x + 8, w->rect.y + 7, w->title, g_gui.colors.title_fg);
+            gui_clear_clip_rect();
+        }
+    }
 
     if (w->flags & GUI_WINDOW_FLAG_CLOSABLE) {
         gui_rect_t c = gui_close_rect(w);
@@ -698,7 +713,7 @@ static int gui_taskbar_content_width(void) {
         gui_window_t *w;
         if (idx >= GUI_MAX_WINDOWS) continue;
         w = &g_gui.windows[idx];
-        if (!w->used || !(w->flags & GUI_WINDOW_FLAG_MINIMIZED)) continue;
+        if (!w->used || !w->visible) continue;
         width += 6 + gui_taskbar_button_width(w);
     }
     return width;
@@ -759,7 +774,7 @@ static gui_window_t *gui_taskbar_window_at(int x, int y) {
         gui_rect_t button;
         if (idx >= GUI_MAX_WINDOWS) continue;
         w = &g_gui.windows[idx];
-        if (!w->used || !(w->flags & GUI_WINDOW_FLAG_MINIMIZED)) continue;
+        if (!w->used || !w->visible) continue;
         button.x = bx;
         button.y = layout.item_y;
         button.w = gui_taskbar_button_width(w);
@@ -1078,6 +1093,7 @@ int gui_start(uint32_t width, uint32_t height) {
     if (g_gui.mouse_x >= (int)g_gui.width) g_gui.mouse_x = (int)g_gui.width - 1;
     if (g_gui.mouse_y >= (int)g_gui.height) g_gui.mouse_y = (int)g_gui.height - 1;
 
+#if GUI_DEBUG_LOG
     serial_write("[GUI] mouse sync: x=");
     gui_write_dec((uint32_t)g_gui.mouse_x);
     serial_write(" y=");
@@ -1087,6 +1103,7 @@ int gui_start(uint32_t width, uint32_t height) {
     serial_write("x");
     gui_write_dec(g_gui.height);
     serial_write("\n");
+#endif
 
     pixels = g_gui.width * g_gui.height;
     if (!g_gui.backbuffer || g_gui.backbuffer_pixels < pixels) {
@@ -1417,7 +1434,7 @@ static void gui_draw_taskbar(void) {
     gui_raw_line(layout.bar.x, layout.bar.y + layout.bar.h - 1, layout.bar.x + layout.bar.w - 1, layout.bar.y + layout.bar.h - 1, gui_rgb(10, 13, 20));
 
     gui_draw_taskbar_button(layout.terminal_button, gui_rgb(64, 92, 150), gui_rgb(170, 205, 255), gui_rgb(12, 18, 30));
-    gui_draw_text(layout.terminal_button.x + 12, layout.bar.y + 8, "TERMINAL", gui_rgb(255,255,255));
+    gui_draw_text(layout.terminal_button.x + 12, layout.bar.y + 8, "TERMINAL", gui_rgb(0,255,0));
 
     for (i = 0; i < g_gui.window_count; i++) {
         uint32_t idx = g_gui.z_order[i];
@@ -1425,15 +1442,21 @@ static void gui_draw_taskbar(void) {
         gui_rect_t button;
         if (idx >= GUI_MAX_WINDOWS) continue;
         w = &g_gui.windows[idx];
-        if (!w->used || !(w->flags & GUI_WINDOW_FLAG_MINIMIZED)) continue;
+        if (!w->used || !w->visible) continue;
         button.x = bx;
         button.y = layout.item_y;
         button.w = gui_taskbar_button_width(w);
         button.h = layout.item_h;
         if (button.x + button.w > layout.bar.x + layout.bar.w - 8) button.w = layout.bar.x + layout.bar.w - 8 - button.x;
         if (button.w <= 0) break;
-        gui_draw_taskbar_button(button, gui_rgb(52, 68, 96), gui_rgb(135, 170, 230), gui_rgb(20, 24, 35));
-        gui_draw_text(button.x + 8, layout.bar.y + 8, w->title, gui_rgb(245,245,255));
+        /* 活动窗口高亮显示，最小化窗口低暗显示 */
+        if (w->flags & GUI_WINDOW_FLAG_MINIMIZED) {
+            gui_draw_taskbar_button(button, gui_rgb(52, 68, 96), gui_rgb(135, 170, 230), gui_rgb(20, 24, 35));
+            gui_draw_text(button.x + 8, layout.bar.y + 8, w->title, gui_rgb(255,255,0));
+        } else {
+            gui_draw_taskbar_button(button, gui_rgb(38, 52, 76), gui_rgb(100, 130, 190), gui_rgb(16, 20, 32));
+            gui_draw_text(button.x + 8, layout.bar.y + 8, w->title, gui_rgb(0,255,255));
+        }
         bx += gui_taskbar_button_width(w) + 6;
     }
 }
