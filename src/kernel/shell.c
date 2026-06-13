@@ -324,15 +324,7 @@ static void shell_move_cursor_left(void)
 {
     if (cmd_cursor <= 0)
         return;
-    int vx, vy;
-    vga_get_xy(&vx, &vy);
-    if (vx > 0) {
-        vx--;
-    } else if (vy > 0) {
-        vy--;
-        vx = VGA_WIDTH - 1;
-    }
-    vga_set_xy(vx, vy);
+    print("\b");
     cmd_cursor--;
 }
 
@@ -340,42 +332,25 @@ static void shell_move_cursor_right(void)
 {
     if (cmd_cursor >= cmd_pos)
         return;
-    int vx, vy;
-    vga_get_xy(&vx, &vy);
-    vx++;
-    if (vx >= VGA_WIDTH) {
-        vx = 0;
-        vy++;
-    }
-    vga_set_xy(vx, vy);
+    char out[2];
+    out[0] = cmd_buf[cmd_cursor];
+    out[1] = '\0';
+    print(out);
     cmd_cursor++;
 }
 
 /* move cursor to Home */
 static void shell_move_cursor_home(void)
 {
-    if (cmd_cursor <= 0)
-        return;
-    int vx, vy;
-    vga_get_xy(&vx, &vy);
-    int total_pos = vy * VGA_WIDTH + vx;
-    int prompt_end = total_pos - cmd_cursor;
-    vga_set_xy(prompt_end % VGA_WIDTH, prompt_end / VGA_WIDTH);
-    cmd_cursor = 0;
+    while (cmd_cursor > 0)
+        shell_move_cursor_left();
 }
 
 /* move cursor to End */
 static void shell_move_cursor_end(void)
 {
-    if (cmd_cursor >= cmd_pos)
-        return;
-    int vx, vy;
-    vga_get_xy(&vx, &vy);
-    int total_pos = vy * VGA_WIDTH + vx;
-    int prompt_end = total_pos - cmd_cursor;
-    int target = prompt_end + cmd_pos;
-    vga_set_xy(target % VGA_WIDTH, target / VGA_WIDTH);
-    cmd_cursor = cmd_pos;
+    while (cmd_cursor < cmd_pos)
+        shell_move_cursor_right();
 }
 
 /* delete char at cursor */
@@ -384,21 +359,16 @@ static void shell_delete_char(void)
     if (cmd_cursor >= cmd_pos)
         return;
 
-    int vx, vy;
-    vga_get_xy(&vx, &vy);
-    int original_total = vy * VGA_WIDTH + vx;
-
     for (int i = cmd_cursor; i < cmd_pos - 1; i++)
         cmd_buf[i] = cmd_buf[i + 1];
     cmd_pos--;
     cmd_buf[cmd_pos] = '\0';
 
-    /* 从光标处重绘剩余内容，并用空格清掉旧尾字�?*/
     print(&cmd_buf[cmd_cursor]);
     print(" ");
-
-    /* 回到删除前的光标位置 */
-    vga_set_xy(original_total % VGA_WIDTH, original_total / VGA_WIDTH);
+    int rewind = cmd_pos - cmd_cursor + 1;
+    while (rewind-- > 0)
+        print("\b");
 }
 
 /* cancel current line */
@@ -436,21 +406,23 @@ static void shell_backspace(void)
 {
     if (cmd_cursor <= 0)
         return;
+
     shell_move_cursor_left();
     for (int i = cmd_cursor; i < cmd_pos - 1; i++)
         cmd_buf[i] = cmd_buf[i + 1];
     cmd_pos--;
     cmd_buf[cmd_pos] = '\0';
+
+    /* Redraw from the new cursor position, erase the old tail,
+     * then move the terminal cursor back to the logical cursor.
+     * This uses terminal output instead of VGA-only cursor writes,
+     * so both text VGA and GUI Terminal stay in sync.
+     */
     print(&cmd_buf[cmd_cursor]);
     print(" ");
-    int overshoot = cmd_pos - cmd_cursor + 1;
-    if (overshoot > 0) {
-        int vx, vy;
-        vga_get_xy(&vx, &vy);
-        int target = vx - overshoot;
-        while (target < 0) { target += VGA_WIDTH; vy--; }
-        vga_set_xy(target, vy);
-    }
+    int rewind = cmd_pos - cmd_cursor + 1;
+    while (rewind-- > 0)
+        print("\b");
 }
 
 

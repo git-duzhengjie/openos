@@ -155,6 +155,36 @@ void gui_draw_text(int x, int y, const char *text, uint32_t color) {
 static void gui_title_rect_px(int x, int y, int w, int h, uint32_t color, const gui_rect_t *clip);
 
 static uint8_t gui_glyph5x7_row(char ch, int row) {
+    if (ch >= 'a' && ch <= 'z') {
+        switch (ch) {
+            case 'a': { static const uint8_t r[7] = {0,0,14,1,15,17,15}; return r[row]; }
+            case 'b': { static const uint8_t r[7] = {16,16,30,17,17,17,30}; return r[row]; }
+            case 'c': { static const uint8_t r[7] = {0,0,14,17,16,17,14}; return r[row]; }
+            case 'd': { static const uint8_t r[7] = {1,1,15,17,17,17,15}; return r[row]; }
+            case 'e': { static const uint8_t r[7] = {0,0,14,17,31,16,14}; return r[row]; }
+            case 'f': { static const uint8_t r[7] = {6,9,8,28,8,8,8}; return r[row]; }
+            case 'g': { static const uint8_t r[7] = {0,0,15,17,17,15,1}; return r[row]; }
+            case 'h': { static const uint8_t r[7] = {16,16,30,17,17,17,17}; return r[row]; }
+            case 'i': { static const uint8_t r[7] = {4,0,12,4,4,4,14}; return r[row]; }
+            case 'j': { static const uint8_t r[7] = {2,0,6,2,2,18,12}; return r[row]; }
+            case 'k': { static const uint8_t r[7] = {16,16,18,20,24,20,18}; return r[row]; }
+            case 'l': { static const uint8_t r[7] = {12,4,4,4,4,4,14}; return r[row]; }
+            case 'm': { static const uint8_t r[7] = {0,0,26,21,21,17,17}; return r[row]; }
+            case 'n': { static const uint8_t r[7] = {0,0,30,17,17,17,17}; return r[row]; }
+            case 'o': { static const uint8_t r[7] = {0,0,14,17,17,17,14}; return r[row]; }
+            case 'p': { static const uint8_t r[7] = {0,0,30,17,17,30,16}; return r[row]; }
+            case 'q': { static const uint8_t r[7] = {0,0,15,17,17,15,1}; return r[row]; }
+            case 'r': { static const uint8_t r[7] = {0,0,22,25,16,16,16}; return r[row]; }
+            case 's': { static const uint8_t r[7] = {0,0,15,16,14,1,30}; return r[row]; }
+            case 't': { static const uint8_t r[7] = {8,8,28,8,8,9,6}; return r[row]; }
+            case 'u': { static const uint8_t r[7] = {0,0,17,17,17,17,15}; return r[row]; }
+            case 'v': { static const uint8_t r[7] = {0,0,17,17,17,10,4}; return r[row]; }
+            case 'w': { static const uint8_t r[7] = {0,0,17,17,21,21,10}; return r[row]; }
+            case 'x': { static const uint8_t r[7] = {0,0,17,10,4,10,17}; return r[row]; }
+            case 'y': { static const uint8_t r[7] = {0,0,17,17,17,15,1}; return r[row]; }
+            case 'z': { static const uint8_t r[7] = {0,0,31,2,4,8,31}; return r[row]; }
+        }
+    }
     switch (ch) {
         case 'A': case 'a': { static const uint8_t r[7] = {14,17,17,31,17,17,17}; return r[row]; }
         case 'B': case 'b': { static const uint8_t r[7] = {30,17,17,30,17,17,30}; return r[row]; }
@@ -536,20 +566,21 @@ static void gui_flush_rect(const gui_rect_t *r) {
 }
 
 static void gui_flush_backbuffer(void) {
+    uint32_t i;
     gui_rect_t all;
     if (!g_gui.double_buffered || !g_gui.backbuffer) return;
 
-    /*
-     * gui_render() currently repaints the whole scene into the backbuffer every
-     * frame. Flushing only dirty rectangles can leave newly drawn window chrome
-     * such as title text invisible when no matching dirty rect was queued.
-     * Keep the strategy consistent: full repaint -> full flush.
-     */
-    all.x = 0;
-    all.y = 0;
-    all.w = (int)g_gui.width;
-    all.h = (int)g_gui.height;
-    gui_flush_rect(&all);
+    if (g_gui.full_dirty) {
+        all.x = 0;
+        all.y = 0;
+        all.w = (int)g_gui.width;
+        all.h = (int)g_gui.height;
+        gui_flush_rect(&all);
+    } else {
+        for (i = 0; i < g_gui.dirty_count; i++) {
+            gui_flush_rect(&g_gui.dirty_rects[i]);
+        }
+    }
 
     g_gui.full_dirty = 0;
     g_gui.dirty_count = 0;
@@ -1315,7 +1346,10 @@ void gui_shutdown_to_text_note(void) { serial_write("[GUI] text mode restore is 
 
 void gui_set_cursor_visible(int visible) {
     g_gui.cursor_visible = visible ? 1 : 0;
-    if (g_gui.initialized) gui_render();
+    if (g_gui.initialized) {
+        gui_invalidate_all();
+        gui_render();
+    }
 }
 
 int gui_is_cursor_visible(void) { return g_gui.cursor_visible; }
@@ -1454,10 +1488,14 @@ void gui_terminal_putc(char ch) {
     if (ch == '\n') {
         g_gui.terminal.cursor_x = 0;
         g_gui.terminal.cursor_y++;
+    } else if (ch == '\r') {
+        g_gui.terminal.cursor_x = 0;
     } else if (ch == '\b') {
         if (g_gui.terminal.cursor_x > 0) {
             g_gui.terminal.cursor_x--;
-            g_gui.terminal.cells[g_gui.terminal.cursor_y][g_gui.terminal.cursor_x] = ' ';
+        } else if (g_gui.terminal.cursor_y > 0) {
+            g_gui.terminal.cursor_y--;
+            g_gui.terminal.cursor_x = g_gui.terminal.cols - 1;
         }
     } else {
         if (g_gui.terminal.cursor_x >= g_gui.terminal.cols) {
@@ -1616,9 +1654,15 @@ static void gui_draw_taskbar(void) {
     }
 }
 
+static int gui_has_dirty(void) {
+    return g_gui.full_dirty || g_gui.dirty_count > 0;
+}
+
 void gui_render(void) {
     uint32_t i;
     if (!g_gui.initialized) return;
+    if (g_gui.double_buffered && g_gui.backbuffer && !gui_has_dirty()) return;
+
     gui_raw_fill_rect(0, 0, (int)g_gui.width, (int)g_gui.height, g_gui.colors.desktop_bg);
     gui_draw_taskbar();
 
@@ -1636,7 +1680,7 @@ void gui_poll(void) {
     if (!g_gui.initialized) return;
     gui_poll_mouse();
     gui_process_events();
-    gui_render();
+    if (gui_has_dirty()) gui_render();
 }
 
 static void gui_demo_button(gui_widget_t *widget, void *user_data) {

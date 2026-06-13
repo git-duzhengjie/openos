@@ -98,7 +98,9 @@ void vga_putc(char c) {
     } else if (c == '\b') {
         if (vga_x > 0) {
             vga_x--;
-            vga_mem[vga_y * VGA_WIDTH + vga_x] = vga_entry(' ', vga_color);
+        } else if (vga_y > 0) {
+            vga_y--;
+            vga_x = VGA_WIDTH - 1;
         }
     } else if (c == '\r') {
         vga_x = 0;
