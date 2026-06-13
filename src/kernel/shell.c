@@ -48,6 +48,32 @@ static void print(const char *s)
     }
 }
 
+static char shell_ascii_lower(char c)
+{
+    if (c >= 'A' && c <= 'Z')
+        return (char)(c - 'A' + 'a');
+    return c;
+}
+
+static int shell_strcasecmp(const char *a, const char *b)
+{
+    int i = 0;
+    while (a[i] && b[i]) {
+        char ca = shell_ascii_lower(a[i]);
+        char cb = shell_ascii_lower(b[i]);
+        if (ca != cb)
+            return (int)((unsigned char)ca) - (int)((unsigned char)cb);
+        i++;
+    }
+    return (int)((unsigned char)shell_ascii_lower(a[i])) -
+           (int)((unsigned char)shell_ascii_lower(b[i]));
+}
+
+static int shell_cmd_equals(const char *cmd, const char *name)
+{
+    return shell_strcasecmp(cmd, name) == 0;
+}
+
 static void shell_print_dec(int value)
 {
     char buf[12];
@@ -1156,11 +1182,11 @@ void shell_run(void)
             if (argc > 0)
             {
                 char *cmd = argv[0];
-                if (strcmp(cmd, "ls") == 0)
+                if (shell_cmd_equals(cmd, "ls"))
                 {
                     cmd_ls(argc > 1 ? argv[1] : ".");
                 }
-                else if (strcmp(cmd, "cat") == 0)
+                else if (shell_cmd_equals(cmd, "cat"))
                 {
                     if (argc > 2 && strcmp(argv[1], ">>") == 0)
                     {
@@ -1188,28 +1214,28 @@ void shell_run(void)
                     else
                         print("cat: missing argument\n");
                 }
-                else if (strcmp(cmd, "mkdir") == 0)
+                else if (shell_cmd_equals(cmd, "mkdir"))
                 {
                     if (argc > 1)
                         cmd_mkdir(argv[1]);
                     else
                         print("mkdir: missing argument\n");
                 }
-                else if (strcmp(cmd, "touch") == 0)
+                else if (shell_cmd_equals(cmd, "touch"))
                 {
                     if (argc > 1)
                         cmd_touch(argv[1]);
                     else
                         print("touch: missing argument\n");
                 }
-                else if (strcmp(cmd, "rm") == 0)
+                else if (shell_cmd_equals(cmd, "rm"))
                 {
                     if (argc > 1)
                         cmd_rm(argv[1]);
                     else
                         print("rm: missing argument\n");
                 }
-                else if (strcmp(cmd, "echo") == 0)
+                else if (shell_cmd_equals(cmd, "echo"))
                 {
                     /* echo <text...> >> <file> */
                     int redirect = -1;
@@ -1243,19 +1269,19 @@ void shell_run(void)
                     else
                         cmd_echo(argc, argv);
                 }
-                else if (strcmp(cmd, "cd") == 0)
+                else if (shell_cmd_equals(cmd, "cd"))
                 {
                     cmd_cd(argc > 1 ? argv[1] : NULL);
                 }
-                else if (strcmp(cmd, "pwd") == 0)
+                else if (shell_cmd_equals(cmd, "pwd"))
                 {
                     cmd_pwd();
                 }
-                else if (strcmp(cmd, "history") == 0)
+                else if (shell_cmd_equals(cmd, "history"))
                 {
                     cmd_history();
                 }
-                else if (strcmp(cmd, "mkext4") == 0)
+                else if (shell_cmd_equals(cmd, "mkext4"))
                 {
                     const char *dev = argc > 1 ? argv[1] : "ram0";
                     if (ext4_format_test_volume(dev) < 0)
@@ -1263,7 +1289,7 @@ void shell_run(void)
                     else
                         print("mkext4: ok\n");
                 }
-                else if (strcmp(cmd, "mount_ext4") == 0)
+                else if (shell_cmd_equals(cmd, "mount_ext4"))
                 {
                     const char *dev = argc > 1 ? argv[1] : "ram0";
                     const char *path = argc > 2 ? argv[2] : "/mnt";
@@ -1272,7 +1298,7 @@ void shell_run(void)
                     else
                         print("mount_ext4: ok\n");
                 }
-                else if (strcmp(cmd, "mount_tmpfs") == 0)
+                else if (shell_cmd_equals(cmd, "mount_tmpfs"))
                 {
                     const char *path = argc > 1 ? argv[1] : "/tmp";
                     if (tmpfs_mount(path) < 0)
@@ -1280,7 +1306,7 @@ void shell_run(void)
                     else
                         print("mount_tmpfs: ok\n");
                 }
-                else if (strcmp(cmd, "write") == 0)
+                else if (shell_cmd_equals(cmd, "write"))
                 {
                     if (argc > 2)
                     {
@@ -1300,7 +1326,7 @@ void shell_run(void)
                     else
                         print("write: need file and text\n");
                 }
-                else if (strcmp(cmd, "fbinfo") == 0)
+                else if (shell_cmd_equals(cmd, "fbinfo"))
                 {
                     framebuffer_print_info();
                     const framebuffer_info_t *info = framebuffer_get_info();
@@ -1308,7 +1334,7 @@ void shell_run(void)
                     print(info->available ? "available" : "not available");
                     print(info->mode_set ? ", mode set\n" : ", text mode\n");
                 }
-                else if (strcmp(cmd, "fbtest") == 0)
+                else if (shell_cmd_equals(cmd, "fbtest"))
                 {
                     if (!framebuffer_is_available())
                     {
@@ -1320,11 +1346,11 @@ void shell_run(void)
                         framebuffer_test_pattern();
                     }
                 }
-                else if (strcmp(cmd, "netinfo") == 0)
+                else if (shell_cmd_equals(cmd, "netinfo"))
                 {
                     net_print_info();
                 }
-                else if (strcmp(cmd, "discovery") == 0)
+                else if (shell_cmd_equals(cmd, "discovery"))
                 {
                     if (argc < 2)
                     {
@@ -1392,7 +1418,7 @@ void shell_run(void)
                         print("usage: discovery [scan|peers|announce|bye|name <n>|caps <c>|auth|auth_secret <s>|auth_peer <id>]\n");
                     }
                 }
-                else if (strcmp(cmd, "sync") == 0)
+                else if (shell_cmd_equals(cmd, "sync"))
                 {
                     if (argc < 2 || strcmp(argv[1], "info") == 0)
                     {
@@ -1467,7 +1493,7 @@ void shell_run(void)
                         print("usage: sync [info|items|tasks|reliable|put <k> <v>|del <k>|push <k>|push_all|offer <id> <title> <payload> [target]|accept <id>|done <id> <result>]\n");
                     }
                 }
-                else if (strcmp(cmd, "bus") == 0)
+                else if (shell_cmd_equals(cmd, "bus"))
                 {
                     if (argc < 2 || strcmp(argv[1], "info") == 0)
                     {
@@ -1507,18 +1533,18 @@ void shell_run(void)
                         print("usage: bus [info|stats|subs|pub <topic> <payload>|pub_local <topic> <payload>|sub <topic>]\n");
                     }
                 }
-                else if (strcmp(cmd, "ping_self") == 0)
+                else if (shell_cmd_equals(cmd, "ping_self"))
                 {
                     if (net_ping_self() < 0)
                         print("ping_self: failed\n");
                     else
                         print("ping_self: ok\n");
                 }
-                else if (strcmp(cmd, "ai_info") == 0)
+                else if (shell_cmd_equals(cmd, "ai_info"))
                 {
                     ai_print_info();
                 }
-                else if (strcmp(cmd, "ai_backend") == 0)
+                else if (shell_cmd_equals(cmd, "ai_backend"))
                 {
                     if (argc < 2)
                     {
@@ -1541,7 +1567,7 @@ void shell_run(void)
                         }
                     }
                 }
-                else if (strcmp(cmd, "ai_ask") == 0)
+                else if (shell_cmd_equals(cmd, "ai_ask"))
                 {
                     if (argc < 2)
                     {
@@ -1583,11 +1609,11 @@ void shell_run(void)
                         }
                     }
                 }
-                else if (strcmp(cmd, "ai_models") == 0)
+                else if (shell_cmd_equals(cmd, "ai_models"))
                 {
                     ai_print_models();
                 }
-                else if (strcmp(cmd, "ai_model_load") == 0)
+                else if (shell_cmd_equals(cmd, "ai_model_load"))
                 {
                     if (argc < 2)
                     {
@@ -1604,7 +1630,7 @@ void shell_run(void)
                         print("\n");
                     }
                 }
-                else if (strcmp(cmd, "ai_model_unload") == 0)
+                else if (shell_cmd_equals(cmd, "ai_model_unload"))
                 {
                     if (argc < 2)
                     {
@@ -1621,7 +1647,7 @@ void shell_run(void)
                         print("\n");
                     }
                 }
-                else if (strcmp(cmd, "ai_repo") == 0)
+                else if (shell_cmd_equals(cmd, "ai_repo"))
                 {
                     if (argc < 2)
                     {
@@ -1638,7 +1664,7 @@ void shell_run(void)
                         print("\n");
                     }
                 }
-                else if (strcmp(cmd, "ai_trust") == 0)
+                else if (shell_cmd_equals(cmd, "ai_trust"))
                 {
                     if (argc < 2)
                     {
@@ -1672,7 +1698,7 @@ void shell_run(void)
                         print("\n");
                     }
                 }
-                else if (strcmp(cmd, "ai_ed25519") == 0)
+                else if (shell_cmd_equals(cmd, "ai_ed25519"))
                 {
                     if (argc < 2 || strcmp(argv[1], "selftest") == 0)
                     {
@@ -1697,7 +1723,7 @@ void shell_run(void)
                         print("usage: ai_ed25519 [selftest|verify_sha256 <public_key_hex> <sha256_hex> <signature_hex>]\n");
                     }
                 }
-                else if (strcmp(cmd, "ai_model_register") == 0)
+                else if (shell_cmd_equals(cmd, "ai_model_register"))
                 {
                     if (argc < 2)
                     {
@@ -1714,7 +1740,7 @@ void shell_run(void)
                         print("\n");
                     }
                 }
-                else if (strcmp(cmd, "ai_model_scan") == 0)
+                else if (shell_cmd_equals(cmd, "ai_model_scan"))
                 {
                     int n = ai_repo_scan();
                     if (n < 0)
@@ -1728,15 +1754,15 @@ void shell_run(void)
                         print(" manifest(s)\n");
                     }
                 }
-                else if (strcmp(cmd, "devices") == 0)
+                else if (shell_cmd_equals(cmd, "devices"))
                 {
                     devmgr_print_devices();
                 }
-                else if (strcmp(cmd, "hotplug") == 0)
+                else if (shell_cmd_equals(cmd, "hotplug"))
                 {
                     devmgr_print_hotplug_events();
                 }
-                else if (strcmp(cmd, "hotplug_poll") == 0)
+                else if (shell_cmd_equals(cmd, "hotplug_poll"))
                 {
                     hotplug_event_t event;
                     if (devmgr_poll_event(&event) < 0)
@@ -1752,11 +1778,11 @@ void shell_run(void)
                         print("\n");
                     }
                 }
-                else if (strcmp(cmd, "gui") == 0)
+                else if (shell_cmd_equals(cmd, "gui"))
                 {
                     gui_print_info();
                 }
-                else if (strcmp(cmd, "guitest") == 0)
+                else if (shell_cmd_equals(cmd, "guitest"))
                 {
                     print("guitest: starting GUI demo...\n");
                     if (!gui_is_ready()) {
@@ -1768,7 +1794,7 @@ void shell_run(void)
                     gui_demo();
                     print("guitest: GUI demo rendered; graphical terminal remains interactive\n");
                 }
-                else if (strcmp(cmd, "cursor") == 0)
+                else if (shell_cmd_equals(cmd, "cursor"))
                 {
                     if (argc >= 2 && strcmp(argv[1], "on") == 0) {
                         gui_set_cursor_visible(1);
@@ -1782,26 +1808,26 @@ void shell_run(void)
                         print("\nusage: cursor [on|off]\n");
                     }
                 }
-                else if (strcmp(cmd, "mouse") == 0)
+                else if (shell_cmd_equals(cmd, "mouse"))
                 {
                     mouse_print_info();
                     print("mouse: status written to serial log\n");
                 }
-                else if (strcmp(cmd, "help") == 0)
+                else if (shell_cmd_equals(cmd, "help"))
                 {
                     cmd_help();
                 }
-                else if (strcmp(cmd, "clear") == 0)
+                else if (shell_cmd_equals(cmd, "clear"))
                 {
                     vga_clear();
                 }
-                else if (strcmp(cmd, "yield") == 0)
+                else if (shell_cmd_equals(cmd, "yield"))
                 {
                     /* 协作式调度测试：主动让出 CPU */
                     serial_write("[YIELD] giving up CPU...\n");
                     __asm__ volatile("int $0x80" : : "a"(201) : "memory");
                 }
-                else if (strcmp(cmd, "exec") == 0)
+                else if (shell_cmd_equals(cmd, "exec"))
                 {
                     /* 执行 ELF 程序 */
                     if (argc > 1)

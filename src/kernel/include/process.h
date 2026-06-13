@@ -112,6 +112,7 @@ void sched_switch_to(thread_t *next);     /* 切换到目标线程 */
 process_t *proc_create(const char *name, uint32_t entry, uint32_t esp);
 thread_t *thread_create(uint32_t pid, const char *name,
                         uint32_t entry, uint32_t stack_top);
+void proc_mark_exit(uint32_t pid, int code);
 
 /* 睡眠/唤醒 */
 void thread_sleep(uint32_t ms);

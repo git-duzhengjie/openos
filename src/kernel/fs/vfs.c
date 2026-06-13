@@ -849,8 +849,24 @@ int vfs_getcwd(char *buf, uint32_t size) {
 }
 
 int vfs_rename(const char *oldpath, const char *newpath) {
-    (void)oldpath; (void)newpath;
-    return -1; /* TODO */
+    char new_parent_path[MAX_PATH];
+    char new_name[MAX_NAME];
+
+    if (!oldpath || !newpath) return -1;
+    dentry_t *old = vfs_path_lookup(oldpath);
+    if (!old || old == root_dentry || !old->parent || !old->inode) return -1;
+    if (old->mount) return -1;
+
+    if (split_parent_path(newpath, new_parent_path, new_name) < 0) return -1;
+    dentry_t *new_parent = vfs_path_lookup(new_parent_path);
+    if (!new_parent || !vfs_is_dir(new_parent->inode)) return -1;
+    if (find_child(new_parent, new_name)) return -1;
+
+    detach_child(old);
+    strncpy(old->name, new_name, MAX_NAME - 1);
+    old->name[MAX_NAME - 1] = 0;
+    add_child(new_parent, old);
+    return 0;
 }
 
 int vfs_link(const char *oldpath, const char *newpath) {
@@ -869,13 +885,23 @@ int vfs_readlink(const char *path, char *buf, uint32_t size) {
 }
 
 int vfs_chmod(const char *path, uint32_t mode) {
-    (void)path; (void)mode;
-    return -1; /* TODO */
+    dentry_t *d = vfs_path_lookup(path);
+    if (!d || !d->inode) return -1;
+    if (d->inode->iops && d->inode->iops->chmod)
+        return d->inode->iops->chmod(d->inode, mode);
+    d->inode->mode = (d->inode->mode & VFS_FILE_TYPE_MASK) | (mode & ~VFS_FILE_TYPE_MASK);
+    return 0;
 }
 
 int vfs_chown(const char *path, uint32_t uid, uint32_t gid) {
-    (void)path; (void)uid; (void)gid;
-    return -1; /* TODO */
+    dentry_t *d = vfs_path_lookup(path);
+    if (!d || !d->inode) return -1;
+    if (d->inode->iops && d->inode->iops->chown)
+        return d->inode->iops->chown(d->inode, uid, gid);
+    /* 当前 inode 尚无 uid/gid 字段，只验证路径存在并返回成功。 */
+    (void)uid;
+    (void)gid;
+    return 0;
 }
 
 dentry_t *vfs_readdir(const char *path, int index) {

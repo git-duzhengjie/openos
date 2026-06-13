@@ -18,6 +18,7 @@ void proc_table_init(void);
 /* 进程生命周期 */
 process_t *proc_alloc(void);                          /* 分配一个空闲 PCB */
 void proc_free(process_t *proc);                      /* 释放 PCB */
+void proc_mark_exit(uint32_t pid, int code);          /* 标记进程退出为僵尸 */
 process_t *proc_find(uint32_t pid);                   /* 按 PID 查找 */
 process_t *proc_find_by_state(process_state_t state); /* 按状态查找 */
 

@@ -1,8 +1,8 @@
-/* ============================================================
+﻿/* ============================================================
  * openos - Minimal GUI / Window System
  *
- * 支持：GUI 终端、PS/2 鼠标光标、事件队列、按钮点击�?
- *       窗口拖动/置顶/关闭/最小化、双缓冲渲染�?
+ * 鏀寔锛欸UI 缁堢銆丳S/2 榧犳爣鍏夋爣銆佷簨浠堕槦鍒椼€佹寜閽偣鍑伙拷?
+ *       绐楀彛鎷栧姩/缃《/鍏抽棴/鏈€灏忓寲銆佸弻缂撳啿娓叉煋锟?
  * ============================================================ */
 
 #include "gui.h"
@@ -53,15 +53,19 @@ static void gui_copy_text(char *dst, const char *src, uint32_t cap) {
     dst[i] = '\0';
 }
 
-static void gui_raw_put_pixel(int x, int y, uint32_t color) {
+static void gui_put_pixel_unclipped(int x, int y, uint32_t color) {
     if (!g_gui.initialized) return;
     if (x < 0 || y < 0 || x >= (int)g_gui.width || y >= (int)g_gui.height) return;
-    if (g_gui.clip_enabled && !gui_rect_contains(&g_gui.clip_rect, x, y)) return;
     if (g_gui.double_buffered && g_gui.backbuffer) {
         g_gui.backbuffer[(uint32_t)y * g_gui.width + (uint32_t)x] = color;
     } else {
         framebuffer_put_pixel((uint32_t)x, (uint32_t)y, color);
     }
+}
+
+static void gui_raw_put_pixel(int x, int y, uint32_t color) {
+    if (g_gui.clip_enabled && !gui_rect_contains(&g_gui.clip_rect, x, y)) return;
+    gui_put_pixel_unclipped(x, y, color);
 }
 
 static void gui_raw_fill_rect(int x, int y, int w, int h, uint32_t color) {
@@ -134,6 +138,165 @@ void gui_draw_text(int x, int y, const char *text, uint32_t color) {
     font_draw_text(font_get_default(), gui_font_put_pixel, 0, x, y, text, color);
 }
 
+static void gui_draw_text_clipped_direct(int x, int y, const char *text, uint32_t color, const gui_rect_t *clip) {
+    font_rect_t font_clip;
+    if (!clip || clip->w <= 0 || clip->h <= 0 || !text || !text[0]) return;
+    font_clip.x = clip->x;
+    font_clip.y = clip->y;
+    font_clip.w = clip->w;
+    font_clip.h = clip->h;
+    font_draw_text_clipped(font_get_default(), gui_font_put_pixel, 0, &font_clip, x, y, text, color);
+}
+
+static void gui_title_rect_px(int x, int y, int w, int h, uint32_t color, const gui_rect_t *clip) {
+    int x2;
+    int y2;
+    if (!clip || w <= 0 || h <= 0) return;
+    if (x < clip->x) {
+        w -= clip->x - x;
+        x = clip->x;
+    }
+    if (y < clip->y) {
+        h -= clip->y - y;
+        y = clip->y;
+    }
+    x2 = clip->x + clip->w;
+    y2 = clip->y + clip->h;
+    if (x + w > x2) w = x2 - x;
+    if (y + h > y2) h = y2 - y;
+    if (w <= 0 || h <= 0) return;
+    gui_raw_fill_rect(x, y, w, h, color);
+}
+
+#define GUI_GLYPH_ROW(row,r0,r1,r2,r3,r4,r5,r6) \
+    ((uint8_t)((row) == 0 ? (r0) : \
+               (row) == 1 ? (r1) : \
+               (row) == 2 ? (r2) : \
+               (row) == 3 ? (r3) : \
+               (row) == 4 ? (r4) : \
+               (row) == 5 ? (r5) : (r6)))
+
+static uint8_t gui_rect_glyph5x7(char ch, int row) {
+    uint8_t c = (uint8_t)ch;
+    if (row < 0 || row >= 7) return 0;
+    if (c >= (uint8_t)'a' && c <= (uint8_t)'z') c = (uint8_t)(c - (uint8_t)'a' + (uint8_t)'A');
+
+    switch (c) {
+        case 'A': return GUI_GLYPH_ROW(row,0x0e,0x11,0x11,0x1f,0x11,0x11,0x11);
+        case 'B': return GUI_GLYPH_ROW(row,0x1e,0x11,0x11,0x1e,0x11,0x11,0x1e);
+        case 'C': return GUI_GLYPH_ROW(row,0x0e,0x11,0x10,0x10,0x10,0x11,0x0e);
+        case 'D': return GUI_GLYPH_ROW(row,0x1e,0x11,0x11,0x11,0x11,0x11,0x1e);
+        case 'E': return GUI_GLYPH_ROW(row,0x1f,0x10,0x10,0x1e,0x10,0x10,0x1f);
+        case 'F': return GUI_GLYPH_ROW(row,0x1f,0x10,0x10,0x1e,0x10,0x10,0x10);
+        case 'G': return GUI_GLYPH_ROW(row,0x0e,0x11,0x10,0x17,0x11,0x11,0x0f);
+        case 'H': return GUI_GLYPH_ROW(row,0x11,0x11,0x11,0x1f,0x11,0x11,0x11);
+        case 'I': return GUI_GLYPH_ROW(row,0x1f,0x04,0x04,0x04,0x04,0x04,0x1f);
+        case 'J': return GUI_GLYPH_ROW(row,0x01,0x01,0x01,0x01,0x11,0x11,0x0e);
+        case 'K': return GUI_GLYPH_ROW(row,0x11,0x12,0x14,0x18,0x14,0x12,0x11);
+        case 'L': return GUI_GLYPH_ROW(row,0x10,0x10,0x10,0x10,0x10,0x10,0x1f);
+        case 'M': return GUI_GLYPH_ROW(row,0x11,0x1b,0x15,0x15,0x11,0x11,0x11);
+        case 'N': return GUI_GLYPH_ROW(row,0x11,0x19,0x15,0x13,0x11,0x11,0x11);
+        case 'O': return GUI_GLYPH_ROW(row,0x0e,0x11,0x11,0x11,0x11,0x11,0x0e);
+        case 'P': return GUI_GLYPH_ROW(row,0x1e,0x11,0x11,0x1e,0x10,0x10,0x10);
+        case 'Q': return GUI_GLYPH_ROW(row,0x0e,0x11,0x11,0x11,0x15,0x12,0x0d);
+        case 'R': return GUI_GLYPH_ROW(row,0x1e,0x11,0x11,0x1e,0x14,0x12,0x11);
+        case 'S': return GUI_GLYPH_ROW(row,0x0f,0x10,0x10,0x0e,0x01,0x01,0x1e);
+        case 'T': return GUI_GLYPH_ROW(row,0x1f,0x04,0x04,0x04,0x04,0x04,0x04);
+        case 'U': return GUI_GLYPH_ROW(row,0x11,0x11,0x11,0x11,0x11,0x11,0x0e);
+        case 'V': return GUI_GLYPH_ROW(row,0x11,0x11,0x11,0x11,0x11,0x0a,0x04);
+        case 'W': return GUI_GLYPH_ROW(row,0x11,0x11,0x11,0x15,0x15,0x15,0x0a);
+        case 'X': return GUI_GLYPH_ROW(row,0x11,0x11,0x0a,0x04,0x0a,0x11,0x11);
+        case 'Y': return GUI_GLYPH_ROW(row,0x11,0x11,0x0a,0x04,0x04,0x04,0x04);
+        case 'Z': return GUI_GLYPH_ROW(row,0x1f,0x01,0x02,0x04,0x08,0x10,0x1f);
+        case '0': return GUI_GLYPH_ROW(row,0x0e,0x11,0x13,0x15,0x19,0x11,0x0e);
+        case '1': return GUI_GLYPH_ROW(row,0x04,0x0c,0x04,0x04,0x04,0x04,0x0e);
+        case '2': return GUI_GLYPH_ROW(row,0x0e,0x11,0x01,0x02,0x04,0x08,0x1f);
+        case '3': return GUI_GLYPH_ROW(row,0x1e,0x01,0x01,0x0e,0x01,0x01,0x1e);
+        case '4': return GUI_GLYPH_ROW(row,0x02,0x06,0x0a,0x12,0x1f,0x02,0x02);
+        case '5': return GUI_GLYPH_ROW(row,0x1f,0x10,0x10,0x1e,0x01,0x01,0x1e);
+        case '6': return GUI_GLYPH_ROW(row,0x0e,0x10,0x10,0x1e,0x11,0x11,0x0e);
+        case '7': return GUI_GLYPH_ROW(row,0x1f,0x01,0x02,0x04,0x08,0x08,0x08);
+        case '8': return GUI_GLYPH_ROW(row,0x0e,0x11,0x11,0x0e,0x11,0x11,0x0e);
+        case '9': return GUI_GLYPH_ROW(row,0x0e,0x11,0x11,0x0f,0x01,0x01,0x0e);
+        case '-': return GUI_GLYPH_ROW(row,0x00,0x00,0x00,0x1f,0x00,0x00,0x00);
+        case '_': return GUI_GLYPH_ROW(row,0x00,0x00,0x00,0x00,0x00,0x00,0x1f);
+        case '.': return GUI_GLYPH_ROW(row,0x00,0x00,0x00,0x00,0x00,0x0c,0x0c);
+        case ':': return GUI_GLYPH_ROW(row,0x00,0x0c,0x0c,0x00,0x0c,0x0c,0x00);
+        case '/': return GUI_GLYPH_ROW(row,0x01,0x01,0x02,0x04,0x08,0x10,0x10);
+        case ' ': return 0;
+        default:  return GUI_GLYPH_ROW(row,0x1f,0x11,0x01,0x02,0x04,0x00,0x04);
+    }
+}
+
+#undef GUI_GLYPH_ROW
+
+static void gui_draw_rect_text_clipped(int x, int y, const char *text, uint32_t color, const gui_rect_t *clip) {
+    int cursor_x;
+    uint32_t i;
+
+    if (!clip || clip->w <= 0 || clip->h <= 0 || !text || !text[0]) return;
+    cursor_x = x;
+    for (i = 0; text[i] && i < 63u; i++) {
+        char ch = text[i];
+        int row;
+        if (ch == '\n' || ch == '\r') break;
+        if (ch == '\t') {
+            cursor_x += 24;
+            continue;
+        }
+        if (cursor_x >= clip->x + clip->w) break;
+        for (row = 0; row < 7; row++) {
+            uint8_t bits = gui_rect_glyph5x7(ch, row);
+            int col;
+            for (col = 0; col < 5; col++) {
+                if (bits & (uint8_t)(0x10u >> col)) {
+                    gui_title_rect_px(cursor_x + col, y + row, 1, 1, color, clip);
+                }
+            }
+        }
+        cursor_x += 6;
+    }
+}
+
+static void gui_draw_debug_title_word(int x, int y, uint32_t color, const gui_rect_t *clip) {
+    int s = 1;
+    int gap = 6;
+    int cx = x;
+
+    (void)clip;
+
+    /* T */
+    gui_title_rect_px(cx, y, 5 * s, s, color, clip);
+    gui_title_rect_px(cx + 2 * s, y, s, 7 * s, color, clip);
+    cx += gap;
+
+    /* I */
+    gui_title_rect_px(cx, y, 5 * s, s, color, clip);
+    gui_title_rect_px(cx + 2 * s, y, s, 7 * s, color, clip);
+    gui_title_rect_px(cx, y + 6 * s, 5 * s, s, color, clip);
+    cx += gap;
+
+    /* T */
+    gui_title_rect_px(cx, y, 5 * s, s, color, clip);
+    gui_title_rect_px(cx + 2 * s, y, s, 7 * s, color, clip);
+    cx += gap;
+
+    /* L */
+    gui_title_rect_px(cx, y, s, 7 * s, color, clip);
+    gui_title_rect_px(cx, y + 6 * s, 5 * s, s, color, clip);
+    cx += gap;
+
+    /* E */
+    gui_title_rect_px(cx, y, s, 7 * s, color, clip);
+    gui_title_rect_px(cx, y, 5 * s, s, color, clip);
+    gui_title_rect_px(cx, y + 3 * s, 4 * s, s, color, clip);
+    gui_title_rect_px(cx, y + 6 * s, 5 * s, s, color, clip);
+}
+
+static void gui_draw_window_title_text(int x, int y, const char *text, uint32_t color, const gui_rect_t *clip) {
+    (void)text;
+    gui_draw_debug_title_word(x, y, color, clip);
+}
 static int gui_rect_contains(const gui_rect_t *r, int x, int y) {
     return r && x >= r->x && y >= r->y && x < r->x + r->w && y < r->y + r->h;
 }
@@ -416,16 +579,21 @@ static void gui_flush_rect(const gui_rect_t *r) {
 }
 
 static void gui_flush_backbuffer(void) {
-    uint32_t i;
     gui_rect_t all;
     if (!g_gui.double_buffered || !g_gui.backbuffer) return;
-    if (!g_gui.full_dirty && g_gui.dirty_count == 0) return;
-    if (g_gui.full_dirty) {
-        all.x = 0; all.y = 0; all.w = (int)g_gui.width; all.h = (int)g_gui.height;
-        gui_flush_rect(&all);
-    } else {
-        for (i = 0; i < g_gui.dirty_count; i++) gui_flush_rect(&g_gui.dirty_rects[i]);
-    }
+
+    /*
+     * gui_render() currently repaints the whole scene into the backbuffer every
+     * frame. Flushing only dirty rectangles can leave newly drawn window chrome
+     * such as title text invisible when no matching dirty rect was queued.
+     * Keep the strategy consistent: full repaint -> full flush.
+     */
+    all.x = 0;
+    all.y = 0;
+    all.w = (int)g_gui.width;
+    all.h = (int)g_gui.height;
+    gui_flush_rect(&all);
+
     g_gui.full_dirty = 0;
     g_gui.dirty_count = 0;
 }
@@ -509,19 +677,6 @@ static void gui_draw_window(gui_window_t *w) {
                       w->rect.w - GUI_BORDER_SIZE * 2, w->rect.h - GUI_TITLE_HEIGHT - GUI_BORDER_SIZE,
                       w->bg_color ? w->bg_color : g_gui.colors.window_bg);
 
-    {
-        gui_rect_t title_clip;
-        title_clip.x = w->rect.x + GUI_BORDER_SIZE + 6;
-        title_clip.y = w->rect.y + GUI_BORDER_SIZE;
-        title_clip.w = w->rect.w - GUI_BORDER_SIZE * 2 - 56;
-        title_clip.h = GUI_TITLE_HEIGHT - GUI_BORDER_SIZE;
-        if (title_clip.w > 0 && title_clip.h > 0) {
-            gui_set_clip_rect(&title_clip);
-            gui_draw_text(w->rect.x + 8, w->rect.y + 7, w->title, g_gui.colors.title_fg);
-            gui_clear_clip_rect();
-        }
-    }
-
     if (w->flags & GUI_WINDOW_FLAG_CLOSABLE) {
         gui_rect_t c = gui_close_rect(w);
         gui_raw_fill_rect(c.x, c.y, c.w, c.h, gui_rgb(160, 50, 55));
@@ -533,6 +688,37 @@ static void gui_draw_window(gui_window_t *w) {
         gui_rect_t m = gui_min_rect(w);
         gui_raw_fill_rect(m.x, m.y, m.w, m.h, gui_rgb(80, 90, 105));
         gui_raw_line(m.x + 3, m.y + m.h - 4, m.x + m.w - 4, m.y + m.h - 4, gui_rgb(255,255,255));
+    }
+
+    {
+        gui_rect_t title_clip;
+        int title_x = w->rect.x + 8;
+        int title_y = w->rect.y + 7;
+        int title_right = w->rect.x + w->rect.w - GUI_BORDER_SIZE - 6;
+        if (w->flags & GUI_WINDOW_FLAG_CLOSABLE) {
+            gui_rect_t c = gui_close_rect(w);
+            title_right = c.x - 6;
+        }
+        if (w->flags & GUI_WINDOW_FLAG_MINIMIZABLE) {
+            gui_rect_t m = gui_min_rect(w);
+            if (m.x - 6 < title_right) title_right = m.x - 6;
+        }
+        title_clip.x = title_x;
+        title_clip.y = w->rect.y + GUI_BORDER_SIZE;
+        title_clip.w = title_right - title_x;
+        title_clip.h = GUI_TITLE_HEIGHT - GUI_BORDER_SIZE;
+        if (title_clip.w > 0 && title_clip.h > 0) {
+            /* Window-title pipeline marker. If this yellow block is visible but
+             * text is not, the remaining issue is purely glyph/text rendering.
+             */
+            gui_raw_fill_rect(title_x, title_y, 10, 8, gui_rgb(255, 255, 0));
+
+            /* Draw title text via the simplest pixel path. This bypasses the
+             * generic clipped font renderer, which may reject this tiny clip or
+             * depend on state that is not valid during window chrome drawing.
+             */
+            gui_draw_window_title_text(title_x + 14, title_y, w->title, gui_rgb(0, 255, 0), &title_clip);
+        }
     }
 
     {
@@ -553,14 +739,14 @@ void gui_event_push(gui_event_t event) {
     if (event.type == GUI_EVENT_MOUSE_MOVE && g_gui.event_count > 0) {
         uint32_t last = (g_gui.event_tail + GUI_EVENT_QUEUE_SIZE - 1) % GUI_EVENT_QUEUE_SIZE;
         if (g_gui.events[last].type == GUI_EVENT_MOUSE_MOVE) {
-            /* 合并连续 MOVE，避免移动事件刷满队列导致点击/拖动事件丢失。 */
+            /* 鍚堝苟杩炵画 MOVE锛岄伩鍏嶇Щ鍔ㄤ簨浠跺埛婊￠槦鍒楀鑷寸偣鍑?鎷栧姩浜嬩欢涓㈠け銆?*/
             g_gui.events[last] = event;
             return;
         }
     }
 
     if (g_gui.event_count >= GUI_EVENT_QUEUE_SIZE) {
-        /* 队列满时丢弃最老事件，保证 DOWN/UP 等关键事件可以入队。 */
+        /* 闃熷垪婊℃椂涓㈠純鏈€鑰佷簨浠讹紝淇濊瘉 DOWN/UP 绛夊叧閿簨浠跺彲浠ュ叆闃熴€?*/
         if (event.type == GUI_EVENT_MOUSE_MOVE) {
             return;
         }
@@ -977,7 +1163,7 @@ void gui_process_events(void) {
         } else if (ev.type == GUI_EVENT_BUTTON_CLICK) {
             if (ev.widget && gui_widget_is_clickable(ev.widget)) {
                 serial_write("[GUI] button clicked\n");
-                /* 不做任意 on_click 间接调用，只对白名单回调做直接调用，避免跳飞。 */
+                /* 涓嶅仛浠绘剰 on_click 闂存帴璋冪敤锛屽彧瀵圭櫧鍚嶅崟鍥炶皟鍋氱洿鎺ヨ皟鐢紝閬垮厤璺抽銆?*/
                 if (ev.widget->on_click == gui_demo_button) {
                     gui_demo_button(ev.widget, ev.widget->user_data);
                 }
@@ -1069,15 +1255,15 @@ int gui_start(uint32_t width, uint32_t height) {
     g_gui.width = info->width;
     g_gui.height = info->height;
 
-    /* 先设置鼠标边界为真实分辨率 */
+    /* 鍏堣缃紶鏍囪竟鐣屼负鐪熷疄鍒嗚鲸鐜?*/
     mouse_set_bounds((int)g_gui.width, (int)g_gui.height);
 
     g_gui.initialized = 1;
 
-    /* 从鼠标驱动获取当前坐标 */
+    /* 浠庨紶鏍囬┍鍔ㄨ幏鍙栧綋鍓嶅潗鏍?*/
     mouse_snapshot_and_clear_delta(&ms);
 
-    /* 如果鼠标还没收到中断包，使用屏幕中心 */
+    /* 濡傛灉榧犳爣杩樻病鏀跺埌涓柇鍖咃紝浣跨敤灞忓箷涓績 */
     if (ms.packet_count == 0) {
         g_gui.mouse_x = (int)(g_gui.width / 2);
         g_gui.mouse_y = (int)(g_gui.height / 2);
@@ -1087,7 +1273,7 @@ int gui_start(uint32_t width, uint32_t height) {
         g_gui.mouse_y = ms.y;
     }
 
-    /* 坐标边界最终检查 */
+    /* 鍧愭爣杈圭晫鏈€缁堟鏌?*/
     if (g_gui.mouse_x < 0) g_gui.mouse_x = 0;
     if (g_gui.mouse_y < 0) g_gui.mouse_y = 0;
     if (g_gui.mouse_x >= (int)g_gui.width) g_gui.mouse_x = (int)g_gui.width - 1;
@@ -1434,7 +1620,7 @@ static void gui_draw_taskbar(void) {
     gui_raw_line(layout.bar.x, layout.bar.y + layout.bar.h - 1, layout.bar.x + layout.bar.w - 1, layout.bar.y + layout.bar.h - 1, gui_rgb(10, 13, 20));
 
     gui_draw_taskbar_button(layout.terminal_button, gui_rgb(64, 92, 150), gui_rgb(170, 205, 255), gui_rgb(12, 18, 30));
-    gui_draw_text(layout.terminal_button.x + 12, layout.bar.y + 8, "TERMINAL", gui_rgb(0,255,0));
+    /* Taskbar text temporarily disabled: keep GUI desktop boot path stable. */
 
     for (i = 0; i < g_gui.window_count; i++) {
         uint32_t idx = g_gui.z_order[i];
@@ -1449,13 +1635,13 @@ static void gui_draw_taskbar(void) {
         button.h = layout.item_h;
         if (button.x + button.w > layout.bar.x + layout.bar.w - 8) button.w = layout.bar.x + layout.bar.w - 8 - button.x;
         if (button.w <= 0) break;
-        /* 活动窗口高亮显示，最小化窗口低暗显示 */
+        /* 娲诲姩绐楀彛楂樹寒鏄剧ず锛屾渶灏忓寲绐楀彛浣庢殫鏄剧ず */
         if (w->flags & GUI_WINDOW_FLAG_MINIMIZED) {
             gui_draw_taskbar_button(button, gui_rgb(52, 68, 96), gui_rgb(135, 170, 230), gui_rgb(20, 24, 35));
-            gui_draw_text(button.x + 8, layout.bar.y + 8, w->title, gui_rgb(255,255,0));
+            /* Taskbar text temporarily disabled: keep GUI desktop boot path stable. */
         } else {
             gui_draw_taskbar_button(button, gui_rgb(38, 52, 76), gui_rgb(100, 130, 190), gui_rgb(16, 20, 32));
-            gui_draw_text(button.x + 8, layout.bar.y + 8, w->title, gui_rgb(0,255,255));
+            /* Taskbar text temporarily disabled: keep GUI desktop boot path stable. */
         }
         bx += gui_taskbar_button_width(w) + 6;
     }
@@ -1472,6 +1658,15 @@ void gui_render(void) {
         if (idx < GUI_MAX_WINDOWS) gui_draw_window(&g_gui.windows[idx]);
     }
     gui_terminal_redraw();
+
+    /* Hard GUI pipeline diagnostic: these bars do not depend on fonts/windows.
+     * If the graphical renderer is active, the top-left corner must show
+     * red/green/blue bars. Remove after display-path debugging.
+     */
+    gui_raw_fill_rect(0, 0, 96, 12, gui_rgb(255, 0, 0));
+    gui_raw_fill_rect(0, 12, 96, 12, gui_rgb(0, 255, 0));
+    gui_raw_fill_rect(0, 24, 96, 12, gui_rgb(0, 64, 255));
+
     if (g_gui.cursor_visible) gui_draw_cursor();
     gui_flush_backbuffer();
 }
@@ -1511,3 +1706,6 @@ void gui_demo(void) {
     gui_terminal_write("\n[GUI] demo windows created\n> ");
     gui_render();
 }
+
+
+

@@ -68,6 +68,19 @@ void proc_free(process_t *proc) {
     if (!proc) return;
     proc->pid = 0;
     proc->state = PROC_DEAD;
+    proc->ppid = 0;
+    proc->threads = NULL;
+    proc->thread_count = 0;
+    for (int i = 0; i < 16; i++) proc->fds[i] = NULL;
+}
+
+void proc_mark_exit(uint32_t pid, int code) {
+    process_t *proc = proc_find(pid);
+    if (!proc) return;
+    proc->exit_code = (uint32_t)code;
+    proc->state = PROC_ZOMBIE;
+    if (proc->threads)
+        proc->threads->state = PROC_ZOMBIE;
 }
 
 process_t *proc_find(uint32_t pid) {
@@ -225,6 +238,7 @@ uint32_t sys_fork(void) {
  * ============================================================ */
 int sys_exec(const char *path, char *const argv[]) {
     (void)argv;
+    if (!path || !path[0]) return -1;
     thread_t *cur = sched_get_current();
     if (!cur) return -1;
 
@@ -255,7 +269,7 @@ int sys_exec(const char *path, char *const argv[]) {
     elf_load_result_t load_result = elf_load(fd);
     vfs_close(fd);  /* 关闭文件 */
 
-    if (load_result.entry == 0) {
+    if (load_result.entry == 0 || load_result.num_segments <= 0 || load_result.brk_start == 0) {
         serial_write("[EXEC] ELF load failed\n");
         return -1;
     }
@@ -271,7 +285,10 @@ int sys_exec(const char *path, char *const argv[]) {
 
     /* 分配用户栈 */
     uint32_t stack_top = alloc_user_stack();
-    if (!stack_top) return -1;
+    if (!stack_top) {
+        serial_write("[EXEC] user stack allocation failed\n");
+        return -1;
+    }
 
     /* 切换到用户态执行 */
     switch_to_user_asm(load_result.entry, stack_top);
@@ -288,30 +305,37 @@ uint32_t sys_wait(int *status) {
 }
 
 uint32_t sys_waitpid(uint32_t pid, int *status, int options) {
-    (void)options;
     thread_t *cur = sched_get_current();
     if (!cur) return (uint32_t)-1;
 
-    /* 查找子进程 */
-    for (int i = 0; i < MAX_PROCS; i++) {
-        process_t *p = &proc_table[i];
-        if (p->state == PROC_DEAD) continue;
-        if (p->ppid != cur->pid) continue;
+    for (;;) {
+        int has_child = 0;
 
-        if (pid != 0 && p->pid != pid) continue;
+        for (int i = 0; i < MAX_PROCS; i++) {
+            process_t *p = &proc_table[i];
+            if (p->state == PROC_DEAD) continue;
+            if (p->ppid != cur->pid) continue;
+            if (pid != 0 && p->pid != pid) continue;
 
-        /* 找到僵尸子进程 */
-        if (p->state == PROC_ZOMBIE) {
-            if (status) *status = (int)p->exit_code;
-            uint32_t cpid = p->pid;
-            proc_free(p);
-            return cpid;
+            has_child = 1;
+
+            if (p->state == PROC_ZOMBIE) {
+                if (status) *status = (int)p->exit_code;
+                uint32_t cpid = p->pid;
+                proc_free(p);
+                return cpid;
+            }
         }
-    }
 
-    /* 没有僵尸子进程,阻塞等待 */
-    /* TODO: 实现等待队列,目前简单返回 0 */
-    return 0;
+        if (!has_child)
+            return (uint32_t)-1;
+
+        /* options bit0 acts as a small WNOHANG-compatible flag. */
+        if (options & 1)
+            return 0;
+
+        sched_yield();
+    }
 }
 
 uint32_t sys_getppid(void) {

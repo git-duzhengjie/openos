@@ -18,6 +18,10 @@
 #define NULL ((void*)0)
 #endif
 
+#define ELF_USER_MIN 0x00100000u
+#define ELF_USER_MAX 0x10000000u
+#define ELF_MAX_PHNUM 64u
+
 /* ============================================================
  * 验证 ELF 头
  * ============================================================ */
@@ -85,7 +89,10 @@ elf_load_result_t elf_load(int fd) {
     serial_write("\n");
 
     /* 读取程序头表 */
-    if (ehdr.e_phnum == 0 || ehdr.e_phentsize != sizeof(Elf32_Phdr)) {
+    if (ehdr.e_phnum == 0 || ehdr.e_phnum > ELF_MAX_PHNUM ||
+        ehdr.e_phentsize != sizeof(Elf32_Phdr) ||
+        ehdr.e_phoff == 0 ||
+        ehdr.e_phoff > 0x7FFFFFFFu - (uint32_t)ehdr.e_phnum * sizeof(Elf32_Phdr)) {
         serial_write("[ELF] Invalid program headers\n");
         return result;
     }
@@ -109,6 +116,7 @@ elf_load_result_t elf_load(int fd) {
     /* 加载每个 PT_LOAD 段 */
     uint32_t max_addr = 0;
     int num_loaded = 0;
+    int entry_in_load_segment = 0;
 
     for (int i = 0; i < ehdr.e_phnum; i++) {
         Elf32_Phdr *ph = &phdrs[i];
@@ -127,16 +135,28 @@ elf_load_result_t elf_load(int fd) {
         serial_write_hex(ph->p_flags);
         serial_write("\n");
 
-        /* 检查地址范围 */
-        if (ph->p_vaddr < 0x00100000 || ph->p_vaddr > 0x10000000) {
+        /* 检查段大小和地址范围 */
+        if (ph->p_memsz < ph->p_filesz || ph->p_memsz == 0) {
+            serial_write("[ELF] Invalid segment size\n");
+            pmm_free_page((void *)phdrs);
+            return result;
+        }
+        if (ph->p_vaddr < ELF_USER_MIN || ph->p_vaddr >= ELF_USER_MAX ||
+            ph->p_memsz > ELF_USER_MAX - ph->p_vaddr) {
             serial_write("[ELF] Invalid vaddr range\n");
-            continue;
+            pmm_free_page((void *)phdrs);
+            return result;
         }
 
         /* 计算需要的页数 */
-        uint32_t start = ph->p_vaddr;
+        uint32_t start = ph->p_vaddr & PAGE_MASK;
         uint32_t end = ph->p_vaddr + ph->p_memsz;
         uint32_t num_pages = (end - start + PAGE_SIZE - 1) / PAGE_SIZE;
+        if (num_pages == 0 || num_pages > 4096) {
+            serial_write("[ELF] Invalid page count\n");
+            pmm_free_page((void *)phdrs);
+            return result;
+        }
 
         /* 分配并映射页面 */
         for (uint32_t page = 0; page < num_pages; page++) {
@@ -149,7 +169,8 @@ elf_load_result_t elf_load(int fd) {
             uint32_t phys = (uint32_t)pmm_alloc_page();
             if (!phys) {
                 serial_write("[ELF] Cannot allocate page\n");
-                continue;
+                pmm_free_page((void *)phdrs);
+                return result;
             }
 
             /* 映射页面 */
@@ -177,8 +198,13 @@ elf_load_result_t elf_load(int fd) {
                 serial_write(" expected ");
                 serial_write_hex(ph->p_filesz);
                 serial_write("\n");
+                pmm_free_page((void *)phdrs);
+                return result;
             }
         }
+
+        if (ehdr.e_entry >= ph->p_vaddr && ehdr.e_entry < end)
+            entry_in_load_segment = 1;
 
         /* 更新最大地址 (用于 brk) */
         if (end > max_addr) {
@@ -190,6 +216,11 @@ elf_load_result_t elf_load(int fd) {
 
     /* 释放程序头表内存 */
     pmm_free_page((void *)phdrs);
+
+    if (num_loaded == 0 || !entry_in_load_segment) {
+        serial_write("[ELF] No loadable segment or invalid entry\n");
+        return result;
+    }
 
     /* 设置结果 */
     result.entry = ehdr.e_entry;

@@ -282,8 +282,8 @@ uint32_t sys_getpid(void) { return sched.current ? sched.current->pid : 0; }
 uint32_t sys_gettid(void) { return sched.current ? sched.current->id : 0; }
 
 void sys_exit(int code) {
-    (void)code;
     if (sched.current) {
+        proc_mark_exit(sched.current->pid, code);
         remove_from_queue(sched.current);
         sched.current->state = PROC_ZOMBIE;
         sched.need_resched = 1;
