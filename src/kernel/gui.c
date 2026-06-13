@@ -1712,10 +1712,20 @@ void gui_widget_set_enabled(gui_widget_t *widget, int enabled) {
 
 void gui_terminal_clear(void) {
     uint32_t r, c;
-    for (r = 0; r < GUI_TERM_ROWS; r++) for (c = 0; c < GUI_TERM_COLS; c++) g_gui.terminal.cells[r][c] = ' ';
+    if (!g_gui.initialized || !g_gui.terminal.enabled) return;
+
+    for (r = 0; r < GUI_TERM_ROWS; r++) {
+        for (c = 0; c < GUI_TERM_COLS; c++) {
+            g_gui.terminal.cells[r][c] = ' ';
+        }
+    }
+
     g_gui.terminal.cursor_x = 0;
     g_gui.terminal.cursor_y = 0;
+    g_gui.terminal.selecting = 0;
+    g_gui.terminal.has_selection = 0;
     g_gui.terminal.dirty = 1;
+    gui_terminal_invalidate_body();
 }
 
 void gui_terminal_init(void) {

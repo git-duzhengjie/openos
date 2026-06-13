@@ -1823,6 +1823,7 @@ void shell_run(void)
                 else if (shell_cmd_equals(cmd, "clear"))
                 {
                     vga_clear();
+                    gui_terminal_clear();
                 }
                 else if (shell_cmd_equals(cmd, "yield"))
                 {
