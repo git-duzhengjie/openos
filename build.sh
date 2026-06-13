@@ -2,12 +2,22 @@
 # openos Phase 2 Build Script (WSL native tools)
 
 set -e
-cd /mnt/e/openos
+if [ -d /mnt/e/openos ]; then
+    cd /mnt/e/openos
+else
+    cd /e/openos
+fi
 
 echo "===== Building openos Phase 2 ====="
 
 BUILD=target
 SRC=src/kernel
+
+if [ "${1:-}" = "clean" ]; then
+    echo "Cleaning build artifacts..."
+    rm -rf "$BUILD"
+    exit 0
+fi
 
 mkdir -p $BUILD
 
@@ -250,6 +260,16 @@ ld -m elf_i386 -T $SRC/linker.ld \
     $BUILD/shell.o
 
 objcopy -O binary $BUILD/kernel.elf $BUILD/kernel.bin
+
+KERNEL_BYTES=$(stat -c%s "$BUILD/kernel.bin")
+KERNEL_SECTORS=$(( (KERNEL_BYTES + 511) / 512 ))
+BOOT_LOAD_SECTORS=512
+if [ "$KERNEL_SECTORS" -gt "$BOOT_LOAD_SECTORS" ]; then
+    echo "ERROR: kernel.bin is ${KERNEL_SECTORS} sectors, but bootloader loads only ${BOOT_LOAD_SECTORS} sectors."
+    echo "Increase bootloader kernel load chunks before building the image."
+    exit 1
+fi
+echo "  kernel.bin: ${KERNEL_BYTES} bytes (${KERNEL_SECTORS}/${BOOT_LOAD_SECTORS} sectors loaded by bootloader)"
 
 echo "[5/5] Generating disk image..."
 dd if=/dev/zero of=$BUILD/openos.img bs=512 count=2880 2>/dev/null

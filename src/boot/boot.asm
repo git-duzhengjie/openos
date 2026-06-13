@@ -27,59 +27,39 @@ start:
     call print_string
 
     ; 从磁盘读取内核 (LBA模式)
-    ; 内核约 160KB，需要多次读取 (每次 64 扇区 = 32KB)
-    
-    ; 第1次: LBA 1 → 0x8000 (32KB)
+    ; 每次读取 64 扇区 = 32KB，共读取 8 次 = 512 扇区 = 256KB。
+    ; 当前 kernel.bin 已超过旧版 320 扇区加载上限，因此必须覆盖完整内核，
+    ; 否则 .rodata/字符串常量等后半段内容不会进入内存。
+    mov word [dap + 2], 0x40     ; sectors per chunk
+    mov word [dap + 4], 0x8000   ; first buffer offset: 0000:8000
+    mov word [dap + 6], 0x0000   ; first buffer segment
+    mov dword [dap + 8], 1       ; first kernel LBA
+    mov dword [dap + 12], 0
+    mov cx, 8
+.load_kernel_chunk:
+    push cx
     mov ah, 0x42
     mov si, dap
     int 0x13
     jc disk_error
     mov al, '.'
     call print_char
-    
-    ; 第2次: LBA 65 → 0x10000 (32KB)
-    mov dword [dap + 8], 65      ; 起始 LBA
-    mov word [dap + 4], 0       ; offset = 0
-    mov word [dap + 6], 0x1000  ; segment = 0x1000 → 物理地址 0x10000
-    mov ah, 0x42
-    mov si, dap
-    int 0x13
-    jc disk_error
-    mov al, '.'
-    call print_char
-    
-    ; 第3次: LBA 129 → 0x18000 (32KB)
-    mov dword [dap + 8], 129
-    mov word [dap + 4], 0       ; offset = 0
-    mov word [dap + 6], 0x1800  ; segment = 0x1800
-    mov ah, 0x42
-    mov si, dap
-    int 0x13
-    jc disk_error
-    mov al, '.'
-    call print_char
-    
-    ; 第4次: LBA 193 → 0x20000 (32KB)
-    mov dword [dap + 8], 193
-    mov word [dap + 4], 0       ; offset = 0
-    mov word [dap + 6], 0x2000  ; segment = 0x2000
-    mov ah, 0x42
-    mov si, dap
-    int 0x13
-    jc disk_error
-    mov al, '.'
-    call print_char
-    
-    ; 第5次: LBA 257 → 0x28000 (32KB)
-    mov dword [dap + 8], 257
-    mov word [dap + 4], 0       ; offset = 0
-    mov word [dap + 6], 0x2800  ; segment = 0x2800
-    mov ah, 0x42
-    mov si, dap
-    int 0x13
-    jc disk_error
-    mov al, '.'
-    call print_char
+
+    add dword [dap + 8], 64
+    adc dword [dap + 12], 0
+
+    ; First chunk uses 0000:8000. Later chunks use segment:0000 and advance
+    ; by 0x0800 paragraphs = 32KB each time.
+    cmp word [dap + 4], 0x8000
+    jne .advance_kernel_segment
+    mov word [dap + 4], 0
+    mov word [dap + 6], 0x1000
+    jmp .kernel_buffer_ready
+.advance_kernel_segment:
+    add word [dap + 6], 0x0800
+.kernel_buffer_ready:
+    pop cx
+    loop .load_kernel_chunk
 
     mov si, ok_msg
     call print_string
@@ -184,7 +164,7 @@ protected_mode:
     mov fs, ax
     mov gs, ax
     mov ss, ax
-    mov esp, 0x90000
+    mov esp, 0x9F000
 
     ; 跳转到内核入口
     jmp 0x08:0x8000

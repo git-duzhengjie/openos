@@ -34,12 +34,17 @@ static uint32_t gui_rgb(uint8_t r, uint8_t g, uint8_t b) {
 static void gui_write_dec(uint32_t value) {
     char buf[11];
     int i = 0;
-    if (value == 0) { serial_write("0"); return; }
+    if (value == 0) {
+        serial_write("0");
+        return;
+    }
     while (value > 0 && i < 10) {
         buf[i++] = (char)('0' + (value % 10));
         value /= 10;
     }
-    while (i > 0) serial_putc(buf[--i]);
+    while (i > 0) {
+        serial_putc(buf[--i]);
+    }
 }
 
 static void gui_copy_text(char *dst, const char *src, uint32_t cap) {
@@ -51,6 +56,15 @@ static void gui_copy_text(char *dst, const char *src, uint32_t cap) {
         i++;
     }
     dst[i] = '\0';
+}
+
+static uint32_t gui_bounded_strlen(const char *text, uint32_t max_len) {
+    uint32_t len = 0;
+    if (!text) return 0;
+    while (len < max_len && text[len]) {
+        len++;
+    }
+    return len;
 }
 
 static void gui_put_pixel_unclipped(int x, int y, uint32_t color) {
@@ -138,14 +152,83 @@ void gui_draw_text(int x, int y, const char *text, uint32_t color) {
     font_draw_text(font_get_default(), gui_font_put_pixel, 0, x, y, text, color);
 }
 
+static void gui_title_rect_px(int x, int y, int w, int h, uint32_t color, const gui_rect_t *clip);
+
+static uint8_t gui_glyph5x7_row(char ch, int row) {
+    switch (ch) {
+        case 'A': case 'a': { static const uint8_t r[7] = {14,17,17,31,17,17,17}; return r[row]; }
+        case 'B': case 'b': { static const uint8_t r[7] = {30,17,17,30,17,17,30}; return r[row]; }
+        case 'C': case 'c': { static const uint8_t r[7] = {14,17,16,16,16,17,14}; return r[row]; }
+        case 'D': case 'd': { static const uint8_t r[7] = {30,17,17,17,17,17,30}; return r[row]; }
+        case 'E': case 'e': { static const uint8_t r[7] = {31,16,16,30,16,16,31}; return r[row]; }
+        case 'F': case 'f': { static const uint8_t r[7] = {31,16,16,30,16,16,16}; return r[row]; }
+        case 'G': case 'g': { static const uint8_t r[7] = {14,17,16,23,17,17,14}; return r[row]; }
+        case 'H': case 'h': { static const uint8_t r[7] = {17,17,17,31,17,17,17}; return r[row]; }
+        case 'I': case 'i': { static const uint8_t r[7] = {31,4,4,4,4,4,31}; return r[row]; }
+        case 'J': case 'j': { static const uint8_t r[7] = {7,2,2,2,18,18,12}; return r[row]; }
+        case 'K': case 'k': { static const uint8_t r[7] = {17,18,20,24,20,18,17}; return r[row]; }
+        case 'L': case 'l': { static const uint8_t r[7] = {16,16,16,16,16,16,31}; return r[row]; }
+        case 'M': case 'm': { static const uint8_t r[7] = {17,27,21,21,17,17,17}; return r[row]; }
+        case 'N': case 'n': { static const uint8_t r[7] = {17,25,21,19,17,17,17}; return r[row]; }
+        case 'O': case 'o': { static const uint8_t r[7] = {14,17,17,17,17,17,14}; return r[row]; }
+        case 'P': case 'p': { static const uint8_t r[7] = {30,17,17,30,16,16,16}; return r[row]; }
+        case 'Q': case 'q': { static const uint8_t r[7] = {14,17,17,17,21,18,13}; return r[row]; }
+        case 'R': case 'r': { static const uint8_t r[7] = {30,17,17,30,20,18,17}; return r[row]; }
+        case 'S': case 's': { static const uint8_t r[7] = {15,16,16,14,1,1,30}; return r[row]; }
+        case 'T': case 't': { static const uint8_t r[7] = {31,4,4,4,4,4,4}; return r[row]; }
+        case 'U': case 'u': { static const uint8_t r[7] = {17,17,17,17,17,17,14}; return r[row]; }
+        case 'V': case 'v': { static const uint8_t r[7] = {17,17,17,17,17,10,4}; return r[row]; }
+        case 'W': case 'w': { static const uint8_t r[7] = {17,17,17,21,21,21,10}; return r[row]; }
+        case 'X': case 'x': { static const uint8_t r[7] = {17,17,10,4,10,17,17}; return r[row]; }
+        case 'Y': case 'y': { static const uint8_t r[7] = {17,17,10,4,4,4,4}; return r[row]; }
+        case 'Z': case 'z': { static const uint8_t r[7] = {31,1,2,4,8,16,31}; return r[row]; }
+        case '0': { static const uint8_t r[7] = {14,17,19,21,25,17,14}; return r[row]; }
+        case '1': { static const uint8_t r[7] = {4,12,4,4,4,4,14}; return r[row]; }
+        case '2': { static const uint8_t r[7] = {14,17,1,2,4,8,31}; return r[row]; }
+        case '3': { static const uint8_t r[7] = {30,1,1,14,1,1,30}; return r[row]; }
+        case '4': { static const uint8_t r[7] = {2,6,10,18,31,2,2}; return r[row]; }
+        case '5': { static const uint8_t r[7] = {31,16,16,30,1,1,30}; return r[row]; }
+        case '6': { static const uint8_t r[7] = {14,16,16,30,17,17,14}; return r[row]; }
+        case '7': { static const uint8_t r[7] = {31,1,2,4,8,8,8}; return r[row]; }
+        case '8': { static const uint8_t r[7] = {14,17,17,14,17,17,14}; return r[row]; }
+        case '9': { static const uint8_t r[7] = {14,17,17,15,1,1,14}; return r[row]; }
+        case '-': { static const uint8_t r[7] = {0,0,0,14,0,0,0}; return r[row]; }
+        case '_': { static const uint8_t r[7] = {0,0,0,0,0,0,31}; return r[row]; }
+        case '.': { static const uint8_t r[7] = {0,0,0,0,0,12,12}; return r[row]; }
+        case ':': { static const uint8_t r[7] = {0,12,12,0,12,12,0}; return r[row]; }
+        case '/': { static const uint8_t r[7] = {1,2,2,4,8,8,16}; return r[row]; }
+        case '+': { static const uint8_t r[7] = {0,4,4,31,4,4,0}; return r[row]; }
+        case ' ': return 0;
+        default: { static const uint8_t r[7] = {14,17,1,2,4,0,4}; return r[row]; }
+    }
+}
+
+static void gui_draw_rect_char5x7(int x, int y, char ch, uint32_t color, const gui_rect_t *clip) {
+    int row;
+    int col;
+    if (!clip || clip->w <= 0 || clip->h <= 0) return;
+    for (row = 0; row < 7; row++) {
+        uint8_t bits = gui_glyph5x7_row(ch, row);
+        for (col = 0; col < 5; col++) {
+            if (bits & (uint8_t)(1u << (4 - col))) {
+                gui_title_rect_px(x + col, y + row, 1, 1, color, clip);
+            }
+        }
+    }
+}
+
 static void gui_draw_text_clipped_direct(int x, int y, const char *text, uint32_t color, const gui_rect_t *clip) {
-    font_rect_t font_clip;
-    if (!clip || clip->w <= 0 || clip->h <= 0 || !text || !text[0]) return;
-    font_clip.x = clip->x;
-    font_clip.y = clip->y;
-    font_clip.w = clip->w;
-    font_clip.h = clip->h;
-    font_draw_text_clipped(font_get_default(), gui_font_put_pixel, 0, &font_clip, x, y, text, color);
+    uint32_t i;
+    int cx;
+    if (!clip || clip->w <= 0 || clip->h <= 0 || !text) return;
+    cx = x;
+    for (i = 0; i < 63u; i++) {
+        char ch = text[i];
+        if (ch == '\0') break;
+        if (cx > clip->x + clip->w - 1) break;
+        gui_draw_rect_char5x7(cx, y, ch, color, clip);
+        cx += 6;
+    }
 }
 
 static void gui_title_rect_px(int x, int y, int w, int h, uint32_t color, const gui_rect_t *clip) {
@@ -168,134 +251,8 @@ static void gui_title_rect_px(int x, int y, int w, int h, uint32_t color, const 
     gui_raw_fill_rect(x, y, w, h, color);
 }
 
-#define GUI_GLYPH_ROW(row,r0,r1,r2,r3,r4,r5,r6) \
-    ((uint8_t)((row) == 0 ? (r0) : \
-               (row) == 1 ? (r1) : \
-               (row) == 2 ? (r2) : \
-               (row) == 3 ? (r3) : \
-               (row) == 4 ? (r4) : \
-               (row) == 5 ? (r5) : (r6)))
-
-static uint8_t gui_rect_glyph5x7(char ch, int row) {
-    uint8_t c = (uint8_t)ch;
-    if (row < 0 || row >= 7) return 0;
-    if (c >= (uint8_t)'a' && c <= (uint8_t)'z') c = (uint8_t)(c - (uint8_t)'a' + (uint8_t)'A');
-
-    switch (c) {
-        case 'A': return GUI_GLYPH_ROW(row,0x0e,0x11,0x11,0x1f,0x11,0x11,0x11);
-        case 'B': return GUI_GLYPH_ROW(row,0x1e,0x11,0x11,0x1e,0x11,0x11,0x1e);
-        case 'C': return GUI_GLYPH_ROW(row,0x0e,0x11,0x10,0x10,0x10,0x11,0x0e);
-        case 'D': return GUI_GLYPH_ROW(row,0x1e,0x11,0x11,0x11,0x11,0x11,0x1e);
-        case 'E': return GUI_GLYPH_ROW(row,0x1f,0x10,0x10,0x1e,0x10,0x10,0x1f);
-        case 'F': return GUI_GLYPH_ROW(row,0x1f,0x10,0x10,0x1e,0x10,0x10,0x10);
-        case 'G': return GUI_GLYPH_ROW(row,0x0e,0x11,0x10,0x17,0x11,0x11,0x0f);
-        case 'H': return GUI_GLYPH_ROW(row,0x11,0x11,0x11,0x1f,0x11,0x11,0x11);
-        case 'I': return GUI_GLYPH_ROW(row,0x1f,0x04,0x04,0x04,0x04,0x04,0x1f);
-        case 'J': return GUI_GLYPH_ROW(row,0x01,0x01,0x01,0x01,0x11,0x11,0x0e);
-        case 'K': return GUI_GLYPH_ROW(row,0x11,0x12,0x14,0x18,0x14,0x12,0x11);
-        case 'L': return GUI_GLYPH_ROW(row,0x10,0x10,0x10,0x10,0x10,0x10,0x1f);
-        case 'M': return GUI_GLYPH_ROW(row,0x11,0x1b,0x15,0x15,0x11,0x11,0x11);
-        case 'N': return GUI_GLYPH_ROW(row,0x11,0x19,0x15,0x13,0x11,0x11,0x11);
-        case 'O': return GUI_GLYPH_ROW(row,0x0e,0x11,0x11,0x11,0x11,0x11,0x0e);
-        case 'P': return GUI_GLYPH_ROW(row,0x1e,0x11,0x11,0x1e,0x10,0x10,0x10);
-        case 'Q': return GUI_GLYPH_ROW(row,0x0e,0x11,0x11,0x11,0x15,0x12,0x0d);
-        case 'R': return GUI_GLYPH_ROW(row,0x1e,0x11,0x11,0x1e,0x14,0x12,0x11);
-        case 'S': return GUI_GLYPH_ROW(row,0x0f,0x10,0x10,0x0e,0x01,0x01,0x1e);
-        case 'T': return GUI_GLYPH_ROW(row,0x1f,0x04,0x04,0x04,0x04,0x04,0x04);
-        case 'U': return GUI_GLYPH_ROW(row,0x11,0x11,0x11,0x11,0x11,0x11,0x0e);
-        case 'V': return GUI_GLYPH_ROW(row,0x11,0x11,0x11,0x11,0x11,0x0a,0x04);
-        case 'W': return GUI_GLYPH_ROW(row,0x11,0x11,0x11,0x15,0x15,0x15,0x0a);
-        case 'X': return GUI_GLYPH_ROW(row,0x11,0x11,0x0a,0x04,0x0a,0x11,0x11);
-        case 'Y': return GUI_GLYPH_ROW(row,0x11,0x11,0x0a,0x04,0x04,0x04,0x04);
-        case 'Z': return GUI_GLYPH_ROW(row,0x1f,0x01,0x02,0x04,0x08,0x10,0x1f);
-        case '0': return GUI_GLYPH_ROW(row,0x0e,0x11,0x13,0x15,0x19,0x11,0x0e);
-        case '1': return GUI_GLYPH_ROW(row,0x04,0x0c,0x04,0x04,0x04,0x04,0x0e);
-        case '2': return GUI_GLYPH_ROW(row,0x0e,0x11,0x01,0x02,0x04,0x08,0x1f);
-        case '3': return GUI_GLYPH_ROW(row,0x1e,0x01,0x01,0x0e,0x01,0x01,0x1e);
-        case '4': return GUI_GLYPH_ROW(row,0x02,0x06,0x0a,0x12,0x1f,0x02,0x02);
-        case '5': return GUI_GLYPH_ROW(row,0x1f,0x10,0x10,0x1e,0x01,0x01,0x1e);
-        case '6': return GUI_GLYPH_ROW(row,0x0e,0x10,0x10,0x1e,0x11,0x11,0x0e);
-        case '7': return GUI_GLYPH_ROW(row,0x1f,0x01,0x02,0x04,0x08,0x08,0x08);
-        case '8': return GUI_GLYPH_ROW(row,0x0e,0x11,0x11,0x0e,0x11,0x11,0x0e);
-        case '9': return GUI_GLYPH_ROW(row,0x0e,0x11,0x11,0x0f,0x01,0x01,0x0e);
-        case '-': return GUI_GLYPH_ROW(row,0x00,0x00,0x00,0x1f,0x00,0x00,0x00);
-        case '_': return GUI_GLYPH_ROW(row,0x00,0x00,0x00,0x00,0x00,0x00,0x1f);
-        case '.': return GUI_GLYPH_ROW(row,0x00,0x00,0x00,0x00,0x00,0x0c,0x0c);
-        case ':': return GUI_GLYPH_ROW(row,0x00,0x0c,0x0c,0x00,0x0c,0x0c,0x00);
-        case '/': return GUI_GLYPH_ROW(row,0x01,0x01,0x02,0x04,0x08,0x10,0x10);
-        case ' ': return 0;
-        default:  return GUI_GLYPH_ROW(row,0x1f,0x11,0x01,0x02,0x04,0x00,0x04);
-    }
-}
-
-#undef GUI_GLYPH_ROW
-
-static void gui_draw_rect_text_clipped(int x, int y, const char *text, uint32_t color, const gui_rect_t *clip) {
-    int cursor_x;
-    uint32_t i;
-
-    if (!clip || clip->w <= 0 || clip->h <= 0 || !text || !text[0]) return;
-    cursor_x = x;
-    for (i = 0; text[i] && i < 63u; i++) {
-        char ch = text[i];
-        int row;
-        if (ch == '\n' || ch == '\r') break;
-        if (ch == '\t') {
-            cursor_x += 24;
-            continue;
-        }
-        if (cursor_x >= clip->x + clip->w) break;
-        for (row = 0; row < 7; row++) {
-            uint8_t bits = gui_rect_glyph5x7(ch, row);
-            int col;
-            for (col = 0; col < 5; col++) {
-                if (bits & (uint8_t)(0x10u >> col)) {
-                    gui_title_rect_px(cursor_x + col, y + row, 1, 1, color, clip);
-                }
-            }
-        }
-        cursor_x += 6;
-    }
-}
-
-static void gui_draw_debug_title_word(int x, int y, uint32_t color, const gui_rect_t *clip) {
-    int s = 1;
-    int gap = 6;
-    int cx = x;
-
-    (void)clip;
-
-    /* T */
-    gui_title_rect_px(cx, y, 5 * s, s, color, clip);
-    gui_title_rect_px(cx + 2 * s, y, s, 7 * s, color, clip);
-    cx += gap;
-
-    /* I */
-    gui_title_rect_px(cx, y, 5 * s, s, color, clip);
-    gui_title_rect_px(cx + 2 * s, y, s, 7 * s, color, clip);
-    gui_title_rect_px(cx, y + 6 * s, 5 * s, s, color, clip);
-    cx += gap;
-
-    /* T */
-    gui_title_rect_px(cx, y, 5 * s, s, color, clip);
-    gui_title_rect_px(cx + 2 * s, y, s, 7 * s, color, clip);
-    cx += gap;
-
-    /* L */
-    gui_title_rect_px(cx, y, s, 7 * s, color, clip);
-    gui_title_rect_px(cx, y + 6 * s, 5 * s, s, color, clip);
-    cx += gap;
-
-    /* E */
-    gui_title_rect_px(cx, y, s, 7 * s, color, clip);
-    gui_title_rect_px(cx, y, 5 * s, s, color, clip);
-    gui_title_rect_px(cx, y + 3 * s, 4 * s, s, color, clip);
-    gui_title_rect_px(cx, y + 6 * s, 5 * s, s, color, clip);
-}
-
 static void gui_draw_window_title_text(int x, int y, const char *text, uint32_t color, const gui_rect_t *clip) {
-    (void)text;
-    gui_draw_debug_title_word(x, y, color, clip);
+    gui_draw_text_clipped_direct(x, y, text, color, clip);
 }
 static int gui_rect_contains(const gui_rect_t *r, int x, int y) {
     return r && x >= r->x && y >= r->y && x < r->x + r->w && y < r->y + r->h;
@@ -708,16 +665,7 @@ static void gui_draw_window(gui_window_t *w) {
         title_clip.w = title_right - title_x;
         title_clip.h = GUI_TITLE_HEIGHT - GUI_BORDER_SIZE;
         if (title_clip.w > 0 && title_clip.h > 0) {
-            /* Window-title pipeline marker. If this yellow block is visible but
-             * text is not, the remaining issue is purely glyph/text rendering.
-             */
-            gui_raw_fill_rect(title_x, title_y, 10, 8, gui_rgb(255, 255, 0));
-
-            /* Draw title text via the simplest pixel path. This bypasses the
-             * generic clipped font renderer, which may reject this tiny clip or
-             * depend on state that is not valid during window chrome drawing.
-             */
-            gui_draw_window_title_text(title_x + 14, title_y, w->title, gui_rgb(0, 255, 0), &title_clip);
+            gui_draw_window_title_text(title_x, title_y, w->title, gui_rgb(235, 242, 255), &title_clip);
         }
     }
 
@@ -884,11 +832,11 @@ typedef struct gui_taskbar_layout {
 } gui_taskbar_layout_t;
 
 static int gui_taskbar_button_width(gui_window_t *window) {
-    int bw;
-    if (!window) return GUI_TASKBAR_START_W;
-    bw = 72 + (int)strlen(window->title) * GUI_CHAR_W;
-    if (bw > 180) bw = 180;
-    return bw;
+    uint32_t len;
+    if (!window) return 96;
+    len = gui_bounded_strlen(window->title, 31u);
+    if (len == 0u) return 96;
+    return 48 + (int)len * GUI_CHAR_W;
 }
 
 static int gui_taskbar_content_width(void) {
@@ -1399,7 +1347,7 @@ gui_window_t *gui_create_window(int x, int y, int w, int h, const char *title) {
     win->used = 1;
     win->id = g_gui.next_window_id++;
     win->rect.x = x; win->rect.y = y; win->rect.w = w; win->rect.h = h;
-    gui_copy_text(win->title, title, sizeof(win->title));
+    gui_copy_text(win->title, title ? title : "Window", sizeof(win->title));
     win->bg_color = g_gui.colors.window_bg;
     win->flags = GUI_WINDOW_FLAG_CLOSABLE | GUI_WINDOW_FLAG_MINIMIZABLE;
     win->visible = 1;
@@ -1620,7 +1568,18 @@ static void gui_draw_taskbar(void) {
     gui_raw_line(layout.bar.x, layout.bar.y + layout.bar.h - 1, layout.bar.x + layout.bar.w - 1, layout.bar.y + layout.bar.h - 1, gui_rgb(10, 13, 20));
 
     gui_draw_taskbar_button(layout.terminal_button, gui_rgb(64, 92, 150), gui_rgb(170, 205, 255), gui_rgb(12, 18, 30));
-    /* Taskbar text temporarily disabled: keep GUI desktop boot path stable. */
+    {
+        gui_rect_t terminal_clip;
+        terminal_clip.x = layout.terminal_button.x + 4;
+        terminal_clip.y = layout.terminal_button.y + 3;
+        terminal_clip.w = layout.terminal_button.w - 8;
+        terminal_clip.h = layout.terminal_button.h - 6;
+        gui_draw_text_clipped_direct(layout.terminal_button.x + 8,
+                                     layout.terminal_button.y + 7,
+                                     "Terminal",
+                                     gui_rgb(230, 240, 255),
+                                     &terminal_clip);
+    }
 
     for (i = 0; i < g_gui.window_count; i++) {
         uint32_t idx = g_gui.z_order[i];
@@ -1638,10 +1597,20 @@ static void gui_draw_taskbar(void) {
         /* 娲诲姩绐楀彛楂樹寒鏄剧ず锛屾渶灏忓寲绐楀彛浣庢殫鏄剧ず */
         if (w->flags & GUI_WINDOW_FLAG_MINIMIZED) {
             gui_draw_taskbar_button(button, gui_rgb(52, 68, 96), gui_rgb(135, 170, 230), gui_rgb(20, 24, 35));
-            /* Taskbar text temporarily disabled: keep GUI desktop boot path stable. */
         } else {
             gui_draw_taskbar_button(button, gui_rgb(38, 52, 76), gui_rgb(100, 130, 190), gui_rgb(16, 20, 32));
-            /* Taskbar text temporarily disabled: keep GUI desktop boot path stable. */
+        }
+        {
+            gui_rect_t window_button_clip;
+            window_button_clip.x = button.x + 4;
+            window_button_clip.y = button.y + 3;
+            window_button_clip.w = button.w - 8;
+            window_button_clip.h = button.h - 6;
+            gui_draw_text_clipped_direct(button.x + 8,
+                                         button.y + 7,
+                                         w->title,
+                                         gui_rgb(220, 235, 255),
+                                         &window_button_clip);
         }
         bx += gui_taskbar_button_width(w) + 6;
     }
@@ -1658,14 +1627,6 @@ void gui_render(void) {
         if (idx < GUI_MAX_WINDOWS) gui_draw_window(&g_gui.windows[idx]);
     }
     gui_terminal_redraw();
-
-    /* Hard GUI pipeline diagnostic: these bars do not depend on fonts/windows.
-     * If the graphical renderer is active, the top-left corner must show
-     * red/green/blue bars. Remove after display-path debugging.
-     */
-    gui_raw_fill_rect(0, 0, 96, 12, gui_rgb(255, 0, 0));
-    gui_raw_fill_rect(0, 12, 96, 12, gui_rgb(0, 255, 0));
-    gui_raw_fill_rect(0, 24, 96, 12, gui_rgb(0, 64, 255));
 
     if (g_gui.cursor_visible) gui_draw_cursor();
     gui_flush_backbuffer();
@@ -1706,6 +1667,7 @@ void gui_demo(void) {
     gui_terminal_write("\n[GUI] demo windows created\n> ");
     gui_render();
 }
+
 
 
 

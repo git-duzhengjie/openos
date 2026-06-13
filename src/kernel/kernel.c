@@ -275,11 +275,11 @@ void kernel_main(void) {
     /* 启动定时器（调度器已初始化） */
     pit_start();
     
-    /* ⚠️ 不在此处开启中断！
-     * 必须�?sched_start() 通过 iret 启动第一个线程后�?
-     * 由线程初�?EFLAGS (IF=1) 自动开启中断�?
-     * 如果提前 sti，timer ISR 会把 0x90000 栈指针保存到 idle->kernel_esp�?
-     * 导致后续切换�?idle 时栈帧被破坏 �?GPF�?
+    /* Do not enable interrupts here.
+     * sched_start() must enter the first thread through iret, and the
+     * thread's initial EFLAGS (IF=1) will enable interrupts safely.
+     * If sti runs too early, timer ISR may save the bootstrap stack into
+     * idle->kernel_esp and later context switches can restore a bad stack.
      */
     
     /* 测试用户态切换已通过 Phase 2 验证，不再自动测�?*/

@@ -48,8 +48,10 @@ SECTIONS
 
     /* 结束地址 (调试用) */
     __kernel_end = .;
-    
-    /* 内核栈顶地址 (栈向低地址增长) */
-    . = 0x90000;
-    kernel_stack_top = .;
+
+    /* 低端内存栈顶。必须高于内核映像/BSS，且低于 EBDA/显存区域。 */
+    kernel_stack_top = 0x9F000;
+
+    ASSERT(__kernel_end < 0x9A000, "kernel image/BSS overlaps low-memory stack reserve")
+    ASSERT(kernel_stack_top <= 0x9F000, "kernel stack top exceeds safe low memory")
 }
