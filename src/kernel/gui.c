@@ -1029,6 +1029,7 @@ static int gui_taskbar_content_width(void) {
         if (idx >= GUI_MAX_WINDOWS) continue;
         w = &g_gui.windows[idx];
         if (!w->used || !w->visible) continue;
+        if (w->flags & GUI_WINDOW_FLAG_TERMINAL) continue;
         width += 6 + gui_taskbar_button_width(w);
     }
     return width;
@@ -1090,6 +1091,7 @@ static gui_window_t *gui_taskbar_window_at(int x, int y) {
         if (idx >= GUI_MAX_WINDOWS) continue;
         w = &g_gui.windows[idx];
         if (!w->used || !w->visible) continue;
+        if (w->flags & GUI_WINDOW_FLAG_TERMINAL) continue;
         button.x = bx;
         button.y = layout.item_y;
         button.w = gui_taskbar_button_width(w);
@@ -1582,22 +1584,20 @@ int gui_start(uint32_t width, uint32_t height) {
     return 0;
 }
 
-static void gui_create_welcome_window(void) {
-    gui_window_t *welcome;
+static void gui_draw_desktop_welcome(void) {
+    int x = 92;
+    int y = 84;
 
-    welcome = gui_create_window(92, 84, 470, 210, "Welcome to OpenOS");
-    if (!welcome) return;
-
-    gui_add_label(welcome, 22, 26, 390, 18, "OpenOS desktop is ready.");
-    gui_add_label(welcome, 22, 54, 410, 18, "Click TERMINAL on the taskbar");
-    gui_add_label(welcome, 22, 78, 420, 18, "to open the command line tool.");
-    gui_add_label(welcome, 22, 118, 420, 18, "Tip: use cursor on/off for software mouse.");
+    gui_draw_text(x, y, "Welcome to OpenOS", gui_rgb(235, 242, 255));
+    gui_draw_text(x, y + 32, "OpenOS desktop is ready.", gui_rgb(205, 220, 245));
+    gui_draw_text(x, y + 60, "Click TERMINAL on the taskbar", gui_rgb(205, 220, 245));
+    gui_draw_text(x, y + 84, "to open the command line tool.", gui_rgb(205, 220, 245));
+    gui_draw_text(x, y + 124, "Tip: use cursor on/off for software mouse.", gui_rgb(170, 195, 230));
 }
 
 int gui_start_desktop(void) {
     if (g_gui.initialized) {
         gui_terminal_minimize();
-        gui_create_welcome_window();
         gui_render();
         return 0;
     }
@@ -1605,7 +1605,6 @@ int gui_start_desktop(void) {
     if (gui_start(1024, 768) != 0) return -1;
     gui_terminal_write("\n[GUI] desktop started. Click TERMINAL on the taskbar to open command line.\n");
     gui_terminal_minimize();
-    gui_create_welcome_window();
     gui_render();
     return 0;
 }
@@ -1770,7 +1769,7 @@ void gui_terminal_clear(void) {
 void gui_terminal_init(void) {
     gui_window_t *term;
     if (g_gui.terminal.window) return;
-    term = gui_create_window(24, 420, (int)g_gui.width - 48, (int)g_gui.height - 448, "OpenOS GUI Terminal");
+    term = gui_create_window(24, 420, (int)g_gui.width - 48, (int)g_gui.height - 448, "TERMINAL");
     if (!term) return;
     term->flags |= GUI_WINDOW_FLAG_TERMINAL;
     term->bg_color = gui_rgb(10, 14, 22);
@@ -1788,7 +1787,7 @@ void gui_terminal_init(void) {
     g_gui.terminal.clipboard_len = 0;
     g_gui.terminal.clipboard[0] = '\0';
     gui_terminal_clear();
-    gui_terminal_write("OpenOS GUI terminal ready. Keyboard input is routed here.\n> ");
+    gui_terminal_write("TERMINAL ready. Keyboard input is routed here.\n> ");
 }
 
 static void gui_terminal_scroll(void) {
@@ -2022,7 +2021,7 @@ static void gui_draw_taskbar(void) {
         terminal_clip.h = layout.terminal_button.h - 6;
         gui_draw_text_clipped_direct(layout.terminal_button.x + 8,
                                      layout.terminal_button.y + 7,
-                                     "Terminal",
+                                     "TERMINAL",
                                      gui_rgb(230, 240, 255),
                                      &terminal_clip);
     }
@@ -2034,6 +2033,7 @@ static void gui_draw_taskbar(void) {
         if (idx >= GUI_MAX_WINDOWS) continue;
         w = &g_gui.windows[idx];
         if (!w->used || !w->visible) continue;
+        if (w->flags & GUI_WINDOW_FLAG_TERMINAL) continue;
         button.x = bx;
         button.y = layout.item_y;
         button.w = gui_taskbar_button_width(w);
@@ -2081,6 +2081,7 @@ static void gui_terminal_tick_cursor(void) {
 static void gui_render_scene(void) {
     uint32_t i;
     gui_raw_fill_rect(0, 0, (int)g_gui.width, (int)g_gui.height, g_gui.colors.desktop_bg);
+    gui_draw_desktop_welcome();
     gui_draw_taskbar();
 
     for (i = 0; i < g_gui.window_count; i++) {
