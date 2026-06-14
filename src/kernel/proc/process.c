@@ -77,7 +77,51 @@ void proc_free(process_t *proc) {
     proc->ppid = 0;
     proc->threads = NULL;
     proc->thread_count = 0;
+    proc->cr3 = 0;
+    proc->code_addr = 0;
+    proc->code_size = 0;
+    proc->heap_start = 0;
+    proc->heap_end = 0;
+    proc->exit_code = 0;
     for (int i = 0; i < 16; i++) proc->fds[i] = NULL;
+}
+
+void proc_reap_zombie(process_t *proc) {
+    if (!proc || proc->state != PROC_ZOMBIE) return;
+
+    /* Current process model uses one main thread per user process.
+     * thread_t.next/prev are scheduler queue links, not a private process
+     * thread list, so never iterate through t->next here. */
+    thread_t *t = proc->threads;
+    if (t) {
+        sched_remove_thread(t);
+
+        if (t->kernel_stack && t->kernel_stack_top > t->kernel_stack) {
+            uint32_t stack_size = t->kernel_stack_top - t->kernel_stack;
+            uint32_t stack_pages = (stack_size + PAGE_SIZE - 1) / PAGE_SIZE;
+            for (uint32_t page = 0; page < stack_pages; page++) {
+                pmm_free_page((void *)(t->kernel_stack + page * PAGE_SIZE));
+            }
+            t->kernel_stack = 0;
+            t->kernel_stack_top = 0;
+        }
+
+        pmm_free_page(t);
+    }
+
+    proc_free(proc);
+}
+
+uint32_t proc_reap_zombies_for_parent(uint32_t ppid) {
+    uint32_t count = 0;
+    for (int i = 0; i < MAX_PROCS; i++) {
+        process_t *p = &proc_table[i];
+        if (p->state == PROC_ZOMBIE && p->ppid == ppid) {
+            proc_reap_zombie(p);
+            count++;
+        }
+    }
+    return count;
 }
 
 void proc_mark_exit(uint32_t pid, int code) {
@@ -103,6 +147,11 @@ process_t *proc_find_by_state(process_state_t state) {
             return &proc_table[i];
     }
     return NULL;
+}
+
+uint32_t proc_current_pid(void) {
+    thread_t *cur = sched_get_current();
+    return cur ? cur->pid : 0;
 }
 
 process_t *proc_get_parent(uint32_t pid) {
@@ -427,7 +476,7 @@ uint32_t sys_waitpid(uint32_t pid, int *status, int options) {
             if (p->state == PROC_ZOMBIE) {
                 if (status) *status = (int)p->exit_code;
                 uint32_t cpid = p->pid;
-                proc_free(p);
+                proc_reap_zombie(p);
                 return cpid;
             }
         }

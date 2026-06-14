@@ -38,6 +38,12 @@ static void enqueue(thread_t *t) {
 static void remove_from_queue(thread_t *t) {
     if (!t) return;
     int prio = t->priority;
+    if (prio < 0 || prio >= 8) return;
+
+    thread_t *cur = sched.queues[prio];
+    while (cur && cur != t) cur = cur->next;
+    if (!cur) return;
+
     if (t->prev) t->prev->next = t->next;
     else sched.queues[prio] = t->next;
     if (t->next) t->next->prev = t->prev;

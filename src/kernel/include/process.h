@@ -116,6 +116,9 @@ thread_t *thread_create_sized(uint32_t pid, const char *name,
                               uint32_t entry, uint32_t stack_top,
                               uint32_t stack_size);
 void proc_mark_exit(uint32_t pid, int code);
+void proc_reap_zombie(process_t *proc);
+uint32_t proc_reap_zombies_for_parent(uint32_t ppid);
+uint32_t proc_current_pid(void);
 
 /* 睡眠/唤醒 */
 void thread_sleep(uint32_t ms);

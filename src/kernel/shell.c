@@ -1868,6 +1868,12 @@ void shell_run(void)
             history_view = history_count;
             history_saved_valid = 0;
             history_saved_line[0] = '\0';
+            uint32_t reaped = proc_reap_zombies_for_parent(proc_current_pid());
+            if (reaped > 0) {
+                serial_write("[REAP] collected zombie children: ");
+                serial_write_hex(reaped);
+                serial_write("\n");
+            }
             shell_prompt();
         }
         else if (c == 0x1B)
