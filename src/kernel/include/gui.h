@@ -181,7 +181,9 @@ typedef struct gui_system {
     uint8_t mouse_buttons;
     uint8_t last_mouse_buttons;
     int cursor_visible;
-
+    int cursor_drawn;
+    int cursor_fb_x;
+    int cursor_fb_y;
     uint32_t *backbuffer;
     uint32_t backbuffer_pixels;
     int double_buffered;
@@ -238,6 +240,7 @@ void gui_invalidate_all(void);
 void gui_terminal_init(void);
 void gui_terminal_putc(char ch);
 void gui_terminal_write(const char *text);
+void gui_terminal_enqueue_output(const char *text);
 void gui_terminal_clear(void);
 void gui_terminal_redraw(void);
 void gui_terminal_on_input(char ch);

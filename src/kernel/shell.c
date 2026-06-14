@@ -44,7 +44,7 @@ static void print(const char *s)
     vga_write(s);
     serial_write(s);
     if (gui_is_ready()) {
-        gui_terminal_write(s);
+        gui_terminal_enqueue_output(s);
     }
 }
 
@@ -207,9 +207,6 @@ static char shell_read_input_char(int wait_loops)
         c = input_getc();
         if (c)
             return c;
-        if (gui_is_ready()) {
-            gui_poll();
-        }
     }
 
     return 0;
@@ -1132,13 +1129,15 @@ void shell_run(void)
         /* 从统一输入缓冲区读取；同时把串口数据灌入输入缓冲区 */
         char c = shell_read_input_char(0);
 
-        /* 每次循玏下处理 GUI 事件和鼠标更新，避免邥溉 */
-        if (gui_is_ready()) {
-            gui_poll();
-        }
-
-        if (!c)
+        if (!c) {
+            static unsigned idle_spin = 0;
+            __asm__ volatile("pause");
+            idle_spin++;
+            if ((idle_spin & 0x3fu) == 0) {
+                sched_yield();
+            }
             continue;
+        }
 
         {
             int gui_key = 0;
@@ -1166,7 +1165,6 @@ void shell_run(void)
                     gui_post_key(c);
                 else
                     gui_post_key_code(gui_key);
-                gui_poll();
                 continue;
             }
         }

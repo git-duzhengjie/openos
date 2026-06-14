@@ -20,7 +20,15 @@ static gui_system_t g_gui;
 #define GUI_DEBUG_LOG 0
 #endif
 
-#define GUI_TERMINAL_CURSOR_BLINK_INTERVAL 30000u
+#ifndef GUI_TERMINAL_START_SHELL
+#define GUI_TERMINAL_START_SHELL 1
+#endif
+
+#define GUI_TERMINAL_OUTPUT_QUEUE_SIZE 4096u
+#define GUI_TERMINAL_OUTPUT_DRAIN_LIMIT 128u
+static volatile uint32_t g_terminal_out_head = 0;
+static volatile uint32_t g_terminal_out_tail = 0;
+static char g_terminal_out_queue[GUI_TERMINAL_OUTPUT_QUEUE_SIZE];
 
 static int gui_rect_contains(const gui_rect_t *r, int x, int y);
 static int gui_rect_intersect(const gui_rect_t *a, const gui_rect_t *b, gui_rect_t *out);
@@ -30,6 +38,7 @@ static int gui_handle_window_control_at(int x, int y);
 static void gui_demo_button(gui_widget_t *widget, void *user_data);
 static void gui_terminal_invalidate_cursor(void);
 static void gui_terminal_invalidate_body(void);
+static void gui_terminal_drain_output_queue(void);
 static int gui_terminal_point_to_cell(int x, int y, uint32_t *col, uint32_t *row);
 static void gui_terminal_update_selection(uint32_t col, uint32_t row);
 static int gui_terminal_cell_selected(uint32_t col, uint32_t row);
@@ -601,6 +610,49 @@ static void gui_draw_cursor(void) {
     gui_raw_line(x + 1, y + 2, x + 1, y + 12, c);
     gui_raw_line(x + 1, y + 2, x + 8, y + 9, c);
     gui_raw_line(x + 2, y + 12, x + 4, y + 10, c);
+}
+
+static void gui_cursor_restore_fb(void) {
+    int x, y, sx, sy, ex, ey;
+    if (!g_gui.cursor_drawn || !g_gui.backbuffer) return;
+    sx = g_gui.cursor_fb_x - 2;
+    sy = g_gui.cursor_fb_y - 2;
+    ex = g_gui.cursor_fb_x + 14;
+    ey = g_gui.cursor_fb_y + 18;
+    if (sx < 0) sx = 0;
+    if (sy < 0) sy = 0;
+    if (ex > (int)g_gui.width) ex = (int)g_gui.width;
+    if (ey > (int)g_gui.height) ey = (int)g_gui.height;
+    for (y = sy; y < ey; y++) {
+        for (x = sx; x < ex; x++) {
+            framebuffer_put_pixel((uint32_t)x, (uint32_t)y, g_gui.backbuffer[y * (int)g_gui.width + x]);
+        }
+    }
+    g_gui.cursor_drawn = 0;
+}
+
+static void gui_cursor_draw_fb(void) {
+    int x = g_gui.mouse_x;
+    int y = g_gui.mouse_y;
+    uint32_t c = gui_rgb(255, 255, 255);
+    uint32_t b = gui_rgb(0, 0, 0);
+    if (!g_gui.cursor_visible) return;
+    framebuffer_draw_line(x, y, x, y + 15, b);
+    framebuffer_draw_line(x, y, x + 10, y + 10, b);
+    framebuffer_draw_line(x, y + 15, x + 4, y + 11, b);
+    framebuffer_draw_line(x + 4, y + 11, x + 10, y + 10, b);
+    framebuffer_draw_line(x + 1, y + 2, x + 1, y + 12, c);
+    framebuffer_draw_line(x + 1, y + 2, x + 8, y + 9, c);
+    framebuffer_draw_line(x + 2, y + 12, x + 4, y + 10, c);
+    g_gui.cursor_drawn = 1;
+    g_gui.cursor_fb_x = x;
+    g_gui.cursor_fb_y = y;
+}
+
+static void gui_cursor_present_fast(void) {
+    if (!g_gui.initialized || !g_gui.double_buffered || !g_gui.backbuffer) return;
+    gui_cursor_restore_fb();
+    gui_cursor_draw_fb();
 }
 
 static void gui_rect_union_inplace(gui_rect_t *dst, const gui_rect_t *src) {
@@ -1309,17 +1361,6 @@ static void gui_handle_mouse_down(int x, int y) {
         return;
     }
 
-    serial_write("[GUI] mouse miss x=");
-    gui_write_dec((uint32_t)x);
-    serial_write(" y=");
-    gui_write_dec((uint32_t)y);
-    serial_write(" taskbar_y=");
-    gui_write_dec((uint32_t)((int)g_gui.height - GUI_TASKBAR_HEIGHT));
-    serial_write(" screen=");
-    gui_write_dec(g_gui.width);
-    serial_write("x");
-    gui_write_dec(g_gui.height);
-    serial_write("\n");
 
     gui_set_focused_widget(0);
 }
@@ -1430,29 +1471,24 @@ static void gui_poll_mouse(void) {
     if (ms.y > (int)g_gui.height - 1) ms.y = (int)g_gui.height - 1;
 
     if ((ms.buttons & 1u) && !(g_gui.last_mouse_buttons & 1u)) {
-        serial_write("[GUI] mouse down x=");
-        gui_write_dec((uint32_t)ms.x);
-        serial_write(" y=");
-        gui_write_dec((uint32_t)ms.y);
-        serial_write(" btn=");
-        gui_write_dec((uint32_t)ms.buttons);
-        serial_write("\n");
         gui_handle_mouse_down(ms.x, ms.y);
     } else if (!(ms.buttons & 1u) && (g_gui.last_mouse_buttons & 1u)) {
-        serial_write("[GUI] mouse up x=");
-        gui_write_dec((uint32_t)ms.x);
-        serial_write(" y=");
-        gui_write_dec((uint32_t)ms.y);
-        serial_write(" btn=");
-        gui_write_dec((uint32_t)ms.buttons);
-        serial_write("\n");
         gui_handle_mouse_up(ms.x, ms.y);
     }
 
     if (ms.x != g_gui.mouse_x || ms.y != g_gui.mouse_y) {
-        gui_invalidate_rect(g_gui.mouse_x - 2, g_gui.mouse_y - 2, 22, 22);
-        gui_invalidate_rect(ms.x - 2, ms.y - 2, 22, 22);
-        gui_handle_mouse_move(ms.x, ms.y);
+        int complex_move;
+        complex_move = (g_gui.drag_window != 0) || g_gui.terminal.selecting ||
+                       ((ms.buttons & 1u) != 0) || ((g_gui.last_mouse_buttons & 1u) != 0);
+        if (complex_move) {
+            gui_invalidate_rect(g_gui.mouse_x - 2, g_gui.mouse_y - 2, 22, 22);
+            gui_invalidate_rect(ms.x - 2, ms.y - 2, 22, 22);
+            gui_handle_mouse_move(ms.x, ms.y);
+        } else {
+            g_gui.mouse_x = ms.x;
+            g_gui.mouse_y = ms.y;
+            gui_cursor_present_fast();
+        }
     }
 
     g_gui.mouse_x = ms.x;
@@ -1480,6 +1516,9 @@ void gui_init(void) {
      * Use `cursor off` to hide it when the host cursor is preferred.
      */
     g_gui.cursor_visible = 1;
+    g_gui.cursor_drawn = 0;
+    g_gui.cursor_fb_x = 0;
+    g_gui.cursor_fb_y = 0;
     serial_write("[OK] GUI object pool\n");
 }
 
@@ -1840,7 +1879,11 @@ void gui_terminal_open(void) {
     gui_invalidate_rect(g_gui.terminal.window->rect.x, g_gui.terminal.window->rect.y,
                         g_gui.terminal.window->rect.w, g_gui.terminal.window->rect.h);
     gui_invalidate_all();
+#if GUI_TERMINAL_START_SHELL
     kernel_start_shell_thread();
+#else
+    serial_write("[GUI] terminal shell start skipped for diagnosis\n");
+#endif
     serial_write("[GUI] terminal activated\n");
 }
 
@@ -1860,6 +1903,29 @@ void gui_terminal_on_input(char ch) {
 void gui_terminal_write(const char *text) {
     if (!text) return;
     while (*text) gui_terminal_putc(*text++);
+}
+
+void gui_terminal_enqueue_output(const char *text) {
+    if (!text) return;
+    while (*text) {
+        uint32_t head = g_terminal_out_head;
+        uint32_t next = (head + 1u) % GUI_TERMINAL_OUTPUT_QUEUE_SIZE;
+        if (next == g_terminal_out_tail) {
+            return;
+        }
+        g_terminal_out_queue[head] = *text++;
+        g_terminal_out_head = next;
+    }
+}
+
+static void gui_terminal_drain_output_queue(void) {
+    uint32_t drained = 0;
+    while (g_terminal_out_tail != g_terminal_out_head && drained < GUI_TERMINAL_OUTPUT_DRAIN_LIMIT) {
+        char ch = g_terminal_out_queue[g_terminal_out_tail];
+        g_terminal_out_tail = (g_terminal_out_tail + 1u) % GUI_TERMINAL_OUTPUT_QUEUE_SIZE;
+        gui_terminal_putc(ch);
+        drained++;
+    }
 }
 
 void gui_terminal_redraw(void) {
@@ -2005,10 +2071,9 @@ static void gui_terminal_tick_cursor(void) {
     if (!g_gui.terminal.window || !g_gui.terminal.window->visible ||
         (g_gui.terminal.window->flags & GUI_WINDOW_FLAG_MINIMIZED)) return;
 
-    g_gui.terminal.cursor_blink_ticks++;
-    if (g_gui.terminal.cursor_blink_ticks >= GUI_TERMINAL_CURSOR_BLINK_INTERVAL) {
+    if (!g_gui.terminal.cursor_visible) {
+        g_gui.terminal.cursor_visible = 1;
         g_gui.terminal.cursor_blink_ticks = 0;
-        g_gui.terminal.cursor_visible = g_gui.terminal.cursor_visible ? 0 : 1;
         gui_terminal_invalidate_cursor();
     }
 }
@@ -2023,8 +2088,6 @@ static void gui_render_scene(void) {
         if (idx < GUI_MAX_WINDOWS) gui_draw_window(&g_gui.windows[idx]);
     }
     gui_terminal_redraw();
-
-    if (g_gui.cursor_visible) gui_draw_cursor();
 }
 
 void gui_render(void) {
@@ -2034,10 +2097,13 @@ void gui_render(void) {
     if (!g_gui.initialized) return;
     if (g_gui.double_buffered && g_gui.backbuffer && !gui_has_dirty()) return;
 
+    gui_cursor_restore_fb();
+
     if (g_gui.full_dirty || !g_gui.double_buffered || !g_gui.backbuffer) {
         gui_pop_render_clip();
         gui_render_scene();
         gui_flush_backbuffer();
+        gui_cursor_draw_fb();
         return;
     }
 
@@ -2045,19 +2111,25 @@ void gui_render(void) {
     if (dirty_count > GUI_MAX_DIRTY_RECTS) dirty_count = GUI_MAX_DIRTY_RECTS;
     for (i = 0; i < dirty_count; i++) dirty_rects[i] = g_gui.dirty_rects[i];
 
-    for (i = 0; i < dirty_count; i++) {
-        gui_push_render_clip(&dirty_rects[i]);
+    if (dirty_count > 0) {
+        gui_rect_t merged = dirty_rects[0];
+        for (i = 1; i < dirty_count; i++) gui_rect_union_inplace(&merged, &dirty_rects[i]);
+        gui_push_render_clip(&merged);
         gui_render_scene();
         gui_pop_render_clip();
+        g_gui.dirty_count = 1;
+        g_gui.dirty_rects[0] = merged;
     }
 
     gui_flush_backbuffer();
+    gui_cursor_draw_fb();
 }
 
 void gui_poll(void) {
     if (!g_gui.initialized) return;
     gui_poll_mouse();
     gui_process_events();
+    gui_terminal_drain_output_queue();
     gui_terminal_tick_cursor();
     if (gui_has_dirty()) gui_render();
 }

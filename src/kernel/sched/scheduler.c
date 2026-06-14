@@ -186,6 +186,7 @@ void sched_yield(void) {
     __asm__ volatile(
         "cli\n"
         "pushfl\n"          /* EFLAGS */
+        "orl $0x200, (%%esp)\n" /* keep IF enabled when this thread resumes */
         "pushl $0x08\n"     /* CS */
         "pushl $1f\n"       /* EIP */
         "pushal\n"          /* EAX ECX EDX EBX ESP EBP ESI EDI */
@@ -219,7 +220,7 @@ process_t *proc_create(const char *name, uint32_t entry, uint32_t esp) {
     return p;
 }
 
-thread_t *thread_create(uint32_t pid, const char *name, uint32_t entry, uint32_t stack_top) {
+thread_t *thread_create_sized(uint32_t pid, const char *name, uint32_t entry, uint32_t stack_top, uint32_t stack_size) {
     thread_t *t = (thread_t *)pmm_alloc_page();
     if (!t) return NULL;
     for (int i = 0; i < (int)sizeof(thread_t); i++) ((char *)t)[i] = 0;
@@ -230,8 +231,9 @@ thread_t *thread_create(uint32_t pid, const char *name, uint32_t entry, uint32_t
     t->state = PROC_READY;
     (void)name;
 
-    char *stack_base = (char *)((uint32_t)stack_top - 4096);
-    for (int i = 0; i < 4096; i++) stack_base[i] = 0;
+    if (stack_size < 4096) stack_size = 4096;
+    char *stack_base = (char *)((uint32_t)stack_top - stack_size);
+    for (uint32_t i = 0; i < stack_size; i++) stack_base[i] = 0;
 
     /* Stack frame matching timer_isr save format:
      * [GS][FS][ES][DS][EDI][ESI][EBP][ESP_skip][EBX][EDX][ECX][EAX][EIP][CS][EFLAGS]
@@ -259,6 +261,10 @@ thread_t *thread_create(uint32_t pid, const char *name, uint32_t entry, uint32_t
     t->kernel_stack = (uint32_t)stack_base;
     t->kernel_stack_top = stack_top;
     return t;
+}
+
+thread_t *thread_create(uint32_t pid, const char *name, uint32_t entry, uint32_t stack_top) {
+    return thread_create_sized(pid, name, entry, stack_top, 4096);
 }
 
 void thread_sleep(uint32_t ms) {

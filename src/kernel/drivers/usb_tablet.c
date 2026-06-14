@@ -53,6 +53,8 @@
 #define TD_CTRL_IOC        0x01000000u
 #define TD_CTRL_C_ERR3     0x18000000u
 #define TD_CTRL_LS         0x04000000u
+#define TD_CTRL_NAK        0x00080000u
+#define TD_CTRL_STATUS_ERR 0x007F0000u
 
 #define USB_PID_OUT   0xE1
 #define USB_PID_IN    0x69
@@ -112,6 +114,11 @@ typedef struct usb_tablet_state {
     uint32_t reports;
     uint32_t errors;
     uint32_t last_status;
+    int poll_pending;
+    int poll_scheduled;
+    uint16_t poll_frame;
+    uint32_t poll_wait_ticks;
+    uint8_t poll_len;
     uint8_t last_report[16];
 } usb_tablet_state_t;
 
@@ -178,14 +185,20 @@ static void td_fill(uhci_td_t *td, uint32_t link, uint32_t ctrl, uint8_t pid,
                     uint8_t addr, uint8_t endp, uint8_t toggle, uint16_t len,
                     void *buf) {
     uint32_t maxlen = (len == 0) ? 0x7FFu : ((uint32_t)(len - 1) << 21);
+    uint32_t inactive_ctrl = ctrl & ~TD_CTRL_ACTIVE;
+
+    /* The poll TD may already be linked from the UHCI periodic frame list.
+     * Publish ACTIVE last so the controller never sees a half-refilled TD.
+     */
+    td->ctrl = inactive_ctrl;
     td->link = link;
-    td->ctrl = ctrl;
     td->token = ((uint32_t)pid) |
                 ((uint32_t)addr << 8) |
                 ((uint32_t)endp << 15) |
                 ((uint32_t)(toggle ? 1 : 0) << 19) |
                 maxlen;
     td->buffer = (uint32_t)buf;
+    td->ctrl = ctrl;
 }
 
 static int uhci_wait_td(uhci_td_t *last_td, uint32_t timeout) {
@@ -201,15 +214,29 @@ static int uhci_wait_td(uhci_td_t *last_td, uint32_t timeout) {
     return 0;
 }
 
-static int uhci_submit_tds(int count, uhci_td_t *wait_td) {
+static int uhci_submit_tds_wait(int count, uhci_td_t *wait_td, uint32_t timeout) {
     if (!g_frame_list || !g_tds || count <= 0) return 0;
     outw(g_tab.io_base + UHCI_STS, 0x003F);
     g_frame_list[0] = (uint32_t)&g_tds[0];
-    int ok = uhci_wait_td(wait_td, 30000);
+    int ok = uhci_wait_td(wait_td, timeout);
     g_frame_list[0] = TD_LINK_TERMINATE;
     outw(g_tab.io_base + UHCI_STS, 0x003F);
     if (!ok) g_tab.errors++;
     return ok;
+}
+
+static int uhci_submit_tds(int count, uhci_td_t *wait_td) {
+    return uhci_submit_tds_wait(count, wait_td, 30000);
+}
+
+static void uhci_schedule_tablet_poll_td(void) {
+    uint32_t td_addr;
+    if (!g_frame_list || !g_tds || g_tab.poll_scheduled) return;
+    td_addr = (uint32_t)&g_tds[0];
+    for (int i = 0; i < 1024; i++) {
+        g_frame_list[i] = td_addr;
+    }
+    g_tab.poll_scheduled = 1;
 }
 
 static int usb_control(uint8_t addr, uint8_t req_type, uint8_t req, uint16_t value,
@@ -452,14 +479,48 @@ void usb_tablet_poll(int screen_width, int screen_height) {
     if (!g_tab.ready || screen_width <= 0 || screen_height <= 0) return;
     g_tab.polls++;
 
-    memset(report, 0, 16);
     len = g_tab.max_packet_in;
     if (len == 0 || len > 16) len = 8;
 
-    td_fill(&g_tds[0], TD_LINK_TERMINATE, TD_CTRL_ACTIVE | TD_CTRL_C_ERR3 | TD_CTRL_IOC,
-            USB_PID_IN, g_tab.address, g_tab.endpoint_in, g_tab.data_toggle_in, len, report);
+    if (!g_tab.poll_pending) {
+        memset(report, 0, 16);
+        td_fill(&g_tds[0], TD_LINK_TERMINATE, TD_CTRL_ACTIVE | TD_CTRL_C_ERR3 | TD_CTRL_IOC,
+                USB_PID_IN, g_tab.address, g_tab.endpoint_in, g_tab.data_toggle_in, len, report);
+        outw(g_tab.io_base + UHCI_STS, 0x003F);
+        g_tab.poll_frame = (uint16_t)(inw(g_tab.io_base + UHCI_FRNUM) & 1023u);
+        uhci_schedule_tablet_poll_td();
+        g_tab.poll_pending = 1;
+        g_tab.poll_wait_ticks = 0;
+        g_tab.poll_len = len;
+        return;
+    }
 
-    if (!uhci_submit_tds(1, &g_tds[0])) return;
+    g_tab.last_status = g_tds[0].ctrl;
+    if (g_tab.last_status & TD_CTRL_ACTIVE) {
+        g_tab.poll_wait_ticks++;
+        if ((g_tab.last_status & TD_CTRL_STATUS_ERR) && !(g_tab.last_status & TD_CTRL_NAK)) {
+            g_tds[0].ctrl &= ~TD_CTRL_ACTIVE;
+            outw(g_tab.io_base + UHCI_STS, 0x003F);
+            g_tab.poll_pending = 0;
+            g_tab.poll_wait_ticks = 0;
+            g_tab.errors++;
+        }
+        return;
+    }
+
+    /* Keep the inactive TD installed in the periodic frame list.
+     * Rewriting all 1024 frame entries for every mouse report creates
+     * visible movement spikes. The next poll refills the same TD as ACTIVE.
+     */
+    outw(g_tab.io_base + UHCI_STS, 0x003F);
+    g_tab.poll_pending = 0;
+    g_tab.last_status = g_tds[0].ctrl;
+
+    if (g_tab.last_status & TD_CTRL_STATUS_ERR) {
+        if (!(g_tab.last_status & TD_CTRL_NAK)) g_tab.errors++;
+        return;
+    }
+
     g_tab.data_toggle_in ^= 1;
 
     memcpy(g_tab.last_report, report, 16);

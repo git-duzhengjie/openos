@@ -28,6 +28,7 @@
 #include "gui.h"
 #include "mouse.h"
 #include "usb_tablet.h"
+#include "pmm.h"
 #include "embed_hello.h"  /* 嵌入的用户程�?*/
 
 /* 外部符号 */
@@ -44,7 +45,6 @@ extern void sched_add_thread(thread_t *t);
 extern thread_t *thread_create(uint32_t pid, const char *name, uint32_t entry, uint32_t stack_top);
 extern void sched_yield(void);
 
-extern uint32_t pmm_alloc_page(void);
 extern void serial_write_hex(uint32_t val);
 extern void serial_putc(char c);
 
@@ -74,27 +74,35 @@ void test_proc_b(void) {
 
 static int g_shell_thread_started = 0;
 
+#define KERNEL_UI_THREAD_STACK_PAGES 4u
+#define KERNEL_UI_THREAD_STACK_SIZE  (KERNEL_UI_THREAD_STACK_PAGES * 4096u)
+
+static uint32_t kernel_alloc_stack_pages(uint32_t pages) {
+    void *base;
+
+    if (pages == 0) pages = 1;
+    base = pmm_alloc_pages(pages);
+    if (!base) return 0;
+
+    return (uint32_t)base + pages * 4096u;
+}
+
 void kernel_start_shell_thread(void) {
     extern void shell_run(void);
-    uint32_t shell_page;
     uint32_t shell_stack;
     thread_t *sh;
 
     if (g_shell_thread_started) return;
 
-    shell_page = (uint32_t)pmm_alloc_page();
-    if (!shell_page) {
+    shell_stack = kernel_alloc_stack_pages(KERNEL_UI_THREAD_STACK_PAGES);
+    if (!shell_stack) {
         serial_write("[SHELL] Failed to allocate shell stack.\n");
         return;
     }
 
-    shell_stack = shell_page + 4096;
-    pmm_alloc_page();
-    pmm_alloc_page();
-    pmm_alloc_page(); /* keep previous reservation behavior */
-
-    sh = thread_create(1, "shell", (uint32_t)shell_run, shell_stack);
+    sh = thread_create_sized(1, "shell", (uint32_t)shell_run, shell_stack, KERNEL_UI_THREAD_STACK_SIZE);
     if (sh) {
+        sh->priority = PRIORITY_LOW;
         g_shell_thread_started = 1;
         sched_add_thread(sh);
         serial_write("[SHELL] Shell thread started on demand.\n");
@@ -287,9 +295,11 @@ void kernel_main(void) {
     
     /* Start graphical desktop as the foreground UI. */
     {
-        uint32_t desktop_stack = (uint32_t)pmm_alloc_page() + 4096;
-        pmm_alloc_page(); pmm_alloc_page(); pmm_alloc_page(); /* extend to 16KB */
-        thread_t *desk = thread_create(1, "desktop", (uint32_t)desktop_thread, desktop_stack);
+        uint32_t desktop_stack = kernel_alloc_stack_pages(KERNEL_UI_THREAD_STACK_PAGES);
+        thread_t *desk = NULL;
+        if (desktop_stack) {
+            desk = thread_create_sized(1, "desktop", (uint32_t)desktop_thread, desktop_stack, KERNEL_UI_THREAD_STACK_SIZE);
+        }
         if (desk) {
             sched_add_thread(desk);
         } else {

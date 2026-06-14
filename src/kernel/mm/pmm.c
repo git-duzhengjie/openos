@@ -130,6 +130,44 @@ void *pmm_alloc_page(void)
 }
 
 /* ============================================================
+ * Allocate contiguous physical pages
+ * ============================================================ */
+void *pmm_alloc_pages(uint32_t count)
+{
+    if (count == 0)
+        count = 1;
+    if (count > pmm.free_pages)
+        return NULL;
+
+    for (int32_t start = (int32_t)(pmm.total_pages - count); start >= 0; start--) {
+        int ok = 1;
+        for (uint32_t i = 0; i < count; i++) {
+            uint32_t page = (uint32_t)start + i;
+            uint32_t word = page / 32;
+            uint32_t bit  = page % 32;
+            if (word >= pmm.bitmap_size / 4 || !(pmm.bitmap[word] & (1U << bit))) {
+                ok = 0;
+                break;
+            }
+        }
+        if (!ok)
+            continue;
+
+        for (uint32_t i = 0; i < count; i++) {
+            uint32_t page = (uint32_t)start + i;
+            uint32_t word = page / 32;
+            uint32_t bit  = page % 32;
+            pmm.bitmap[word] &= ~(1U << bit);
+        }
+        pmm.used_pages += count;
+        pmm.free_pages -= count;
+        return (void *)((uint32_t)start * PAGE_SIZE);
+    }
+
+    return NULL;
+}
+
+/* ============================================================
  * 释放一个物理页
  * ============================================================ */
 void pmm_free_page(void *page)
@@ -159,7 +197,6 @@ uint32_t pmm_get_free_pages(void)
  * ============================================================ */
 void pmm_init_from_mmap(mmap_entry_t *mmap, uint32_t count)
 {
-    uint32_t usable_base = 0;
     uint32_t usable_end  = 0;
 
     for (uint32_t i = 0; i < count; i++) {
