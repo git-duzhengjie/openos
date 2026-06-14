@@ -23,6 +23,12 @@ extern void switch_to_user_asm(uint32_t eip, uint32_t esp);
 static process_t proc_table[MAX_PROCS];
 static uint32_t next_pid = 1;  /* PID 0 = idle */
 
+typedef struct user_spawn_args {
+    char path[128];
+} user_spawn_args_t;
+
+static void user_process_trampoline(void *arg);
+
 void proc_table_init(void) {
     for (int i = 0; i < MAX_PROCS; i++) {
         proc_table[i].pid = 0;
@@ -290,11 +296,110 @@ int sys_exec(const char *path, char *const argv[]) {
         return -1;
     }
 
+    /* CPU switches to TSS.esp0 on every ring3 -> ring0 interrupt.
+     * Keep it pointed at this thread's kernel stack before entering user mode;
+     * otherwise int 0x80/IRQ from ring3 may corrupt another stack or fault. */
+    tss_set_kernel_stack(cur->kernel_stack_top);
+
     /* 切换到用户态执行 */
     switch_to_user_asm(load_result.entry, stack_top);
 
     /* 不会到达这里 */
     return 0;
+}
+
+int spawn_user_process(const char *path, char *const argv[]) {
+    (void)argv;
+    if (!path || !path[0]) return -1;
+
+    process_t *child = proc_alloc();
+    if (!child) return -1;
+
+    thread_t *cur = sched_get_current();
+    child->ppid = cur ? cur->pid : 0;
+    child->cr3 = vmm_get_cr3();
+
+    int i = 0;
+    for (; i < 31 && path[i]; i++)
+        child->name[i] = path[i];
+    child->name[i] = '\0';
+
+    user_spawn_args_t *args = (user_spawn_args_t *)pmm_alloc_page();
+    if (!args) {
+        proc_free(child);
+        return -1;
+    }
+
+    int j = 0;
+    for (; j < 127 && path[j]; j++)
+        args->path[j] = path[j];
+    args->path[j] = '\0';
+
+    uint32_t stack_pages = PROC_KERNEL_STACK_SIZE / PAGE_SIZE;
+    if (stack_pages == 0) stack_pages = 1;
+    void *kernel_stack = pmm_alloc_pages(stack_pages);
+    if (!kernel_stack) {
+        pmm_free_page(args);
+        proc_free(child);
+        return -1;
+    }
+
+    /* thread_create_sized() cannot pass a C argument to entry directly.
+     * Temporarily store spawn args in an unused PCB field; the trampoline
+     * retrieves it through the current pid after the scheduler starts it. */
+    child->code_addr = (uint32_t)args;
+
+    thread_t *thread = thread_create_sized(child->pid, child->name,
+                                           (uint32_t)user_process_trampoline,
+                                           (uint32_t)kernel_stack + PROC_KERNEL_STACK_SIZE,
+                                           PROC_KERNEL_STACK_SIZE);
+    if (!thread) {
+        pmm_free_page(args);
+        pmm_free_page(kernel_stack);
+        proc_free(child);
+        return -1;
+    }
+
+    child->threads = thread;
+    child->thread_count = 1;
+    child->state = PROC_READY;
+    sched_add_thread(thread);
+
+    serial_write("[SPAWN] user process pid=");
+    serial_write_hex(child->pid);
+    serial_write(" path=");
+    serial_write(args->path);
+    serial_write("\n");
+
+    return (int)child->pid;
+}
+
+static void user_process_trampoline(void *arg) {
+    (void)arg;
+    thread_t *cur = sched_get_current();
+    process_t *proc = cur ? proc_find(cur->pid) : NULL;
+    user_spawn_args_t *args = proc ? (user_spawn_args_t *)proc->code_addr : NULL;
+    if (!args) {
+        sys_exit(-1);
+    }
+
+    char path[128];
+    int i = 0;
+    for (; i < 127 && args->path[i]; i++)
+        path[i] = args->path[i];
+    path[i] = '\0';
+    if (proc) proc->code_addr = 0;
+    pmm_free_page(args);
+
+    int ret = sys_exec(path, NULL);
+    if (ret < 0) {
+        serial_write("[SPAWN] exec failed: ");
+        serial_write(path);
+        serial_write("\n");
+        sys_exit(-1);
+    }
+
+    sys_exit(0);
 }
 
 /* ============================================================

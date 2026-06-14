@@ -24,7 +24,7 @@
 #include "mouse.h"
 #include "ext4.h"
 #include "include/io.h"
-extern int sys_exec(const char *path, char *const argv[]);
+extern int spawn_user_process(const char *path, char *const argv[]);
 #ifndef NULL
 #define NULL ((void *)0)
 #endif
@@ -1835,15 +1835,19 @@ void shell_run(void)
                     /* 执行 ELF 程序 */
                     if (argc > 1)
                     {
-                        serial_write("[EXEC] loading ");
+                        serial_write("[EXEC] spawning ");
                         serial_write(argv[1]);
                         serial_write("\n");
-                        int ret = sys_exec(argv[1], NULL);
+                        int ret = spawn_user_process(argv[1], NULL);
                         if (ret < 0)
                         {
-                            print("exec: failed to load ");
+                            print("exec: failed to spawn ");
                             print(argv[1]);
                             print("\n");
+                        }
+                        else
+                        {
+                            print("exec: spawned\n");
                         }
                     }
                     else

@@ -28,6 +28,9 @@ uint32_t sys_fork(void);
 /* exec: 替换当前进程的内存映像 */
 int sys_exec(const char *path, char *const argv[]);
 
+/* spawn: 创建独立用户态进程并执行 ELF */
+int spawn_user_process(const char *path, char *const argv[]);
+
 /* wait: 等待子进程退出 */
 uint32_t sys_wait(int *status);
 
