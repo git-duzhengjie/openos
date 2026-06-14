@@ -32,7 +32,7 @@ nasm -f elf32 $SRC/sched/context_switch.asm -o $BUILD/context_switch.o
 nasm -f elf32 $SRC/timer_isr.asm -o $BUILD/timer_isr.o
 nasm -f elf32 $SRC/switch_to_user.asm -o $BUILD/switch_to_user.o
 
-# 编译用户程序并嵌入内�?
+# 编译用户程序并嵌入内�?
 echo "[2.5] Building user program..."
 USR=src/user
 if [ -f $USR/hello.c ]; then
@@ -152,6 +152,11 @@ gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
+    -I $SRC/include \
+    -c $SRC/usermem.c -o $BUILD/usermem.o
+
+gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
     -I $SRC/include -I $SRC/fs -I $SRC/proc \
     -c $SRC/proc/process.c -o $BUILD/process.o
 
@@ -245,6 +250,7 @@ ld -m elf_i386 -T $SRC/linker.ld \
     $BUILD/blockdev.o \
     $BUILD/input_buffer.o \
     $BUILD/usermode.o \
+    $BUILD/usermem.o \
     $BUILD/process.o \
     $BUILD/elf_loader.o \
     $BUILD/vfs.o \

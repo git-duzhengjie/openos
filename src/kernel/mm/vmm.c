@@ -141,10 +141,13 @@ void vmm_map_page(uint32_t vaddr, uint32_t paddr, uint32_t flags) {
         serial_write("\n");
 #endif
     } else {
-        /* PDE 已存在，确保权限包含用户位 */
+        /* PDE 已存在，确保权限包含后续映射需要的用户/写权限 */
+        uint32_t *pgd_rec = (uint32_t *)(0xFFFFF000 + (pgd_idx << 2));
         if (flags & PTE_USER) {
-            uint32_t *pgd_rec = (uint32_t *)(0xFFFFF000 + (pgd_idx << 2));
             *pgd_rec |= PTE_USER;  /* 设置 U/S 位 */
+        }
+        if (flags & PTE_RW) {
+            *pgd_rec |= PTE_RW;    /* 设置 R/W 位 */
         }
     }
     
