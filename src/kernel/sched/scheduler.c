@@ -3,6 +3,7 @@
 #include "../include/process.h"
 #include "../include/pmm.h"
 #include "../include/idt.h"
+#include "../include/usermode.h"
 #include "../include/serial.h"
 #include "../net/sync.h"
 #include "../net/bus.h"
@@ -110,6 +111,7 @@ void sched_start(void) {
     sched.current = first;
     first->state = PROC_RUNNING;
     sched.current_ticks = 0;
+    tss_set_kernel_stack(first->kernel_stack_top);
 
     serial_write("[SCHED] Starting first thread\n");
 
@@ -162,6 +164,7 @@ thread_t *timer_schedule_handler(void) {
     next->state = PROC_RUNNING;
     sched.current_ticks = 0;
     sched.need_resched = 0;
+    tss_set_kernel_stack(next->kernel_stack_top);
 
     return next;
 }
@@ -184,6 +187,7 @@ void sched_yield(void) {
     sched.current = next;
     next->state = PROC_RUNNING;
     sched.current_ticks = 0;
+    tss_set_kernel_stack(next->kernel_stack_top);
 
     /* 构建完整栈帧，格式与 timer_isr + thread_create 一致：
      * 从低到高: [EFLAGS][CS][EIP][pushad: EAX..EDI][DS][ES][FS][GS]
