@@ -1013,11 +1013,8 @@ typedef struct gui_taskbar_layout {
 } gui_taskbar_layout_t;
 
 static int gui_taskbar_button_width(gui_window_t *window) {
-    uint32_t len;
-    if (!window) return 96;
-    len = gui_bounded_strlen(window->title, 31u);
-    if (len == 0u) return 96;
-    return 48 + (int)len * GUI_CHAR_W;
+    (void)window;
+    return GUI_TASKBAR_ICON_BUTTON_W;
 }
 
 static int gui_taskbar_content_width(void) {
@@ -1990,13 +1987,44 @@ static void gui_terminal_invalidate_cursor(void) {
     gui_terminal_invalidate_cursor_at(g_gui.terminal.cursor_x, g_gui.terminal.cursor_y);
 }
 
-static void gui_draw_taskbar_button(gui_rect_t rect, uint32_t fill, uint32_t light, uint32_t dark) {
-    if (rect.w <= 0 || rect.h <= 0) return;
-    gui_raw_fill_rect(rect.x, rect.y, rect.w, rect.h, fill);
-    gui_raw_line(rect.x, rect.y, rect.x + rect.w - 1, rect.y, light);
-    gui_raw_line(rect.x, rect.y, rect.x, rect.y + rect.h - 1, light);
-    gui_raw_line(rect.x + rect.w - 1, rect.y, rect.x + rect.w - 1, rect.y + rect.h - 1, dark);
-    gui_raw_line(rect.x, rect.y + rect.h - 1, rect.x + rect.w - 1, rect.y + rect.h - 1, dark);
+static void gui_draw_taskbar_terminal_icon(gui_rect_t rect) {
+    int x = rect.x + (rect.w - 26) / 2;
+    int y = rect.y + (rect.h - 22) / 2;
+    uint32_t bg = gui_rgb(8, 14, 24);
+    uint32_t border = gui_rgb(205, 225, 255);
+    uint32_t shadow = gui_rgb(60, 80, 115);
+    uint32_t prompt = gui_rgb(120, 255, 160);
+    uint32_t text = gui_rgb(190, 230, 255);
+
+    gui_raw_fill_rect(x, y, 26, 22, bg);
+    gui_raw_line(x, y, x + 25, y, border);
+    gui_raw_line(x, y, x, y + 21, border);
+    gui_raw_line(x + 25, y, x + 25, y + 21, shadow);
+    gui_raw_line(x, y + 21, x + 25, y + 21, shadow);
+    gui_raw_line(x + 5, y + 7, x + 9, y + 11, prompt);
+    gui_raw_line(x + 9, y + 11, x + 5, y + 15, prompt);
+    gui_raw_line(x + 13, y + 15, x + 21, y + 15, text);
+}
+
+static void gui_draw_taskbar_window_icon(gui_rect_t rect, int minimized) {
+    int x = rect.x + (rect.w - 26) / 2;
+    int y = rect.y + (rect.h - 22) / 2;
+    uint32_t title = minimized ? gui_rgb(95, 125, 175) : gui_rgb(86, 130, 210);
+    uint32_t body = minimized ? gui_rgb(28, 36, 55) : gui_rgb(32, 44, 70);
+    uint32_t border = gui_rgb(205, 225, 255);
+    uint32_t shadow = gui_rgb(60, 76, 110);
+
+    gui_raw_fill_rect(x, y, 26, 22, body);
+    gui_raw_fill_rect(x + 1, y + 1, 24, 5, title);
+    gui_raw_line(x, y, x + 25, y, border);
+    gui_raw_line(x, y, x, y + 21, border);
+    gui_raw_line(x + 25, y, x + 25, y + 21, shadow);
+    gui_raw_line(x, y + 21, x + 25, y + 21, shadow);
+    if (minimized) {
+        gui_raw_line(x + 8, y + 16, x + 17, y + 16, gui_rgb(170, 195, 235));
+    } else {
+        gui_raw_fill_rect(x + 5, y + 10, 16, 6, gui_rgb(70, 92, 130));
+    }
 }
 
 static void gui_draw_taskbar(void) {
@@ -2012,19 +2040,7 @@ static void gui_draw_taskbar(void) {
     gui_raw_line(layout.bar.x + layout.bar.w - 1, layout.bar.y, layout.bar.x + layout.bar.w - 1, layout.bar.y + layout.bar.h - 1, gui_rgb(10, 13, 20));
     gui_raw_line(layout.bar.x, layout.bar.y + layout.bar.h - 1, layout.bar.x + layout.bar.w - 1, layout.bar.y + layout.bar.h - 1, gui_rgb(10, 13, 20));
 
-    gui_draw_taskbar_button(layout.terminal_button, gui_rgb(64, 92, 150), gui_rgb(170, 205, 255), gui_rgb(12, 18, 30));
-    {
-        gui_rect_t terminal_clip;
-        terminal_clip.x = layout.terminal_button.x + 4;
-        terminal_clip.y = layout.terminal_button.y + 3;
-        terminal_clip.w = layout.terminal_button.w - 8;
-        terminal_clip.h = layout.terminal_button.h - 6;
-        gui_draw_text_clipped_direct(layout.terminal_button.x + 8,
-                                     layout.terminal_button.y + 7,
-                                     "TERMINAL",
-                                     gui_rgb(230, 240, 255),
-                                     &terminal_clip);
-    }
+    gui_draw_taskbar_terminal_icon(layout.terminal_button);
 
     for (i = 0; i < g_gui.window_count; i++) {
         uint32_t idx = g_gui.z_order[i];
@@ -2040,24 +2056,7 @@ static void gui_draw_taskbar(void) {
         button.h = layout.item_h;
         if (button.x + button.w > layout.bar.x + layout.bar.w - 8) button.w = layout.bar.x + layout.bar.w - 8 - button.x;
         if (button.w <= 0) break;
-        /* 娲诲姩绐楀彛楂樹寒鏄剧ず锛屾渶灏忓寲绐楀彛浣庢殫鏄剧ず */
-        if (w->flags & GUI_WINDOW_FLAG_MINIMIZED) {
-            gui_draw_taskbar_button(button, gui_rgb(52, 68, 96), gui_rgb(135, 170, 230), gui_rgb(20, 24, 35));
-        } else {
-            gui_draw_taskbar_button(button, gui_rgb(38, 52, 76), gui_rgb(100, 130, 190), gui_rgb(16, 20, 32));
-        }
-        {
-            gui_rect_t window_button_clip;
-            window_button_clip.x = button.x + 4;
-            window_button_clip.y = button.y + 3;
-            window_button_clip.w = button.w - 8;
-            window_button_clip.h = button.h - 6;
-            gui_draw_text_clipped_direct(button.x + 8,
-                                         button.y + 7,
-                                         w->title,
-                                         gui_rgb(220, 235, 255),
-                                         &window_button_clip);
-        }
+        gui_draw_taskbar_window_icon(button, (w->flags & GUI_WINDOW_FLAG_MINIMIZED) != 0);
         bx += gui_taskbar_button_width(w) + 6;
     }
 }
