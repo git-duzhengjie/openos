@@ -254,27 +254,22 @@ void kernel_main(void) {
     }
     serial_write("[OK] VFS TEST\n");
 
-    /* 写入嵌入的用户程序到 ramfs */
+    /* Install the embedded user ELF into ramfs. */
+    vfs_mkdir("/bin", 0755);
+
+    fd = vfs_open("/bin/hello", O_CREAT | O_RDWR, 0755);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)hello_elf, hello_elf_size);
+        vfs_close(fd);
+        serial_write("[OK] Installed /bin/hello user ELF\n");
+    } else {
+        serial_write("[WARN] Failed to install /bin/hello\n");
+    }
+
     fd = vfs_open("/hello.elf", O_CREAT | O_RDWR, 0755);
     if (fd >= 0) {
         vfs_write(fd, (const char *)hello_elf, hello_elf_size);
         vfs_close(fd);
-        serial_write("[OK] Embedded hello.elf\n");
-
-    /* 调试：检�?ramfs_file_ops 内容 */
-    {
-        extern file_ops_t ramfs_file_ops;
-        ramfs_refresh_ops();
-        serial_write("[DEBUG] ramfs_file_ops addr=0x");
-        serial_write_hex((uint32_t)&ramfs_file_ops);
-        serial_write(" open=0x");
-        serial_write_hex((uint32_t)ramfs_file_ops.open);
-        serial_write(" read=0x");
-        serial_write_hex((uint32_t)ramfs_file_ops.read);
-        serial_write(" write=0x");
-        serial_write_hex((uint32_t)ramfs_file_ops.write);
-        serial_write("\n");
-    }
     }
 
     /* 初始化调度器 */

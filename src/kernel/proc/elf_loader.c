@@ -151,7 +151,8 @@ elf_load_result_t elf_load(int fd) {
         /* 计算需要的页数 */
         uint32_t start = ph->p_vaddr & PAGE_MASK;
         uint32_t end = ph->p_vaddr + ph->p_memsz;
-        uint32_t num_pages = (end - start + PAGE_SIZE - 1) / PAGE_SIZE;
+        uint32_t map_end = (end + PAGE_SIZE - 1) & PAGE_MASK;
+        uint32_t num_pages = (map_end - start) / PAGE_SIZE;
         if (num_pages == 0 || num_pages > 4096) {
             serial_write("[ELF] Invalid page count\n");
             pmm_free_page((void *)phdrs);
@@ -174,11 +175,9 @@ elf_load_result_t elf_load(int fd) {
             }
 
             /* 映射页面 */
-            uint32_t flags = VMM_USER;
+            uint32_t flags = PTE_PRESENT | PTE_USER;
             if (ph->p_flags & PF_W) {
-                flags = VMM_USER;  /* 可写 */
-            } else {
-                flags = VMM_RO | PTE_USER;  /* 只读 */
+                flags |= PTE_RW;
             }
 
             vmm_map_page(vaddr, phys, flags);

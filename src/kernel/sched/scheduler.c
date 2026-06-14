@@ -147,7 +147,7 @@ thread_t *timer_schedule_handler(void) {
     remove_from_queue(next);
 
     thread_t *prev = sched.current;
-    if (prev->priority != PRIORITY_IDLE) {
+    if (prev->state == PROC_RUNNING && prev->priority != PRIORITY_IDLE) {
         prev->state = PROC_READY;
         enqueue(prev);
     }
@@ -170,7 +170,7 @@ void sched_yield(void) {
     remove_from_queue(next);
 
     thread_t *prev = sched.current;
-    if (prev->priority != PRIORITY_IDLE) {
+    if (prev->state == PROC_RUNNING && prev->priority != PRIORITY_IDLE) {
         prev->state = PROC_READY;
         enqueue(prev);
     }
@@ -290,9 +290,9 @@ uint32_t sys_gettid(void) { return sched.current ? sched.current->id : 0; }
 void sys_exit(int code) {
     if (sched.current) {
         proc_mark_exit(sched.current->pid, code);
-        remove_from_queue(sched.current);
         sched.current->state = PROC_ZOMBIE;
         sched.need_resched = 1;
+        sched_yield();
     }
     while (1) { __asm__ volatile("hlt"); }
 }

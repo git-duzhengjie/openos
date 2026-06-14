@@ -24,6 +24,7 @@
 #include "mouse.h"
 #include "ext4.h"
 #include "include/io.h"
+extern int sys_exec(const char *path, char *const argv[]);
 #ifndef NULL
 #define NULL ((void *)0)
 #endif
@@ -1837,13 +1838,7 @@ void shell_run(void)
                         serial_write("[EXEC] loading ");
                         serial_write(argv[1]);
                         serial_write("\n");
-                        /* syscall SYS_EXEC=221, path in ebx */
-                        int ret;
-                        __asm__ volatile(
-                            "int $0x80"
-                            : "=a"(ret)
-                            : "a"(221), "b"(argv[1])
-                            : "memory");
+                        int ret = sys_exec(argv[1], NULL);
                         if (ret < 0)
                         {
                             print("exec: failed to load ");

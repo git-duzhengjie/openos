@@ -244,5 +244,5 @@ syscall_common_stub:
                               ; 此时 EAX = 系统调用返回值
     
     add esp, 8              ; 清理错误码和中断号
-    sti                      ; 开启中断
+    ; Do not sti here. iret restores the user EFLAGS.IF saved by the CPU.
     iret                     ; 返回用户态

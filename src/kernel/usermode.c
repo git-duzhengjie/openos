@@ -42,15 +42,16 @@ uint32_t alloc_user_stack(void)
         return 0;
     }
     
-    uint32_t stack_top = USER_STACK_ADDR + USER_STACK_SIZE - 4;
-    
-    /* 用 VMM_USER (含 USER 位) 映射，这样 Ring 3 才能访问 */
-    vmm_map_page(stack_top, phys, VMM_USER);
+    uint32_t stack_base = USER_STACK_ADDR;
+    uint32_t stack_top = USER_STACK_ADDR + USER_STACK_SIZE;
+
+    /* Map the actual page base. The first user push lands at stack_top - 4. */
+    vmm_map_page(stack_base, phys, VMM_USER);
     
     serial_write("[USERMODE] Stack: phys=");
     serial_write_hex(phys);
     serial_write(" virt=");
-    serial_write_hex(stack_top);
+    serial_write_hex(stack_base);
     serial_write("\n");
     
     return stack_top;
