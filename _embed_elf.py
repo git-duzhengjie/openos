@@ -3,11 +3,10 @@ import sys
 
 elf_path = sys.argv[1] if len(sys.argv) > 1 else "target/hello.elf"
 out_path = sys.argv[2] if len(sys.argv) > 2 else "src/kernel/include/embed_hello.h"
+name = sys.argv[3] if len(sys.argv) > 3 else "hello_elf"
 
 with open(elf_path, "rb") as f:
     data = f.read()
-
-name = "hello_elf"
 lines = []
 lines.append(f"/* Auto-generated - embed {elf_path} */")
 lines.append(f"static const unsigned char {name}[] = {{")

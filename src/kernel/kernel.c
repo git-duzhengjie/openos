@@ -30,6 +30,7 @@
 #include "usb_tablet.h"
 #include "pmm.h"
 #include "embed_hello.h"  /* 嵌入的用户程�?*/
+#include "embed_fault.h"  /* 用户异常隔离测试程序 */
 
 /* 外部符号 */
 extern void gdt_init(void);
@@ -270,6 +271,15 @@ void kernel_main(void) {
     if (fd >= 0) {
         vfs_write(fd, (const char *)hello_elf, hello_elf_size);
         vfs_close(fd);
+    }
+
+    fd = vfs_open("/bin/fault", O_CREAT | O_RDWR, 0755);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)fault_elf, fault_elf_size);
+        vfs_close(fd);
+        serial_write("[OK] Installed /bin/fault user ELF\n");
+    } else {
+        serial_write("[WARN] Failed to install /bin/fault\n");
     }
 
     /* 初始化调度器 */

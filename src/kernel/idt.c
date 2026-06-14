@@ -6,6 +6,7 @@
 #include "include/idt.h"
 #include "include/io.h"
 #include "include/mouse.h"
+#include "include/process.h"
 #include "serial.h"
 
 /* IDT表 (256个条目) */
@@ -167,6 +168,33 @@ static void terminal_write(const char *str) {
 	}
 }
 
+static int is_user_mode_trap(registers_t *regs) {
+	return regs && ((regs->cs & 0x3) == 0x3);
+}
+
+static void kill_current_user_process(registers_t *regs) {
+	thread_t *cur = sched_get_current();
+	if (!cur || cur->pid == 0) {
+		return;
+	}
+
+	serial_write("[EXC] killing user process pid=");
+	serial_write_hex(cur->pid);
+	serial_write(" int=");
+	serial_write_hex(regs->int_no);
+	serial_write(" eip=");
+	serial_write_hex(regs->eip);
+	serial_write("\n");
+
+	proc_mark_exit(cur->pid, -128 - (int)regs->int_no);
+	cur->state = PROC_ZOMBIE;
+	sched_yield();
+
+	while (1) {
+		__asm__ volatile ("hlt");
+	}
+}
+
 /*
  * ISR处理函数 (由isr.asm调用)
  */
@@ -224,7 +252,11 @@ void isr_handler(registers_t *regs) {
 			serial_write("\n");
 		}
 
-		/* 严重错误，停止系统 */
+		if (regs->int_no < 32 && is_user_mode_trap(regs)) {
+			kill_current_user_process(regs);
+		}
+
+		/* 严重内核错误，停止系统 */
 		if (regs->int_no < 8 || regs->int_no == 14) {
 			serial_write("System Halted.\n");
 			__asm__ volatile ("cli; hlt");
