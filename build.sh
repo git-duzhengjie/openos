@@ -102,6 +102,16 @@ if [ -f $USR/argtest.c ]; then
     echo "  Embedded: argtest.elf"
 fi
 
+if [ -f $USR/libctest.c ]; then
+    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+        -fno-stack-protector -fno-builtin \
+        -I $SRC/include \
+        -c $USR/libctest.c -o $BUILD/libctest.o
+    ld -m elf_i386 -T $USR/user.ld -o $BUILD/libctest.elf $BUILD/libctest.o
+    python3 _embed_elf.py $BUILD/libctest.elf $SRC/include/embed_libctest.h libctest_elf
+    echo "  Embedded: libctest.elf"
+fi
+
 if [ -f $USR/fstest.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \

@@ -125,6 +125,207 @@ static inline int openos_str_copy(char *dst, const char *src, int size)
     return 0;
 }
 
+static inline void *openos_memset(void *dst, int value, int len)
+{
+    unsigned char *p = (unsigned char *)dst;
+    int i;
+
+    if (!dst || len <= 0)
+        return dst;
+
+    for (i = 0; i < len; i++)
+        p[i] = (unsigned char)value;
+    return dst;
+}
+
+static inline void *openos_memcpy(void *dst, const void *src, int len)
+{
+    unsigned char *d = (unsigned char *)dst;
+    const unsigned char *s = (const unsigned char *)src;
+    int i;
+
+    if (!dst || !src || len <= 0)
+        return dst;
+
+    for (i = 0; i < len; i++)
+        d[i] = s[i];
+    return dst;
+}
+
+static inline void *openos_memmove(void *dst, const void *src, int len)
+{
+    unsigned char *d = (unsigned char *)dst;
+    const unsigned char *s = (const unsigned char *)src;
+    int i;
+
+    if (!dst || !src || len <= 0)
+        return dst;
+
+    if (d < s) {
+        for (i = 0; i < len; i++)
+            d[i] = s[i];
+    } else if (d > s) {
+        for (i = len - 1; i >= 0; i--)
+            d[i] = s[i];
+    }
+    return dst;
+}
+
+static inline int openos_memcmp(const void *a, const void *b, int len)
+{
+    const unsigned char *pa = (const unsigned char *)a;
+    const unsigned char *pb = (const unsigned char *)b;
+    int i;
+
+    if (a == b || len <= 0)
+        return 0;
+    if (!a || !b)
+        return a ? 1 : -1;
+
+    for (i = 0; i < len; i++) {
+        if (pa[i] != pb[i])
+            return (int)pa[i] - (int)pb[i];
+    }
+    return 0;
+}
+
+static inline int openos_strncmp(const char *a, const char *b, int n)
+{
+    int i;
+
+    if (n <= 0)
+        return 0;
+    if (!a || !b)
+        return a == b ? 0 : (a ? 1 : -1);
+
+    for (i = 0; i < n; i++) {
+        unsigned char ca = (unsigned char)a[i];
+        unsigned char cb = (unsigned char)b[i];
+        if (ca != cb || ca == 0 || cb == 0)
+            return (int)ca - (int)cb;
+    }
+    return 0;
+}
+
+static inline char *openos_strchr(const char *s, int ch)
+{
+    char c = (char)ch;
+
+    if (!s)
+        return 0;
+
+    while (*s) {
+        if (*s == c)
+            return (char *)s;
+        s++;
+    }
+    return c == 0 ? (char *)s : 0;
+}
+
+static inline char *openos_strrchr(const char *s, int ch)
+{
+    const char *last = 0;
+    char c = (char)ch;
+
+    if (!s)
+        return 0;
+
+    do {
+        if (*s == c)
+            last = s;
+    } while (*s++);
+
+    return (char *)last;
+}
+
+static inline char *openos_strstr(const char *haystack, const char *needle)
+{
+    int needle_len;
+    int i;
+
+    if (!haystack || !needle)
+        return 0;
+    if (!needle[0])
+        return (char *)haystack;
+
+    needle_len = openos_strlen(needle);
+    for (i = 0; haystack[i]; i++) {
+        if (openos_strncmp(&haystack[i], needle, needle_len) == 0)
+            return (char *)&haystack[i];
+    }
+    return 0;
+}
+
+static inline int openos_isdigit(int ch)
+{
+    return ch >= '0' && ch <= '9';
+}
+
+static inline int openos_isspace(int ch)
+{
+    return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == '\v' || ch == '\f';
+}
+
+static inline int openos_atoi(const char *s)
+{
+    int sign = 1;
+    int value = 0;
+
+    if (!s)
+        return 0;
+
+    while (openos_isspace(*s))
+        s++;
+    if (*s == '-' || *s == '+') {
+        if (*s == '-')
+            sign = -1;
+        s++;
+    }
+    while (openos_isdigit(*s)) {
+        value = value * 10 + (*s - '0');
+        s++;
+    }
+    return sign * value;
+}
+
+static inline char *openos_itoa(int value, char *buf, int base)
+{
+    char tmp[33];
+    unsigned int v;
+    int i = 0;
+    int j = 0;
+    int neg = 0;
+
+    if (!buf || base < 2 || base > 16)
+        return 0;
+
+    if (value == 0) {
+        buf[0] = '0';
+        buf[1] = 0;
+        return buf;
+    }
+
+    if (value < 0 && base == 10) {
+        neg = 1;
+        v = (unsigned int)(-value);
+    } else {
+        v = (unsigned int)value;
+    }
+
+    while (v > 0 && i < (int)sizeof(tmp)) {
+        int digit = (int)(v % (unsigned int)base);
+        tmp[i++] = (char)(digit < 10 ? '0' + digit : 'a' + digit - 10);
+        v /= (unsigned int)base;
+    }
+
+    if (neg)
+        buf[j++] = '-';
+    while (i > 0)
+        buf[j++] = tmp[--i];
+    buf[j] = 0;
+    return buf;
+}
+
 static inline void openos_write(int fd, const char *s, int len)
 {
     openos_syscall3(SYS_WRITE, fd, (int)s, len);
@@ -168,6 +369,84 @@ static inline int openos_pipe(int pipefd[2])
 static inline void openos_write_str(const char *s)
 {
     openos_write(1, s, openos_strlen(s));
+}
+
+static inline int openos_putchar(int ch)
+{
+    char c = (char)ch;
+    return openos_write_fd(STDOUT_FILENO, &c, 1);
+}
+
+static inline int openos_puts(const char *s)
+{
+    if (s)
+        openos_write_fd(STDOUT_FILENO, s, openos_strlen(s));
+    openos_write_fd(STDOUT_FILENO, "\n", 1);
+    return 0;
+}
+
+static inline int openos_print_int(int value)
+{
+    char buf[16];
+
+    if (!openos_itoa(value, buf, 10))
+        return -1;
+    return openos_write_fd(STDOUT_FILENO, buf, openos_strlen(buf));
+}
+
+static inline int openos_printf(const char *fmt, ...)
+{
+    __builtin_va_list ap;
+    int written = 0;
+
+    if (!fmt)
+        return -1;
+
+    __builtin_va_start(ap, fmt);
+    while (*fmt) {
+        if (*fmt != '%') {
+            openos_write_fd(STDOUT_FILENO, fmt, 1);
+            written++;
+            fmt++;
+            continue;
+        }
+
+        fmt++;
+        if (*fmt == 0)
+            break;
+
+        if (*fmt == '%') {
+            openos_write_fd(STDOUT_FILENO, "%", 1);
+            written++;
+        } else if (*fmt == 's') {
+            const char *s = __builtin_va_arg(ap, const char *);
+            if (!s)
+                s = "(null)";
+            openos_write_fd(STDOUT_FILENO, s, openos_strlen(s));
+            written += openos_strlen(s);
+        } else if (*fmt == 'c') {
+            char c = (char)__builtin_va_arg(ap, int);
+            openos_write_fd(STDOUT_FILENO, &c, 1);
+            written++;
+        } else if (*fmt == 'd' || *fmt == 'i') {
+            char buf[16];
+            openos_itoa(__builtin_va_arg(ap, int), buf, 10);
+            openos_write_fd(STDOUT_FILENO, buf, openos_strlen(buf));
+            written += openos_strlen(buf);
+        } else if (*fmt == 'x') {
+            char buf[16];
+            openos_itoa(__builtin_va_arg(ap, int), buf, 16);
+            openos_write_fd(STDOUT_FILENO, buf, openos_strlen(buf));
+            written += openos_strlen(buf);
+        } else {
+            openos_write_fd(STDOUT_FILENO, "%", 1);
+            openos_write_fd(STDOUT_FILENO, fmt, 1);
+            written += 2;
+        }
+        fmt++;
+    }
+    __builtin_va_end(ap);
+    return written;
 }
 
 static inline int openos_getpid(void)

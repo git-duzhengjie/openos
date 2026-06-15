@@ -4,9 +4,9 @@
 >
 > 当前状态：openos 已具备 32 位 x86 原型内核能力，能够启动、显示、输入、调度、运行基础用户程序，并具备基础 syscall、VFS、ramfs/tmpfs、shell、GUI Terminal 等模块。以下清单记录后续仍需开发或完善的功能。
 >
-> 最近完成：`9f584f2 fix(proc): reap orphaned child processes` 已完成子进程资源回收、孤儿进程 reparent 到 init，并新增 `/bin/orphan` 回归覆盖；`d2a2da0 fix(build): increase boot kernel load limit` 已将 bootloader 内核加载上限提升到 1024 扇区并修复 `NULL` 重定义警告；当前已搭建 PID1 init/reaper 内核线程，已支持 shell 直接执行 `/bin/app arg1 arg2` 带参数用户程序，已补齐 `envp` 环境变量传递，并已暴露 `stat/getcwd/chdir/readdir/fstat/lstat` 文件系统 syscall，同时新增最小用户态公共 runtime 头文件 `src/user/openos.h`，且已新增独立 `/bin/pwd`、`/bin/ls`、`/bin/cat`、`/bin/echo`、`/bin/mkdir`、`/bin/rm`、`/bin/rmdir`、`/bin/grep`、`/bin/wc` 用户态命令；本轮已初步标准化 `stdin/stdout/stderr`，`/bin/cat` 支持无参数从 stdin 读取，并已新增 `dup` / `dup2` / `pipe` syscall 与 VFS fd 引用计数语义。
+> 最近完成：已补齐 shell 后台任务、`Ctrl+C` / `Ctrl+D`、`jobs` / `fg`、Tab 命令补全、脚本执行；本轮完成用户态运行库 libc 子集，`src/user/openos.h` 新增 `memset/memcpy/memmove/memcmp/strncmp/strchr/strrchr/strstr/isdigit/isspace/atoi/itoa/putchar/puts/printf` 等 header-only 能力，并新增 `/bin/libctest` 回归程序覆盖基础字符串、内存、转换与输出函数。
 >
-> 当前推荐下一步：继续 P5，补齐用户态运行库 libc 子集，为后续更多用户态程序和测试工具打基础。
+> 当前推荐下一步：继续 P5，完善 crt0 启动入口与用户态程序入口规范，为后续 malloc/free、errno、stdio 打基础。
 
 ---
 
@@ -24,7 +24,7 @@
 - [√] bootloader 内核加载上限提升到 1024 扇区（提交：`d2a2da0`）
 - [√] Shell、VGA / GUI Terminal、基础输入
 - [√] 基础网络栈雏形（ARP / IPv4 / ICMP / UDP / TCP）
-- [√] `/bin/hello`、`/bin/fault`、`/bin/waittest`、`/bin/orphan`、`/bin/argtest`、`/bin/envtest`、`/bin/fstest`、`/bin/pwd`、`/bin/ls`、`/bin/cat`、`/bin/echo`、`/bin/mkdir`、`/bin/rm`、`/bin/rmdir`、`/bin/grep`、`/bin/wc` 基础用户程序
+- [√] `/bin/hello`、`/bin/fault`、`/bin/waittest`、`/bin/orphan`、`/bin/argtest`、`/bin/envtest`、`/bin/fstest`、`/bin/libctest`、`/bin/pwd`、`/bin/ls`、`/bin/cat`、`/bin/echo`、`/bin/mkdir`、`/bin/rm`、`/bin/rmdir`、`/bin/grep`、`/bin/wc` 基础用户程序
 - [√] 新增最小用户态公共 runtime 头文件 `src/user/openos.h`，统一 syscall 编号、基础 wrapper、状态宏与 FS 结构体
 - [√] 调度器 GPF 修复
 - [√] Shell 历史命令重绘修复
@@ -262,13 +262,14 @@
 
 ### 16. 用户态运行库
 
-- [ ] 标准 libc 子集
+- [√] 标准 libc 子集（header-only：`memset/memcpy/memmove/memcmp/strlen/strcmp/strncmp/strchr/strrchr/strstr/isdigit/isspace/atoi/itoa` 等）
+- [√] 基础输出辅助（`putchar` / `puts` / 最小 `printf`，支持 `%s` / `%c` / `%d` / `%i` / `%x` / `%%`）
+- [√] 更多用户态测试程序（新增 `/bin/libctest` 覆盖 libc 子集）
 - [ ] crt0 启动入口完善
 - [ ] syscall wrapper 标准化
 - [ ] malloc/free 用户态实现
 - [ ] errno
 - [ ] stdio 基础能力
-- [ ] 更多用户态测试程序
 
 ---
 
