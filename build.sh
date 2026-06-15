@@ -293,6 +293,16 @@ if [ -f $USR/cp.c ]; then
     echo "  Embedded: cp.elf"
 fi
 
+if [ -f $USR/mv.c ]; then
+    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+        -fno-stack-protector -fno-builtin \
+        -I $SRC/include \
+        -c $USR/mv.c -o $BUILD/mv.o
+    ld -m elf_i386 -T $USR/user.ld -o $BUILD/mv.elf $BUILD/mv.o
+    python3 _embed_elf.py $BUILD/mv.elf $SRC/include/embed_mv.h mv_elf
+    echo "  Embedded: mv.elf"
+fi
+
 if [ -f $USR/rmdir.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \

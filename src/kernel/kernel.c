@@ -163,6 +163,12 @@
 #else
 #define OPENOS_HAS_CP 0
 #endif
+#if __has_include("embed_mv.h")
+#include "embed_mv.h"  /* mv user command */
+#define OPENOS_HAS_MV 1
+#else
+#define OPENOS_HAS_MV 0
+#endif
 #if __has_include("embed_rmdir.h")
 #include "embed_rmdir.h"  /* rmdir user command */
 #define OPENOS_HAS_RMDIR 1
@@ -709,6 +715,28 @@ void kernel_main(void) {
         serial_write("[OK] Installed /bin/rm user ELF\n");
     } else {
         serial_write("[WARN] Failed to install /bin/rm\n");
+    }
+#endif
+
+#if OPENOS_HAS_CP
+    fd = vfs_open("/bin/cp", O_CREAT | O_RDWR, 0755);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)cp_elf, cp_elf_size);
+        vfs_close(fd);
+        serial_write("[OK] Installed /bin/cp user ELF\n");
+    } else {
+        serial_write("[WARN] Failed to install /bin/cp\n");
+    }
+#endif
+
+#if OPENOS_HAS_MV
+    fd = vfs_open("/bin/mv", O_CREAT | O_RDWR, 0755);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)mv_elf, mv_elf_size);
+        vfs_close(fd);
+        serial_write("[OK] Installed /bin/mv user ELF\n");
+    } else {
+        serial_write("[WARN] Failed to install /bin/mv\n");
     }
 #endif
 
