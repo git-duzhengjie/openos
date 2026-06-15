@@ -266,7 +266,9 @@ static const char *builtin_commands[] = {
     "ai_trust",
     "ai_ed25519",
     "ai_model_register",
-    "ai_model_scan"
+    "ai_model_scan",
+    "jobs",
+    "fg"
 };
 
 #define BUILTIN_COMMAND_COUNT (sizeof(builtin_commands) / sizeof(builtin_commands[0]))
@@ -746,47 +748,74 @@ static void shell_paste_text(const char *text)
     }
 }
 
+static int shell_add_command_match(const char *name, const char *prefix, int prefix_len,
+                                   const char *matches[], int *match_count, int max_matches)
+{
+    if (!name || !name[0] || !shell_starts_with(name, prefix, prefix_len))
+        return 0;
+    for (int i = 0; i < *match_count; i++)
+    {
+        if (strcmp(matches[i], name) == 0)
+            return 0;
+    }
+    if (*match_count >= max_matches)
+        return 0;
+    matches[*match_count] = name;
+    (*match_count)++;
+    return 1;
+}
+
+static void shell_collect_bin_command_matches(const char *prefix, int prefix_len,
+                                              const char *matches[], int *match_count,
+                                              int max_matches)
+{
+    dentry_t *bin = vfs_path_lookup("/bin");
+    if (!bin || !bin->inode || (bin->inode->mode & 0xF000) != FS_DIR)
+        return;
+
+    dentry_t *child = bin->child;
+    while (child && *match_count < max_matches)
+    {
+        int is_dir = child->inode && (child->inode->mode & 0xF000) == FS_DIR;
+        if (!is_dir)
+            shell_add_command_match(child->name, prefix, prefix_len, matches, match_count, max_matches);
+        child = child->sibling;
+    }
+}
+
 static void shell_complete_command(void)
 {
-    const char *first_match = NULL;
-    int match_count = 0;
-    int common_len = 0;
-
     if (!shell_is_command_completion_context())
         return;
 
     cmd_buf[cmd_pos] = '\0';
 
+#define MAX_COMMAND_MATCHES 96
+    const char *matches[MAX_COMMAND_MATCHES];
+    int match_count = 0;
+
     for (int i = 0; i < (int)BUILTIN_COMMAND_COUNT; i++)
-    {
-        const char *name = builtin_commands[i];
-        if (shell_starts_with(name, cmd_buf, cmd_pos))
-        {
-            if (match_count == 0)
-            {
-                first_match = name;
-                common_len = (int)strlen(name);
-            }
-            else
-            {
-                int len = shell_common_prefix_len(first_match, name);
-                if (len < common_len)
-                    common_len = len;
-            }
-            match_count++;
-        }
-    }
+        shell_add_command_match(builtin_commands[i], cmd_buf, cmd_pos, matches, &match_count, MAX_COMMAND_MATCHES);
+    shell_collect_bin_command_matches(cmd_buf, cmd_pos, matches, &match_count, MAX_COMMAND_MATCHES);
 
     if (match_count == 0)
         return;
+
+    const char *first_match = matches[0];
+    int common_len = (int)strlen(first_match);
+    for (int i = 1; i < match_count; i++)
+    {
+        int len = shell_common_prefix_len(first_match, matches[i]);
+        if (len < common_len)
+            common_len = len;
+    }
 
     if (match_count == 1)
     {
         int len = (int)strlen(first_match);
         for (int i = cmd_pos; i < len; i++)
             shell_append_char(first_match[i]);
-        if (cmd_pos < CMD_BUF_SIZE - 1)
-            shell_append_char(' ');
+        shell_append_char(' ');
         return;
     }
 
@@ -798,16 +827,15 @@ static void shell_complete_command(void)
     }
 
     print("\n");
-    for (int i = 0; i < (int)BUILTIN_COMMAND_COUNT; i++)
+    for (int i = 0; i < match_count; i++)
     {
-        const char *name = builtin_commands[i];
-        if (shell_starts_with(name, cmd_buf, cmd_pos))
-        {
-            print(name);
-            print("  ");
-        }
+        print(matches[i]);
+        print("  ");
+        if ((i + 1) % 4 == 0)
+            print("\n");
     }
-    print("\n");
+    if (match_count % 4 != 0)
+        print("\n");
     shell_redraw_input_line();
 }
 
