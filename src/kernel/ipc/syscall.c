@@ -237,17 +237,19 @@ uint32_t syscall_dispatch(uint32_t num,
     case SYS_EXEC:
         {
             char path[USERMEM_CSTR_MAX];
+            char *const *argv = (char *const *)b;
             if (syscall_copy_user_path(path, (const char *)a) < 0)
                 return (uint32_t)-1;
-            return (uint32_t)sys_exec(path, NULL);
+            return (uint32_t)sys_exec(path, argv);
         }
 
     case SYS_SPAWN:
         {
             char path[USERMEM_CSTR_MAX];
+            char *const *argv = (char *const *)b;
             if (syscall_copy_user_path(path, (const char *)a) < 0)
                 return (uint32_t)-1;
-            return (uint32_t)spawn_user_process(path, NULL);
+            return (uint32_t)spawn_user_process(path, argv);
         }
 
     default:

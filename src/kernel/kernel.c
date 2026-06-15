@@ -49,6 +49,12 @@
 #else
 #define OPENOS_HAS_ORPHAN 0
 #endif
+#if __has_include("embed_argtest.h")
+#include "embed_argtest.h"  /* argv 回归测试程序 */
+#define OPENOS_HAS_ARGTEST 1
+#else
+#define OPENOS_HAS_ARGTEST 0
+#endif
 
 /* 外部符号 */
 extern void gdt_init(void);
@@ -401,6 +407,17 @@ void kernel_main(void) {
         serial_write("[OK] Installed /bin/orphan user ELF\n");
     } else {
         serial_write("[WARN] Failed to install /bin/orphan\n");
+    }
+#endif
+
+#if OPENOS_HAS_ARGTEST
+    fd = vfs_open("/bin/argtest", O_CREAT | O_RDWR, 0755);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)argtest_elf, argtest_elf_size);
+        vfs_close(fd);
+        serial_write("[OK] Installed /bin/argtest user ELF\n");
+    } else {
+        serial_write("[WARN] Failed to install /bin/argtest\n");
     }
 #endif
 

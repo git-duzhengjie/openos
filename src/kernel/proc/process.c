@@ -23,13 +23,97 @@ extern void switch_to_user_asm(uint32_t eip, uint32_t esp);
 static process_t proc_table[MAX_PROCS];
 static uint32_t next_pid = 2;  /* PID 0 = idle, PID 1 = init/reaper */
 
+#define PROC_ARG_MAX     8
+#define PROC_ARG_STR_MAX 64
+
 typedef struct user_spawn_args {
     char path[128];
+    int argc;
+    char argv[PROC_ARG_MAX][PROC_ARG_STR_MAX];
 } user_spawn_args_t;
 
 static void user_process_trampoline(void *arg);
+static int copy_exec_argv(user_spawn_args_t *args, const char *path, char *const argv[]);
+static uint32_t setup_user_argv_stack(uint32_t stack_top, const user_spawn_args_t *args);
 
 #define WAITPID_SUPPORTED_OPTIONS WAITPID_WNOHANG
+
+static int copy_exec_argv(user_spawn_args_t *args, const char *path, char *const argv[]) {
+    int argc = 0;
+
+    if (!args || !path || !path[0]) return -1;
+
+    memset(args, 0, sizeof(*args));
+
+    int i = 0;
+    for (; i < 127 && path[i]; i++)
+        args->path[i] = path[i];
+    args->path[i] = '\0';
+
+    if (argv) {
+        for (; argc < PROC_ARG_MAX; argc++) {
+            const char *src = argv[argc];
+            if (!src) break;
+
+            int j = 0;
+            for (; j < PROC_ARG_STR_MAX - 1 && src[j]; j++)
+                args->argv[argc][j] = src[j];
+            args->argv[argc][j] = '\0';
+
+            if (src[j] != '\0')
+                return -1;
+        }
+
+        if (argc == PROC_ARG_MAX && argv[argc])
+            return -1;
+    }
+
+    if (argc == 0) {
+        int j = 0;
+        for (; j < PROC_ARG_STR_MAX - 1 && path[j]; j++)
+            args->argv[0][j] = path[j];
+        args->argv[0][j] = '\0';
+        argc = 1;
+    }
+
+    args->argc = argc;
+    return 0;
+}
+
+static uint32_t setup_user_argv_stack(uint32_t stack_top, const user_spawn_args_t *args) {
+    uint32_t sp = stack_top;
+    uint32_t argv_ptrs[PROC_ARG_MAX + 1];
+    int argc;
+
+    if (!args) return 0;
+    argc = args->argc;
+    if (argc < 0 || argc > PROC_ARG_MAX) return 0;
+
+    for (int i = argc - 1; i >= 0; i--) {
+        uint32_t len = (uint32_t)strlen(args->argv[i]) + 1u;
+        sp -= len;
+        memcpy((void *)sp, args->argv[i], len);
+        argv_ptrs[i] = sp;
+    }
+    argv_ptrs[argc] = 0;
+
+    sp &= ~0x3u;
+
+    sp -= sizeof(uint32_t) * (uint32_t)(argc + 1);
+    memcpy((void *)sp, argv_ptrs, sizeof(uint32_t) * (uint32_t)(argc + 1));
+    uint32_t user_argv = sp;
+
+    sp -= sizeof(uint32_t);
+    *(uint32_t *)sp = user_argv;
+
+    sp -= sizeof(uint32_t);
+    *(uint32_t *)sp = (uint32_t)argc;
+
+    sp -= sizeof(uint32_t);
+    *(uint32_t *)sp = 0;
+
+    return sp;
+}
 
 void proc_table_init(void) {
     for (int i = 0; i < MAX_PROCS; i++) {
@@ -357,8 +441,9 @@ uint32_t sys_fork(void) {
  * TODO: 从文件系统加载 ELF
  * ============================================================ */
 int sys_exec(const char *path, char *const argv[]) {
-    (void)argv;
+    user_spawn_args_t exec_args;
     if (!path || !path[0]) return -1;
+    if (copy_exec_argv(&exec_args, path, argv) != 0) return -1;
     thread_t *cur = sched_get_current();
     if (!cur) return -1;
 
@@ -410,20 +495,25 @@ int sys_exec(const char *path, char *const argv[]) {
         return -1;
     }
 
+    uint32_t user_sp = setup_user_argv_stack(stack_top, &exec_args);
+    if (!user_sp) {
+        serial_write("[EXEC] argv stack setup failed\n");
+        return -1;
+    }
+
     /* CPU switches to TSS.esp0 on every ring3 -> ring0 interrupt.
      * Keep it pointed at this thread's kernel stack before entering user mode;
      * otherwise int 0x80/IRQ from ring3 may corrupt another stack or fault. */
     tss_set_kernel_stack(cur->kernel_stack_top);
 
     /* 切换到用户态执行 */
-    switch_to_user_asm(load_result.entry, stack_top);
+    switch_to_user_asm(load_result.entry, user_sp);
 
     /* 不会到达这里 */
     return 0;
 }
 
 int spawn_user_process(const char *path, char *const argv[]) {
-    (void)argv;
     if (!path || !path[0]) return -1;
 
     /* Fail early when the executable path is invalid. Without this check,
@@ -451,10 +541,11 @@ int spawn_user_process(const char *path, char *const argv[]) {
         return -1;
     }
 
-    int j = 0;
-    for (; j < 127 && path[j]; j++)
-        args->path[j] = path[j];
-    args->path[j] = '\0';
+    if (copy_exec_argv(args, path, argv) != 0) {
+        pmm_free_page(args);
+        proc_free(child);
+        return -1;
+    }
 
     uint32_t stack_pages = PROC_KERNEL_STACK_SIZE / PAGE_SIZE;
     if (stack_pages == 0) stack_pages = 1;
@@ -504,18 +595,20 @@ static void user_process_trampoline(void *arg) {
         sys_exit(-1);
     }
 
-    char path[128];
-    int i = 0;
-    for (; i < 127 && args->path[i]; i++)
-        path[i] = args->path[i];
-    path[i] = '\0';
+    user_spawn_args_t exec_args;
+    memcpy(&exec_args, args, sizeof(exec_args));
     if (proc) proc->code_addr = 0;
     pmm_free_page(args);
 
-    int ret = sys_exec(path, NULL);
+    char *argv[PROC_ARG_MAX + 1];
+    for (int i = 0; i < exec_args.argc && i < PROC_ARG_MAX; i++)
+        argv[i] = exec_args.argv[i];
+    argv[exec_args.argc] = NULL;
+
+    int ret = sys_exec(exec_args.path, argv);
     if (ret < 0) {
         serial_write("[SPAWN] exec failed: ");
-        serial_write(path);
+        serial_write(exec_args.path);
         serial_write("\n");
         sys_exit(-1);
     }

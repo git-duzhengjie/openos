@@ -42,6 +42,11 @@ static int spawn(const char *path)
     return syscall3(SYS_SPAWN, (int)path, 0, 0);
 }
 
+static int spawn2(const char *path, char *const argv[])
+{
+    return syscall3(SYS_SPAWN, (int)path, (int)argv, 0);
+}
+
 static int waitpid(int pid, int *status, int options)
 {
     return syscall3(SYS_WAITPID, pid, (int)status, options);
@@ -159,6 +164,18 @@ void _start(void)
     waited = waitpid(child, &status, WNOHANG);
     if (waited >= 0)
         fail(24, "[waittest] orphan parent waited twice\n");
+
+    write_str("[waittest] checking argv spawn path...\n");
+    status = -1;
+    char *argtest_argv[] = {"argtest", "alpha", "beta", 0};
+    child = spawn2("/bin/argtest", argtest_argv);
+    if (child < 0)
+        fail(25, "[waittest] spawn /bin/argtest failed\n");
+    waited = waitpid(child, &status, 0);
+    if (waited != child)
+        fail(26, "[waittest] waitpid argtest failed\n");
+    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0)
+        fail(27, "[waittest] argtest status failed\n");
 
     write_str("[waittest] waitpid ok\n");
     syscall3(SYS_EXIT, 0, 0, 0);

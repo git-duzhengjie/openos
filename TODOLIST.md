@@ -6,7 +6,7 @@
 >
 > 最近完成：`9f584f2 fix(proc): reap orphaned child processes` 已完成子进程资源回收、孤儿进程 reparent 到 init，并新增 `/bin/orphan` 回归覆盖；`d2a2da0 fix(build): increase boot kernel load limit` 已将 bootloader 内核加载上限提升到 1024 扇区并修复 `NULL` 重定义警告；当前已搭建 PID1 init/reaper 内核线程，负责启动桌面 / shell fallback 并循环回收孤儿僵尸。
 >
-> 当前推荐下一步：继续 P0，优先推进 `spawn/exec argv/envp` 参数传递；完成后再补齐用户态 `main(argc, argv)`、shell 命令参数解析和基础文件系统用户命令。
+> 当前推荐下一步：继续 P0，优先补齐 shell 命令参数解析和基础文件系统用户命令；随后推进 `envp` 环境变量传递。
 
 ---
 
@@ -24,7 +24,7 @@
 - [√] bootloader 内核加载上限提升到 1024 扇区（提交：`d2a2da0`）
 - [√] Shell、VGA / GUI Terminal、基础输入
 - [√] 基础网络栈雏形（ARP / IPv4 / ICMP / UDP / TCP）
-- [√] `/bin/hello`、`/bin/fault`、`/bin/waittest`、`/bin/orphan` 基础用户程序
+- [√] `/bin/hello`、`/bin/fault`、`/bin/waittest`、`/bin/orphan`、`/bin/argtest` 基础用户程序
 - [√] 调度器 GPF 修复
 - [√] Shell 历史命令重绘修复
 - [√] `waitpid` 错误语义、`waitpid(-1)`、exit status 编码与回归测试（提交：`daca8f2`）
@@ -63,9 +63,9 @@
 
 ### 2. 用户程序参数支持
 
-- [ ] `spawn(path, argv)` 支持参数
-- [ ] `exec(path, argv)` 支持参数
-- [ ] 用户态入口支持 `main(argc, argv)`
+- [√] `spawn(path, argv)` 支持参数（新增 `/bin/argtest` 回归，提交：本提交）
+- [√] `exec(path, argv)` 支持参数（提交：本提交）
+- [√] 用户态入口支持 `main(argc, argv)` / `_start(argc, argv)` 参数栈（提交：本提交）
 - [ ] shell 支持执行 `/bin/app arg1 arg2`
 - [ ] 支持环境变量 `envp`
 
