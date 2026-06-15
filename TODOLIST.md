@@ -4,9 +4,9 @@
 >
 > 当前状态：openos 已具备 32 位 x86 原型内核能力，能够启动、显示、输入、调度、运行基础用户程序，并具备基础 syscall、VFS、ramfs/tmpfs、shell、GUI Terminal 等模块。以下清单记录后续仍需开发或完善的功能。
 >
-> 最近完成：已补齐 shell 后台任务、`Ctrl+C` / `Ctrl+D`、`jobs` / `fg`、Tab 命令补全、脚本执行；本轮完成用户态运行库 libc 子集，并新增 `/bin/libctest` 回归程序；已补充 `/bin/touch`、`/bin/cp`、`/bin/mv`、`/bin/tee`、`/bin/head`、`/bin/tail`、`/bin/sort`、`/bin/env` 常用文件工具；已完善 `grep -n/-v/-c` 与 `wc -l/-w/-c` 选项；已支持 shell 环境变量 `$VAR` / `${VAR}` 参数展开；已新增最小 `kill` syscall 与 `/bin/kill`。
+> 最近完成：已补齐 shell 后台任务、`Ctrl+C` / `Ctrl+D`、`jobs` / `fg`、Tab 命令补全、脚本执行；本轮完成用户态运行库 libc 子集，并新增 `/bin/libctest` 回归程序；已补充 `/bin/touch`、`/bin/cp`、`/bin/mv`、`/bin/tee`、`/bin/head`、`/bin/tail`、`/bin/sort`、`/bin/env` 常用文件工具；已完善 `grep -n/-v/-c` 与 `wc -l/-w/-c` 选项；已支持 shell 环境变量 `$VAR` / `${VAR}` 参数展开；已新增最小 `kill` syscall 与 `/bin/kill`；已补充最小 signal pending/default terminate 机制。
 >
-> 当前推荐下一步：继续增强 shell 和用户态工具；本轮已完成最小 `kill` syscall 与 `/bin/kill`，建议后续继续补齐 signal 机制或更多用户态工具。
+> 当前推荐下一步：继续增强 shell 和用户态工具；本轮已完成最小 signal pending/default terminate 机制，建议后续继续补齐 alarm/timer signal 或更多用户态工具。
 
 ---
 
@@ -142,7 +142,7 @@
 - [ ] `fork` 稳定化
 - [ ] `exec` 完整替换当前进程镜像
 - [√] `kill`（最小实现：支持 SIGTERM/SIGKILL/signal 0，新增 `/bin/kill`）
-- [ ] signal 机制
+- [√] signal 机制（最小实现：pending signal 位图，SIGTERM/SIGKILL 默认终止，signal 0 存在性检查）
 - [ ] alarm / timer signal
 - [ ] 作业控制基础
 

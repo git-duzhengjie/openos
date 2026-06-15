@@ -184,6 +184,8 @@ void sched_yield(void) {
     } while (0)
 
     if (!sched.initialized || !sched.current) SCHED_RESTORE_FLAGS_AND_RETURN();
+    if (sched.current->pid)
+        proc_handle_pending_signals(sched.current->pid);
 
     thread_t *next = pick_next();
     if (!next) SCHED_RESTORE_FLAGS_AND_RETURN();

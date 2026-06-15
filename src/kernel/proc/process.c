@@ -234,6 +234,7 @@ process_t *proc_alloc(void) {
             /* 初始化当前工作目录为 / */
             p->cwd[0] = '/';
             p->cwd[1] = '\0';
+            p->pending_signals = 0;
             return p;
         }
     }
@@ -254,6 +255,7 @@ void proc_free(process_t *proc) {
     proc->heap_start = 0;
     proc->heap_end = 0;
     proc->exit_code = 0;
+    proc->pending_signals = 0;
     for (int i = 0; i < MAX_FD; i++) {
         proc->fds[i] = NULL;
         proc->fd_flags[i] = 0;
@@ -794,15 +796,58 @@ int proc_terminate(uint32_t pid, int exit_code)
     return 0;
 }
 
+int proc_send_signal(uint32_t pid, int sig)
+{
+    process_t *p;
+
+    if (pid == 0 || sig < 0 || sig > OPENOS_SIGNAL_MAX)
+        return -1;
+
+    p = proc_find(pid);
+    if (!p || p->state == PROC_DEAD || p->state == PROC_ZOMBIE)
+        return -1;
+
+    if (sig == 0)
+        return 0;
+    if (sig != OPENOS_SIGKILL && sig != OPENOS_SIGTERM)
+        return -1;
+
+    p->pending_signals |= (1u << sig);
+    if (p->threads && (p->threads->state == PROC_BLOCKED || p->threads->state == PROC_SLEEPING))
+        thread_wake(p->threads);
+
+    if (sig == OPENOS_SIGKILL)
+        return proc_handle_pending_signals(pid);
+    return 0;
+}
+
+int proc_handle_pending_signals(uint32_t pid)
+{
+    process_t *p = proc_find(pid);
+    int sig = 0;
+
+    if (!p || p->state == PROC_DEAD || p->state == PROC_ZOMBIE)
+        return 0;
+    if (pid == INIT_PID)
+        return 0;
+
+    if (p->pending_signals & (1u << OPENOS_SIGKILL))
+        sig = OPENOS_SIGKILL;
+    else if (p->pending_signals & (1u << OPENOS_SIGTERM))
+        sig = OPENOS_SIGTERM;
+
+    if (!sig)
+        return 0;
+
+    p->pending_signals &= ~(1u << sig);
+    proc_terminate(pid, 128 + sig);
+    return sig;
+}
+
 int sys_kill(int pid, int sig)
 {
     if (pid <= 0)
         return -1;
 
-    if (sig == 0)
-        return proc_find((uint32_t)pid) ? 0 : -1;
-    if (sig != 9 && sig != 15)
-        return -1;
-
-    return proc_terminate((uint32_t)pid, 128 + sig);
+    return proc_send_signal((uint32_t)pid, sig);
 }

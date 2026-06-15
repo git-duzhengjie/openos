@@ -29,6 +29,9 @@ typedef enum {
 /* Reserved system process IDs and wait options */
 #define INIT_PID 1u
 #define WAITPID_WNOHANG 1
+#define OPENOS_SIGKILL 9
+#define OPENOS_SIGTERM 15
+#define OPENOS_SIGNAL_MAX 31
 
 /* ============================================================
  * 线程控制块 (TCB)
@@ -128,6 +131,8 @@ uint32_t proc_reap_zombies_for_parent(uint32_t ppid);
 uint32_t proc_reparent_children(uint32_t old_ppid, uint32_t new_ppid);
 void proc_wake_sleepers(uint32_t now_ms);
 int proc_terminate(uint32_t pid, int exit_code);
+int proc_send_signal(uint32_t pid, int sig);
+int proc_handle_pending_signals(uint32_t pid);
 uint32_t proc_current_pid(void);
 
 /* 睡眠/唤醒 */

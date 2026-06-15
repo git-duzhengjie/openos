@@ -146,6 +146,14 @@ static void syscall_fill_user_stat(openos_stat_t *user_st, const inode_t *st)
     user_st->fs_type = st->fs_type;
 }
 
+static uint32_t syscall_return(uint32_t value)
+{
+    uint32_t pid = proc_current_pid();
+    if (pid)
+        proc_handle_pending_signals(pid);
+    return value;
+}
+
 /* ============================================================
  * 系统调用分发
  * ============================================================ */
@@ -154,6 +162,9 @@ uint32_t syscall_dispatch(uint32_t num,
                           uint32_t d, uint32_t e)
 {
     (void)d; (void)e;
+    uint32_t current_pid = proc_current_pid();
+    if (current_pid)
+        proc_handle_pending_signals(current_pid);
     switch (num) {
     case SYS_GETPID:
         return sys_getpid();
@@ -258,7 +269,7 @@ uint32_t syscall_dispatch(uint32_t num,
         }
 
     case SYS_KILL:
-        return (uint32_t)sys_kill((int)a, (int)b);
+        return syscall_return((uint32_t)sys_kill((int)a, (int)b));
 
     case SYS_MKDIR:
         {
