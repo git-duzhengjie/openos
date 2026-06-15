@@ -283,6 +283,16 @@ if [ -f $USR/touch.c ]; then
     echo "  Embedded: touch.elf"
 fi
 
+if [ -f $USR/cp.c ]; then
+    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+        -fno-stack-protector -fno-builtin \
+        -I $SRC/include \
+        -c $USR/cp.c -o $BUILD/cp.o
+    ld -m elf_i386 -T $USR/user.ld -o $BUILD/cp.elf $BUILD/cp.o
+    python3 _embed_elf.py $BUILD/cp.elf $SRC/include/embed_cp.h cp_elf
+    echo "  Embedded: cp.elf"
+fi
+
 if [ -f $USR/rmdir.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \

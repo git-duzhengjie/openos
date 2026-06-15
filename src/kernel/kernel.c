@@ -157,6 +157,12 @@
 #else
 #define OPENOS_HAS_TOUCH 0
 #endif
+#if __has_include("embed_cp.h")
+#include "embed_cp.h"  /* cp user command */
+#define OPENOS_HAS_CP 1
+#else
+#define OPENOS_HAS_CP 0
+#endif
 #if __has_include("embed_rmdir.h")
 #include "embed_rmdir.h"  /* rmdir user command */
 #define OPENOS_HAS_RMDIR 1
