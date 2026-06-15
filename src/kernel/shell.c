@@ -46,14 +46,29 @@ static void shell_cancel_line(void);
 static void shell_backspace(void);
 
 
-/* 打印�?VGA + 串口 */
-static void print(const char *s)
+/* 打印：默认输出到 VGA + 串口 + GUI；命令重定向时输出到 fd 1 */
+static int shell_stdout_redirect_depth = 0;
+
+static void shell_print_terminal(const char *s)
 {
     vga_write(s);
     serial_write(s);
     if (gui_is_ready()) {
         gui_terminal_enqueue_output(s);
     }
+}
+
+static void print(const char *s)
+{
+    if (!s)
+        return;
+
+    if (shell_stdout_redirect_depth > 0 && vfs_get_file(1)) {
+        vfs_write(1, s, strlen(s));
+        return;
+    }
+
+    shell_print_terminal(s);
 }
 
 static char shell_ascii_lower(char c)
@@ -1719,8 +1734,34 @@ void shell_run(void)
             /* 解析命令 */
             char *argv[MAX_ARGS];
             int argc = split_args(cmd_buf, argv, MAX_ARGS);
+            shell_redirect_t redir;
+            int saved_stdin = SHELL_FD_UNCHANGED;
+            int saved_stdout = SHELL_FD_UNCHANGED;
+            int saved_stderr = SHELL_FD_UNCHANGED;
+            int stdout_redirected = 0;
+            int redirect_failed = 0;
 
-            if (argc > 0)
+            if (argc > 0) {
+                argc = shell_parse_redirects(argv, argc, &redir);
+                if (argc < 0 || argc <= 0) {
+                    redirect_failed = 1;
+                    argc = 0;
+                } else {
+                    argv[argc] = NULL;
+                    if (redir.stdin_path && shell_apply_one_redirect(redir.stdin_path, 0, 0, &saved_stdin) < 0)
+                        redirect_failed = 1;
+                    if (!redirect_failed && redir.stdout_path && shell_apply_one_redirect(redir.stdout_path, 1, redir.stdout_append, &saved_stdout) < 0)
+                        redirect_failed = 1;
+                    if (!redirect_failed && redir.stderr_path && shell_apply_one_redirect(redir.stderr_path, 2, redir.stderr_append, &saved_stderr) < 0)
+                        redirect_failed = 1;
+                    if (!redirect_failed && redir.stdout_path) {
+                        stdout_redirected = 1;
+                        shell_stdout_redirect_depth++;
+                    }
+                }
+            }
+
+            if (argc > 0 && !redirect_failed)
             {
                 char *cmd = argv[0];
                 if (shell_cmd_equals(cmd, "ls"))
@@ -2329,7 +2370,7 @@ void shell_run(void)
                     if (!gui_is_ready()) {
                         if (gui_start(1024, 768) != 0) {
                             print("guitest: gui_start failed\n");
-                            continue;
+                            goto shell_command_done;
                         }
                     }
                     gui_demo();
@@ -2393,9 +2434,23 @@ void shell_run(void)
                 }
                 else
                 {
-                    shell_run_external_with_redirect(cmd, argv, argc);
+                    int ret = shell_spawn_user_program(cmd, argv, argc);
+                    if (ret < 0) {
+                        print(cmd);
+                        print(": command not found\n");
+                    } else if (redir.stdin_path || redir.stdout_path || redir.stderr_path) {
+                        sys_waitpid(ret, NULL, 0);
+                    } else {
+                        print("exec: spawned\n");
+                    }
                 }
             }
+
+shell_command_done:
+            if (stdout_redirected) {
+                shell_stdout_redirect_depth--;
+            }
+            shell_restore_redirects(saved_stdin, saved_stdout, saved_stderr);
 
             cmd_pos = 0;
             cmd_cursor = 0;
