@@ -838,8 +838,13 @@ static int shell_execute_user_argv(int argc, char *argv[])
     return shell_spawn_user_program(path, argv, argc);
 }
 
+#define SHELL_FD_UNCHANGED (-2)
+
 static void shell_restore_fd(int target_fd, int saved_fd)
 {
+    if (saved_fd == SHELL_FD_UNCHANGED)
+        return;
+
     if (saved_fd >= 0) {
         vfs_dup2(saved_fd, target_fd);
         vfs_close(saved_fd);
@@ -943,9 +948,9 @@ static void shell_restore_redirects(int saved_stdin, int saved_stdout, int saved
 static int shell_run_external_with_redirect(char *cmd, char *argv[], int argc)
 {
     shell_redirect_t redir;
-    int saved_stdin = -1;
-    int saved_stdout = -1;
-    int saved_stderr = -1;
+    int saved_stdin = SHELL_FD_UNCHANGED;
+    int saved_stdout = SHELL_FD_UNCHANGED;
+    int saved_stderr = SHELL_FD_UNCHANGED;
 
     argc = shell_parse_redirects(argv, argc, &redir);
     if (argc < 0)
@@ -1019,38 +1024,92 @@ static int shell_run_single_pipe(char *cmdline)
         return 1;
     }
 
+    shell_redirect_t left_redir;
+    shell_redirect_t right_redir;
+    left_argc = shell_parse_redirects(left_argv, left_argc, &left_redir);
+    right_argc = shell_parse_redirects(right_argv, right_argc, &right_redir);
+    if (left_argc <= 0 || right_argc <= 0) {
+        print("pipe: missing command\n");
+        return 1;
+    }
+    left_argv[left_argc] = NULL;
+    right_argv[right_argc] = NULL;
+
     int pipefd[2];
     if (vfs_pipe(pipefd) < 0) {
         print("pipe: create failed\n");
         return 1;
     }
 
-    int saved_stdin = vfs_dup(0);
-    int saved_stdout = vfs_dup(1);
+    int saved_stdin = SHELL_FD_UNCHANGED;
+    int saved_stdout = SHELL_FD_UNCHANGED;
+    int saved_stderr = SHELL_FD_UNCHANGED;
     int left_pid = -1;
     int right_pid = -1;
 
-    if (vfs_dup2(pipefd[1], 1) < 0) {
-        print("pipe: dup stdout failed\n");
+    if (left_redir.stdin_path && shell_apply_one_redirect(left_redir.stdin_path, 0, &saved_stdin) < 0)
         goto done;
+    if (left_redir.stderr_path && shell_apply_one_redirect(left_redir.stderr_path, 2, &saved_stderr) < 0)
+        goto done;
+    if (left_redir.stdout_path) {
+        if (shell_apply_one_redirect(left_redir.stdout_path, 1, &saved_stdout) < 0)
+            goto done;
+    } else {
+        saved_stdout = vfs_dup(1);
+        if (vfs_dup2(pipefd[1], 1) < 0) {
+            print("pipe: dup stdout failed\n");
+            goto done;
+        }
     }
+
     left_pid = shell_execute_user_argv(left_argc, left_argv);
-    if (left_pid >= 0)
+    if (left_pid < 0) {
+        print(left_argv[0]);
+        print(": command not found\n");
+    } else {
         shell_close_child_fd(left_pid, pipefd[0]);
-
-    shell_restore_fd(1, saved_stdout);
-    saved_stdout = -1;
-
-    if (vfs_dup2(pipefd[0], 0) < 0) {
-        print("pipe: dup stdin failed\n");
-        goto done;
+        if (left_redir.stdout_path)
+            shell_close_child_fd(left_pid, pipefd[1]);
     }
-    right_pid = shell_execute_user_argv(right_argc, right_argv);
-    if (right_pid >= 0)
-        shell_close_child_fd(right_pid, pipefd[1]);
 
     shell_restore_fd(0, saved_stdin);
-    saved_stdin = -1;
+    shell_restore_fd(1, saved_stdout);
+    shell_restore_fd(2, saved_stderr);
+    saved_stdin = SHELL_FD_UNCHANGED;
+    saved_stdout = SHELL_FD_UNCHANGED;
+    saved_stderr = SHELL_FD_UNCHANGED;
+
+    if (right_redir.stdin_path) {
+        if (shell_apply_one_redirect(right_redir.stdin_path, 0, &saved_stdin) < 0)
+            goto done;
+    } else {
+        saved_stdin = vfs_dup(0);
+        if (vfs_dup2(pipefd[0], 0) < 0) {
+            print("pipe: dup stdin failed\n");
+            goto done;
+        }
+    }
+    if (right_redir.stdout_path && shell_apply_one_redirect(right_redir.stdout_path, 1, &saved_stdout) < 0)
+        goto done;
+    if (right_redir.stderr_path && shell_apply_one_redirect(right_redir.stderr_path, 2, &saved_stderr) < 0)
+        goto done;
+
+    right_pid = shell_execute_user_argv(right_argc, right_argv);
+    if (right_pid < 0) {
+        print(right_argv[0]);
+        print(": command not found\n");
+    } else {
+        shell_close_child_fd(right_pid, pipefd[1]);
+        if (right_redir.stdin_path)
+            shell_close_child_fd(right_pid, pipefd[0]);
+    }
+
+    shell_restore_fd(0, saved_stdin);
+    shell_restore_fd(1, saved_stdout);
+    shell_restore_fd(2, saved_stderr);
+    saved_stdin = SHELL_FD_UNCHANGED;
+    saved_stdout = SHELL_FD_UNCHANGED;
+    saved_stderr = SHELL_FD_UNCHANGED;
 
     vfs_close(pipefd[0]);
     vfs_close(pipefd[1]);
@@ -1065,6 +1124,7 @@ static int shell_run_single_pipe(char *cmdline)
 done:
     shell_restore_fd(0, saved_stdin);
     shell_restore_fd(1, saved_stdout);
+    shell_restore_fd(2, saved_stderr);
     vfs_close(pipefd[0]);
     vfs_close(pipefd[1]);
     if (left_pid >= 0)
