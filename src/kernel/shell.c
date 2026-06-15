@@ -1241,18 +1241,50 @@ done:
     return 1;
 }
 
-static int shell_spawn_user_program(const char *path, char *argv[], int argc)
+static int shell_path_has_slash(const char *path)
 {
-    char full[MAX_PATH];
+    if (!path)
+        return 0;
+
+    for (int i = 0; path[i]; i++) {
+        if (path[i] == '/')
+            return 1;
+    }
+    return 0;
+}
+
+static int shell_make_bin_path(const char *cmd, char *out, int out_size)
+{
+    const char *prefix = "/bin/";
+    int pos = 0;
+
+    if (!cmd || !cmd[0] || !out || out_size <= 0)
+        return -1;
+
+    for (int i = 0; prefix[i]; i++) {
+        if (pos + 1 >= out_size)
+            return -1;
+        out[pos++] = prefix[i];
+    }
+    for (int i = 0; cmd[i]; i++) {
+        if (pos + 1 >= out_size)
+            return -1;
+        out[pos++] = cmd[i];
+    }
+    out[pos] = 0;
+    return 0;
+}
+
+static int shell_spawn_user_program_at(const char *full, char *argv[], int argc, const char *display_name)
+{
     char *child_argv[MAX_ARGS + 1];
     const char *arg0;
 
-    if (!path || !path[0])
+    if (!full || !full[0])
         return -1;
 
-    make_path(path, full);
     arg0 = shell_basename(full);
-    child_argv[0] = (char *)(arg0 && arg0[0] ? arg0 : path);
+    child_argv[0] = (char *)(arg0 && arg0[0] ? arg0 : display_name);
 
     int child_argc = 1;
     for (int i = 1; i < argc && child_argc < MAX_ARGS; i++)
@@ -1264,6 +1296,26 @@ static int shell_spawn_user_program(const char *path, char *argv[], int argc)
     serial_write("\n");
 
     return spawn_user_process(full, child_argv);
+}
+
+static int shell_spawn_user_program(const char *path, char *argv[], int argc)
+{
+    char full[MAX_PATH];
+    char bin_path[MAX_PATH];
+    int ret;
+
+    if (!path || !path[0])
+        return -1;
+
+    make_path(path, full);
+    ret = shell_spawn_user_program_at(full, argv, argc, path);
+    if (ret >= 0 || shell_path_has_slash(path))
+        return ret;
+
+    if (shell_make_bin_path(path, bin_path, MAX_PATH) < 0)
+        return ret;
+
+    return shell_spawn_user_program_at(bin_path, argv, argc, path);
 }
 
 /* ---- 内置命令 ---- */
