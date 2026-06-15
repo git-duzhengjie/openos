@@ -169,6 +169,12 @@
 #else
 #define OPENOS_HAS_MV 0
 #endif
+#if __has_include("embed_tee.h")
+#include "embed_tee.h"  /* tee user command */
+#define OPENOS_HAS_TEE 1
+#else
+#define OPENOS_HAS_TEE 0
+#endif
 #if __has_include("embed_rmdir.h")
 #include "embed_rmdir.h"  /* rmdir user command */
 #define OPENOS_HAS_RMDIR 1
@@ -737,6 +743,17 @@ void kernel_main(void) {
         serial_write("[OK] Installed /bin/mv user ELF\n");
     } else {
         serial_write("[WARN] Failed to install /bin/mv\n");
+    }
+#endif
+
+#if OPENOS_HAS_TEE
+    fd = vfs_open("/bin/tee", O_CREAT | O_RDWR, 0755);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)tee_elf, tee_elf_size);
+        vfs_close(fd);
+        serial_write("[OK] Installed /bin/tee user ELF\n");
+    } else {
+        serial_write("[WARN] Failed to install /bin/tee\n");
     }
 #endif
 

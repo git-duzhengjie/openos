@@ -303,6 +303,16 @@ if [ -f $USR/mv.c ]; then
     echo "  Embedded: mv.elf"
 fi
 
+if [ -f $USR/tee.c ]; then
+    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+        -fno-stack-protector -fno-builtin \
+        -I $SRC/include \
+        -c $USR/tee.c -o $BUILD/tee.o
+    ld -m elf_i386 -T $USR/user.ld -o $BUILD/tee.elf $BUILD/tee.o
+    python3 _embed_elf.py $BUILD/tee.elf $SRC/include/embed_tee.h tee_elf
+    echo "  Embedded: tee.elf"
+fi
+
 if [ -f $USR/rmdir.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \
