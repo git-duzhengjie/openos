@@ -91,6 +91,12 @@
 #else
 #define OPENOS_HAS_ERRNOTEST 0
 #endif
+#if __has_include("embed_stdiotest.h")
+#include "embed_stdiotest.h"  /* userspace stdio regression test */
+#define OPENOS_HAS_STDIOTEST 1
+#else
+#define OPENOS_HAS_STDIOTEST 0
+#endif
 #if __has_include("embed_fstest.h")
 #include "embed_fstest.h"  /* filesystem syscall 回归测试程序 */
 #define OPENOS_HAS_FSTEST 1
@@ -581,6 +587,17 @@ void kernel_main(void) {
         serial_write("[OK] Installed /bin/errnotest user ELF\n");
     } else {
         serial_write("[WARN] Failed to install /bin/errnotest\n");
+    }
+#endif
+
+#if OPENOS_HAS_STDIOTEST
+    fd = vfs_open("/bin/stdiotest", O_CREAT | O_RDWR, 0755);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)stdiotest_elf, stdiotest_elf_size);
+        vfs_close(fd);
+        serial_write("[OK] Installed /bin/stdiotest user ELF\n");
+    } else {
+        serial_write("[WARN] Failed to install /bin/stdiotest\n");
     }
 #endif
 

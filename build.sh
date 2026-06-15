@@ -168,6 +168,20 @@ if [ -f $USR/errnotest.c ]; then
     echo "  Embedded: errnotest.elf"
 fi
 
+if [ -f $USR/stdiotest.c ]; then
+    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+        -fno-stack-protector -fno-builtin \
+        -I $SRC/include \
+        -c $USR/crt0.c -o $BUILD/crt0.o
+    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+        -fno-stack-protector -fno-builtin \
+        -I $SRC/include \
+        -c $USR/stdiotest.c -o $BUILD/stdiotest.o
+    ld -m elf_i386 -T $USR/user.ld -o $BUILD/stdiotest.elf $BUILD/crt0.o $BUILD/stdiotest.o
+    python3 _embed_elf.py $BUILD/stdiotest.elf $SRC/include/embed_stdiotest.h stdiotest_elf
+    echo "  Embedded: stdiotest.elf"
+fi
+
 if [ -f $USR/fstest.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \

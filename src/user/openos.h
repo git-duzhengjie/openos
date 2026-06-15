@@ -47,6 +47,14 @@
 #define FS_FILE         0x1000
 #define FS_DIR          0x2000
 #define O_RDONLY        0
+#define O_WRONLY        1
+#define O_RDWR          2
+#define O_CREAT         0x100
+#define O_TRUNC         0x200
+#define SEEK_SET        0
+#define SEEK_CUR        1
+#define SEEK_END        2
+#define EOF             (-1)
 #define STDIN_FILENO    0
 #define STDOUT_FILENO   1
 #define STDERR_FILENO   2
@@ -79,6 +87,10 @@ static inline int *openos_errno_location(void)
 {
     return &openos_errno;
 }
+
+#ifndef errno
+#define errno (*openos_errno_location())
+#endif
 
 static inline int openos_get_errno(void)
 {
@@ -462,20 +474,43 @@ static inline int openos_print_int(int value)
     return openos_write_fd(STDOUT_FILENO, buf, openos_strlen(buf));
 }
 
-static inline int openos_printf(const char *fmt, ...)
+static inline void openos_format_emit_char(char *buf, int size, int *pos, int *total, int fd, int ch)
 {
-    __builtin_va_list ap;
-    int written = 0;
+    char c = (char)ch;
 
-    if (!fmt)
+    if (total)
+        (*total)++;
+    if (buf && size > 0 && pos && *pos < size - 1)
+        buf[(*pos)++] = c;
+    if (fd >= 0)
+        openos_write_fd(fd, &c, 1);
+}
+
+static inline void openos_format_emit_str(char *buf, int size, int *pos, int *total, int fd, const char *s)
+{
+    if (!s)
+        s = "(null)";
+    while (*s) {
+        openos_format_emit_char(buf, size, pos, total, fd, *s);
+        s++;
+    }
+}
+
+static inline int openos_vformat(char *buf, int size, int fd, const char *fmt, __builtin_va_list ap)
+{
+    int pos = 0;
+    int total = 0;
+
+    if (!fmt) {
+        openos_set_errno(OPENOS_EINVAL);
+        if (buf && size > 0)
+            buf[0] = 0;
         return -1;
+    }
 
-    __builtin_va_start(ap, fmt);
     while (*fmt) {
         if (*fmt != '%') {
-            openos_write_fd(STDOUT_FILENO, fmt, 1);
-            written++;
-            fmt++;
+            openos_format_emit_char(buf, size, &pos, &total, fd, *fmt++);
             continue;
         }
 
@@ -484,38 +519,102 @@ static inline int openos_printf(const char *fmt, ...)
             break;
 
         if (*fmt == '%') {
-            openos_write_fd(STDOUT_FILENO, "%", 1);
-            written++;
+            openos_format_emit_char(buf, size, &pos, &total, fd, '%');
         } else if (*fmt == 's') {
-            const char *s = __builtin_va_arg(ap, const char *);
-            if (!s)
-                s = "(null)";
-            openos_write_fd(STDOUT_FILENO, s, openos_strlen(s));
-            written += openos_strlen(s);
+            openos_format_emit_str(buf, size, &pos, &total, fd, __builtin_va_arg(ap, const char *));
         } else if (*fmt == 'c') {
-            char c = (char)__builtin_va_arg(ap, int);
-            openos_write_fd(STDOUT_FILENO, &c, 1);
-            written++;
+            openos_format_emit_char(buf, size, &pos, &total, fd, __builtin_va_arg(ap, int));
         } else if (*fmt == 'd' || *fmt == 'i') {
-            char buf[16];
-            openos_itoa(__builtin_va_arg(ap, int), buf, 10);
-            openos_write_fd(STDOUT_FILENO, buf, openos_strlen(buf));
-            written += openos_strlen(buf);
+            char nbuf[16];
+            openos_itoa(__builtin_va_arg(ap, int), nbuf, 10);
+            openos_format_emit_str(buf, size, &pos, &total, fd, nbuf);
+        } else if (*fmt == 'u') {
+            char nbuf[16];
+            unsigned int value = __builtin_va_arg(ap, unsigned int);
+            char tmp[16];
+            int i = 0;
+            int j = 0;
+            if (value == 0) {
+                nbuf[0] = '0';
+                nbuf[1] = 0;
+            } else {
+                while (value > 0 && i < (int)sizeof(tmp)) {
+                    tmp[i++] = (char)('0' + (value % 10));
+                    value /= 10;
+                }
+                while (i > 0)
+                    nbuf[j++] = tmp[--i];
+                nbuf[j] = 0;
+            }
+            openos_format_emit_str(buf, size, &pos, &total, fd, nbuf);
         } else if (*fmt == 'x') {
-            char buf[16];
-            openos_itoa(__builtin_va_arg(ap, int), buf, 16);
-            openos_write_fd(STDOUT_FILENO, buf, openos_strlen(buf));
-            written += openos_strlen(buf);
+            char nbuf[16];
+            openos_itoa(__builtin_va_arg(ap, int), nbuf, 16);
+            openos_format_emit_str(buf, size, &pos, &total, fd, nbuf);
         } else {
-            openos_write_fd(STDOUT_FILENO, "%", 1);
-            openos_write_fd(STDOUT_FILENO, fmt, 1);
-            written += 2;
+            openos_format_emit_char(buf, size, &pos, &total, fd, '%');
+            openos_format_emit_char(buf, size, &pos, &total, fd, *fmt);
         }
         fmt++;
     }
-    __builtin_va_end(ap);
-    return written;
+
+    if (buf && size > 0)
+        buf[pos] = 0;
+    openos_clear_errno();
+    return total;
 }
+
+static inline int openos_vsnprintf(char *buf, int size, const char *fmt, __builtin_va_list ap)
+{
+    if (!buf || size <= 0) {
+        openos_set_errno(OPENOS_EINVAL);
+        return -1;
+    }
+    return openos_vformat(buf, size, -1, fmt, ap);
+}
+
+static inline int openos_snprintf(char *buf, int size, const char *fmt, ...)
+{
+    __builtin_va_list ap;
+    int ret;
+
+    __builtin_va_start(ap, fmt);
+    ret = openos_vsnprintf(buf, size, fmt, ap);
+    __builtin_va_end(ap);
+    return ret;
+}
+
+static inline int openos_vdprintf(int fd, const char *fmt, __builtin_va_list ap)
+{
+    if (fd < 0) {
+        openos_set_errno(OPENOS_EBADF);
+        return -1;
+    }
+    return openos_vformat(0, 0, fd, fmt, ap);
+}
+
+static inline int openos_dprintf(int fd, const char *fmt, ...)
+{
+    __builtin_va_list ap;
+    int ret;
+
+    __builtin_va_start(ap, fmt);
+    ret = openos_vdprintf(fd, fmt, ap);
+    __builtin_va_end(ap);
+    return ret;
+}
+
+static inline int openos_printf(const char *fmt, ...)
+{
+    __builtin_va_list ap;
+    int ret;
+
+    __builtin_va_start(ap, fmt);
+    ret = openos_vdprintf(STDOUT_FILENO, fmt, ap);
+    __builtin_va_end(ap);
+    return ret;
+}
+
 
 static inline int openos_getpid(void)
 {
@@ -831,6 +930,276 @@ static inline int openos_seek(int fd, int offset, int whence)
     return openos_syscall_result(openos_syscall3(SYS_SEEK, fd, offset, whence));
 }
 
+
+
+typedef struct openos_FILE {
+    int fd;
+    int flags;
+    int error;
+    int eof;
+    int builtin;
+} openos_FILE;
+
+typedef openos_FILE FILE;
+
+static openos_FILE openos_stdin_file = { STDIN_FILENO, O_RDONLY, 0, 0, 1 };
+static openos_FILE openos_stdout_file = { STDOUT_FILENO, O_WRONLY, 0, 0, 1 };
+static openos_FILE openos_stderr_file = { STDERR_FILENO, O_WRONLY, 0, 0, 1 };
+
+#define stdin  (&openos_stdin_file)
+#define stdout (&openos_stdout_file)
+#define stderr (&openos_stderr_file)
+
+static inline int openos_stdio_mode_flags(const char *mode, int *append)
+{
+    int flags;
+
+    if (!mode || !mode[0]) {
+        openos_set_errno(OPENOS_EINVAL);
+        return -1;
+    }
+
+    *append = 0;
+    if (mode[0] == 'r') {
+        flags = O_RDONLY;
+        if (openos_strchr(mode, '+'))
+            flags = O_RDWR;
+    } else if (mode[0] == 'w') {
+        flags = O_CREAT | O_TRUNC | O_WRONLY;
+        if (openos_strchr(mode, '+'))
+            flags = O_CREAT | O_TRUNC | O_RDWR;
+    } else if (mode[0] == 'a') {
+        flags = O_CREAT | O_WRONLY;
+        if (openos_strchr(mode, '+'))
+            flags = O_CREAT | O_RDWR;
+        *append = 1;
+    } else {
+        openos_set_errno(OPENOS_EINVAL);
+        return -1;
+    }
+    return flags;
+}
+
+static inline openos_FILE *openos_fopen(const char *path, const char *mode)
+{
+    openos_FILE *file;
+    int append = 0;
+    int flags = openos_stdio_mode_flags(mode, &append);
+    int fd;
+
+    if (!path || flags < 0) {
+        if (!path)
+            openos_set_errno(OPENOS_EINVAL);
+        return 0;
+    }
+
+    fd = openos_open(path, flags, 0644);
+    if (fd < 0)
+        return 0;
+    if (append)
+        openos_seek(fd, 0, SEEK_END);
+
+    file = (openos_FILE *)openos_malloc(sizeof(openos_FILE));
+    if (!file) {
+        openos_close(fd);
+        return 0;
+    }
+    file->fd = fd;
+    file->flags = flags;
+    file->error = 0;
+    file->eof = 0;
+    file->builtin = 0;
+    openos_clear_errno();
+    return file;
+}
+
+static inline int openos_fflush(openos_FILE *stream)
+{
+    if (!stream) {
+        openos_set_errno(OPENOS_EINVAL);
+        return EOF;
+    }
+    openos_clear_errno();
+    return 0;
+}
+
+static inline int openos_fclose(openos_FILE *stream)
+{
+    int ret;
+
+    if (!stream) {
+        openos_set_errno(OPENOS_EINVAL);
+        return EOF;
+    }
+    if (stream->builtin)
+        return openos_fflush(stream);
+
+    ret = openos_close(stream->fd);
+    stream->fd = -1;
+    openos_free(stream);
+    return ret < 0 ? EOF : 0;
+}
+
+static inline int openos_fread(void *ptr, int size, int nmemb, openos_FILE *stream)
+{
+    int want;
+    int got;
+
+    if (!ptr || !stream || size < 0 || nmemb < 0) {
+        openos_set_errno(OPENOS_EINVAL);
+        if (stream)
+            stream->error = 1;
+        return 0;
+    }
+    if (size == 0 || nmemb == 0)
+        return 0;
+    want = size * nmemb;
+    if (size != 0 && want / size != nmemb) {
+        openos_set_errno(OPENOS_EINVAL);
+        stream->error = 1;
+        return 0;
+    }
+    got = openos_read(stream->fd, ptr, want);
+    if (got < 0) {
+        stream->error = 1;
+        return 0;
+    }
+    if (got < want)
+        stream->eof = 1;
+    return got / size;
+}
+
+static inline int openos_fwrite(const void *ptr, int size, int nmemb, openos_FILE *stream)
+{
+    int want;
+    int done;
+
+    if (!ptr || !stream || size < 0 || nmemb < 0) {
+        openos_set_errno(OPENOS_EINVAL);
+        if (stream)
+            stream->error = 1;
+        return 0;
+    }
+    if (size == 0 || nmemb == 0)
+        return 0;
+    want = size * nmemb;
+    if (size != 0 && want / size != nmemb) {
+        openos_set_errno(OPENOS_EINVAL);
+        stream->error = 1;
+        return 0;
+    }
+    done = openos_write_fd(stream->fd, ptr, want);
+    if (done < 0) {
+        stream->error = 1;
+        return 0;
+    }
+    return done / size;
+}
+
+static inline int openos_fgetc(openos_FILE *stream)
+{
+    unsigned char ch;
+    int ret;
+
+    if (!stream) {
+        openos_set_errno(OPENOS_EINVAL);
+        return EOF;
+    }
+    ret = openos_read(stream->fd, &ch, 1);
+    if (ret == 1)
+        return (int)ch;
+    if (ret == 0)
+        stream->eof = 1;
+    else
+        stream->error = 1;
+    return EOF;
+}
+
+static inline int openos_fputc(int ch, openos_FILE *stream)
+{
+    unsigned char c = (unsigned char)ch;
+
+    if (!stream) {
+        openos_set_errno(OPENOS_EINVAL);
+        return EOF;
+    }
+    if (openos_write_fd(stream->fd, &c, 1) != 1) {
+        stream->error = 1;
+        return EOF;
+    }
+    return ch;
+}
+
+static inline int openos_fputs(const char *s, openos_FILE *stream)
+{
+    int len;
+
+    if (!s || !stream) {
+        openos_set_errno(OPENOS_EINVAL);
+        if (stream)
+            stream->error = 1;
+        return EOF;
+    }
+    len = openos_strlen(s);
+    if (openos_write_fd(stream->fd, s, len) != len) {
+        stream->error = 1;
+        return EOF;
+    }
+    return 0;
+}
+
+static inline int openos_vfprintf(openos_FILE *stream, const char *fmt, __builtin_va_list ap)
+{
+    if (!stream) {
+        openos_set_errno(OPENOS_EINVAL);
+        return -1;
+    }
+    return openos_vdprintf(stream->fd, fmt, ap);
+}
+
+static inline int openos_fprintf(openos_FILE *stream, const char *fmt, ...)
+{
+    __builtin_va_list ap;
+    int ret;
+
+    __builtin_va_start(ap, fmt);
+    ret = openos_vfprintf(stream, fmt, ap);
+    __builtin_va_end(ap);
+    return ret;
+}
+
+static inline int openos_feof(openos_FILE *stream)
+{
+    return stream ? stream->eof : 0;
+}
+
+static inline int openos_ferror(openos_FILE *stream)
+{
+    return stream ? stream->error : 1;
+}
+
+static inline void openos_clearerr(openos_FILE *stream)
+{
+    if (stream) {
+        stream->error = 0;
+        stream->eof = 0;
+    }
+}
+
+#define fopen(path, mode)       openos_fopen((path), (mode))
+#define fclose(stream)          openos_fclose((stream))
+#define fread(ptr, size, nmemb, stream)  openos_fread((ptr), (size), (nmemb), (stream))
+#define fwrite(ptr, size, nmemb, stream) openos_fwrite((ptr), (size), (nmemb), (stream))
+#define fflush(stream)          openos_fflush((stream))
+#define fgetc(stream)           openos_fgetc((stream))
+#define fputc(ch, stream)       openos_fputc((ch), (stream))
+#define fputs(s, stream)        openos_fputs((s), (stream))
+#define fprintf(stream, fmt, ...) openos_fprintf((stream), (fmt), ##__VA_ARGS__)
+#define printf(fmt, ...)        openos_printf((fmt), ##__VA_ARGS__)
+#define snprintf(buf, size, fmt, ...) openos_snprintf((buf), (size), (fmt), ##__VA_ARGS__)
+#define feof(stream)            openos_feof((stream))
+#define ferror(stream)          openos_ferror((stream))
+#define clearerr(stream)        openos_clearerr((stream))
 
 typedef struct openos_DIR {
     char path[OPENOS_PATH_MAX];

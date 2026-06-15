@@ -6,7 +6,7 @@
 >
 > 最近完成：已补齐 shell 后台任务、`Ctrl+C` / `Ctrl+D`、`jobs` / `fg`、Tab 命令补全、脚本执行；本轮完成用户态运行库 libc 子集，`src/user/openos.h` 新增 `memset/memcpy/memmove/memcmp/strncmp/strchr/strrchr/strstr/isdigit/isspace/atoi/itoa/putchar/puts/printf` 等 header-only 能力，并新增 `/bin/libctest` 回归程序覆盖基础字符串、内存、转换与输出函数。
 >
-> 当前推荐下一步：继续 P5，实现 stdio 基础能力；用户态 errno 与统一错误获取已完成，新增 `openos_errno` / `openos_get_errno()` / `openos_set_errno()` / `openos_syscall_result()`，并新增 `/bin/errnotest` 回归。
+> 当前推荐下一步：继续 P5，完善字符串/ctype 常用函数；stdio 基础能力已完成，新增 header-only `FILE` 与 `/bin/stdiotest` 回归。
 
 ---
 
@@ -269,7 +269,7 @@
 - [√] syscall wrapper 标准化（新增 `openos_syscall0/1/2/3` 与常用 wrapper：进程、文件、目录、pipe、exec、heap 等；新增 `/bin/systest` 回归）
 - [√] malloc/free 用户态实现（基于页级 `SYS_MALLOC/SYS_FREE` 的用户态空闲链表，支持 `malloc/free/calloc/realloc`，新增 `/bin/malloctest` 回归）
 - [√] errno（新增用户态 errno 常量、`openos_get_errno()` / `openos_set_errno()` / `openos_syscall_result()`，syscall wrapper 失败统一返回 -1 并设置 errno，新增 `/bin/errnotest` 回归）
-- [ ] stdio 基础能力
+- [√] stdio 基础能力（新增 header-only `FILE`/`stdin`/`stdout`/`stderr`、`fopen/fclose/fread/fwrite/fgetc/fputc/fputs/fprintf/snprintf/fflush/feof/ferror/clearerr`，新增 `/bin/stdiotest` 回归）
 
 ---
 
