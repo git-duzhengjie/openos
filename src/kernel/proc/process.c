@@ -323,11 +323,19 @@ static void proc_wake_waiter(uint32_t pid)
     if (!parent || !parent->threads)
         return;
 
-    thread_t *t = parent->threads;
-    while (t) {
-        thread_t *next = t->next;
-        thread_wake(t);
-        t = next;
+    thread_wake(parent->threads);
+}
+
+void proc_wake_sleepers(uint32_t now_ms)
+{
+    for (int i = 0; i < MAX_PROCS; i++) {
+        process_t *p = &proc_table[i];
+        if (p->state == PROC_DEAD || p->state == PROC_ZOMBIE || !p->threads)
+            continue;
+
+        thread_t *t = p->threads;
+        if (t->state == PROC_SLEEPING && t->wake_time <= now_ms)
+            thread_wake(t);
     }
 }
 

@@ -18,9 +18,10 @@ static struct {
     thread_t *queues[8];
     thread_t *current;
     uint32_t current_ticks;
+    uint32_t time_ms;
     int initialized;
     int need_resched;
-} sched = {{0}, 0, 0, 0, 0};
+} sched = {{0}, 0, 0, 0, 0, 0};
 
 static void enqueue(thread_t *t) {
     int prio = t->priority;
@@ -63,6 +64,7 @@ void sched_init(void) {
     for (int i = 0; i < 8; i++) sched.queues[i] = NULL;
     sched.current = NULL;
     sched.current_ticks = 0;
+    sched.time_ms = 0;
     sched.need_resched = 0;
 
     /* 创建 idle 线程并加入运行队列 */
@@ -131,6 +133,8 @@ void sched_start(void) {
 void sched_tick(void) {
     sync_tick(1);
     bus_reliable_tick(1);
+    sched.time_ms++;
+    proc_wake_sleepers(sched.time_ms);
     if (!sched.current) return;
     sched.current_ticks++;
     if (sched.current_ticks >= 10) {
@@ -295,10 +299,10 @@ thread_t *thread_create(uint32_t pid, const char *name, uint32_t entry, uint32_t
 }
 
 void thread_sleep(uint32_t ms) {
-    (void)ms;
     if (sched.current) {
         remove_from_queue(sched.current);
-        sched.current->state = PROC_BLOCKED;
+        sched.current->wake_time = sched.time_ms + ms;
+        sched.current->state = PROC_SLEEPING;
         sched.need_resched = 1;
     }
 }

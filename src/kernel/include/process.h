@@ -126,6 +126,7 @@ process_t *proc_find(uint32_t pid);
 void proc_reap_zombie(process_t *proc);
 uint32_t proc_reap_zombies_for_parent(uint32_t ppid);
 uint32_t proc_reparent_children(uint32_t old_ppid, uint32_t new_ppid);
+void proc_wake_sleepers(uint32_t now_ms);
 int proc_terminate(uint32_t pid, int exit_code);
 uint32_t proc_current_pid(void);
 
