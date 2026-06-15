@@ -74,7 +74,7 @@
 - [√] 实现用户态 `stat` syscall（新增 `/bin/fstest` 回归）
 - [x] 实现用户态 `fstat` / `lstat`
 - [√] 实现用户态 `readdir` syscall（路径 + index 形式）
-- [ ] 实现用户态 `opendir` / `closedir` 封装
+- [x] 实现用户态 `opendir` / `closedir` 封装（基于 `SYS_READDIR(path,index)`）
 - [√] 实现 `getcwd` / `chdir` syscall
 - [ ] 可选：将现有 shell 内置基础命令拆分为独立 `/bin/*` 用户态程序
   - [ ] `/bin/ls`
