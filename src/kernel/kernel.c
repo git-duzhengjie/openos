@@ -187,6 +187,12 @@
 #else
 #define OPENOS_HAS_TAIL 0
 #endif
+#if __has_include("embed_sort.h")
+#include "embed_sort.h"  /* sort user command */
+#define OPENOS_HAS_SORT 1
+#else
+#define OPENOS_HAS_SORT 0
+#endif
 #if __has_include("embed_rmdir.h")
 #include "embed_rmdir.h"  /* rmdir user command */
 #define OPENOS_HAS_RMDIR 1
@@ -788,6 +794,17 @@ void kernel_main(void) {
         serial_write("[OK] Installed /bin/tail user ELF\n");
     } else {
         serial_write("[WARN] Failed to install /bin/tail\n");
+    }
+#endif
+
+#if OPENOS_HAS_SORT
+    fd = vfs_open("/bin/sort", O_CREAT | O_RDWR, 0755);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)sort_elf, sort_elf_size);
+        vfs_close(fd);
+        serial_write("[OK] Installed /bin/sort user ELF\n");
+    } else {
+        serial_write("[WARN] Failed to install /bin/sort\n");
     }
 #endif
 

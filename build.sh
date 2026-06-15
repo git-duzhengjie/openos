@@ -333,6 +333,16 @@ if [ -f $USR/tail.c ]; then
     echo "  Embedded: tail.elf"
 fi
 
+if [ -f $USR/sort.c ]; then
+    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+        -fno-stack-protector -fno-builtin \
+        -I $SRC/include \
+        -c $USR/sort.c -o $BUILD/sort.o
+    ld -m elf_i386 -T $USR/user.ld -o $BUILD/sort.elf $BUILD/sort.o
+    python3 _embed_elf.py $BUILD/sort.elf $SRC/include/embed_sort.h sort_elf
+    echo "  Embedded: sort.elf"
+fi
+
 if [ -f $USR/rmdir.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \
