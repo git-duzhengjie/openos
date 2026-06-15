@@ -252,6 +252,26 @@ uint32_t syscall_dispatch(uint32_t num,
             return (uint32_t)spawn_user_process(path, argv);
         }
 
+    case SYS_EXEC_ENV:
+        {
+            char path[USERMEM_CSTR_MAX];
+            char *const *argv = (char *const *)b;
+            char *const *envp = (char *const *)c;
+            if (syscall_copy_user_path(path, (const char *)a) < 0)
+                return (uint32_t)-1;
+            return (uint32_t)sys_exec_env(path, argv, envp);
+        }
+
+    case SYS_SPAWN_ENV:
+        {
+            char path[USERMEM_CSTR_MAX];
+            char *const *argv = (char *const *)b;
+            char *const *envp = (char *const *)c;
+            if (syscall_copy_user_path(path, (const char *)a) < 0)
+                return (uint32_t)-1;
+            return (uint32_t)spawn_user_process_env(path, argv, envp);
+        }
+
     default:
         return 0xFFFFFFFF;
     }

@@ -55,6 +55,12 @@
 #else
 #define OPENOS_HAS_ARGTEST 0
 #endif
+#if __has_include("embed_envtest.h")
+#include "embed_envtest.h"  /* envp 回归测试程序 */
+#define OPENOS_HAS_ENVTEST 1
+#else
+#define OPENOS_HAS_ENVTEST 0
+#endif
 
 /* 外部符号 */
 extern void gdt_init(void);
@@ -418,6 +424,17 @@ void kernel_main(void) {
         serial_write("[OK] Installed /bin/argtest user ELF\n");
     } else {
         serial_write("[WARN] Failed to install /bin/argtest\n");
+    }
+#endif
+
+#if OPENOS_HAS_ENVTEST
+    fd = vfs_open("/bin/envtest", O_CREAT | O_RDWR, 0755);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)envtest_elf, envtest_elf_size);
+        vfs_close(fd);
+        serial_write("[OK] Installed /bin/envtest user ELF\n");
+    } else {
+        serial_write("[WARN] Failed to install /bin/envtest\n");
     }
 #endif
 

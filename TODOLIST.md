@@ -4,9 +4,9 @@
 >
 > 当前状态：openos 已具备 32 位 x86 原型内核能力，能够启动、显示、输入、调度、运行基础用户程序，并具备基础 syscall、VFS、ramfs/tmpfs、shell、GUI Terminal 等模块。以下清单记录后续仍需开发或完善的功能。
 >
-> 最近完成：`9f584f2 fix(proc): reap orphaned child processes` 已完成子进程资源回收、孤儿进程 reparent 到 init，并新增 `/bin/orphan` 回归覆盖；`d2a2da0 fix(build): increase boot kernel load limit` 已将 bootloader 内核加载上限提升到 1024 扇区并修复 `NULL` 重定义警告；当前已搭建 PID1 init/reaper 内核线程，并已支持 shell 直接执行 `/bin/app arg1 arg2` 带参数用户程序。
+> 最近完成：`9f584f2 fix(proc): reap orphaned child processes` 已完成子进程资源回收、孤儿进程 reparent 到 init，并新增 `/bin/orphan` 回归覆盖；`d2a2da0 fix(build): increase boot kernel load limit` 已将 bootloader 内核加载上限提升到 1024 扇区并修复 `NULL` 重定义警告；当前已搭建 PID1 init/reaper 内核线程，已支持 shell 直接执行 `/bin/app arg1 arg2` 带参数用户程序，并已补齐 `envp` 环境变量传递。
 >
-> 当前推荐下一步：继续 P0，优先补齐基础文件系统用户命令；随后推进 `envp` 环境变量传递。
+> 当前推荐下一步：继续 P0，优先补齐文件系统用户态接口（`stat` / `opendir` / `getcwd` 等）；如需类 Unix 用户态工具链，再将现有 shell 内置命令拆分为独立 `/bin/*` 程序。
 
 ---
 
@@ -24,7 +24,7 @@
 - [√] bootloader 内核加载上限提升到 1024 扇区（提交：`d2a2da0`）
 - [√] Shell、VGA / GUI Terminal、基础输入
 - [√] 基础网络栈雏形（ARP / IPv4 / ICMP / UDP / TCP）
-- [√] `/bin/hello`、`/bin/fault`、`/bin/waittest`、`/bin/orphan`、`/bin/argtest` 基础用户程序
+- [√] `/bin/hello`、`/bin/fault`、`/bin/waittest`、`/bin/orphan`、`/bin/argtest`、`/bin/envtest` 基础用户程序
 - [√] 调度器 GPF 修复
 - [√] Shell 历史命令重绘修复
 - [√] `waitpid` 错误语义、`waitpid(-1)`、exit status 编码与回归测试（提交：`daca8f2`）
@@ -67,21 +67,20 @@
 - [√] `exec(path, argv)` 支持参数（提交：本提交）
 - [√] 用户态入口支持 `main(argc, argv)` / `_start(argc, argv)` 参数栈（提交：本提交）
 - [√] shell 支持执行 `/bin/app arg1 arg2`（提交：本提交）
-- [ ] 支持环境变量 `envp`
+- [√] 支持环境变量 `envp`（新增 `/bin/envtest` 回归，提交：本提交）
 
 ### 3. 文件系统基础接口
 
 - [ ] 实现用户态 `stat` / `fstat` / `lstat`
 - [ ] 实现用户态 `opendir` / `readdir`
 - [ ] 实现 `getcwd` / `chdir`
-- [ ] 添加基础用户命令
-  - [ ] `ls`
-  - [ ] `cat`
-  - [ ] `pwd`
-  - [ ] `cd`
-  - [ ] `mkdir`
-  - [ ] `rm`
-  - [ ] `echo`
+- [ ] 可选：将现有 shell 内置基础命令拆分为独立 `/bin/*` 用户态程序
+  - [ ] `/bin/ls`
+  - [ ] `/bin/cat`
+  - [ ] `/bin/pwd`
+  - [ ] `/bin/mkdir`
+  - [ ] `/bin/rm`
+  - [ ] `/bin/echo`
 
 ---
 

@@ -82,6 +82,16 @@ if [ -f $USR/orphan.c ]; then
     echo "  Embedded: orphan.elf"
 fi
 
+if [ -f $USR/envtest.c ]; then
+    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+        -fno-stack-protector -fno-builtin \
+        -I $SRC/include \
+        -c $USR/envtest.c -o $BUILD/envtest.o
+    ld -m elf_i386 -T $USR/user.ld -o $BUILD/envtest.elf $BUILD/envtest.o
+    python3 _embed_elf.py $BUILD/envtest.elf $SRC/include/embed_envtest.h envtest_elf
+    echo "  Embedded: envtest.elf"
+fi
+
 if [ -f $USR/argtest.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \
