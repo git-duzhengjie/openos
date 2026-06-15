@@ -273,6 +273,16 @@ if [ -f $USR/rm.c ]; then
     echo "  Embedded: rm.elf"
 fi
 
+if [ -f $USR/touch.c ]; then
+    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+        -fno-stack-protector -fno-builtin \
+        -I $SRC/include \
+        -c $USR/touch.c -o $BUILD/touch.o
+    ld -m elf_i386 -T $USR/user.ld -o $BUILD/touch.elf $BUILD/touch.o
+    python3 _embed_elf.py $BUILD/touch.elf $SRC/include/embed_touch.h touch_elf
+    echo "  Embedded: touch.elf"
+fi
+
 if [ -f $USR/rmdir.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \

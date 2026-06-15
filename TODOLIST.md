@@ -6,7 +6,7 @@
 >
 > 最近完成：已补齐 shell 后台任务、`Ctrl+C` / `Ctrl+D`、`jobs` / `fg`、Tab 命令补全、脚本执行；本轮完成用户态运行库 libc 子集，`src/user/openos.h` 新增 `memset/memcpy/memmove/memcmp/strncmp/strchr/strrchr/strstr/isdigit/isspace/atoi/itoa/putchar/puts/printf` 等 header-only 能力，并新增 `/bin/libctest` 回归程序覆盖基础字符串、内存、转换与输出函数。
 >
-> 当前推荐下一步：P5 用户态运行库继续完善；字符串/ctype 常用函数已补齐，建议下一步增加更多用户态工具或转向 P1 进程独立地址空间。
+> 当前推荐下一步：继续补充用户态常用工具；本轮新增 `/bin/touch`，建议后续补 `/bin/cp` / `/bin/mv` / `/bin/tee`。
 
 ---
 
@@ -24,7 +24,7 @@
 - [√] bootloader 内核加载上限提升到 1024 扇区（提交：`d2a2da0`）
 - [√] Shell、VGA / GUI Terminal、基础输入
 - [√] 基础网络栈雏形（ARP / IPv4 / ICMP / UDP / TCP）
-- [√] `/bin/hello`、`/bin/fault`、`/bin/waittest`、`/bin/orphan`、`/bin/argtest`、`/bin/envtest`、`/bin/fstest`、`/bin/libctest`、`/bin/maintest`、`/bin/systest`、`/bin/malloctest`、`/bin/errnotest`、`/bin/pwd`、`/bin/ls`、`/bin/cat`、`/bin/echo`、`/bin/mkdir`、`/bin/rm`、`/bin/rmdir`、`/bin/grep`、`/bin/wc` 基础用户程序
+- [√] `/bin/hello`、`/bin/fault`、`/bin/waittest`、`/bin/orphan`、`/bin/argtest`、`/bin/envtest`、`/bin/fstest`、`/bin/libctest`、`/bin/maintest`、`/bin/systest`、`/bin/malloctest`、`/bin/errnotest`、`/bin/pwd`、`/bin/ls`、`/bin/cat`、`/bin/echo`、`/bin/mkdir`、`/bin/touch`、`/bin/rm`、`/bin/rmdir`、`/bin/grep`、`/bin/wc` 基础用户程序
 - [√] 新增最小用户态公共 runtime 头文件 `src/user/openos.h`，统一 syscall 编号、基础 wrapper、状态宏与 FS 结构体
 - [√] 调度器 GPF 修复
 - [√] Shell 历史命令重绘修复
@@ -98,6 +98,7 @@
   - [√] `/bin/pwd`
   - [√] `/bin/mkdir`
   - [√] `/bin/rm`
+  - [√] `/bin/touch`
   - [√] `/bin/rmdir`
   - [√] `/bin/echo`
   - [√] `/bin/grep`
