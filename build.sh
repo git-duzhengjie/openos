@@ -173,6 +173,16 @@ if [ -f $USR/rm.c ]; then
     echo "  Embedded: rm.elf"
 fi
 
+if [ -f $USR/rmdir.c ]; then
+    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+        -fno-stack-protector -fno-builtin \
+        -I $SRC/include \
+        -c $USR/rmdir.c -o $BUILD/rmdir.o
+    ld -m elf_i386 -T $USR/user.ld -o $BUILD/rmdir.elf $BUILD/rmdir.o
+    python3 _embed_elf.py $BUILD/rmdir.elf $SRC/include/embed_rmdir.h rmdir_elf
+    echo "  Embedded: rmdir.elf"
+fi
+
 echo "[3/5] Compiling kernel C files..."
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \

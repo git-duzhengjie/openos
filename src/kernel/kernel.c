@@ -103,6 +103,12 @@
 #else
 #define OPENOS_HAS_RM 0
 #endif
+#if __has_include("embed_rmdir.h")
+#include "embed_rmdir.h"  /* rmdir user command */
+#define OPENOS_HAS_RMDIR 1
+#else
+#define OPENOS_HAS_RMDIR 0
+#endif
 
 
 /* 外部符号 */
@@ -555,6 +561,17 @@ void kernel_main(void) {
         serial_write("[OK] Installed /bin/rm user ELF\n");
     } else {
         serial_write("[WARN] Failed to install /bin/rm\n");
+    }
+#endif
+
+#if OPENOS_HAS_RMDIR
+    fd = vfs_open("/bin/rmdir", O_CREAT | O_RDWR, 0755);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)rmdir_elf, rmdir_elf_size);
+        vfs_close(fd);
+        serial_write("[OK] Installed /bin/rmdir user ELF\n");
+    } else {
+        serial_write("[WARN] Failed to install /bin/rmdir\n");
     }
 #endif
 
