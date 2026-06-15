@@ -4,9 +4,9 @@
 >
 > 当前状态：openos 已具备 32 位 x86 原型内核能力，能够启动、显示、输入、调度、运行基础用户程序，并具备基础 syscall、VFS、ramfs/tmpfs、shell、GUI Terminal 等模块。以下清单记录后续仍需开发或完善的功能。
 >
-> 最近完成：`9f584f2 fix(proc): reap orphaned child processes` 已完成子进程资源回收、孤儿进程 reparent 到 init，并新增 `/bin/orphan` 回归覆盖；`d2a2da0 fix(build): increase boot kernel load limit` 已将 bootloader 内核加载上限提升到 1024 扇区并修复 `NULL` 重定义警告；当前已搭建 PID1 init/reaper 内核线程，已支持 shell 直接执行 `/bin/app arg1 arg2` 带参数用户程序，已补齐 `envp` 环境变量传递，并已暴露 `stat/getcwd/chdir/readdir` 文件系统 syscall。
+> 最近完成：`9f584f2 fix(proc): reap orphaned child processes` 已完成子进程资源回收、孤儿进程 reparent 到 init，并新增 `/bin/orphan` 回归覆盖；`d2a2da0 fix(build): increase boot kernel load limit` 已将 bootloader 内核加载上限提升到 1024 扇区并修复 `NULL` 重定义警告；当前已搭建 PID1 init/reaper 内核线程，已支持 shell 直接执行 `/bin/app arg1 arg2` 带参数用户程序，已补齐 `envp` 环境变量传递，并已暴露 `stat/getcwd/chdir/readdir/fstat/lstat` 文件系统 syscall，同时新增最小用户态公共 runtime 头文件 `src/user/openos.h`。
 >
-> 当前推荐下一步：继续 P0，优先补齐更完整的文件系统用户态接口（`opendir` / `closedir` 用户态封装等）；如需类 Unix 用户态工具链，再将现有 shell 内置命令拆分为独立 `/bin/*` 程序。
+> 当前推荐下一步：继续 P0，优先把剩余用户程序迁移到公共用户态 runtime，并进一步补齐文件描述符表标准化；如需类 Unix 用户态工具链，再将现有 shell 内置命令拆分为独立 `/bin/*` 程序。
 
 ---
 
@@ -25,6 +25,7 @@
 - [√] Shell、VGA / GUI Terminal、基础输入
 - [√] 基础网络栈雏形（ARP / IPv4 / ICMP / UDP / TCP）
 - [√] `/bin/hello`、`/bin/fault`、`/bin/waittest`、`/bin/orphan`、`/bin/argtest`、`/bin/envtest`、`/bin/fstest` 基础用户程序
+- [√] 新增最小用户态公共 runtime 头文件 `src/user/openos.h`，统一 syscall 编号、基础 wrapper、状态宏与 FS 结构体
 - [√] 调度器 GPF 修复
 - [√] Shell 历史命令重绘修复
 - [√] `waitpid` 错误语义、`waitpid(-1)`、exit status 编码与回归测试（提交：`daca8f2`）
@@ -76,6 +77,9 @@
 - [√] 实现用户态 `readdir` syscall（路径 + index 形式）
 - [x] 实现用户态 `opendir` / `closedir` 封装（基于 `SYS_READDIR(path,index)`）
 - [√] 实现 `getcwd` / `chdir` syscall
+- [√] 初步标准化用户态 syscall/runtime 头文件（`openos.h`）
+  - [√] 迁移 `/bin/argtest`、`/bin/envtest`、`/bin/orphan`、`/bin/exit42`、`/bin/fstest`
+  - [ ] 继续迁移 `/bin/hello`、`/bin/fault`、`/bin/waittest` 等剩余用户程序
 - [ ] 可选：将现有 shell 内置基础命令拆分为独立 `/bin/*` 用户态程序
   - [ ] `/bin/ls`
   - [ ] `/bin/cat`
