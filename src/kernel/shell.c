@@ -25,6 +25,7 @@
 #include "ext4.h"
 #include "include/io.h"
 extern int spawn_user_process(const char *path, char *const argv[]);
+extern int spawn_user_process_env(const char *path, char *const argv[], char *const envp[]);
 extern int sys_waitpid(int pid, int *status, int options);
 #ifndef NULL
 #define NULL ((void *)0)
@@ -165,6 +166,10 @@ static void shell_print_dec(int value)
 
 #define CMD_BUF_SIZE 256
 #define MAX_ARGS 16
+#define SHELL_ENV_MAX 32
+#define SHELL_ENV_NAME_MAX 32
+#define SHELL_ENV_VALUE_MAX 160
+#define SHELL_ENV_STRING_MAX (SHELL_ENV_NAME_MAX + 1 + SHELL_ENV_VALUE_MAX)
 
 static char cmd_buf[CMD_BUF_SIZE];
 static int cmd_pos = 0;      /* 当前命令长度 */
@@ -180,6 +185,17 @@ static int history_saved_valid = 0;
 /* 当前工作目录 */
 static char cwd[MAX_PATH] = "/";
 
+typedef struct shell_env_entry {
+    char name[SHELL_ENV_NAME_MAX];
+    char value[SHELL_ENV_VALUE_MAX];
+    char kv[SHELL_ENV_STRING_MAX];
+    int used;
+} shell_env_entry_t;
+
+static shell_env_entry_t shell_env[SHELL_ENV_MAX];
+static char *shell_envp[SHELL_ENV_MAX + 1];
+static int shell_env_initialized = 0;
+
 /* ---- 辅助函数 ---- */
 static void shell_prompt(void)
 {
@@ -189,6 +205,9 @@ static void shell_prompt(void)
 }
 
 static const char *builtin_commands[] = {
+    "env",
+    "export",
+    "unset",
     "ls",
     "cat",
     "mkdir",
@@ -230,6 +249,182 @@ static int shell_starts_with(const char *s, const char *prefix, int prefix_len)
             return 0;
     }
     return 1;
+}
+
+static int shell_env_name_valid(const char *name)
+{
+    if (!name || !name[0])
+        return 0;
+
+    char c0 = name[0];
+    if (!((c0 >= 'A' && c0 <= 'Z') || (c0 >= 'a' && c0 <= 'z') || c0 == '_'))
+        return 0;
+
+    for (int i = 1; name[i]; i++) {
+        char c = name[i];
+        if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+              (c >= '0' && c <= '9') || c == '_'))
+            return 0;
+    }
+    return 1;
+}
+
+static char *shell_find_char(char *s, char target)
+{
+    if (!s)
+        return NULL;
+
+    for (int i = 0; s[i]; i++) {
+        if (s[i] == target)
+            return &s[i];
+    }
+    return NULL;
+}
+
+static int shell_env_find(const char *name)
+{
+    if (!name)
+        return -1;
+
+    for (int i = 0; i < SHELL_ENV_MAX; i++) {
+        if (shell_env[i].used && strcmp(shell_env[i].name, name) == 0)
+            return i;
+    }
+    return -1;
+}
+
+static void shell_env_rebuild_entry(int idx)
+{
+    int pos = 0;
+
+    if (idx < 0 || idx >= SHELL_ENV_MAX || !shell_env[idx].used)
+        return;
+
+    for (int i = 0; shell_env[idx].name[i] && pos + 1 < SHELL_ENV_STRING_MAX; i++)
+        shell_env[idx].kv[pos++] = shell_env[idx].name[i];
+    if (pos + 1 < SHELL_ENV_STRING_MAX)
+        shell_env[idx].kv[pos++] = '=';
+    for (int i = 0; shell_env[idx].value[i] && pos + 1 < SHELL_ENV_STRING_MAX; i++)
+        shell_env[idx].kv[pos++] = shell_env[idx].value[i];
+    shell_env[idx].kv[pos] = '\0';
+}
+
+static int shell_setenv(const char *name, const char *value)
+{
+    if (!shell_env_name_valid(name))
+        return -1;
+    if (!value)
+        value = "";
+    if ((int)strlen(name) >= SHELL_ENV_NAME_MAX || (int)strlen(value) >= SHELL_ENV_VALUE_MAX)
+        return -2;
+
+    int idx = shell_env_find(name);
+    if (idx < 0) {
+        for (int i = 0; i < SHELL_ENV_MAX; i++) {
+            if (!shell_env[i].used) {
+                idx = i;
+                break;
+            }
+        }
+        if (idx < 0)
+            return -3;
+    }
+
+    strncpy(shell_env[idx].name, name, SHELL_ENV_NAME_MAX - 1);
+    shell_env[idx].name[SHELL_ENV_NAME_MAX - 1] = '\0';
+    strncpy(shell_env[idx].value, value, SHELL_ENV_VALUE_MAX - 1);
+    shell_env[idx].value[SHELL_ENV_VALUE_MAX - 1] = '\0';
+    shell_env[idx].used = 1;
+    shell_env_rebuild_entry(idx);
+    return 0;
+}
+
+static int shell_unsetenv(const char *name)
+{
+    if (!shell_env_name_valid(name))
+        return -1;
+
+    int idx = shell_env_find(name);
+    if (idx < 0)
+        return 0;
+
+    shell_env[idx].used = 0;
+    shell_env[idx].name[0] = '\0';
+    shell_env[idx].value[0] = '\0';
+    shell_env[idx].kv[0] = '\0';
+    return 0;
+}
+
+static char *const *shell_build_envp(void)
+{
+    int pos = 0;
+
+    if (!shell_env_initialized) {
+        shell_setenv("PATH", "/bin");
+        shell_setenv("PWD", cwd);
+        shell_setenv("SHELL", "/bin/shell");
+        shell_env_initialized = 1;
+    }
+
+    shell_setenv("PWD", cwd);
+    for (int i = 0; i < SHELL_ENV_MAX && pos < SHELL_ENV_MAX; i++) {
+        if (shell_env[i].used)
+            shell_envp[pos++] = shell_env[i].kv;
+    }
+    shell_envp[pos] = NULL;
+    return shell_envp;
+}
+
+static void cmd_env(void)
+{
+    shell_build_envp();
+    for (int i = 0; i < SHELL_ENV_MAX; i++) {
+        if (shell_env[i].used) {
+            print(shell_env[i].kv);
+            print("\n");
+        }
+    }
+}
+
+static void cmd_export(int argc, char *argv[])
+{
+    if (argc == 1) {
+        cmd_env();
+        return;
+    }
+
+    for (int i = 1; i < argc; i++) {
+        char *eq = shell_find_char(argv[i], '=');
+        int ret;
+
+        if (eq) {
+            *eq = '\0';
+            ret = shell_setenv(argv[i], eq + 1);
+            *eq = '=';
+        } else {
+            ret = shell_setenv(argv[i], "");
+        }
+
+        if (ret == -1)
+            print_err("export: invalid name\n");
+        else if (ret == -2)
+            print_err("export: value too long\n");
+        else if (ret == -3)
+            print_err("export: environment full\n");
+    }
+}
+
+static void cmd_unset(int argc, char *argv[])
+{
+    if (argc == 1) {
+        print_err("unset: missing name\n");
+        return;
+    }
+
+    for (int i = 1; i < argc; i++) {
+        if (shell_unsetenv(argv[i]) < 0)
+            print_err("unset: invalid name\n");
+    }
 }
 
 static int shell_common_prefix_len(const char *a, const char *b)
@@ -1337,7 +1532,7 @@ static int shell_spawn_user_program_at(const char *full, char *argv[], int argc,
     serial_write(full);
     serial_write("\n");
 
-    return spawn_user_process(full, child_argv);
+    return spawn_user_process_env(full, child_argv, (char *const *)shell_build_envp());
 }
 
 static int shell_spawn_user_program(const char *path, char *argv[], int argc)
@@ -1641,6 +1836,9 @@ static void cmd_help(void)
     print("  cd [path]       - Change directory\n");
     print("  pwd             - Print working directory\n");
     print("  history         - Show command history\n");
+    print("  env             - Show shell environment\n");
+    print("  export NAME=VALUE - Set shell environment variable\n");
+    print("  unset NAME      - Remove shell environment variable\n");
     print("  mkext4 [dev]    - Format test EXT4 volume (default ram0)\n");
     print("  mount_ext4 [dev] [path] - Mount EXT4 volume read-only (default ram0 /mnt)\n");
     print("  mount_tmpfs [path] - Mount tmpfs memory filesystem (default /tmp)\n");
@@ -1961,6 +2159,18 @@ void shell_run(void)
                 else if (shell_cmd_equals(cmd, "history"))
                 {
                     cmd_history();
+                }
+                else if (shell_cmd_equals(cmd, "env"))
+                {
+                    cmd_env();
+                }
+                else if (shell_cmd_equals(cmd, "export"))
+                {
+                    cmd_export(argc, argv);
+                }
+                else if (shell_cmd_equals(cmd, "unset"))
+                {
+                    cmd_unset(argc, argv);
                 }
                 else if (shell_cmd_equals(cmd, "mkext4"))
                 {
