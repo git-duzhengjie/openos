@@ -129,6 +129,11 @@ static inline void openos_write_str(const char *s)
     openos_write(1, s, openos_strlen(s));
 }
 
+static inline int openos_getpid(void)
+{
+    return openos_syscall3(SYS_GETPID, 0, 0, 0);
+}
+
 static inline int openos_spawn(const char *path, char *const argv[])
 {
     return openos_syscall3(SYS_SPAWN, (int)path, (int)argv, 0);

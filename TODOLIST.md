@@ -6,7 +6,7 @@
 >
 > 最近完成：`9f584f2 fix(proc): reap orphaned child processes` 已完成子进程资源回收、孤儿进程 reparent 到 init，并新增 `/bin/orphan` 回归覆盖；`d2a2da0 fix(build): increase boot kernel load limit` 已将 bootloader 内核加载上限提升到 1024 扇区并修复 `NULL` 重定义警告；当前已搭建 PID1 init/reaper 内核线程，已支持 shell 直接执行 `/bin/app arg1 arg2` 带参数用户程序，已补齐 `envp` 环境变量传递，并已暴露 `stat/getcwd/chdir/readdir/fstat/lstat` 文件系统 syscall，同时新增最小用户态公共 runtime 头文件 `src/user/openos.h`。
 >
-> 当前推荐下一步：继续 P0，优先把剩余用户程序迁移到公共用户态 runtime，并进一步补齐文件描述符表标准化；如需类 Unix 用户态工具链，再将现有 shell 内置命令拆分为独立 `/bin/*` 程序。
+> 当前推荐下一步：继续 P0，优先补齐文件描述符表标准化；如需类 Unix 用户态工具链，再将现有 shell 内置命令拆分为独立 `/bin/*` 程序。
 
 ---
 
@@ -73,13 +73,13 @@
 ### 3. 文件系统基础接口
 
 - [√] 实现用户态 `stat` syscall（新增 `/bin/fstest` 回归）
-- [x] 实现用户态 `fstat` / `lstat`
+- [√] 实现用户态 `fstat` / `lstat`
 - [√] 实现用户态 `readdir` syscall（路径 + index 形式）
-- [x] 实现用户态 `opendir` / `closedir` 封装（基于 `SYS_READDIR(path,index)`）
+- [√] 实现用户态 `opendir` / `closedir` 封装（基于 `SYS_READDIR(path,index)`）
 - [√] 实现 `getcwd` / `chdir` syscall
 - [√] 初步标准化用户态 syscall/runtime 头文件（`openos.h`）
   - [√] 迁移 `/bin/argtest`、`/bin/envtest`、`/bin/orphan`、`/bin/exit42`、`/bin/fstest`
-  - [ ] 继续迁移 `/bin/hello`、`/bin/fault`、`/bin/waittest` 等剩余用户程序
+  - [√] 迁移 `/bin/hello`、`/bin/fault`、`/bin/waittest` 等剩余用户程序
 - [ ] 可选：将现有 shell 内置基础命令拆分为独立 `/bin/*` 用户态程序
   - [ ] `/bin/ls`
   - [ ] `/bin/cat`
