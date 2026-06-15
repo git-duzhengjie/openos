@@ -33,6 +33,7 @@ extern int sys_waitpid(int pid, int *status, int options);
 static void make_path(const char *arg, char *out);
 static int shell_spawn_user_program(const char *path, char *argv[], int argc);
 static int shell_run_single_pipe(char *cmdline);
+static int shell_run_external_with_redirect(char *cmd, char *argv[], int argc);
 static void shell_complete_command(void);
 static void shell_history_prev(void);
 static void shell_history_next(void);
@@ -852,6 +853,133 @@ static void shell_close_child_fd(int pid, int fd)
     process_t *child = proc_find((uint32_t)pid);
     if (child)
         vfs_close_fd_for_process(child, fd);
+}
+
+typedef struct shell_redirect {
+    char *stdin_path;
+    char *stdout_path;
+    char *stderr_path;
+} shell_redirect_t;
+
+static int shell_parse_redirects(char *argv[], int argc, shell_redirect_t *redir)
+{
+    int out = 0;
+
+    if (!redir)
+        return argc;
+
+    redir->stdin_path = NULL;
+    redir->stdout_path = NULL;
+    redir->stderr_path = NULL;
+
+    for (int i = 0; i < argc; i++) {
+        int target = -1;
+        if (strcmp(argv[i], "<") == 0)
+            target = 0;
+        else if (strcmp(argv[i], ">") == 0)
+            target = 1;
+        else if (strcmp(argv[i], "2>") == 0)
+            target = 2;
+
+        if (target >= 0) {
+            if (i + 1 >= argc) {
+                print("redirect: missing filename\n");
+                return -1;
+            }
+            if (target == 0)
+                redir->stdin_path = argv[++i];
+            else if (target == 1)
+                redir->stdout_path = argv[++i];
+            else
+                redir->stderr_path = argv[++i];
+            continue;
+        }
+
+        argv[out++] = argv[i];
+    }
+
+    return out;
+}
+
+static int shell_open_redirect_path(const char *path, int fd)
+{
+    char full[MAX_PATH];
+    make_path(path, full);
+
+    if (fd == 0)
+        return vfs_open(full, O_RDONLY, 0);
+
+    return vfs_open(full, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
+}
+
+static int shell_apply_one_redirect(const char *path, int target_fd, int *saved_fd)
+{
+    int fd = shell_open_redirect_path(path, target_fd);
+    if (fd < 0) {
+        print("redirect: cannot open ");
+        print(path);
+        print("\n");
+        return -1;
+    }
+
+    *saved_fd = vfs_dup(target_fd);
+    if (vfs_dup2(fd, target_fd) < 0) {
+        vfs_close(fd);
+        print("redirect: dup failed\n");
+        return -1;
+    }
+
+    vfs_close(fd);
+    return 0;
+}
+
+static void shell_restore_redirects(int saved_stdin, int saved_stdout, int saved_stderr)
+{
+    shell_restore_fd(0, saved_stdin);
+    shell_restore_fd(1, saved_stdout);
+    shell_restore_fd(2, saved_stderr);
+}
+
+static int shell_run_external_with_redirect(char *cmd, char *argv[], int argc)
+{
+    shell_redirect_t redir;
+    int saved_stdin = -1;
+    int saved_stdout = -1;
+    int saved_stderr = -1;
+
+    argc = shell_parse_redirects(argv, argc, &redir);
+    if (argc < 0)
+        return -1;
+    if (argc <= 0)
+        return 0;
+    argv[argc] = NULL;
+
+    if (redir.stdin_path && shell_apply_one_redirect(redir.stdin_path, 0, &saved_stdin) < 0)
+        goto fail;
+    if (redir.stdout_path && shell_apply_one_redirect(redir.stdout_path, 1, &saved_stdout) < 0)
+        goto fail;
+    if (redir.stderr_path && shell_apply_one_redirect(redir.stderr_path, 2, &saved_stderr) < 0)
+        goto fail;
+
+    int ret = shell_spawn_user_program(cmd, argv, argc);
+    if (ret < 0) {
+        shell_restore_redirects(saved_stdin, saved_stdout, saved_stderr);
+        print(cmd);
+        print(": command not found\n");
+        return -1;
+    }
+
+    if (redir.stdin_path || redir.stdout_path || redir.stderr_path)
+        sys_waitpid(ret, NULL, 0);
+    else
+        print("exec: spawned\n");
+
+    shell_restore_redirects(saved_stdin, saved_stdout, saved_stderr);
+    return ret;
+
+fail:
+    shell_restore_redirects(saved_stdin, saved_stdout, saved_stderr);
+    return -1;
 }
 
 static int shell_run_single_pipe(char *cmdline)
@@ -2113,16 +2241,7 @@ void shell_run(void)
                 }
                 else
                 {
-                    int ret = shell_spawn_user_program(cmd, argv, argc);
-                    if (ret < 0)
-                    {
-                        print(cmd);
-                        print(": command not found\n");
-                    }
-                    else
-                    {
-                        print("exec: spawned\n");
-                    }
+                    shell_run_external_with_redirect(cmd, argv, argc);
                 }
             }
 
