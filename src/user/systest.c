@@ -61,7 +61,7 @@ int main(int argc, char **argv, char **envp)
         openos_fail(17, "[systest] pipe failed");
     if (openos_write_fd(pipefd[1], "Q", 1) != 1)
         openos_fail(18, "[systest] pipe write failed");
-    if (openos_read_fd(pipefd[0], &ch, 1) != 1 || ch != 'Q')
+    if (openos_read(pipefd[0], &ch, 1) != 1 || ch != 'Q')
         openos_fail(19, "[systest] pipe read failed");
     openos_close(pipefd[0]);
     openos_close(pipefd[1]);
