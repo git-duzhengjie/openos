@@ -6,6 +6,7 @@
 #define KERNEL_PROCESS_H
 
 #include <stdint.h>
+#include "fd.h"
 
 /* 进程状态 */
 typedef enum {
@@ -75,7 +76,7 @@ typedef struct process {
     uint32_t heap_end;        /* 堆结束 */
 
     /* 文件系统 */
-    void *fds[16];            /* 文件描述符表 (简单版: 指针数组) */
+    void *fds[MAX_FD];        /* 文件描述符表 (per-process fd table) */
     char cwd[256];            /* 当前工作目录 (绝对路径) */
 
     /* 信号 */

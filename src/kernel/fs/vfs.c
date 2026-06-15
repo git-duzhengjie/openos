@@ -10,6 +10,7 @@
 #include "tmpfs.h"
 #include "chardev.h"
 #include "blockdev.h"
+#include "process.h"
 
 #ifndef NULL
 #define NULL ((void*)0)
@@ -297,19 +298,28 @@ static file_ops_t vfs_blockdev_ops = {
  * ============================================================ */
 
 /* ============================================================
- * 进程 cwd 辅助（简化版，暂时 fallback 到静态变量）
+ * 进程 cwd / fd table 辅助
  * ============================================================ */
-#include "process.h"
-
-static file_t *fallback_fds[16];
+static file_t *fallback_fds[MAX_FD];
 static int fallback_fds_inited = 0;
 static char fallback_cwd[MAX_PATH] = "/";
 
+static process_t *vfs_current_process(void) {
+    thread_t *cur = sched_get_current();
+    if (!cur || cur->pid == 0) return NULL;
+    return proc_find(cur->pid);
+}
+
 static char *vfs_get_cwd(void) {
+    process_t *p = vfs_current_process();
+    if (p) return p->cwd;
     return fallback_cwd;
 }
 
 static file_t **get_current_fd_table(void) {
+    process_t *p = vfs_current_process();
+    if (p) return (file_t **)p->fds;
+
     if (!fallback_fds_inited) {
         memset(fallback_fds, 0, sizeof(fallback_fds));
         fallback_fds_inited = 1;
@@ -458,13 +468,13 @@ dentry_t *vfs_path_lookup(const char *path) {
 void vfs_init_fds_for_process(void *proc) {
     process_t *p = (process_t *)proc;
     if (!p) return;
-    for (int i = 0; i < 16; i++) p->fds[i] = NULL;
+    for (int i = 0; i < MAX_FD; i++) p->fds[i] = NULL;
     strncpy(p->cwd, "/", sizeof(p->cwd) - 1);
     p->cwd[sizeof(p->cwd) - 1] = 0;
 }
 
 void vfs_init_fds(void) {
-    for (int i = 0; i < 16; i++) fallback_fds[i] = NULL;
+    for (int i = 0; i < MAX_FD; i++) fallback_fds[i] = NULL;
     strncpy(fallback_cwd, "/", sizeof(fallback_cwd)-1);
     fallback_cwd[sizeof(fallback_cwd)-1] = 0;
 }
@@ -545,20 +555,20 @@ static dentry_t *create_regular_file(dentry_t *parent, const char *name, uint32_
 
 int vfs_alloc_fd(void) {
     file_t **fds = get_current_fd_table();
-    for (int i = 0; i < 16; i++) {
+    for (int i = 0; i < MAX_FD; i++) {
         if (!fds[i]) return i;
     }
     return -1;
 }
 
 file_t *vfs_get_file(int fd) {
-    if (fd < 0 || fd >= 16) return NULL;
+    if (fd < 0 || fd >= MAX_FD) return NULL;
     file_t **fds = get_current_fd_table();
     return fds[fd];
 }
 
 int vfs_put_file(int fd, file_t *file) {
-    if (fd < 0 || fd >= 16) return -1;
+    if (fd < 0 || fd >= MAX_FD) return -1;
     file_t **fds = get_current_fd_table();
     fds[fd] = file;
     return 0;
@@ -628,13 +638,29 @@ int vfs_open(const char *path, int flags, int mode) {
     return fd;
 }
 
+static void vfs_release_file(file_t *f) {
+    if (!f) return;
+    if (f->ops && f->ops->close) f->ops->close(f);
+    pmm_free_page(f);
+}
+
 int vfs_close(int fd) {
     file_t *f = vfs_get_file(fd);
     if (!f) return -1;
-    if (f->ops && f->ops->close) f->ops->close(f);
     vfs_put_file(fd, NULL);
-    pmm_free_page(f);
+    vfs_release_file(f);
     return 0;
+}
+
+void vfs_close_fds_for_process(void *proc) {
+    process_t *p = (process_t *)proc;
+    if (!p) return;
+
+    for (int i = 0; i < MAX_FD; i++) {
+        file_t *f = (file_t *)p->fds[i];
+        p->fds[i] = NULL;
+        vfs_release_file(f);
+    }
 }
 
 int vfs_read(int fd, void *buf, uint32_t count) {
@@ -834,8 +860,10 @@ int vfs_chdir(const char *path) {
     if (vfs_normalize_path(path, norm, sizeof(norm)) < 0) return -1;
     dentry_t *d = vfs_path_lookup(norm);
     if (!d || !vfs_is_dir(d->inode)) return -1;
-    strncpy(fallback_cwd, norm, sizeof(fallback_cwd) - 1);
-    fallback_cwd[sizeof(fallback_cwd) - 1] = 0;
+
+    char *cwd = vfs_get_cwd();
+    strncpy(cwd, norm, MAX_PATH - 1);
+    cwd[MAX_PATH - 1] = 0;
     return 0;
 }
 

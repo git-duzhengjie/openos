@@ -6,6 +6,7 @@
 #define KERNEL_FS_VFS_H
 
 #include <stdint.h>
+#include "fd.h"
 
 /* 文件类型 */
 #define FS_FILE          0x1000
@@ -30,10 +31,6 @@
 #define SEEK_SET     0
 #define SEEK_CUR     1
 #define SEEK_END     2
-
-/* 最大文件描述符 */
-#define MAX_FD       16
-#define MAX_FDS_TOTAL 256
 
 /* 最大路径长度 */
 #define MAX_PATH     256
@@ -194,6 +191,7 @@ void   vfs_init_fds(void);                        /* 初始化当前进程的 fd
 file_t *vfs_get_file(int fd);                     /* 通过 fd 获取 file */
 int    vfs_alloc_fd(void);                        /* 分配一个空闲 fd */
 int    vfs_put_file(int fd, file_t *file);        /* 把 file 放入 fd 位置 */
+void   vfs_close_fds_for_process(void *proc);      /* 关闭指定进程的 fd 表 */
 
 /* 进程 cwd 管理 */
 int    vfs_chdir(const char *path);               /* 切换当前工作目录 */

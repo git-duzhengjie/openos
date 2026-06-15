@@ -55,9 +55,15 @@ static int openos_closedir(struct openos_DIR *dir)
 
 void _start(int argc, char **argv, char **envp)
 {
-    (void)argc;
-    (void)argv;
     (void)envp;
+
+    if (argc > 1 && openos_strcmp(argv[1], "--leak-fd-child") == 0) {
+        int child_fd = openos_syscall3(SYS_OPEN, (int)"/bin/hello", O_RDONLY, 0);
+        if (child_fd != 0)
+            openos_fail(30, "[fstest] child first fd mismatch\n");
+        openos_write_str("[fstest] child leaked fd intentionally\n");
+        openos_exit(0);
+    }
 
     openos_stat_t st;
     struct openos_DIR *dir;
@@ -65,6 +71,8 @@ void _start(int argc, char **argv, char **envp)
     char cwd[128];
     int found_bin = 0;
     int fd;
+    int child;
+    int status;
 
     openos_write_str("[fstest] checking fs syscalls...\n");
 
@@ -116,6 +124,23 @@ void _start(int argc, char **argv, char **envp)
         openos_fail(17, "[fstest] fstat hello is not file\n");
     if (openos_syscall3(SYS_CLOSE, fd, 0, 0) < 0)
         openos_fail(18, "[fstest] close hello failed\n");
+
+    {
+        char *child_argv[] = { "fstest", "--leak-fd-child", 0 };
+        child = openos_spawn("/bin/fstest", child_argv);
+    }
+    if (child < 0)
+        openos_fail(19, "[fstest] spawn fd leak child failed\n");
+    if (openos_waitpid(child, &status, 0) != child)
+        openos_fail(20, "[fstest] wait fd leak child failed\n");
+    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0)
+        openos_fail(21, "[fstest] fd leak child failed\n");
+
+    fd = openos_syscall3(SYS_OPEN, (int)"hello", O_RDONLY, 0);
+    if (fd != 0)
+        openos_fail(22, "[fstest] fd table leaked across processes\n");
+    if (openos_syscall3(SYS_CLOSE, fd, 0, 0) < 0)
+        openos_fail(23, "[fstest] close after leak check failed\n");
 
     openos_syscall3(SYS_CHDIR, (int)"/", 0, 0);
     openos_write_str("[fstest] fs syscalls ok\n");
