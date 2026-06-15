@@ -21,13 +21,15 @@ extern void switch_to_user_asm(uint32_t eip, uint32_t esp);
 
 /* ---- 进程表 ---- */
 static process_t proc_table[MAX_PROCS];
-static uint32_t next_pid = 1;  /* PID 0 = idle */
+static uint32_t next_pid = 2;  /* PID 0 = idle, PID 1 = init/reaper */
 
 typedef struct user_spawn_args {
     char path[128];
 } user_spawn_args_t;
 
 static void user_process_trampoline(void *arg);
+
+#define INIT_PID 1
 
 #define WAITPID_WNOHANG 1
 #define WAITPID_SUPPORTED_OPTIONS WAITPID_WNOHANG
@@ -42,10 +44,44 @@ void proc_table_init(void) {
         proc_table[i].cr3 = 0;
         proc_table[i].exit_code = 0;
     }
+
+    /* Reserve PID 1 as the long-lived init/reaper process. Kernel UI
+     * threads are also created with PID 1, so this PCB anchors orphan
+     * reparenting and prevents children from being left attached to a
+     * dead parent. */
+    process_t *init = &proc_table[0];
+    init->pid = INIT_PID;
+    init->state = PROC_RUNNING;
+    init->ppid = 0;
+    init->threads = NULL;
+    init->thread_count = 0;
+    init->cr3 = 0;
+    init->exit_code = 0;
+    init->code_addr = 0;
+    init->code_size = 0;
+    init->heap_start = 0;
+    init->heap_end = 0;
+    for (int i = 0; i < 31; i++) init->name[i] = 0;
+    init->name[0] = 'i';
+    init->name[1] = 'n';
+    init->name[2] = 'i';
+    init->name[3] = 't';
+    init->name[4] = '\0';
+    for (int i = 0; i < 16; i++) init->fds[i] = NULL;
+    init->cwd[0] = '/';
+    init->cwd[1] = '\0';
+    init->pending_signals = 0;
+    init->total_ticks = 0;
+    next_pid = INIT_PID + 1;
 }
 
 /* 分配空闲 PCB */
 process_t *proc_alloc(void) {
+    /* Opportunistically let init/reaper collect orphan zombies before
+     * allocating a new PCB. This keeps orphan cleanup automatic even when
+     * PID 1 is represented by kernel UI threads rather than a user init. */
+    proc_reap_zombies_for_parent(INIT_PID);
+
     for (int i = 0; i < MAX_PROCS; i++) {
         if (proc_table[i].state == PROC_DEAD) {
             process_t *p = &proc_table[i];
@@ -115,11 +151,11 @@ void proc_reap_zombie(process_t *proc) {
     proc_free(proc);
 }
 
-uint32_t proc_reap_zombies_for_parent(uint32_t ppid) {
+static uint32_t proc_reap_zombies_for_parent_except(uint32_t ppid, uint32_t except_pid) {
     uint32_t count = 0;
     for (int i = 0; i < MAX_PROCS; i++) {
         process_t *p = &proc_table[i];
-        if (p->state == PROC_ZOMBIE && p->ppid == ppid) {
+        if (p->state == PROC_ZOMBIE && p->ppid == ppid && p->pid != except_pid) {
             proc_reap_zombie(p);
             count++;
         }
@@ -127,13 +163,42 @@ uint32_t proc_reap_zombies_for_parent(uint32_t ppid) {
     return count;
 }
 
+uint32_t proc_reap_zombies_for_parent(uint32_t ppid) {
+    return proc_reap_zombies_for_parent_except(ppid, 0);
+}
+
+uint32_t proc_reparent_children(uint32_t old_ppid, uint32_t new_ppid) {
+    if (old_ppid == 0 || old_ppid == new_ppid) return 0;
+    if (!proc_find(new_ppid)) return 0;
+
+    uint32_t count = 0;
+    for (int i = 0; i < MAX_PROCS; i++) {
+        process_t *child = &proc_table[i];
+        if (child->state != PROC_DEAD && child->pid != 0 && child->ppid == old_ppid) {
+            child->ppid = new_ppid;
+            count++;
+        }
+    }
+    return count;
+}
+
 void proc_mark_exit(uint32_t pid, int code) {
+    if (pid == INIT_PID) return;
+
     process_t *proc = proc_find(pid);
     if (!proc) return;
+
+    proc_reparent_children(pid, INIT_PID);
+
     proc->exit_code = (uint32_t)code;
     proc->state = PROC_ZOMBIE;
     if (proc->threads)
         proc->threads->state = PROC_ZOMBIE;
+
+    /* Reap previously exited orphan children owned by init, but never reap
+     * this process here: sys_exit() is still running on its kernel stack until
+     * the scheduler switches away. */
+    proc_reap_zombies_for_parent_except(INIT_PID, pid);
 }
 
 process_t *proc_find(uint32_t pid) {

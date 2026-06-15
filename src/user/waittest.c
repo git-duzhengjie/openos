@@ -144,6 +144,22 @@ void _start(void)
     if (!WIFEXITED(status) || WEXITSTATUS(status) != 42)
         fail(20, "[waittest] waitpid(-1) second status failed\n");
 
+    write_str("[waittest] checking orphan reparent path...\n");
+    status = -1;
+    child = spawn("/bin/orphan");
+    if (child < 0)
+        fail(21, "[waittest] spawn /bin/orphan failed\n");
+
+    waited = waitpid(child, &status, 0);
+    if (waited != child)
+        fail(22, "[waittest] waitpid orphan parent failed\n");
+    if (!WIFEXITED(status) || WEXITSTATUS(status) != 7)
+        fail(23, "[waittest] orphan parent status failed\n");
+
+    waited = waitpid(child, &status, WNOHANG);
+    if (waited >= 0)
+        fail(24, "[waittest] orphan parent waited twice\n");
+
     write_str("[waittest] waitpid ok\n");
     syscall3(SYS_EXIT, 0, 0, 0);
 }

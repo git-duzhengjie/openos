@@ -43,6 +43,12 @@
 #else
 #define OPENOS_HAS_EXIT42 0
 #endif
+#if __has_include("embed_orphan.h")
+#include "embed_orphan.h"  /* orphan reparent 回归测试程序 */
+#define OPENOS_HAS_ORPHAN 1
+#else
+#define OPENOS_HAS_ORPHAN 0
+#endif
 
 /* 外部符号 */
 extern void gdt_init(void);
@@ -313,6 +319,17 @@ void kernel_main(void) {
         serial_write("[OK] Installed /bin/exit42 user ELF\n");
     } else {
         serial_write("[WARN] Failed to install /bin/exit42\n");
+    }
+#endif
+
+#if OPENOS_HAS_ORPHAN
+    fd = vfs_open("/bin/orphan", O_CREAT | O_RDWR, 0755);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)orphan_elf, orphan_elf_size);
+        vfs_close(fd);
+        serial_write("[OK] Installed /bin/orphan user ELF\n");
+    } else {
+        serial_write("[WARN] Failed to install /bin/orphan\n");
     }
 #endif
 

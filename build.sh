@@ -65,10 +65,21 @@ fi
 if [ -f $USR/exit42.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \
+        -I $SRC/include \
         -c $USR/exit42.c -o $BUILD/exit42.o
     ld -m elf_i386 -T $USR/user.ld -o $BUILD/exit42.elf $BUILD/exit42.o
     python3 _embed_elf.py $BUILD/exit42.elf $SRC/include/embed_exit42.h exit42_elf
     echo "  Embedded: exit42.elf"
+fi
+
+if [ -f $USR/orphan.c ]; then
+    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+        -fno-stack-protector -fno-builtin \
+        -I $SRC/include \
+        -c $USR/orphan.c -o $BUILD/orphan.o
+    ld -m elf_i386 -T $USR/user.ld -o $BUILD/orphan.elf $BUILD/orphan.o
+    python3 _embed_elf.py $BUILD/orphan.elf $SRC/include/embed_orphan.h orphan_elf
+    echo "  Embedded: orphan.elf"
 fi
 
 echo "[3/5] Compiling kernel C files..."
