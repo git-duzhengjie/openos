@@ -6,7 +6,7 @@
 >
 > 最近完成：`9f584f2 fix(proc): reap orphaned child processes` 已完成子进程资源回收、孤儿进程 reparent 到 init，并新增 `/bin/orphan` 回归覆盖；`d2a2da0 fix(build): increase boot kernel load limit` 已将 bootloader 内核加载上限提升到 1024 扇区并修复 `NULL` 重定义警告；当前已搭建 PID1 init/reaper 内核线程，已支持 shell 直接执行 `/bin/app arg1 arg2` 带参数用户程序，已补齐 `envp` 环境变量传递，并已暴露 `stat/getcwd/chdir/readdir/fstat/lstat` 文件系统 syscall，同时新增最小用户态公共 runtime 头文件 `src/user/openos.h`，且已新增独立 `/bin/pwd`、`/bin/ls`、`/bin/cat`、`/bin/echo`、`/bin/mkdir`、`/bin/rm`、`/bin/rmdir`、`/bin/grep`、`/bin/wc` 用户态命令；本轮已初步标准化 `stdin/stdout/stderr`，`/bin/cat` 支持无参数从 stdin 读取，并已新增 `dup` / `dup2` / `pipe` syscall 与 VFS fd 引用计数语义。
 >
-> 当前推荐下一步：继续 P5，补齐 `>>` 追加重定向与 shell 内置命令 fd 化，进一步完善管道/重定向生态。
+> 当前推荐下一步：继续 P5，推进 shell 内置命令 fd 化，进一步统一内置命令与外部 `/bin/*` 用户程序的管道/重定向语义。
 
 ---
 
@@ -246,9 +246,9 @@
 
 - [ ] 用户态 shell
 - [√] 管道 `|`（已支持多级管道）
-- [ ] 重定向 `>` / `<` / `>>`
+- [√] 重定向 `>` / `<` / `>>`
   - [√] 基础 `<` / `>` / `2>`
-  - [ ] 追加 `>>`
+  - [√] 追加 `>>` / `2>>`
 - [ ] 环境变量
 - [ ] `PATH` 查找
 - [ ] 后台任务 `&`

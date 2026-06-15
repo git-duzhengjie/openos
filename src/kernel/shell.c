@@ -864,21 +864,26 @@ typedef struct shell_redirect {
     char *stdin_path;
     char *stdout_path;
     char *stderr_path;
+    int stdout_append;
+    int stderr_append;
 } shell_redirect_t;
 
-static int shell_set_redirect_path(shell_redirect_t *redir, int target, char *path)
+static int shell_set_redirect_path(shell_redirect_t *redir, int target, char *path, int append)
 {
     if (!path || !path[0]) {
         print("redirect: missing filename\n");
         return -1;
     }
 
-    if (target == 0)
+    if (target == 0) {
         redir->stdin_path = path;
-    else if (target == 1)
+    } else if (target == 1) {
         redir->stdout_path = path;
-    else
+        redir->stdout_append = append;
+    } else {
         redir->stderr_path = path;
+        redir->stderr_append = append;
+    }
 
     return 0;
 }
@@ -893,31 +898,47 @@ static int shell_parse_redirects(char *argv[], int argc, shell_redirect_t *redir
     redir->stdin_path = NULL;
     redir->stdout_path = NULL;
     redir->stderr_path = NULL;
+    redir->stdout_append = 0;
+    redir->stderr_append = 0;
 
     for (int i = 0; i < argc; i++) {
         char *arg = argv[i];
         int target = -1;
+        int append = 0;
         char *op = NULL;
 
-        if (strcmp(arg, "<") == 0)
+        if (strcmp(arg, "<") == 0) {
             target = 0;
-        else if (strcmp(arg, ">") == 0)
+        } else if (strcmp(arg, ">") == 0) {
             target = 1;
-        else if (strcmp(arg, "2>") == 0)
+        } else if (strcmp(arg, ">>") == 0) {
+            target = 1;
+            append = 1;
+        } else if (strcmp(arg, "2>") == 0) {
             target = 2;
+        } else if (strcmp(arg, "2>>") == 0) {
+            target = 2;
+            append = 1;
+        }
 
         if (target >= 0) {
             if (i + 1 >= argc) {
                 print("redirect: missing filename\n");
                 return -1;
             }
-            if (shell_set_redirect_path(redir, target, argv[++i]) < 0)
+            if (shell_set_redirect_path(redir, target, argv[++i], append) < 0)
+                return -1;
+            continue;
+        }
+
+        if (arg[0] == '2' && arg[1] == '>' && arg[2] == '>' && arg[3]) {
+            if (shell_set_redirect_path(redir, 2, arg + 3, 1) < 0)
                 return -1;
             continue;
         }
 
         if (arg[0] == '2' && arg[1] == '>' && arg[2]) {
-            if (shell_set_redirect_path(redir, 2, arg + 2) < 0)
+            if (shell_set_redirect_path(redir, 2, arg + 2, 0) < 0)
                 return -1;
             continue;
         }
@@ -926,12 +947,13 @@ static int shell_parse_redirects(char *argv[], int argc, shell_redirect_t *redir
             if (*p == '<' || *p == '>') {
                 op = p;
                 target = (*p == '<') ? 0 : 1;
+                append = (*p == '>' && p[1] == '>');
                 break;
             }
         }
 
         if (target >= 0 && op) {
-            char *path = op + 1;
+            char *path = op + (append ? 2 : 1);
             char *prefix = arg;
             int has_prefix = (op != arg);
 
@@ -947,7 +969,7 @@ static int shell_parse_redirects(char *argv[], int argc, shell_redirect_t *redir
             if (has_prefix)
                 argv[out++] = prefix;
 
-            if (shell_set_redirect_path(redir, target, path) < 0)
+            if (shell_set_redirect_path(redir, target, path, append) < 0)
                 return -1;
             continue;
         }
@@ -958,7 +980,7 @@ static int shell_parse_redirects(char *argv[], int argc, shell_redirect_t *redir
     return out;
 }
 
-static int shell_open_redirect_path(const char *path, int fd)
+static int shell_open_redirect_path(const char *path, int fd, int append)
 {
     char full[MAX_PATH];
     make_path(path, full);
@@ -966,12 +988,23 @@ static int shell_open_redirect_path(const char *path, int fd)
     if (fd == 0)
         return vfs_open(full, O_RDONLY, 0);
 
-    return vfs_open(full, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
+    int flags = O_WRONLY | O_CREAT;
+    if (!append)
+        flags |= O_TRUNC;
+
+    int opened = vfs_open(full, flags, S_IRUSR | S_IWUSR);
+    if (opened >= 0 && append) {
+        if (vfs_seek(opened, 0, SEEK_END) < 0) {
+            vfs_close(opened);
+            return -1;
+        }
+    }
+    return opened;
 }
 
-static int shell_apply_one_redirect(const char *path, int target_fd, int *saved_fd)
+static int shell_apply_one_redirect(const char *path, int target_fd, int append, int *saved_fd)
 {
-    int fd = shell_open_redirect_path(path, target_fd);
+    int fd = shell_open_redirect_path(path, target_fd, append);
     if (fd < 0) {
         print("redirect: cannot open ");
         print(path);
@@ -1011,11 +1044,11 @@ static int shell_run_external_with_redirect(char *cmd, char *argv[], int argc)
         return 0;
     argv[argc] = NULL;
 
-    if (redir.stdin_path && shell_apply_one_redirect(redir.stdin_path, 0, &saved_stdin) < 0)
+    if (redir.stdin_path && shell_apply_one_redirect(redir.stdin_path, 0, 0, &saved_stdin) < 0)
         goto fail;
-    if (redir.stdout_path && shell_apply_one_redirect(redir.stdout_path, 1, &saved_stdout) < 0)
+    if (redir.stdout_path && shell_apply_one_redirect(redir.stdout_path, 1, redir.stdout_append, &saved_stdout) < 0)
         goto fail;
-    if (redir.stderr_path && shell_apply_one_redirect(redir.stderr_path, 2, &saved_stderr) < 0)
+    if (redir.stderr_path && shell_apply_one_redirect(redir.stderr_path, 2, redir.stderr_append, &saved_stderr) < 0)
         goto fail;
 
     int ret = shell_spawn_user_program(cmd, argv, argc);
@@ -1059,6 +1092,8 @@ static int shell_run_pipeline(char *cmdline)
         stage_redir[i].stdin_path = NULL;
         stage_redir[i].stdout_path = NULL;
         stage_redir[i].stderr_path = NULL;
+        stage_redir[i].stdout_append = 0;
+        stage_redir[i].stderr_append = 0;
     }
     for (int i = 0; i < SHELL_MAX_PIPE_CMDS - 1; i++) {
         pipes[i][0] = -1;
@@ -1132,7 +1167,7 @@ static int shell_run_pipeline(char *cmdline)
         saved_stderr = SHELL_FD_UNCHANGED;
 
         if (stage_redir[i].stdin_path) {
-            if (shell_apply_one_redirect(stage_redir[i].stdin_path, 0, &saved_stdin) < 0)
+            if (shell_apply_one_redirect(stage_redir[i].stdin_path, 0, 0, &saved_stdin) < 0)
                 goto done;
         } else if (i > 0) {
             saved_stdin = vfs_dup(0);
@@ -1143,7 +1178,7 @@ static int shell_run_pipeline(char *cmdline)
         }
 
         if (stage_redir[i].stdout_path) {
-            if (shell_apply_one_redirect(stage_redir[i].stdout_path, 1, &saved_stdout) < 0)
+            if (shell_apply_one_redirect(stage_redir[i].stdout_path, 1, stage_redir[i].stdout_append, &saved_stdout) < 0)
                 goto done;
         } else if (i + 1 < segment_count) {
             saved_stdout = vfs_dup(1);
@@ -1153,7 +1188,7 @@ static int shell_run_pipeline(char *cmdline)
             }
         }
 
-        if (stage_redir[i].stderr_path && shell_apply_one_redirect(stage_redir[i].stderr_path, 2, &saved_stderr) < 0)
+        if (stage_redir[i].stderr_path && shell_apply_one_redirect(stage_redir[i].stderr_path, 2, stage_redir[i].stderr_append, &saved_stderr) < 0)
             goto done;
 
         pids[i] = shell_execute_user_argv(stage_argc[i], stage_argv[i]);
