@@ -3,6 +3,7 @@
  * ============================================================ */
 
 #define SYS_EXIT        1
+#define SYS_GETPID      20
 #define SYS_WRITE       64
 #define SYS_WAITPID     223
 #define SYS_SPAWN       233
@@ -48,6 +49,7 @@ void _start(void)
     int status = -1;
     int child;
     int waited;
+    int self;
 
     write_str("[waittest] checking spawn error path...\n");
     child = spawn("/bin/does-not-exist");
@@ -56,18 +58,40 @@ void _start(void)
         syscall3(SYS_EXIT, 1, 0, 0);
     }
 
+    write_str("[waittest] checking waitpid invalid options...\n");
+    waited = waitpid(0, &status, 2);
+    if (waited >= 0) {
+        write_str("[waittest] invalid options unexpectedly accepted\n");
+        syscall3(SYS_EXIT, 2, 0, 0);
+    }
+
+    write_str("[waittest] checking waitpid missing pid...\n");
+    waited = waitpid(9999, &status, WNOHANG);
+    if (waited >= 0) {
+        write_str("[waittest] missing pid unexpectedly waited\n");
+        syscall3(SYS_EXIT, 3, 0, 0);
+    }
+
+    write_str("[waittest] checking waitpid non-child pid...\n");
+    self = syscall3(SYS_GETPID, 0, 0, 0);
+    waited = waitpid(self, &status, WNOHANG);
+    if (waited >= 0) {
+        write_str("[waittest] non-child pid unexpectedly waited\n");
+        syscall3(SYS_EXIT, 4, 0, 0);
+    }
+
     write_str("[waittest] spawning /bin/hello and waiting...\n");
 
     child = spawn("/bin/hello");
     if (child < 0) {
         write_str("[waittest] spawn failed\n");
-        syscall3(SYS_EXIT, 2, 0, 0);
+        syscall3(SYS_EXIT, 5, 0, 0);
     }
 
     waited = waitpid(child, &status, WNOHANG);
     if (waited < 0) {
         write_str("[waittest] waitpid WNOHANG failed\n");
-        syscall3(SYS_EXIT, 3, 0, 0);
+        syscall3(SYS_EXIT, 6, 0, 0);
     }
 
     if (waited == 0) {
@@ -75,7 +99,13 @@ void _start(void)
     }
     if (waited != child) {
         write_str("[waittest] waitpid failed\n");
-        syscall3(SYS_EXIT, 4, 0, 0);
+        syscall3(SYS_EXIT, 7, 0, 0);
+    }
+
+    waited = waitpid(child, &status, WNOHANG);
+    if (waited >= 0) {
+        write_str("[waittest] reaped pid unexpectedly waited again\n");
+        syscall3(SYS_EXIT, 8, 0, 0);
     }
 
     write_str("[waittest] waitpid ok\n");

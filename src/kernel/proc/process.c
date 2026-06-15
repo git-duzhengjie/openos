@@ -473,6 +473,13 @@ uint32_t sys_waitpid(uint32_t pid, int *status, int options) {
     if (!cur) return (uint32_t)-1;
     if (options & ~WAITPID_SUPPORTED_OPTIONS) return (uint32_t)-1;
 
+    if (pid != 0) {
+        process_t *target = proc_find(pid);
+        if (!target || target->ppid != cur->pid) {
+            return (uint32_t)-1;
+        }
+    }
+
     for (;;) {
         int has_child = 0;
 
