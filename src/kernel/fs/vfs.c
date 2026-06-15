@@ -550,8 +550,111 @@ static dentry_t *create_regular_file(dentry_t *parent, const char *name, uint32_
 }
 
 /* ============================================================
- * fd 管理
+ * fd 管理 / pipe
  * ============================================================ */
+
+#define VFS_PIPE_CAPACITY 512
+#define VFS_MAX_PIPES    32
+
+typedef struct vfs_pipe {
+    int used;
+    int readers;
+    int writers;
+    uint32_t head;
+    uint32_t tail;
+    uint32_t count;
+    char buffer[VFS_PIPE_CAPACITY];
+} vfs_pipe_t;
+
+static vfs_pipe_t pipe_pool[VFS_MAX_PIPES];
+static file_ops_t vfs_pipe_read_ops;
+static file_ops_t vfs_pipe_write_ops;
+
+static vfs_pipe_t *vfs_pipe_alloc_obj(void) {
+    for (int i = 0; i < VFS_MAX_PIPES; i++) {
+        if (!pipe_pool[i].used) {
+            memset(&pipe_pool[i], 0, sizeof(vfs_pipe_t));
+            pipe_pool[i].used = 1;
+            pipe_pool[i].readers = 1;
+            pipe_pool[i].writers = 1;
+            return &pipe_pool[i];
+        }
+    }
+    return NULL;
+}
+
+static void vfs_pipe_release_obj(vfs_pipe_t *p) {
+    if (!p) return;
+    if (p->readers <= 0 && p->writers <= 0) {
+        memset(p, 0, sizeof(vfs_pipe_t));
+    }
+}
+
+static int vfs_pipe_read(file_t *file, void *buf, uint32_t count) {
+    if (!file || !buf) return -1;
+    vfs_pipe_t *p = (vfs_pipe_t *)file->fs_data;
+    if (!p || !p->used) return -1;
+    if (count == 0) return 0;
+
+    char *out = (char *)buf;
+    uint32_t n = 0;
+    while (n == 0) {
+        while (n < count && p->count > 0) {
+            out[n++] = p->buffer[p->tail];
+            p->tail = (p->tail + 1) % VFS_PIPE_CAPACITY;
+            p->count--;
+        }
+        if (n > 0) break;
+        if (p->writers <= 0) return 0;
+        sched_yield();
+    }
+    return (int)n;
+}
+
+static int vfs_pipe_write(file_t *file, const void *buf, uint32_t count) {
+    if (!file || !buf) return -1;
+    vfs_pipe_t *p = (vfs_pipe_t *)file->fs_data;
+    if (!p || !p->used) return -1;
+    if (count == 0) return 0;
+    if (p->readers <= 0) return -1;
+
+    const char *in = (const char *)buf;
+    uint32_t n = 0;
+    while (n < count) {
+        while (p->count >= VFS_PIPE_CAPACITY) {
+            if (p->readers <= 0) return n > 0 ? (int)n : -1;
+            sched_yield();
+        }
+        p->buffer[p->head] = in[n++];
+        p->head = (p->head + 1) % VFS_PIPE_CAPACITY;
+        p->count++;
+    }
+    return (int)n;
+}
+
+static int vfs_pipe_close(file_t *file) {
+    if (!file) return -1;
+    vfs_pipe_t *p = (vfs_pipe_t *)file->fs_data;
+    if (!p) return 0;
+    if (file->ops == &vfs_pipe_read_ops) {
+        if (p->readers > 0) p->readers--;
+    } else if (file->ops == &vfs_pipe_write_ops) {
+        if (p->writers > 0) p->writers--;
+    }
+    vfs_pipe_release_obj(p);
+    file->fs_data = NULL;
+    return 0;
+}
+
+static file_ops_t vfs_pipe_read_ops = {
+    .read = vfs_pipe_read,
+    .close = vfs_pipe_close,
+};
+
+static file_ops_t vfs_pipe_write_ops = {
+    .write = vfs_pipe_write,
+    .close = vfs_pipe_close,
+};
 
 int vfs_alloc_fd(void) {
     file_t **fds = get_current_fd_table();
@@ -618,6 +721,62 @@ int vfs_dup2(int oldfd, int newfd) {
     vfs_file_get(f);
     vfs_put_file(newfd, f);
     return newfd;
+}
+
+int vfs_pipe(int pipefd[2]) {
+    if (!pipefd) return -1;
+
+    file_t **fds = get_current_fd_table();
+    if (!fds) return -1;
+
+    int rfd = -1;
+    int wfd = -1;
+    for (int i = 3; i < MAX_FD; i++) {
+        if (!fds[i]) {
+            if (rfd < 0) {
+                rfd = i;
+            } else {
+                wfd = i;
+                break;
+            }
+        }
+    }
+    if (rfd < 0 || wfd < 0) return -1;
+
+    vfs_pipe_t *p = vfs_pipe_alloc_obj();
+    if (!p) return -1;
+
+    file_t *rf = (file_t *)pmm_alloc_page();
+    if (!rf) {
+        p->readers = 0;
+        p->writers = 0;
+        vfs_pipe_release_obj(p);
+        return -1;
+    }
+
+    file_t *wf = (file_t *)pmm_alloc_page();
+    if (!wf) {
+        pmm_free_page(rf);
+        p->readers = 0;
+        p->writers = 0;
+        vfs_pipe_release_obj(p);
+        return -1;
+    }
+
+    memset(rf, 0, sizeof(file_t));
+    memset(wf, 0, sizeof(file_t));
+    rf->ref_count = 1;
+    rf->fs_data = p;
+    rf->ops = &vfs_pipe_read_ops;
+    wf->ref_count = 1;
+    wf->fs_data = p;
+    wf->ops = &vfs_pipe_write_ops;
+
+    vfs_put_file(rfd, rf);
+    vfs_put_file(wfd, wf);
+    pipefd[0] = rfd;
+    pipefd[1] = wfd;
+    return 0;
 }
 
 /* ============================================================

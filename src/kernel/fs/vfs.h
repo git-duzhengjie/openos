@@ -121,6 +121,7 @@ typedef struct file {
     uint32_t   flags;         /* 打开标志 */
     uint32_t   offset;        /* 当前偏移 */
     uint32_t   ref_count;
+    void      *fs_data;       /* 文件对象私有数据 */
     file_ops_t *ops;
 } file_t;
 
@@ -197,8 +198,9 @@ void   vfs_close_fds_for_process(void *proc);      /* 关闭指定进程的 fd �
 int    vfs_chdir(const char *path);               /* 切换当前工作目录 */
 int    vfs_getcwd(char *buf, uint32_t size);      /* 获取当前工作目录 */
 
-/* fd duplication */
+/* fd duplication / pipe */
 int    vfs_dup(int oldfd);
 int    vfs_dup2(int oldfd, int newfd);
+int    vfs_pipe(int pipefd[2]);
 
 #endif /* KERNEL_FS_VFS_H */

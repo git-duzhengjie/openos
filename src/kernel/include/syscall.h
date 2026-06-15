@@ -41,6 +41,7 @@
 #define SYS_LSTAT       241
 #define SYS_DUP         242
 #define SYS_DUP2        243
+#define SYS_PIPE        244
 
 typedef struct openos_stat {
     uint32_t ino;

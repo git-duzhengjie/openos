@@ -243,6 +243,18 @@ uint32_t syscall_dispatch(uint32_t num,
     case SYS_DUP2:
         return (uint32_t)vfs_dup2((int)a, (int)b);
 
+    case SYS_PIPE:
+        {
+            int pipefd[2];
+            if (!a || !user_ptr_valid((void *)a, sizeof(pipefd), USERMEM_WRITE))
+                return (uint32_t)-1;
+            if (vfs_pipe(pipefd) < 0)
+                return (uint32_t)-1;
+            if (copy_to_user((void *)a, pipefd, sizeof(pipefd)) < 0)
+                return (uint32_t)-1;
+            return 0;
+        }
+
     case SYS_MKDIR:
         {
             char path[USERMEM_CSTR_MAX];
