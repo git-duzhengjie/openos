@@ -4,9 +4,9 @@
 >
 > 当前状态：openos 已具备 32 位 x86 原型内核能力，能够启动、显示、输入、调度、运行基础用户程序，并具备基础 syscall、VFS、ramfs/tmpfs、shell、GUI Terminal 等模块。以下清单记录后续仍需开发或完善的功能。
 >
-> 最近完成：`daca8f2 fix(proc): improve waitpid status semantics` 已完成 `waitpid` 错误语义、`waitpid(-1)`、exit status 编码与 `/bin/waittest` 回归覆盖。
+> 最近完成：`9f584f2 fix(proc): reap orphaned child processes` 已完成子进程资源回收、孤儿进程 reparent 到 init，并新增 `/bin/orphan` 回归覆盖；`d2a2da0 fix(build): increase boot kernel load limit` 已将 bootloader 内核加载上限提升到 1024 扇区并修复 `NULL` 重定义警告。
 >
-> 下一步建议：继续 P0，优先做“子进程资源回收 / orphan reparent 到 init”，再进入 `spawn/exec argv` 和基础文件系统用户命令。
+> 当前推荐下一步：继续 P0，优先实现「init 进程模型搭建」。目标是让 PID1 成为真实常驻 init/reaper 进程，负责启动 shell/基础用户程序、接管孤儿进程，并循环 `waitpid(-1)` 回收孤儿僵尸；完成后再推进 `spawn/exec argv/envp` 和基础文件系统用户命令。
 
 ---
 
@@ -21,12 +21,15 @@
 - [√] 用户态切换、ELF 用户程序加载
 - [√] VFS / ramfs / tmpfs 基础能力
 - [√] RAM disk / 内置用户程序嵌入
+- [√] bootloader 内核加载上限提升到 1024 扇区（提交：`d2a2da0`）
 - [√] Shell、VGA / GUI Terminal、基础输入
 - [√] 基础网络栈雏形（ARP / IPv4 / ICMP / UDP / TCP）
-- [√] `/bin/hello`、`/bin/fault`、`/bin/waittest` 基础用户程序
+- [√] `/bin/hello`、`/bin/fault`、`/bin/waittest`、`/bin/orphan` 基础用户程序
 - [√] 调度器 GPF 修复
 - [√] Shell 历史命令重绘修复
 - [√] `waitpid` 错误语义、`waitpid(-1)`、exit status 编码与回归测试（提交：`daca8f2`）
+- [√] 子进程资源回收与孤儿进程 reparent 到 init（提交：`9f584f2`）
+- [√] `NULL` 宏保护，避免与编译器 `stddef.h` 重复定义（提交：`d2a2da0`）
 
 ---
 
@@ -48,8 +51,14 @@
   - [√] 非法 options
   - [√] 重复 wait
   - [√] pid = -1
-- [√] 完善子进程资源回收
-- [√] 处理孤儿进程 reparent 到 init
+- [√] 完善子进程资源回收（提交：`9f584f2`）
+- [√] 处理孤儿进程 reparent 到 init（提交：`9f584f2`）
+- [√] 扩展 `/bin/waittest` 覆盖 orphan reparent 场景（提交：`9f584f2`）
+- [ ] 搭建 init 进程模型（当前推荐下一步）
+  - [ ] 创建真实 PID1 常驻 init/reaper 进程
+  - [ ] init 负责启动 shell 或基础用户态入口
+  - [ ] init 循环 `waitpid(-1)` 回收孤儿僵尸进程
+  - [ ] 明确 init 退出 / 崩溃时的内核处理策略
 
 ### 2. 用户程序参数支持
 
@@ -366,38 +375,3 @@
 - [ ] GDB 调试脚本
 - [ ] 发布打包流程
 - [ ] 版本号 / release 管理
-
----
-
-## 当前推荐下一步
-
-建议优先从以下两条路线中选择一条开始：
-
-### 路线 A：继续完善当前 i386 稳定基线
-
-已完成第一阶段：
-
-- [√] waitpid 错误返回语义（提交：`daca8f2`）
-- [√] waitpid(-1, &status, options)（提交：`daca8f2`）
-- [√] exit status 标准编码（提交：`daca8f2`）
-- [√] 扩展 /bin/waittest 回归测试（提交：`daca8f2`）
-
-下一阶段建议：
-
-- [ ] 完善子进程资源回收
-- [ ] 处理孤儿进程 reparent 到 init
-- [ ] 支持 spawn/exec argv
-
-原因：这些任务集中在进程语义和测试程序，风险较低，收益较高，并且不会马上触碰调度器和地址空间隔离等高风险模块。
-
-### 路线 B：启动 x86_64 支持
-
-```text
-1. 新增 ARCH=i386/x86_64 构建入口
-2. 新增 src/arch/x86_64/ 目录
-3. 新增 x86_64 linker script
-4. 新增 long mode 启动骨架
-5. 第一阶段只进入 kernel_main64() 并输出 hello 日志
-```
-
-原因：这条路线可以在不破坏当前 i386 基线的前提下，开始支持 64 位。第一阶段目标应尽量小，只验证 long mode 入口和早期输出。
