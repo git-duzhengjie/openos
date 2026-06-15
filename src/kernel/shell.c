@@ -33,7 +33,7 @@ extern int sys_waitpid(int pid, int *status, int options);
 
 static void make_path(const char *arg, char *out);
 static int shell_spawn_user_program(const char *path, char *argv[], int argc);
-static int shell_run_pipeline(char *cmdline);
+static int shell_run_pipeline(char *cmdline, int background);
 static int shell_run_external_with_redirect(char *cmd, char *argv[], int argc);
 static void shell_complete_command(void);
 static void shell_history_prev(void);
@@ -1280,6 +1280,47 @@ static void shell_restore_redirects(int saved_stdin, int saved_stdout, int saved
     shell_restore_fd(2, saved_stderr);
 }
 
+static int shell_extract_background(char *cmdline)
+{
+    if (!cmdline)
+        return 0;
+
+    int len = strlen(cmdline);
+    while (len > 0 && (cmdline[len - 1] == ' ' || cmdline[len - 1] == '\t'))
+        len--;
+
+    if (len <= 0 || cmdline[len - 1] != '&')
+        return 0;
+
+    cmdline[len - 1] = '\0';
+    len--;
+    while (len > 0 && (cmdline[len - 1] == ' ' || cmdline[len - 1] == '\t')) {
+        cmdline[len - 1] = '\0';
+        len--;
+    }
+
+    return 1;
+}
+
+static void shell_print_background_job(int pid)
+{
+    print("[bg] pid ");
+    shell_print_dec(pid);
+    print("\n");
+}
+
+static void shell_print_background_pipeline(int *pids, int count)
+{
+    print("[bg] pipeline");
+    for (int i = 0; i < count; i++) {
+        if (pids[i] >= 0) {
+            print(" ");
+            shell_print_dec(pids[i]);
+        }
+    }
+    print("\n");
+}
+
 static int shell_run_external_with_redirect(char *cmd, char *argv[], int argc)
 {
     shell_redirect_t redir;
@@ -1322,7 +1363,7 @@ fail:
     return -1;
 }
 
-static int shell_run_pipeline(char *cmdline)
+static int shell_run_pipeline(char *cmdline, int background)
 {
     enum { SHELL_MAX_PIPE_CMDS = 8 };
 
@@ -1470,9 +1511,13 @@ done:
             vfs_close(pipes[i][1]);
     }
 
-    for (int i = 0; i < segment_count; i++) {
-        if (pids[i] >= 0)
-            sys_waitpid(pids[i], NULL, 0);
+    if (background) {
+        shell_print_background_pipeline(pids, segment_count);
+    } else {
+        for (int i = 0; i < segment_count; i++) {
+            if (pids[i] >= 0)
+                sys_waitpid(pids[i], NULL, 0);
+        }
     }
 
     return 1;
@@ -2014,7 +2059,17 @@ void shell_run(void)
             shell_save_history();
             shell_history_save_file();
 
-            if (shell_run_pipeline(cmd_buf))
+            int background = shell_extract_background(cmd_buf);
+            if (background && !shell_trim(cmd_buf)[0]) {
+                print_err("background: missing command\n");
+                cmd_pos = 0;
+                cmd_cursor = 0;
+                cmd_buf[0] = '\0';
+                shell_prompt();
+                continue;
+            }
+
+            if (shell_run_pipeline(cmd_buf, background))
             {
                 cmd_pos = 0;
                 cmd_cursor = 0;
@@ -2731,9 +2786,13 @@ void shell_run(void)
                             print_err(argv[1]);
                             print_err("\n");
                         }
+                        else if (background)
+                        {
+                            shell_print_background_job(ret);
+                        }
                         else
                         {
-                            print("exec: spawned\n");
+                            sys_waitpid(ret, NULL, 0);
                         }
                     }
                     else
@@ -2747,10 +2806,10 @@ void shell_run(void)
                     if (ret < 0) {
                         print_err(cmd);
                         print_err(": command not found\n");
-                    } else if (redir.stdin_path || redir.stdout_path || redir.stderr_path) {
-                        sys_waitpid(ret, NULL, 0);
+                    } else if (background) {
+                        shell_print_background_job(ret);
                     } else {
-                        print("exec: spawned\n");
+                        sys_waitpid(ret, NULL, 0);
                     }
                 }
             }
