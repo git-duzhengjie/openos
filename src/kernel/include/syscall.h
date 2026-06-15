@@ -37,6 +37,8 @@
 #define SYS_GETCWD      237
 #define SYS_CHDIR       238
 #define SYS_READDIR     239
+#define SYS_FSTAT       240
+#define SYS_LSTAT       241
 
 typedef struct openos_stat {
     uint32_t ino;

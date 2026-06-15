@@ -118,6 +118,15 @@ static int syscall_copy_user_path(char *dst, const char *user_path)
     return strncpy_from_user(dst, user_path, USERMEM_CSTR_MAX);
 }
 
+static void syscall_fill_user_stat(openos_stat_t *user_st, const inode_t *st)
+{
+    user_st->ino = st->ino;
+    user_st->mode = st->mode;
+    user_st->size = st->size;
+    user_st->nlinks = st->nlinks;
+    user_st->fs_type = st->fs_type;
+}
+
 /* ============================================================
  * 系统调用分发
  * ============================================================ */
@@ -284,11 +293,40 @@ uint32_t syscall_dispatch(uint32_t num,
                 return (uint32_t)-1;
             if (vfs_stat(path, &st) < 0)
                 return (uint32_t)-1;
-            user_st.ino = st.ino;
-            user_st.mode = st.mode;
-            user_st.size = st.size;
-            user_st.nlinks = st.nlinks;
-            user_st.fs_type = st.fs_type;
+            syscall_fill_user_stat(&user_st, &st);
+            if (copy_to_user((void *)b, &user_st, sizeof(user_st)) < 0)
+                return (uint32_t)-1;
+            return 0;
+        }
+
+    case SYS_FSTAT:
+        {
+            file_t *f;
+            openos_stat_t user_st;
+            if (!b || !user_ptr_valid((void *)b, sizeof(user_st), USERMEM_WRITE))
+                return (uint32_t)-1;
+            f = vfs_get_file((int)a);
+            if (!f || !f->inode)
+                return (uint32_t)-1;
+            syscall_fill_user_stat(&user_st, f->inode);
+            if (copy_to_user((void *)b, &user_st, sizeof(user_st)) < 0)
+                return (uint32_t)-1;
+            return 0;
+        }
+
+    case SYS_LSTAT:
+        {
+            char path[USERMEM_CSTR_MAX];
+            inode_t st;
+            openos_stat_t user_st;
+            if (!b || !user_ptr_valid((void *)b, sizeof(user_st), USERMEM_WRITE))
+                return (uint32_t)-1;
+            if (syscall_copy_user_path(path, (const char *)a) < 0)
+                return (uint32_t)-1;
+            /* 当前 VFS 尚未区分 symlink，lstat 先与 stat 等价。 */
+            if (vfs_stat(path, &st) < 0)
+                return (uint32_t)-1;
+            syscall_fill_user_stat(&user_st, &st);
             if (copy_to_user((void *)b, &user_st, sizeof(user_st)) < 0)
                 return (uint32_t)-1;
             return 0;

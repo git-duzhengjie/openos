@@ -4,13 +4,18 @@
 
 #define SYS_EXIT    1
 #define SYS_WRITE   64
+#define SYS_OPEN    225
+#define SYS_CLOSE   226
 #define SYS_STAT    236
 #define SYS_GETCWD  237
 #define SYS_CHDIR   238
 #define SYS_READDIR 239
+#define SYS_FSTAT   240
+#define SYS_LSTAT   241
 
 #define FS_DIR      0x2000
 #define FS_FILE     0x1000
+#define O_RDONLY    0
 
 struct openos_stat {
     unsigned int ino;
@@ -76,6 +81,7 @@ void _start(int argc, char **argv, char **envp)
     struct openos_dirent de;
     char cwd[128];
     int found_bin = 0;
+    int fd;
     int i;
 
     write_str("[fstest] checking fs syscalls...\n");
@@ -113,6 +119,21 @@ void _start(int argc, char **argv, char **envp)
         fail(10, "[fstest] relative stat hello failed\n");
     if ((st.mode & FS_FILE) != FS_FILE)
         fail(11, "[fstest] hello is not file\n");
+
+    if (syscall3(SYS_LSTAT, (int)"hello", (int)&st, 0) < 0)
+        fail(12, "[fstest] lstat hello failed\n");
+    if ((st.mode & FS_FILE) != FS_FILE)
+        fail(13, "[fstest] lstat hello is not file\n");
+
+    fd = syscall3(SYS_OPEN, (int)"hello", O_RDONLY, 0);
+    if (fd < 0)
+        fail(14, "[fstest] open hello failed\n");
+    if (syscall3(SYS_FSTAT, fd, (int)&st, 0) < 0)
+        fail(15, "[fstest] fstat hello failed\n");
+    if ((st.mode & FS_FILE) != FS_FILE)
+        fail(16, "[fstest] fstat hello is not file\n");
+    if (syscall3(SYS_CLOSE, fd, 0, 0) < 0)
+        fail(17, "[fstest] close hello failed\n");
 
     syscall3(SYS_CHDIR, (int)"/", 0, 0);
     write_str("[fstest] fs syscalls ok\n");

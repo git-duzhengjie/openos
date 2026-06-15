@@ -6,7 +6,7 @@
 >
 > 最近完成：`9f584f2 fix(proc): reap orphaned child processes` 已完成子进程资源回收、孤儿进程 reparent 到 init，并新增 `/bin/orphan` 回归覆盖；`d2a2da0 fix(build): increase boot kernel load limit` 已将 bootloader 内核加载上限提升到 1024 扇区并修复 `NULL` 重定义警告；当前已搭建 PID1 init/reaper 内核线程，已支持 shell 直接执行 `/bin/app arg1 arg2` 带参数用户程序，已补齐 `envp` 环境变量传递，并已暴露 `stat/getcwd/chdir/readdir` 文件系统 syscall。
 >
-> 当前推荐下一步：继续 P0，优先补齐更完整的文件系统用户态接口（`fstat` / `lstat` / `opendir` 封装等）；如需类 Unix 用户态工具链，再将现有 shell 内置命令拆分为独立 `/bin/*` 程序。
+> 当前推荐下一步：继续 P0，优先补齐更完整的文件系统用户态接口（`opendir` / `closedir` 用户态封装等）；如需类 Unix 用户态工具链，再将现有 shell 内置命令拆分为独立 `/bin/*` 程序。
 
 ---
 
@@ -72,7 +72,7 @@
 ### 3. 文件系统基础接口
 
 - [√] 实现用户态 `stat` syscall（新增 `/bin/fstest` 回归）
-- [ ] 实现用户态 `fstat` / `lstat`
+- [x] 实现用户态 `fstat` / `lstat`
 - [√] 实现用户态 `readdir` syscall（路径 + index 形式）
 - [ ] 实现用户态 `opendir` / `closedir` 封装
 - [√] 实现 `getcwd` / `chdir` syscall
