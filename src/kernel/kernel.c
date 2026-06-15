@@ -85,6 +85,12 @@
 #else
 #define OPENOS_HAS_CAT 0
 #endif
+#if __has_include("embed_echo.h")
+#include "embed_echo.h"  /* echo user command */
+#define OPENOS_HAS_ECHO 1
+#else
+#define OPENOS_HAS_ECHO 0
+#endif
 
 
 /* 外部符号 */
@@ -504,6 +510,17 @@ void kernel_main(void) {
         serial_write("[OK] Installed /bin/cat user ELF\n");
     } else {
         serial_write("[WARN] Failed to install /bin/cat\n");
+    }
+#endif
+
+#if OPENOS_HAS_ECHO
+    fd = vfs_open("/bin/echo", O_CREAT | O_RDWR, 0755);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)echo_elf, echo_elf_size);
+        vfs_close(fd);
+        serial_write("[OK] Installed /bin/echo user ELF\n");
+    } else {
+        serial_write("[WARN] Failed to install /bin/echo\n");
     }
 #endif
 

@@ -143,6 +143,16 @@ if [ -f $USR/cat.c ]; then
     echo "  Embedded: cat.elf"
 fi
 
+if [ -f $USR/echo.c ]; then
+    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+        -fno-stack-protector -fno-builtin \
+        -I $SRC/include \
+        -c $USR/echo.c -o $BUILD/echo.o
+    ld -m elf_i386 -T $USR/user.ld -o $BUILD/echo.elf $BUILD/echo.o
+    python3 _embed_elf.py $BUILD/echo.elf $SRC/include/embed_echo.h echo_elf
+    echo "  Embedded: echo.elf"
+fi
+
 echo "[3/5] Compiling kernel C files..."
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
