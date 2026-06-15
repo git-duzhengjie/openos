@@ -4,9 +4,9 @@
 >
 > 当前状态：openos 已具备 32 位 x86 原型内核能力，能够启动、显示、输入、调度、运行基础用户程序，并具备基础 syscall、VFS、ramfs/tmpfs、shell、GUI Terminal 等模块。以下清单记录后续仍需开发或完善的功能。
 >
-> 最近完成：`9f584f2 fix(proc): reap orphaned child processes` 已完成子进程资源回收、孤儿进程 reparent 到 init，并新增 `/bin/orphan` 回归覆盖；`d2a2da0 fix(build): increase boot kernel load limit` 已将 bootloader 内核加载上限提升到 1024 扇区并修复 `NULL` 重定义警告。
+> 最近完成：`9f584f2 fix(proc): reap orphaned child processes` 已完成子进程资源回收、孤儿进程 reparent 到 init，并新增 `/bin/orphan` 回归覆盖；`d2a2da0 fix(build): increase boot kernel load limit` 已将 bootloader 内核加载上限提升到 1024 扇区并修复 `NULL` 重定义警告；当前已搭建 PID1 init/reaper 内核线程，负责启动桌面 / shell fallback 并循环回收孤儿僵尸。
 >
-> 当前推荐下一步：继续 P0，优先实现「init 进程模型搭建」。目标是让 PID1 成为真实常驻 init/reaper 进程，负责启动 shell/基础用户程序、接管孤儿进程，并循环 `waitpid(-1)` 回收孤儿僵尸；完成后再推进 `spawn/exec argv/envp` 和基础文件系统用户命令。
+> 当前推荐下一步：继续 P0，优先推进 `spawn/exec argv/envp` 参数传递；完成后再补齐用户态 `main(argc, argv)`、shell 命令参数解析和基础文件系统用户命令。
 
 ---
 
@@ -29,6 +29,7 @@
 - [√] Shell 历史命令重绘修复
 - [√] `waitpid` 错误语义、`waitpid(-1)`、exit status 编码与回归测试（提交：`daca8f2`）
 - [√] 子进程资源回收与孤儿进程 reparent 到 init（提交：`9f584f2`）
+- [√] PID1 init/reaper 内核线程模型
 - [√] `NULL` 宏保护，避免与编译器 `stddef.h` 重复定义（提交：`d2a2da0`）
 
 ---
@@ -54,11 +55,11 @@
 - [√] 完善子进程资源回收（提交：`9f584f2`）
 - [√] 处理孤儿进程 reparent 到 init（提交：`9f584f2`）
 - [√] 扩展 `/bin/waittest` 覆盖 orphan reparent 场景（提交：`9f584f2`）
-- [ ] 搭建 init 进程模型（当前推荐下一步）
-  - [ ] 创建真实 PID1 常驻 init/reaper 进程
-  - [ ] init 负责启动 shell 或基础用户态入口
-  - [ ] init 循环 `waitpid(-1)` 回收孤儿僵尸进程
-  - [ ] 明确 init 退出 / 崩溃时的内核处理策略
+- [√] 搭建 init 进程模型
+  - [√] 创建真实 PID1 常驻 init/reaper 内核线程
+  - [√] init 负责启动 desktop，失败时启动 shell fallback
+  - [√] init 循环 `waitpid(-1, WNOHANG)` 回收孤儿僵尸进程
+  - [√] 明确 init 不允许通过 `sys_exit` 退出，失败时由内核回退到 shell
 
 ### 2. 用户程序参数支持
 

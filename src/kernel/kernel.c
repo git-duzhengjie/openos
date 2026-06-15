@@ -92,6 +92,7 @@ void test_proc_b(void) {
 }
 
 static int g_shell_thread_started = 0;
+static int g_desktop_thread_started = 0;
 
 #define KERNEL_UI_THREAD_STACK_PAGES 4u
 #define KERNEL_UI_THREAD_STACK_SIZE  (KERNEL_UI_THREAD_STACK_PAGES * 4096u)
@@ -119,7 +120,7 @@ void kernel_start_shell_thread(void) {
         return;
     }
 
-    sh = thread_create_sized(1, "shell", (uint32_t)shell_run, shell_stack, KERNEL_UI_THREAD_STACK_SIZE);
+    sh = thread_create_sized(INIT_PID, "shell", (uint32_t)shell_run, shell_stack, KERNEL_UI_THREAD_STACK_SIZE);
     if (sh) {
         sh->priority = PRIORITY_LOW;
         g_shell_thread_started = 1;
@@ -142,6 +143,76 @@ static void desktop_thread(void) {
         gui_poll();
         sched_yield();
     }
+}
+
+static int kernel_start_desktop_thread(void) {
+    uint32_t desktop_stack;
+    thread_t *desk;
+
+    if (g_desktop_thread_started) return 0;
+
+    desktop_stack = kernel_alloc_stack_pages(KERNEL_UI_THREAD_STACK_PAGES);
+    if (!desktop_stack) {
+        serial_write("[GUI] Failed to allocate desktop stack.\n");
+        return -1;
+    }
+
+    desk = thread_create_sized(INIT_PID, "desktop", (uint32_t)desktop_thread,
+                               desktop_stack, KERNEL_UI_THREAD_STACK_SIZE);
+    if (!desk) {
+        serial_write("[GUI] Failed to create desktop thread.\n");
+        return -1;
+    }
+
+    g_desktop_thread_started = 1;
+    sched_add_thread(desk);
+    serial_write("[INIT] Desktop thread started.\n");
+    return 0;
+}
+
+static void init_thread(void) {
+    serial_write("[INIT] PID1 init/reaper started.\n");
+
+    if (kernel_start_desktop_thread() != 0) {
+        serial_write("[INIT] Desktop unavailable; starting shell fallback.\n");
+        kernel_start_shell_thread();
+    }
+
+    for (;;) {
+        int status = 0;
+        uint32_t reaped = sys_waitpid(-1, &status, WAITPID_WNOHANG);
+        if (reaped != 0 && reaped != (uint32_t)-1) {
+            serial_write("[INIT] Reaped orphan pid=");
+            serial_write_hex(reaped);
+            serial_write(" status=");
+            serial_write_hex((uint32_t)status);
+            serial_write("\n");
+            continue;
+        }
+        sched_yield();
+    }
+}
+
+static int kernel_start_init_thread(void) {
+    uint32_t init_stack = kernel_alloc_stack_pages(KERNEL_UI_THREAD_STACK_PAGES);
+    thread_t *init;
+
+    if (!init_stack) {
+        serial_write("[INIT] Failed to allocate init stack.\n");
+        return -1;
+    }
+
+    init = thread_create_sized(INIT_PID, "init", (uint32_t)init_thread,
+                               init_stack, KERNEL_UI_THREAD_STACK_SIZE);
+    if (!init) {
+        serial_write("[INIT] Failed to create init thread.\n");
+        return -1;
+    }
+
+    init->priority = PRIORITY_NORMAL;
+    sched_add_thread(init);
+    serial_write("[INIT] Init thread scheduled.\n");
+    return 0;
 }
 
 void kernel_main(void) {
@@ -349,22 +420,13 @@ void kernel_main(void) {
     /* 测试用户态切换已通过 Phase 2 验证，不再自动测�?*/
     /* test_user_mode_switch(); */
     
-    /* Start graphical desktop as the foreground UI. */
-    {
-        uint32_t desktop_stack = kernel_alloc_stack_pages(KERNEL_UI_THREAD_STACK_PAGES);
-        thread_t *desk = NULL;
-        if (desktop_stack) {
-            desk = thread_create_sized(1, "desktop", (uint32_t)desktop_thread, desktop_stack, KERNEL_UI_THREAD_STACK_SIZE);
-        }
-        if (desk) {
-            sched_add_thread(desk);
-        } else {
-            serial_write("[GUI] Failed to create desktop thread; starting shell fallback.\n");
-            kernel_start_shell_thread();
-        }
+    /* Start PID1 init/reaper; init owns desktop/shell startup and orphan cleanup. */
+    if (kernel_start_init_thread() != 0) {
+        serial_write("[INIT] Failed to start init; falling back to shell thread.\n");
+        kernel_start_shell_thread();
     }
 
-    /* Shell is launched on demand from the GUI Terminal tool, or as a fallback if GUI fails. */
+    /* Shell is launched on demand from the GUI Terminal tool, or as a fallback if GUI/init fails. */
 
     /* 自动测试 ELF 加载 - 已禁用，避免干扰键盘输入
     {

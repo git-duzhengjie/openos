@@ -29,9 +29,6 @@ typedef struct user_spawn_args {
 
 static void user_process_trampoline(void *arg);
 
-#define INIT_PID 1
-
-#define WAITPID_WNOHANG 1
 #define WAITPID_SUPPORTED_OPTIONS WAITPID_WNOHANG
 
 void proc_table_init(void) {

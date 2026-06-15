@@ -25,6 +25,10 @@ typedef enum {
 #define MAX_PROCESSES 64
 #define MAX_THREADS  256
 
+/* Reserved system process IDs and wait options */
+#define INIT_PID 1u
+#define WAITPID_WNOHANG 1
+
 /* ============================================================
  * 线程控制块 (TCB)
  * ============================================================ */
