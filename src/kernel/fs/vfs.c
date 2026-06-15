@@ -578,6 +578,48 @@ int vfs_put_file(int fd, file_t *file) {
     return 0;
 }
 
+static void vfs_file_get(file_t *f) {
+    if (f) f->ref_count++;
+}
+
+static void vfs_file_put(file_t *f) {
+    if (!f) return;
+    if (f->ref_count > 1) {
+        f->ref_count--;
+        return;
+    }
+    if (f->ops && f->ops->close) f->ops->close(f);
+    pmm_free_page(f);
+}
+
+int vfs_dup(int oldfd) {
+    file_t *f = vfs_get_file(oldfd);
+    if (!f) return -1;
+
+    int newfd = vfs_alloc_fd();
+    if (newfd < 0) return -1;
+
+    vfs_file_get(f);
+    vfs_put_file(newfd, f);
+    return newfd;
+}
+
+int vfs_dup2(int oldfd, int newfd) {
+    file_t *f = vfs_get_file(oldfd);
+    if (!f || newfd < 0 || newfd >= MAX_FD) return -1;
+    if (oldfd == newfd) return newfd;
+
+    file_t *old_new = vfs_get_file(newfd);
+    if (old_new) {
+        vfs_put_file(newfd, NULL);
+        vfs_file_put(old_new);
+    }
+
+    vfs_file_get(f);
+    vfs_put_file(newfd, f);
+    return newfd;
+}
+
 /* ============================================================
  * 文件操作
  * ============================================================ */
@@ -642,17 +684,11 @@ int vfs_open(const char *path, int flags, int mode) {
     return fd;
 }
 
-static void vfs_release_file(file_t *f) {
-    if (!f) return;
-    if (f->ops && f->ops->close) f->ops->close(f);
-    pmm_free_page(f);
-}
-
 int vfs_close(int fd) {
     file_t *f = vfs_get_file(fd);
     if (!f) return -1;
     vfs_put_file(fd, NULL);
-    vfs_release_file(f);
+    vfs_file_put(f);
     return 0;
 }
 
@@ -663,7 +699,7 @@ void vfs_close_fds_for_process(void *proc) {
     for (int i = 0; i < MAX_FD; i++) {
         file_t *f = (file_t *)p->fds[i];
         p->fds[i] = NULL;
-        vfs_release_file(f);
+        vfs_file_put(f);
     }
 }
 

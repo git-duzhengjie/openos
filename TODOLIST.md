@@ -4,9 +4,9 @@
 >
 > 当前状态：openos 已具备 32 位 x86 原型内核能力，能够启动、显示、输入、调度、运行基础用户程序，并具备基础 syscall、VFS、ramfs/tmpfs、shell、GUI Terminal 等模块。以下清单记录后续仍需开发或完善的功能。
 >
-> 最近完成：`9f584f2 fix(proc): reap orphaned child processes` 已完成子进程资源回收、孤儿进程 reparent 到 init，并新增 `/bin/orphan` 回归覆盖；`d2a2da0 fix(build): increase boot kernel load limit` 已将 bootloader 内核加载上限提升到 1024 扇区并修复 `NULL` 重定义警告；当前已搭建 PID1 init/reaper 内核线程，已支持 shell 直接执行 `/bin/app arg1 arg2` 带参数用户程序，已补齐 `envp` 环境变量传递，并已暴露 `stat/getcwd/chdir/readdir/fstat/lstat` 文件系统 syscall，同时新增最小用户态公共 runtime 头文件 `src/user/openos.h`，且已新增独立 `/bin/pwd`、`/bin/ls`、`/bin/cat`、`/bin/echo`、`/bin/mkdir`、`/bin/rm`、`/bin/rmdir` 用户态命令；本轮已初步标准化 `stdin/stdout/stderr`，`/bin/cat` 支持无参数从 stdin 读取。
+> 最近完成：`9f584f2 fix(proc): reap orphaned child processes` 已完成子进程资源回收、孤儿进程 reparent 到 init，并新增 `/bin/orphan` 回归覆盖；`d2a2da0 fix(build): increase boot kernel load limit` 已将 bootloader 内核加载上限提升到 1024 扇区并修复 `NULL` 重定义警告；当前已搭建 PID1 init/reaper 内核线程，已支持 shell 直接执行 `/bin/app arg1 arg2` 带参数用户程序，已补齐 `envp` 环境变量传递，并已暴露 `stat/getcwd/chdir/readdir/fstat/lstat` 文件系统 syscall，同时新增最小用户态公共 runtime 头文件 `src/user/openos.h`，且已新增独立 `/bin/pwd`、`/bin/ls`、`/bin/cat`、`/bin/echo`、`/bin/mkdir`、`/bin/rm`、`/bin/rmdir` 用户态命令；本轮已初步标准化 `stdin/stdout/stderr`，`/bin/cat` 支持无参数从 stdin 读取，并已新增 `dup` / `dup2` syscall 与 VFS fd 引用计数语义。
 >
-> 当前推荐下一步：继续 P0，已初步标准化 `stdin/stdout/stderr`，下一步建议完善 `dup` / `dup2` / `pipe`，为 shell 管道打基础。
+> 当前推荐下一步：继续 P0，完善 `pipe` 与 shell 管道，为 `echo hello | cat` 这类组合命令打基础。
 
 ---
 
@@ -153,8 +153,8 @@
 - [ ] chmod / chown 权限模型
 - [ ] access 权限检查
 - [ ] per-process cwd 更严格集成
-- [ ] 文件描述符表标准化
-- [ ] `dup` / `dup2`
+- [√] 文件描述符表标准化
+- [√] `dup` / `dup2`
 - [ ] pipe
 - [ ] `select` / `poll`
 

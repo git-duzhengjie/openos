@@ -48,7 +48,7 @@ static uint32_t syscall_write_user_buffer(int fd, const void *user_buf, uint32_t
     if (!user_ptr_valid(user_buf, count, USERMEM_READ))
         return (uint32_t)-1;
 
-    if (fd == STDOUT_FILENO || fd == STDERR_FILENO) {
+    if ((fd == STDOUT_FILENO || fd == STDERR_FILENO) && !vfs_get_file(fd)) {
         serial_write(fd == STDERR_FILENO ? "[USER-ERR] " : "[USER] ");
     }
 
@@ -61,7 +61,7 @@ static uint32_t syscall_write_user_buffer(int fd, const void *user_buf, uint32_t
         if (copy_from_user(chunk, (const char *)user_buf + done, n) < 0)
             return done ? done : (uint32_t)-1;
 
-        if (fd == STDOUT_FILENO || fd == STDERR_FILENO) {
+        if ((fd == STDOUT_FILENO || fd == STDERR_FILENO) && !vfs_get_file(fd)) {
             for (uint32_t i = 0; i < n; i++) {
                 serial_putc(chunk[i]);
                 vga_putc(chunk[i]);
@@ -101,7 +101,7 @@ static uint32_t syscall_read_user_buffer(int fd, void *user_buf, uint32_t count)
         if (n > SYSCALL_IO_CHUNK)
             n = SYSCALL_IO_CHUNK;
 
-        if (fd == STDIN_FILENO) {
+        if (fd == STDIN_FILENO && !vfs_get_file(fd)) {
             got = 0;
             while (got == 0) {
                 while ((uint32_t)got < n && input_has_data()) {
@@ -236,6 +236,12 @@ uint32_t syscall_dispatch(uint32_t num,
 
     case SYS_SEEK:
         return (uint32_t)vfs_seek((int)a, (int)b, (int)c);
+
+    case SYS_DUP:
+        return (uint32_t)vfs_dup((int)a);
+
+    case SYS_DUP2:
+        return (uint32_t)vfs_dup2((int)a, (int)b);
 
     case SYS_MKDIR:
         {

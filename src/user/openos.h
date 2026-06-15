@@ -36,6 +36,8 @@
 #define SYS_READDIR     239
 #define SYS_FSTAT       240
 #define SYS_LSTAT       241
+#define SYS_DUP         242
+#define SYS_DUP2        243
 
 #define WNOHANG         1
 #define WIFEXITED(status)      (((status) & 0x7f) == 0)
@@ -145,6 +147,16 @@ static inline int openos_read(int fd, void *buf, int len)
 static inline int openos_write_fd(int fd, const void *buf, int len)
 {
     return openos_syscall3(SYS_WRITE_FD, fd, (int)buf, len);
+}
+
+static inline int openos_dup(int oldfd)
+{
+    return openos_syscall3(SYS_DUP, oldfd, 0, 0);
+}
+
+static inline int openos_dup2(int oldfd, int newfd)
+{
+    return openos_syscall3(SYS_DUP2, oldfd, newfd, 0);
 }
 
 static inline void openos_write_str(const char *s)
