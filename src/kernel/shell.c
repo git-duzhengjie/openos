@@ -866,6 +866,23 @@ typedef struct shell_redirect {
     char *stderr_path;
 } shell_redirect_t;
 
+static int shell_set_redirect_path(shell_redirect_t *redir, int target, char *path)
+{
+    if (!path || !path[0]) {
+        print("redirect: missing filename\n");
+        return -1;
+    }
+
+    if (target == 0)
+        redir->stdin_path = path;
+    else if (target == 1)
+        redir->stdout_path = path;
+    else
+        redir->stderr_path = path;
+
+    return 0;
+}
+
 static int shell_parse_redirects(char *argv[], int argc, shell_redirect_t *redir)
 {
     int out = 0;
@@ -878,12 +895,15 @@ static int shell_parse_redirects(char *argv[], int argc, shell_redirect_t *redir
     redir->stderr_path = NULL;
 
     for (int i = 0; i < argc; i++) {
+        char *arg = argv[i];
         int target = -1;
-        if (strcmp(argv[i], "<") == 0)
+        char *op = NULL;
+
+        if (strcmp(arg, "<") == 0)
             target = 0;
-        else if (strcmp(argv[i], ">") == 0)
+        else if (strcmp(arg, ">") == 0)
             target = 1;
-        else if (strcmp(argv[i], "2>") == 0)
+        else if (strcmp(arg, "2>") == 0)
             target = 2;
 
         if (target >= 0) {
@@ -891,16 +911,48 @@ static int shell_parse_redirects(char *argv[], int argc, shell_redirect_t *redir
                 print("redirect: missing filename\n");
                 return -1;
             }
-            if (target == 0)
-                redir->stdin_path = argv[++i];
-            else if (target == 1)
-                redir->stdout_path = argv[++i];
-            else
-                redir->stderr_path = argv[++i];
+            if (shell_set_redirect_path(redir, target, argv[++i]) < 0)
+                return -1;
             continue;
         }
 
-        argv[out++] = argv[i];
+        if (arg[0] == '2' && arg[1] == '>' && arg[2]) {
+            if (shell_set_redirect_path(redir, 2, arg + 2) < 0)
+                return -1;
+            continue;
+        }
+
+        for (char *p = arg; *p; p++) {
+            if (*p == '<' || *p == '>') {
+                op = p;
+                target = (*p == '<') ? 0 : 1;
+                break;
+            }
+        }
+
+        if (target >= 0 && op) {
+            char *path = op + 1;
+            char *prefix = arg;
+            int has_prefix = (op != arg);
+
+            *op = '\0';
+            if (!path[0]) {
+                if (i + 1 >= argc) {
+                    print("redirect: missing filename\n");
+                    return -1;
+                }
+                path = argv[++i];
+            }
+
+            if (has_prefix)
+                argv[out++] = prefix;
+
+            if (shell_set_redirect_path(redir, target, path) < 0)
+                return -1;
+            continue;
+        }
+
+        argv[out++] = arg;
     }
 
     return out;
