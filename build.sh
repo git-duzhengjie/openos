@@ -307,7 +307,7 @@ objcopy -O binary $BUILD/kernel.elf $BUILD/kernel.bin
 
 KERNEL_BYTES=$(stat -c%s "$BUILD/kernel.bin")
 KERNEL_SECTORS=$(( (KERNEL_BYTES + 511) / 512 ))
-BOOT_LOAD_SECTORS=512
+BOOT_LOAD_SECTORS=1024
 if [ "$KERNEL_SECTORS" -gt "$BOOT_LOAD_SECTORS" ]; then
     echo "ERROR: kernel.bin is ${KERNEL_SECTORS} sectors, but bootloader loads only ${BOOT_LOAD_SECTORS} sectors."
     echo "Increase bootloader kernel load chunks before building the image."
