@@ -91,6 +91,12 @@
 #else
 #define OPENOS_HAS_ECHO 0
 #endif
+#if __has_include("embed_mkdir.h")
+#include "embed_mkdir.h"  /* mkdir user command */
+#define OPENOS_HAS_MKDIR 1
+#else
+#define OPENOS_HAS_MKDIR 0
+#endif
 
 
 /* 外部符号 */
@@ -521,6 +527,17 @@ void kernel_main(void) {
         serial_write("[OK] Installed /bin/echo user ELF\n");
     } else {
         serial_write("[WARN] Failed to install /bin/echo\n");
+    }
+#endif
+
+#if OPENOS_HAS_MKDIR
+    fd = vfs_open("/bin/mkdir", O_CREAT | O_RDWR, 0755);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)mkdir_elf, mkdir_elf_size);
+        vfs_close(fd);
+        serial_write("[OK] Installed /bin/mkdir user ELF\n");
+    } else {
+        serial_write("[WARN] Failed to install /bin/mkdir\n");
     }
 #endif
 
