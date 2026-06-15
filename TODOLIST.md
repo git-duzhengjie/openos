@@ -163,7 +163,7 @@
 - [ ] per-process cwd 更严格集成
 - [√] 文件描述符表标准化
 - [√] `dup` / `dup2`
-- [ ] pipe
+- [√] pipe（已实现 VFS 匿名管道、`SYS_PIPE`、shell pipeline，并由 `/bin/systest` 覆盖）
 - [ ] `select` / `poll`
 
 ### 8. 持久化存储
@@ -234,7 +234,7 @@
 
 ### 14. IPC
 
-- [ ] pipe
+- [√] pipe（已实现 VFS 匿名管道、`SYS_PIPE`、shell pipeline，并由 `/bin/systest` 覆盖）
 - [ ] message queue
 - [ ] shared memory
 - [ ] eventfd 类机制
