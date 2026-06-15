@@ -181,6 +181,12 @@
 #else
 #define OPENOS_HAS_HEAD 0
 #endif
+#if __has_include("embed_tail.h")
+#include "embed_tail.h"  /* tail user command */
+#define OPENOS_HAS_TAIL 1
+#else
+#define OPENOS_HAS_TAIL 0
+#endif
 #if __has_include("embed_rmdir.h")
 #include "embed_rmdir.h"  /* rmdir user command */
 #define OPENOS_HAS_RMDIR 1
@@ -771,6 +777,17 @@ void kernel_main(void) {
         serial_write("[OK] Installed /bin/head user ELF\n");
     } else {
         serial_write("[WARN] Failed to install /bin/head\n");
+    }
+#endif
+
+#if OPENOS_HAS_TAIL
+    fd = vfs_open("/bin/tail", O_CREAT | O_RDWR, 0755);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)tail_elf, tail_elf_size);
+        vfs_close(fd);
+        serial_write("[OK] Installed /bin/tail user ELF\n");
+    } else {
+        serial_write("[WARN] Failed to install /bin/tail\n");
     }
 #endif
 

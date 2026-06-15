@@ -323,6 +323,16 @@ if [ -f $USR/head.c ]; then
     echo "  Embedded: head.elf"
 fi
 
+if [ -f $USR/tail.c ]; then
+    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+        -fno-stack-protector -fno-builtin \
+        -I $SRC/include \
+        -c $USR/tail.c -o $BUILD/tail.o
+    ld -m elf_i386 -T $USR/user.ld -o $BUILD/tail.elf $BUILD/tail.o
+    python3 _embed_elf.py $BUILD/tail.elf $SRC/include/embed_tail.h tail_elf
+    echo "  Embedded: tail.elf"
+fi
+
 if [ -f $USR/rmdir.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \
