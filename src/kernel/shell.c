@@ -33,8 +33,11 @@ static void make_path(const char *arg, char *out);
 static void shell_complete_command(void);
 static void shell_history_prev(void);
 static void shell_history_next(void);
+static void shell_move_cursor_left(void);
+static void shell_move_cursor_right(void);
 static void shell_move_cursor_home(void);
 static void shell_move_cursor_end(void);
+static void shell_delete_char(void);
 static void shell_cancel_line(void);
 static void shell_backspace(void);
 
@@ -306,12 +309,17 @@ static void shell_history_load_file(void)
 }
 static void shell_clear_current_input(void)
 {
-    print("\r");
-    shell_prompt();
-    for (int i = 0; i < CMD_BUF_SIZE - 1; i++)
-        print(" ");
-    print("\r");
-    shell_prompt();
+    /*
+     * Do not use '\r' here. The GUI terminal currently treats carriage
+     * return like a line advance, which makes history navigation create a
+     * blank line before redrawing the command. Clear only the editable input
+     * area by moving to the end and erasing characters with backspace.
+     */
+    while (cmd_cursor < cmd_pos)
+        shell_move_cursor_right();
+
+    for (int i = 0; i < cmd_pos; i++)
+        print("\b \b");
 }
 
 static void shell_replace_input(const char *src)
@@ -1119,6 +1127,8 @@ void shell_run(void)
     history_view = history_count;
     shell_prompt();
 
+    char last_enter_char = 0;
+
     /* 从串口读取输入（轮询方式�?*/
     while (1)
     {
@@ -1139,6 +1149,74 @@ void shell_run(void)
             }
             continue;
         }
+
+        if (c == 0x1B)
+        {
+            char c2 = shell_read_input_char(10000);
+            char c3 = shell_read_input_char(10000);
+            int gui_key = 0;
+
+            if (c2 == '[' || c2 == 'O')
+            {
+                if (c3 == 'A')
+                    gui_key = GUI_KEY_UP;
+                else if (c3 == 'B')
+                    gui_key = GUI_KEY_DOWN;
+                else if (c3 == 'C')
+                    gui_key = GUI_KEY_RIGHT;
+                else if (c3 == 'D')
+                    gui_key = GUI_KEY_LEFT;
+                else if (c3 == 'H')
+                    gui_key = GUI_KEY_HOME;
+                else if (c3 == 'F')
+                    gui_key = GUI_KEY_END;
+                else if (c3 == '1' || c3 == '3' || c3 == '4' || c3 == '7' || c3 == '8')
+                {
+                    char c4 = shell_read_input_char(10000);
+                    if ((c3 == '1' || c3 == '7') && c4 == '~')
+                        gui_key = GUI_KEY_HOME;
+                    else if ((c3 == '4' || c3 == '8') && c4 == '~')
+                        gui_key = GUI_KEY_END;
+                    else if (c3 == '3' && c4 == '~')
+                        gui_key = GUI_KEY_DELETE;
+                }
+            }
+
+            if (gui_key && gui_should_capture_key_code(gui_key))
+            {
+                gui_post_key_code(gui_key);
+                continue;
+            }
+
+            if (gui_key == GUI_KEY_UP)
+                shell_history_prev();
+            else if (gui_key == GUI_KEY_DOWN)
+                shell_history_next();
+            else if (gui_key == GUI_KEY_RIGHT)
+                shell_move_cursor_right();
+            else if (gui_key == GUI_KEY_LEFT)
+                shell_move_cursor_left();
+            else if (gui_key == GUI_KEY_HOME)
+                shell_move_cursor_home();
+            else if (gui_key == GUI_KEY_END)
+                shell_move_cursor_end();
+            else if (gui_key == GUI_KEY_DELETE)
+                shell_delete_char();
+
+            continue;
+        }
+
+        if ((c == '\r' && last_enter_char == '\n') ||
+            (c == '\n' && last_enter_char == '\r'))
+        {
+            last_enter_char = 0;
+            continue;
+        }
+
+        if (c == '\r' || c == '\n')
+            last_enter_char = c;
+        else
+            last_enter_char = 0;
 
         {
             int gui_key = 0;
@@ -1875,36 +1953,6 @@ void shell_run(void)
                 serial_write("\n");
             }
             shell_prompt();
-        }
-        else if (c == 0x1B)
-        {
-            char c2 = shell_read_input_char(10000);
-            char c3 = shell_read_input_char(10000);
-            if (c2 == '[' || c2 == 'O')
-            {
-                if (c3 == 'A')
-                    shell_history_prev();
-                else if (c3 == 'B')
-                    shell_history_next();
-                else if (c3 == 'C')
-                    shell_move_cursor_right();
-                else if (c3 == 'D')
-                    shell_move_cursor_left();
-                else if (c3 == 'H')
-                    shell_move_cursor_home();
-                else if (c3 == 'F')
-                    shell_move_cursor_end();
-                else if (c3 == '1' || c3 == '3' || c3 == '4' || c3 == '7' || c3 == '8')
-                {
-                    char c4 = shell_read_input_char(10000);
-                    if ((c3 == '1' || c3 == '7') && c4 == '~')
-                        shell_move_cursor_home();
-                    else if ((c3 == '4' || c3 == '8') && c4 == '~')
-                        shell_move_cursor_end();
-                    else if (c3 == '3' && c4 == '~')
-                        shell_delete_char();
-                }
-            }
         }
         else if (c == '\t')
         {
