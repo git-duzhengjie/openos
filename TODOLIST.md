@@ -1,0 +1,373 @@
+# openos 待开发功能清单
+
+> 更新时间：2026-06-15
+>
+> 当前状态：openos 已具备 32 位 x86 原型内核能力，能够启动、显示、输入、调度、运行基础用户程序，并具备基础 syscall、VFS、ramfs/tmpfs、shell、GUI Terminal 等模块。以下清单记录后续仍需开发或完善的功能。
+
+---
+
+## P0：近期优先开发
+
+### 1. 进程与 waitpid/spawn 语义
+
+- [ ] 完善 `waitpid` 错误返回语义
+  - [ ] `waitpid(不存在的 pid)`
+  - [ ] `waitpid(非子进程 pid)`
+  - [ ] `waitpid(已被回收的 pid)`
+  - [ ] `waitpid(options 非法)`
+- [ ] 支持 `waitpid(-1, &status, options)` 等待任意子进程
+- [ ] 支持 exit status 回传
+- [ ] 添加 `WIFEXITED` / `WEXITSTATUS` 等状态解析宏
+- [ ] 扩展 `/bin/waittest` 回归测试
+  - [ ] 正常子进程退出码
+  - [ ] `WNOHANG`
+  - [ ] 非法 options
+  - [ ] 重复 wait
+  - [ ] pid = -1
+- [ ] 完善子进程资源回收
+- [ ] 处理孤儿进程 reparent 到 init
+
+### 2. 用户程序参数支持
+
+- [ ] `spawn(path, argv)` 支持参数
+- [ ] `exec(path, argv)` 支持参数
+- [ ] 用户态入口支持 `main(argc, argv)`
+- [ ] shell 支持执行 `/bin/app arg1 arg2`
+- [ ] 支持环境变量 `envp`
+
+### 3. 文件系统基础接口
+
+- [ ] 实现用户态 `stat` / `fstat` / `lstat`
+- [ ] 实现用户态 `opendir` / `readdir`
+- [ ] 实现 `getcwd` / `chdir`
+- [ ] 添加基础用户命令
+  - [ ] `ls`
+  - [ ] `cat`
+  - [ ] `pwd`
+  - [ ] `cd`
+  - [ ] `mkdir`
+  - [ ] `rm`
+  - [ ] `echo`
+
+---
+
+## P1：内核核心能力完善
+
+### 4. 内存管理
+
+- [ ] 真正的进程独立地址空间
+- [ ] 重新设计稳定的 CR3 切换方案
+- [ ] 用户态 / 内核态完整内存隔离
+- [ ] `mmap` / `munmap`
+- [ ] `brk` / `sbrk`
+- [ ] demand paging
+- [ ] copy-on-write
+- [ ] page fault 完整处理
+- [ ] 用户栈 guard page
+- [ ] 用户指针安全访问检查
+- [ ] 进程退出时完整释放用户内存映射
+
+### 5. 调度与同步
+
+- [ ] waitpid 阻塞等待，避免忙等 `sched_yield`
+- [ ] 完善进程 `BLOCKED` / `SLEEPING` 状态语义
+- [ ] 子进程 exit 唤醒父进程
+- [ ] 多线程用户态 API
+- [ ] mutex
+- [ ] semaphore
+- [ ] condition variable
+- [ ] futex 或类似轻量同步机制
+- [ ] priority / nice
+- [ ] 更完整的调度策略
+
+### 6. 进程控制与信号
+
+- [ ] init 进程模型
+- [ ] `fork` 稳定化
+- [ ] `exec` 完整替换当前进程镜像
+- [ ] `kill`
+- [ ] signal 机制
+- [ ] alarm / timer signal
+- [ ] 作业控制基础
+
+---
+
+## P2：文件系统与存储
+
+### 7. VFS 完整语义
+
+- [ ] `vfs_link`
+- [ ] `vfs_symlink`
+- [ ] `vfs_readlink`
+- [ ] hard link
+- [ ] symbolic link
+- [ ] inode uid / gid 字段
+- [ ] chmod / chown 权限模型
+- [ ] access 权限检查
+- [ ] per-process cwd 更严格集成
+- [ ] 文件描述符表标准化
+- [ ] `dup` / `dup2`
+- [ ] pipe
+- [ ] `select` / `poll`
+
+### 8. 持久化存储
+
+- [ ] 磁盘持久化文件系统
+- [ ] FAT32
+- [ ] EXT4 读写支持
+- [ ] 文件缓存 / page cache
+- [ ] `fsync`
+- [ ] MBR / GPT 分区表
+- [ ] 块设备缓存层
+
+---
+
+## P3：设备驱动
+
+### 9. 总线与基础硬件
+
+- [ ] PCI 总线扫描
+- [ ] ACPI
+- [ ] APIC / IOAPIC
+- [ ] RTC 时钟
+- [ ] 电源管理
+- [ ] 热插拔支持
+
+### 10. 存储驱动
+
+- [ ] IDE / ATA
+- [ ] AHCI / SATA
+- [ ] virtio-blk
+
+### 11. 网络驱动
+
+- [ ] virtio-net
+- [ ] e1000
+- [ ] rtl8139
+
+### 12. 输入与多媒体
+
+- [ ] PS/2 键盘鼠标完整支持
+- [ ] USB 通用栈
+- [ ] 声卡驱动
+
+---
+
+## P4：网络与 IPC
+
+### 13. 网络协议栈
+
+- [ ] 真实网卡接入协议栈
+- [ ] DHCP
+- [ ] DNS
+- [ ] socket syscall
+- [ ] `bind`
+- [ ] `listen`
+- [ ] `accept`
+- [ ] `connect`
+- [ ] `send`
+- [ ] `recv`
+- [ ] TCP 完整状态机
+- [ ] TCP 重传
+- [ ] TCP 拥塞控制
+- [ ] TCP 窗口管理
+- [ ] UDP 用户态接口
+- [ ] ping / ifconfig / netstat 等工具
+- [ ] 网络配置管理
+- [ ] 防火墙 / 权限控制
+
+### 14. IPC
+
+- [ ] pipe
+- [ ] message queue
+- [ ] shared memory
+- [ ] eventfd 类机制
+- [ ] socketpair
+- [ ] 用户态服务进程通信模型
+- [ ] 微内核式服务消息机制
+
+---
+
+## P5：Shell、用户态生态与 libc
+
+### 15. Shell 能力
+
+- [ ] 用户态 shell
+- [ ] 管道 `|`
+- [ ] 重定向 `>` / `<` / `>>`
+- [ ] 环境变量
+- [ ] `PATH` 查找
+- [ ] 后台任务 `&`
+- [ ] `Ctrl+C` / `Ctrl+D`
+- [ ] 命令补全
+- [ ] 脚本执行
+
+### 16. 用户态运行库
+
+- [ ] 标准 libc 子集
+- [ ] crt0 启动入口完善
+- [ ] syscall wrapper 标准化
+- [ ] malloc/free 用户态实现
+- [ ] errno
+- [ ] stdio 基础能力
+- [ ] 更多用户态测试程序
+
+---
+
+## P6：GUI / 桌面系统
+
+### 17. 图形系统
+
+- [ ] 窗口管理器
+- [ ] 多窗口
+- [ ] 控件系统
+- [ ] 鼠标事件分发
+- [ ] 键盘焦点
+- [ ] GUI 应用模型
+- [ ] 双缓冲 / 合成器
+- [ ] 图形加速
+- [ ] 图片解码
+- [ ] 中文字体 / Unicode 渲染
+- [ ] 桌面环境
+- [ ] 应用启动器
+
+---
+
+## P7：安全与权限
+
+### 18. 安全模型
+
+- [ ] 用户 / 组
+- [ ] uid / gid
+- [ ] 文件权限检查
+- [ ] 进程权限
+- [ ] capability
+- [ ] syscall 权限控制
+- [ ] 沙箱
+- [ ] 内核地址保护
+- [ ] ASLR
+- [ ] NX / W^X
+- [ ] 安全审计
+
+---
+
+## P8：AI 与跨端能力
+
+### 19. AI 子系统
+
+- [ ] 本地推理引擎
+- [ ] 模型加载与执行
+- [ ] tokenizer
+- [ ] tensor runtime
+- [ ] GPU / NPU 支持
+- [ ] 云端 AI 接入
+- [ ] 自然语言 Shell
+- [ ] AI Agent 系统服务
+- [ ] 模型签名完整验证链路
+- [ ] 用户态 AI API
+
+### 20. 跨端协同
+
+- [ ] 真实网络发现协议
+- [ ] 设备认证
+- [ ] 端到端加密
+- [ ] 文件同步
+- [ ] 剪贴板同步
+- [ ] 消息同步
+- [ ] 任务流转
+- [ ] 多设备账号体系
+
+---
+
+## P9：架构、平台与工程化
+
+### 21. 平台架构
+
+#### 21.1 x86_64 支持
+
+- [ ] 保留当前 i386 稳定基线，新增 `ARCH=i386/x86_64` 或 `./build.sh i386|x86_64` 构建入口
+- [ ] 新增 `src/arch/x86_64/` 架构目录，逐步拆分 i386 与 x86_64 架构相关代码
+- [ ] 新增 x86_64 linker script
+- [ ] 新增 x86_64 启动骨架，第一阶段只进入 `kernel_main64()` 并输出日志
+- [ ] 从 BIOS 启动路径进入 long mode
+  - [ ] 16 位实模式启动
+  - [ ] 进入 32 位保护模式
+  - [ ] 建立 PML4 / PDPT / PD / PT
+  - [ ] 开启 PAE
+  - [ ] 设置 `EFER.LME`
+  - [ ] 开启分页并 far jump 到 64 位代码段
+- [ ] 评估是否引入 Limine / BOOTBOOT / Multiboot2 等现代 bootloader，降低 UEFI 和 long mode 启动复杂度
+- [ ] 实现 64 位 GDT
+- [ ] 实现 64 位 TSS 与 `rsp0` / IST
+- [ ] 实现 64 位 IDT 和异常入口
+- [ ] 移植串口 / VGA / framebuffer 早期输出到 x86_64
+- [ ] 移植 PMM 到 x86_64
+- [ ] 实现 4 级分页 VMM
+- [ ] 移植内核堆分配器到 x86_64
+- [ ] 将地址、指针、栈、ELF entry 等字段从 `uint32_t` 整理为 `uintptr_t` / `size_t` / `uint64_t`
+- [ ] 编译参数支持 x86_64 内核
+  - [ ] `-m64`
+  - [ ] `-ffreestanding`
+  - [ ] `-fno-stack-protector`
+  - [ ] `-fno-pic` / `-fno-pie`
+  - [ ] `-mno-red-zone`
+  - [ ] `-mcmodel=kernel`
+- [ ] 移植调度器上下文切换到 `rsp/rip/rflags` 和 `r8-r15`
+- [ ] 将 `kernel_esp` 等 32 位字段迁移或抽象为架构相关的 `kernel_sp`
+- [ ] 第一阶段继续支持 `int 0x80` syscall
+- [ ] 后续实现 x86_64 `syscall/sysret`
+- [ ] 支持 ELF64 loader
+- [ ] 支持 64 位用户态 `iretq` 返回
+- [ ] 支持 64 位用户态 syscall wrapper / crt0
+- [ ] 支持 64 位用户程序 `/bin/hello64` 回归测试
+- [ ] 后续评估兼容 32 位用户程序
+
+#### 21.2 其他平台与启动能力
+
+- [ ] UEFI 启动
+- [ ] ARM 移植
+- [ ] RISC-V 移植
+- [ ] SMP 多核支持
+- [ ] ACPI / APIC / IOAPIC 支持
+- [ ] 更完整的 bootloader
+
+### 22. 构建与测试
+
+- [ ] CMake / Ninja 构建系统
+- [ ] CI 自动构建
+- [ ] QEMU 自动回归测试
+- [ ] 单元测试框架
+- [ ] 内核 panic 日志标准化
+- [ ] 崩溃 dump
+- [ ] GDB 调试脚本
+- [ ] 发布打包流程
+- [ ] 版本号 / release 管理
+
+---
+
+## 当前推荐下一步
+
+建议优先从以下两条路线中选择一条开始：
+
+### 路线 A：继续完善当前 i386 稳定基线
+
+```text
+1. waitpid 错误返回语义
+2. waitpid(-1, &status, options)
+3. exit status 标准编码
+4. 扩展 /bin/waittest 回归测试
+```
+
+原因：这些任务集中在进程语义和测试程序，风险较低，收益较高，并且不会马上触碰调度器和地址空间隔离等高风险模块。
+
+### 路线 B：启动 x86_64 支持
+
+```text
+1. 新增 ARCH=i386/x86_64 构建入口
+2. 新增 src/arch/x86_64/ 目录
+3. 新增 x86_64 linker script
+4. 新增 long mode 启动骨架
+5. 第一阶段只进入 kernel_main64() 并输出 hello 日志
+```
+
+原因：这条路线可以在不破坏当前 i386 基线的前提下，开始支持 64 位。第一阶段目标应尽量小，只验证 long mode 入口和早期输出。
