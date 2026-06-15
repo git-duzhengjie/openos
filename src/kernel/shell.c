@@ -32,7 +32,7 @@ extern int sys_waitpid(int pid, int *status, int options);
 
 static void make_path(const char *arg, char *out);
 static int shell_spawn_user_program(const char *path, char *argv[], int argc);
-static int shell_run_single_pipe(char *cmdline);
+static int shell_run_pipeline(char *cmdline);
 static int shell_run_external_with_redirect(char *cmd, char *argv[], int argc);
 static void shell_complete_command(void);
 static void shell_history_prev(void);
@@ -1039,150 +1039,155 @@ fail:
     return -1;
 }
 
-static int shell_run_single_pipe(char *cmdline)
+static int shell_run_pipeline(char *cmdline)
 {
-    char *pipe_pos = NULL;
-    int pipe_count = 0;
+    enum { SHELL_MAX_PIPE_CMDS = 8 };
 
-    for (int i = 0; cmdline[i]; i++) {
-        if (cmdline[i] == '|') {
-            pipe_pos = &cmdline[i];
-            pipe_count++;
-        }
+    char *segments[SHELL_MAX_PIPE_CMDS];
+    char *stage_argv[SHELL_MAX_PIPE_CMDS][MAX_ARGS];
+    int stage_argc[SHELL_MAX_PIPE_CMDS];
+    shell_redirect_t stage_redir[SHELL_MAX_PIPE_CMDS];
+    int pids[SHELL_MAX_PIPE_CMDS];
+    int pipes[SHELL_MAX_PIPE_CMDS - 1][2];
+    int segment_count = 0;
+    int saw_pipe = 0;
+    char *start = cmdline;
+
+    for (int i = 0; i < SHELL_MAX_PIPE_CMDS; i++) {
+        pids[i] = -1;
+        stage_argc[i] = 0;
+        stage_redir[i].stdin_path = NULL;
+        stage_redir[i].stdout_path = NULL;
+        stage_redir[i].stderr_path = NULL;
+    }
+    for (int i = 0; i < SHELL_MAX_PIPE_CMDS - 1; i++) {
+        pipes[i][0] = -1;
+        pipes[i][1] = -1;
     }
 
-    if (pipe_count == 0)
+    for (int i = 0;; i++) {
+        if (cmdline[i] != '|' && cmdline[i] != '\0')
+            continue;
+
+        int is_end = (cmdline[i] == '\0');
+        if (!is_end) {
+            saw_pipe = 1;
+            cmdline[i] = '\0';
+        }
+
+        if (segment_count >= SHELL_MAX_PIPE_CMDS) {
+            print("pipe: too many commands\n");
+            return 1;
+        }
+
+        segments[segment_count] = shell_trim(start);
+        if (!segments[segment_count][0]) {
+            print("pipe: missing command\n");
+            return 1;
+        }
+        segment_count++;
+
+        if (is_end)
+            break;
+        start = &cmdline[i + 1];
+    }
+
+    if (!saw_pipe)
         return 0;
 
-    if (pipe_count > 1) {
-        print("pipe: only one pipe is supported now\n");
-        return 1;
+    for (int i = 0; i < segment_count; i++) {
+        stage_argc[i] = split_args(segments[i], stage_argv[i], MAX_ARGS);
+        if (stage_argc[i] <= 0) {
+            print("pipe: missing command\n");
+            return 1;
+        }
+
+        stage_argc[i] = shell_parse_redirects(stage_argv[i], stage_argc[i], &stage_redir[i]);
+        if (stage_argc[i] <= 0) {
+            print("pipe: missing command\n");
+            return 1;
+        }
+        stage_argv[i][stage_argc[i]] = NULL;
     }
 
-    *pipe_pos = '\0';
-    char *left = shell_trim(cmdline);
-    char *right = shell_trim(pipe_pos + 1);
-    if (!left[0] || !right[0]) {
-        print("pipe: missing command\n");
-        return 1;
-    }
-
-    char *left_argv[MAX_ARGS];
-    char *right_argv[MAX_ARGS];
-    int left_argc = split_args(left, left_argv, MAX_ARGS);
-    int right_argc = split_args(right, right_argv, MAX_ARGS);
-    if (left_argc <= 0 || right_argc <= 0) {
-        print("pipe: missing command\n");
-        return 1;
-    }
-
-    shell_redirect_t left_redir;
-    shell_redirect_t right_redir;
-    left_argc = shell_parse_redirects(left_argv, left_argc, &left_redir);
-    right_argc = shell_parse_redirects(right_argv, right_argc, &right_redir);
-    if (left_argc <= 0 || right_argc <= 0) {
-        print("pipe: missing command\n");
-        return 1;
-    }
-    left_argv[left_argc] = NULL;
-    right_argv[right_argc] = NULL;
-
-    int pipefd[2];
-    if (vfs_pipe(pipefd) < 0) {
-        print("pipe: create failed\n");
-        return 1;
+    int pipe_count = segment_count - 1;
+    for (int i = 0; i < pipe_count; i++) {
+        if (vfs_pipe(pipes[i]) < 0) {
+            print("pipe: create failed\n");
+            for (int j = 0; j < i; j++) {
+                vfs_close(pipes[j][0]);
+                vfs_close(pipes[j][1]);
+            }
+            return 1;
+        }
     }
 
     int saved_stdin = SHELL_FD_UNCHANGED;
     int saved_stdout = SHELL_FD_UNCHANGED;
     int saved_stderr = SHELL_FD_UNCHANGED;
-    int left_pid = -1;
-    int right_pid = -1;
 
-    if (left_redir.stdin_path && shell_apply_one_redirect(left_redir.stdin_path, 0, &saved_stdin) < 0)
-        goto done;
-    if (left_redir.stderr_path && shell_apply_one_redirect(left_redir.stderr_path, 2, &saved_stderr) < 0)
-        goto done;
-    if (left_redir.stdout_path) {
-        if (shell_apply_one_redirect(left_redir.stdout_path, 1, &saved_stdout) < 0)
-            goto done;
-    } else {
-        saved_stdout = vfs_dup(1);
-        if (vfs_dup2(pipefd[1], 1) < 0) {
-            print("pipe: dup stdout failed\n");
-            goto done;
+    for (int i = 0; i < segment_count; i++) {
+        saved_stdin = SHELL_FD_UNCHANGED;
+        saved_stdout = SHELL_FD_UNCHANGED;
+        saved_stderr = SHELL_FD_UNCHANGED;
+
+        if (stage_redir[i].stdin_path) {
+            if (shell_apply_one_redirect(stage_redir[i].stdin_path, 0, &saved_stdin) < 0)
+                goto done;
+        } else if (i > 0) {
+            saved_stdin = vfs_dup(0);
+            if (vfs_dup2(pipes[i - 1][0], 0) < 0) {
+                print("pipe: dup stdin failed\n");
+                goto done;
+            }
         }
-    }
 
-    left_pid = shell_execute_user_argv(left_argc, left_argv);
-    if (left_pid < 0) {
-        print(left_argv[0]);
-        print(": command not found\n");
-    } else {
-        shell_close_child_fd(left_pid, pipefd[0]);
-        if (left_redir.stdout_path)
-            shell_close_child_fd(left_pid, pipefd[1]);
-    }
-
-    shell_restore_fd(0, saved_stdin);
-    shell_restore_fd(1, saved_stdout);
-    shell_restore_fd(2, saved_stderr);
-    saved_stdin = SHELL_FD_UNCHANGED;
-    saved_stdout = SHELL_FD_UNCHANGED;
-    saved_stderr = SHELL_FD_UNCHANGED;
-
-    if (right_redir.stdin_path) {
-        if (shell_apply_one_redirect(right_redir.stdin_path, 0, &saved_stdin) < 0)
-            goto done;
-    } else {
-        saved_stdin = vfs_dup(0);
-        if (vfs_dup2(pipefd[0], 0) < 0) {
-            print("pipe: dup stdin failed\n");
-            goto done;
+        if (stage_redir[i].stdout_path) {
+            if (shell_apply_one_redirect(stage_redir[i].stdout_path, 1, &saved_stdout) < 0)
+                goto done;
+        } else if (i + 1 < segment_count) {
+            saved_stdout = vfs_dup(1);
+            if (vfs_dup2(pipes[i][1], 1) < 0) {
+                print("pipe: dup stdout failed\n");
+                goto done;
+            }
         }
+
+        if (stage_redir[i].stderr_path && shell_apply_one_redirect(stage_redir[i].stderr_path, 2, &saved_stderr) < 0)
+            goto done;
+
+        pids[i] = shell_execute_user_argv(stage_argc[i], stage_argv[i]);
+        if (pids[i] < 0) {
+            print(stage_argv[i][0]);
+            print(": command not found\n");
+        } else {
+            for (int j = 0; j < pipe_count; j++) {
+                shell_close_child_fd(pids[i], pipes[j][0]);
+                shell_close_child_fd(pids[i], pipes[j][1]);
+            }
+        }
+
+        shell_restore_redirects(saved_stdin, saved_stdout, saved_stderr);
+        saved_stdin = SHELL_FD_UNCHANGED;
+        saved_stdout = SHELL_FD_UNCHANGED;
+        saved_stderr = SHELL_FD_UNCHANGED;
     }
-    if (right_redir.stdout_path && shell_apply_one_redirect(right_redir.stdout_path, 1, &saved_stdout) < 0)
-        goto done;
-    if (right_redir.stderr_path && shell_apply_one_redirect(right_redir.stderr_path, 2, &saved_stderr) < 0)
-        goto done;
-
-    right_pid = shell_execute_user_argv(right_argc, right_argv);
-    if (right_pid < 0) {
-        print(right_argv[0]);
-        print(": command not found\n");
-    } else {
-        shell_close_child_fd(right_pid, pipefd[1]);
-        if (right_redir.stdin_path)
-            shell_close_child_fd(right_pid, pipefd[0]);
-    }
-
-    shell_restore_fd(0, saved_stdin);
-    shell_restore_fd(1, saved_stdout);
-    shell_restore_fd(2, saved_stderr);
-    saved_stdin = SHELL_FD_UNCHANGED;
-    saved_stdout = SHELL_FD_UNCHANGED;
-    saved_stderr = SHELL_FD_UNCHANGED;
-
-    vfs_close(pipefd[0]);
-    vfs_close(pipefd[1]);
-
-    if (left_pid >= 0)
-        sys_waitpid(left_pid, NULL, 0);
-    if (right_pid >= 0)
-        sys_waitpid(right_pid, NULL, 0);
-
-    return 1;
 
 done:
-    shell_restore_fd(0, saved_stdin);
-    shell_restore_fd(1, saved_stdout);
-    shell_restore_fd(2, saved_stderr);
-    vfs_close(pipefd[0]);
-    vfs_close(pipefd[1]);
-    if (left_pid >= 0)
-        sys_waitpid(left_pid, NULL, 0);
-    if (right_pid >= 0)
-        sys_waitpid(right_pid, NULL, 0);
+    shell_restore_redirects(saved_stdin, saved_stdout, saved_stderr);
+
+    for (int i = 0; i < pipe_count; i++) {
+        if (pipes[i][0] >= 0)
+            vfs_close(pipes[i][0]);
+        if (pipes[i][1] >= 0)
+            vfs_close(pipes[i][1]);
+    }
+
+    for (int i = 0; i < segment_count; i++) {
+        if (pids[i] >= 0)
+            sys_waitpid(pids[i], NULL, 0);
+    }
+
     return 1;
 }
 
@@ -1667,7 +1672,7 @@ void shell_run(void)
             shell_save_history();
             shell_history_save_file();
 
-            if (shell_run_single_pipe(cmd_buf))
+            if (shell_run_pipeline(cmd_buf))
             {
                 cmd_pos = 0;
                 cmd_cursor = 0;
