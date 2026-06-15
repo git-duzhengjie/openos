@@ -79,6 +79,12 @@
 #else
 #define OPENOS_HAS_LS 0
 #endif
+#if __has_include("embed_cat.h")
+#include "embed_cat.h"  /* cat user command */
+#define OPENOS_HAS_CAT 1
+#else
+#define OPENOS_HAS_CAT 0
+#endif
 
 
 /* 外部符号 */
@@ -487,6 +493,17 @@ void kernel_main(void) {
         serial_write("[OK] Installed /bin/ls user ELF\n");
     } else {
         serial_write("[WARN] Failed to install /bin/ls\n");
+    }
+#endif
+
+#if OPENOS_HAS_CAT
+    fd = vfs_open("/bin/cat", O_CREAT | O_RDWR, 0755);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)cat_elf, cat_elf_size);
+        vfs_close(fd);
+        serial_write("[OK] Installed /bin/cat user ELF\n");
+    } else {
+        serial_write("[WARN] Failed to install /bin/cat\n");
     }
 #endif
 

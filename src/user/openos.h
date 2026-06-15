@@ -124,6 +124,26 @@ static inline void openos_write(int fd, const char *s, int len)
     openos_syscall3(SYS_WRITE, fd, (int)s, len);
 }
 
+static inline int openos_open(const char *path, int flags, int mode)
+{
+    return openos_syscall3(SYS_OPEN, (int)path, flags, mode);
+}
+
+static inline int openos_close(int fd)
+{
+    return openos_syscall3(SYS_CLOSE, fd, 0, 0);
+}
+
+static inline int openos_read(int fd, void *buf, int len)
+{
+    return openos_syscall3(SYS_READ_FD, fd, (int)buf, len);
+}
+
+static inline int openos_write_fd(int fd, const void *buf, int len)
+{
+    return openos_syscall3(SYS_WRITE_FD, fd, (int)buf, len);
+}
+
 static inline void openos_write_str(const char *s)
 {
     openos_write(1, s, openos_strlen(s));
