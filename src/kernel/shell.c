@@ -307,26 +307,25 @@ static void shell_history_load_file(void)
     history_saved_line[0] = '\0';
     return;
 }
-static void shell_clear_current_input(void)
-{
-    /*
-     * Do not use '\r' here. The GUI terminal currently treats carriage
-     * return like a line advance, which makes history navigation create a
-     * blank line before redrawing the command. Clear only the editable input
-     * area by moving to the end and erasing characters with backspace.
-     */
-    while (cmd_cursor < cmd_pos)
-        shell_move_cursor_right();
-
-    for (int i = 0; i < cmd_pos; i++)
-        print("\b \b");
-}
-
 static void shell_replace_input(const char *src)
 {
-    shell_clear_current_input();
+    int old_len = cmd_pos;
+
     shell_set_buffer(src);
-    print(cmd_buf);
+
+    /*
+     * Use standard carriage-return semantics for line redraw: CR returns to
+     * column 0 without advancing to the next row, then the prompt and command
+     * are redrawn in place. If the new command is shorter than the old one,
+     * erase the stale tail and move the terminal cursor back to the logical
+     * end of the command.
+     */
+    print("\r");
+    shell_redraw_input_line();
+    for (int i = cmd_pos; i < old_len; i++)
+        print(" ");
+    for (int i = cmd_pos; i < old_len; i++)
+        print("\b");
 }
 
 static void shell_move_cursor_left(void)
