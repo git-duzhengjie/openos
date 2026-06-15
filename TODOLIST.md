@@ -6,7 +6,7 @@
 >
 > 最近完成：已补齐 shell 后台任务、`Ctrl+C` / `Ctrl+D`、`jobs` / `fg`、Tab 命令补全、脚本执行；本轮完成用户态运行库 libc 子集，`src/user/openos.h` 新增 `memset/memcpy/memmove/memcmp/strncmp/strchr/strrchr/strstr/isdigit/isspace/atoi/itoa/putchar/puts/printf` 等 header-only 能力，并新增 `/bin/libctest` 回归程序覆盖基础字符串、内存、转换与输出函数。
 >
-> 当前推荐下一步：继续 P5，实现用户态 malloc/free，当前 syscall wrapper 已标准化并新增 `/bin/systest` 回归。
+> 当前推荐下一步：继续 P5，实现用户态 errno 与统一错误获取，当前用户态 malloc/free/calloc/realloc 已完成并新增 `/bin/malloctest` 回归。
 
 ---
 
@@ -24,7 +24,7 @@
 - [√] bootloader 内核加载上限提升到 1024 扇区（提交：`d2a2da0`）
 - [√] Shell、VGA / GUI Terminal、基础输入
 - [√] 基础网络栈雏形（ARP / IPv4 / ICMP / UDP / TCP）
-- [√] `/bin/hello`、`/bin/fault`、`/bin/waittest`、`/bin/orphan`、`/bin/argtest`、`/bin/envtest`、`/bin/fstest`、`/bin/libctest`、`/bin/maintest`、`/bin/systest`、`/bin/pwd`、`/bin/ls`、`/bin/cat`、`/bin/echo`、`/bin/mkdir`、`/bin/rm`、`/bin/rmdir`、`/bin/grep`、`/bin/wc` 基础用户程序
+- [√] `/bin/hello`、`/bin/fault`、`/bin/waittest`、`/bin/orphan`、`/bin/argtest`、`/bin/envtest`、`/bin/fstest`、`/bin/libctest`、`/bin/maintest`、`/bin/systest`、`/bin/malloctest`、`/bin/pwd`、`/bin/ls`、`/bin/cat`、`/bin/echo`、`/bin/mkdir`、`/bin/rm`、`/bin/rmdir`、`/bin/grep`、`/bin/wc` 基础用户程序
 - [√] 新增最小用户态公共 runtime 头文件 `src/user/openos.h`，统一 syscall 编号、基础 wrapper、状态宏与 FS 结构体
 - [√] 调度器 GPF 修复
 - [√] Shell 历史命令重绘修复
@@ -267,7 +267,7 @@
 - [√] 更多用户态测试程序（新增 `/bin/libctest` 覆盖 libc 子集）
 - [√] crt0 启动入口完善（新增 `src/user/crt0.c`，支持标准 `main(argc, argv, envp)`，并新增 `/bin/maintest` 回归）
 - [√] syscall wrapper 标准化（新增 `openos_syscall0/1/2/3` 与常用 wrapper：进程、文件、目录、pipe、exec、heap 等；新增 `/bin/systest` 回归）
-- [ ] malloc/free 用户态实现
+- [√] malloc/free 用户态实现（基于页级 `SYS_MALLOC/SYS_FREE` 的用户态空闲链表，支持 `malloc/free/calloc/realloc`，新增 `/bin/malloctest` 回归）
 - [ ] errno
 - [ ] stdio 基础能力
 

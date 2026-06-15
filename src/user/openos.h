@@ -549,14 +549,198 @@ static inline int openos_exec_env(const char *path, char *const argv[], char *co
     return openos_syscall3(SYS_EXEC_ENV, (int)path, (int)argv, (int)envp);
 }
 
+#define OPENOS_HEAP_PAGE_SIZE 4096
+#define OPENOS_HEAP_ALIGN     8
+#define OPENOS_HEAP_MAGIC     0x0f0e0d0cU
+#define OPENOS_HEAP_FREE      1U
+
+typedef struct openos_heap_block {
+    unsigned int magic;
+    unsigned int size;
+    unsigned int free;
+    struct openos_heap_block *next;
+} openos_heap_block_t;
+
+static openos_heap_block_t *openos_heap_head = 0;
+
+static inline void *openos_heap_alloc_page(void)
+{
+    return (void *)openos_syscall1(SYS_MALLOC, OPENOS_HEAP_PAGE_SIZE);
+}
+
+static inline int openos_heap_free_page(void *ptr)
+{
+    return openos_syscall1(SYS_FREE, (int)ptr);
+}
+
+static inline int openos_heap_align_size(int size)
+{
+    if (size <= 0)
+        return 0;
+    return (size + OPENOS_HEAP_ALIGN - 1) & ~(OPENOS_HEAP_ALIGN - 1);
+}
+
+static inline void openos_heap_split_block(openos_heap_block_t *block, int size)
+{
+    openos_heap_block_t *next;
+    int remain;
+
+    if (!block)
+        return;
+
+    remain = (int)block->size - size - (int)sizeof(openos_heap_block_t);
+    if (remain < (int)(OPENOS_HEAP_ALIGN + sizeof(openos_heap_block_t)))
+        return;
+
+    next = (openos_heap_block_t *)((char *)(block + 1) + size);
+    next->magic = OPENOS_HEAP_MAGIC;
+    next->size = (unsigned int)remain;
+    next->free = OPENOS_HEAP_FREE;
+    next->next = block->next;
+
+    block->size = (unsigned int)size;
+    block->next = next;
+}
+
+static inline void openos_heap_coalesce(void)
+{
+    openos_heap_block_t *cur = openos_heap_head;
+
+    while (cur && cur->next) {
+        char *cur_end = (char *)(cur + 1) + cur->size;
+        if (cur->free && cur->next->free && cur_end == (char *)cur->next) {
+            cur->size += (unsigned int)sizeof(openos_heap_block_t) + cur->next->size;
+            cur->next = cur->next->next;
+            continue;
+        }
+        cur = cur->next;
+    }
+}
+
+static inline openos_heap_block_t *openos_heap_add_page(int min_size)
+{
+    char *page;
+    int payload;
+    int pages = 1;
+    openos_heap_block_t *block;
+    openos_heap_block_t *tail;
+
+    while (pages * OPENOS_HEAP_PAGE_SIZE < min_size + (int)sizeof(openos_heap_block_t))
+        pages++;
+
+    if (pages != 1)
+        return 0;
+
+    page = (char *)openos_heap_alloc_page();
+    if (!page)
+        return 0;
+
+    payload = OPENOS_HEAP_PAGE_SIZE - (int)sizeof(openos_heap_block_t);
+    block = (openos_heap_block_t *)page;
+    block->magic = OPENOS_HEAP_MAGIC;
+    block->size = (unsigned int)payload;
+    block->free = OPENOS_HEAP_FREE;
+    block->next = 0;
+
+    if (!openos_heap_head) {
+        openos_heap_head = block;
+    } else {
+        tail = openos_heap_head;
+        while (tail->next)
+            tail = tail->next;
+        tail->next = block;
+    }
+    return block;
+}
+
 static inline void *openos_malloc(int size)
 {
-    return (void *)openos_syscall1(SYS_MALLOC, size);
+    openos_heap_block_t *cur;
+    int aligned = openos_heap_align_size(size);
+
+    if (aligned <= 0)
+        return 0;
+
+    cur = openos_heap_head;
+    while (cur) {
+        if (cur->magic == OPENOS_HEAP_MAGIC && cur->free && (int)cur->size >= aligned) {
+            openos_heap_split_block(cur, aligned);
+            cur->free = 0;
+            return (void *)(cur + 1);
+        }
+        cur = cur->next;
+    }
+
+    cur = openos_heap_add_page(aligned);
+    if (!cur)
+        return 0;
+    openos_heap_split_block(cur, aligned);
+    cur->free = 0;
+    return (void *)(cur + 1);
 }
 
 static inline int openos_free(void *ptr)
 {
-    return openos_syscall1(SYS_FREE, (int)ptr);
+    openos_heap_block_t *block;
+
+    if (!ptr)
+        return 0;
+
+    block = ((openos_heap_block_t *)ptr) - 1;
+    if (block->magic != OPENOS_HEAP_MAGIC)
+        return -1;
+    if (block->free)
+        return -1;
+
+    block->free = OPENOS_HEAP_FREE;
+    openos_heap_coalesce();
+    return 0;
+}
+
+static inline void *openos_calloc(int count, int size)
+{
+    int total;
+    void *ptr;
+
+    if (count <= 0 || size <= 0)
+        return 0;
+    total = count * size;
+    if (size != 0 && total / size != count)
+        return 0;
+    ptr = openos_malloc(total);
+    if (ptr)
+        openos_memset(ptr, 0, total);
+    return ptr;
+}
+
+static inline void *openos_realloc(void *ptr, int size)
+{
+    openos_heap_block_t *block;
+    void *next;
+    int copy;
+
+    if (!ptr)
+        return openos_malloc(size);
+    if (size <= 0) {
+        openos_free(ptr);
+        return 0;
+    }
+
+    block = ((openos_heap_block_t *)ptr) - 1;
+    if (block->magic != OPENOS_HEAP_MAGIC)
+        return 0;
+    if ((int)block->size >= size)
+        return ptr;
+
+    next = openos_malloc(size);
+    if (!next)
+        return 0;
+    copy = (int)block->size;
+    if (copy > size)
+        copy = size;
+    openos_memcpy(next, ptr, copy);
+    openos_free(ptr);
+    return next;
 }
 
 static inline int openos_seek(int fd, int offset, int whence)

@@ -140,6 +140,20 @@ if [ -f $USR/systest.c ]; then
     echo "  Embedded: systest.elf"
 fi
 
+if [ -f $USR/malloctest.c ]; then
+    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+        -fno-stack-protector -fno-builtin \
+        -I $SRC/include \
+        -c $USR/crt0.c -o $BUILD/crt0.o
+    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+        -fno-stack-protector -fno-builtin \
+        -I $SRC/include \
+        -c $USR/malloctest.c -o $BUILD/malloctest.o
+    ld -m elf_i386 -T $USR/user.ld -o $BUILD/malloctest.elf $BUILD/crt0.o $BUILD/malloctest.o
+    python3 _embed_elf.py $BUILD/malloctest.elf $SRC/include/embed_malloctest.h malloctest_elf
+    echo "  Embedded: malloctest.elf"
+fi
+
 if [ -f $USR/fstest.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \
