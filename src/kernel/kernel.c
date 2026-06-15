@@ -61,6 +61,12 @@
 #else
 #define OPENOS_HAS_ENVTEST 0
 #endif
+#if __has_include("embed_fstest.h")
+#include "embed_fstest.h"  /* filesystem syscall 回归测试程序 */
+#define OPENOS_HAS_FSTEST 1
+#else
+#define OPENOS_HAS_FSTEST 0
+#endif
 
 /* 外部符号 */
 extern void gdt_init(void);
@@ -435,6 +441,17 @@ void kernel_main(void) {
         serial_write("[OK] Installed /bin/envtest user ELF\n");
     } else {
         serial_write("[WARN] Failed to install /bin/envtest\n");
+    }
+#endif
+
+#if OPENOS_HAS_FSTEST
+    fd = vfs_open("/bin/fstest", O_CREAT | O_RDWR, 0755);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)fstest_elf, fstest_elf_size);
+        vfs_close(fd);
+        serial_write("[OK] Installed /bin/fstest user ELF\n");
+    } else {
+        serial_write("[WARN] Failed to install /bin/fstest\n");
     }
 #endif
 

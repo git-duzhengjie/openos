@@ -33,6 +33,25 @@
 #define SYS_SPAWN       233
 #define SYS_EXEC_ENV    234
 #define SYS_SPAWN_ENV   235
+#define SYS_STAT        236
+#define SYS_GETCWD      237
+#define SYS_CHDIR       238
+#define SYS_READDIR     239
+
+typedef struct openos_stat {
+    uint32_t ino;
+    uint32_t mode;
+    uint32_t size;
+    uint32_t nlinks;
+    uint32_t fs_type;
+} openos_stat_t;
+
+typedef struct openos_dirent {
+    uint32_t ino;
+    uint32_t mode;
+    uint32_t size;
+    char name[32];
+} openos_dirent_t;
 
 /* 调用号通过 EAX 传递，参数通过 EBX/ECX/EDX/ESI/EDI */
 uint32_t syscall_handler(uint32_t syscall_num,

@@ -10,6 +10,7 @@
 #include "../include/usermem.h"
 #include "../proc/process.h"
 #include "../fs/vfs.h"
+#include "../include/string.h"
 #include <stddef.h>  /* NULL */
 
 /* VGA */
@@ -270,6 +271,75 @@ uint32_t syscall_dispatch(uint32_t num,
             if (syscall_copy_user_path(path, (const char *)a) < 0)
                 return (uint32_t)-1;
             return (uint32_t)spawn_user_process_env(path, argv, envp);
+        }
+
+    case SYS_STAT:
+        {
+            char path[USERMEM_CSTR_MAX];
+            inode_t st;
+            openos_stat_t user_st;
+            if (!b || !user_ptr_valid((void *)b, sizeof(user_st), USERMEM_WRITE))
+                return (uint32_t)-1;
+            if (syscall_copy_user_path(path, (const char *)a) < 0)
+                return (uint32_t)-1;
+            if (vfs_stat(path, &st) < 0)
+                return (uint32_t)-1;
+            user_st.ino = st.ino;
+            user_st.mode = st.mode;
+            user_st.size = st.size;
+            user_st.nlinks = st.nlinks;
+            user_st.fs_type = st.fs_type;
+            if (copy_to_user((void *)b, &user_st, sizeof(user_st)) < 0)
+                return (uint32_t)-1;
+            return 0;
+        }
+
+    case SYS_GETCWD:
+        {
+            char cwd[MAX_PATH];
+            uint32_t len;
+            if (!a || b == 0 || b > USERMEM_CSTR_MAX)
+                return (uint32_t)-1;
+            if (!user_ptr_valid((void *)a, b, USERMEM_WRITE))
+                return (uint32_t)-1;
+            if (vfs_getcwd(cwd, sizeof(cwd)) < 0)
+                return (uint32_t)-1;
+            len = (uint32_t)strlen(cwd) + 1;
+            if (len > b)
+                return (uint32_t)-1;
+            if (copy_to_user((void *)a, cwd, len) < 0)
+                return (uint32_t)-1;
+            return 0;
+        }
+
+    case SYS_CHDIR:
+        {
+            char path[USERMEM_CSTR_MAX];
+            if (syscall_copy_user_path(path, (const char *)a) < 0)
+                return (uint32_t)-1;
+            return (uint32_t)vfs_chdir(path);
+        }
+
+    case SYS_READDIR:
+        {
+            char path[USERMEM_CSTR_MAX];
+            dentry_t *de;
+            openos_dirent_t user_de;
+            if (!c || !user_ptr_valid((void *)c, sizeof(user_de), USERMEM_WRITE))
+                return (uint32_t)-1;
+            if (syscall_copy_user_path(path, (const char *)a) < 0)
+                return (uint32_t)-1;
+            de = vfs_readdir(path, (int)b);
+            if (!de || !de->inode)
+                return 0;
+            user_de.ino = de->inode->ino;
+            user_de.mode = de->inode->mode;
+            user_de.size = de->inode->size;
+            strncpy(user_de.name, de->name, sizeof(user_de.name) - 1);
+            user_de.name[sizeof(user_de.name) - 1] = 0;
+            if (copy_to_user((void *)c, &user_de, sizeof(user_de)) < 0)
+                return (uint32_t)-1;
+            return 1;
         }
 
     default:

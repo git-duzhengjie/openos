@@ -102,6 +102,16 @@ if [ -f $USR/argtest.c ]; then
     echo "  Embedded: argtest.elf"
 fi
 
+if [ -f $USR/fstest.c ]; then
+    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+        -fno-stack-protector -fno-builtin \
+        -I $SRC/include \
+        -c $USR/fstest.c -o $BUILD/fstest.o
+    ld -m elf_i386 -T $USR/user.ld -o $BUILD/fstest.elf $BUILD/fstest.o
+    python3 _embed_elf.py $BUILD/fstest.elf $SRC/include/embed_fstest.h fstest_elf
+    echo "  Embedded: fstest.elf"
+fi
+
 echo "[3/5] Compiling kernel C files..."
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
