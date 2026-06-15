@@ -73,6 +73,12 @@
 #else
 #define OPENOS_HAS_MAINTEST 0
 #endif
+#if __has_include("embed_systest.h")
+#include "embed_systest.h"  /* syscall wrapper 回归测试程序 */
+#define OPENOS_HAS_SYSTEST 1
+#else
+#define OPENOS_HAS_SYSTEST 0
+#endif
 #if __has_include("embed_fstest.h")
 #include "embed_fstest.h"  /* filesystem syscall 回归测试程序 */
 #define OPENOS_HAS_FSTEST 1
@@ -530,6 +536,17 @@ void kernel_main(void) {
         serial_write("[OK] Installed /bin/maintest user ELF\n");
     } else {
         serial_write("[WARN] Failed to install /bin/maintest\n");
+    }
+#endif
+
+#if OPENOS_HAS_SYSTEST
+    fd = vfs_open("/bin/systest", O_CREAT | O_RDWR, 0755);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)systest_elf, systest_elf_size);
+        vfs_close(fd);
+        serial_write("[OK] Installed /bin/systest user ELF\n");
+    } else {
+        serial_write("[WARN] Failed to install /bin/systest\n");
     }
 #endif
 

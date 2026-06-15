@@ -81,9 +81,24 @@ static inline int openos_syscall3(int num, int a, int b, int c)
     return ret;
 }
 
+static inline int openos_syscall0(int num)
+{
+    return openos_syscall3(num, 0, 0, 0);
+}
+
+static inline int openos_syscall1(int num, int a)
+{
+    return openos_syscall3(num, a, 0, 0);
+}
+
+static inline int openos_syscall2(int num, int a, int b)
+{
+    return openos_syscall3(num, a, b, 0);
+}
+
 static inline void openos_exit(int code)
 {
-    openos_syscall3(SYS_EXIT, code, 0, 0);
+    openos_syscall1(SYS_EXIT, code);
     for (;;) {
         __asm__ volatile("pause");
     }
@@ -326,9 +341,9 @@ static inline char *openos_itoa(int value, char *buf, int base)
     return buf;
 }
 
-static inline void openos_write(int fd, const char *s, int len)
+static inline int openos_write(int fd, const char *s, int len)
 {
-    openos_syscall3(SYS_WRITE, fd, (int)s, len);
+    return openos_syscall3(SYS_WRITE, fd, (int)s, len);
 }
 
 static inline int openos_open(const char *path, int flags, int mode)
@@ -338,7 +353,7 @@ static inline int openos_open(const char *path, int flags, int mode)
 
 static inline int openos_close(int fd)
 {
-    return openos_syscall3(SYS_CLOSE, fd, 0, 0);
+    return openos_syscall1(SYS_CLOSE, fd);
 }
 
 static inline int openos_read(int fd, void *buf, int len)
@@ -353,7 +368,7 @@ static inline int openos_write_fd(int fd, const void *buf, int len)
 
 static inline int openos_dup(int oldfd)
 {
-    return openos_syscall3(SYS_DUP, oldfd, 0, 0);
+    return openos_syscall1(SYS_DUP, oldfd);
 }
 
 static inline int openos_dup2(int oldfd, int newfd)
@@ -363,12 +378,12 @@ static inline int openos_dup2(int oldfd, int newfd)
 
 static inline int openos_pipe(int pipefd[2])
 {
-    return openos_syscall3(SYS_PIPE, (int)pipefd, 0, 0);
+    return openos_syscall1(SYS_PIPE, (int)pipefd);
 }
 
 static inline void openos_write_str(const char *s)
 {
-    openos_write(1, s, openos_strlen(s));
+    openos_write(STDOUT_FILENO, s, openos_strlen(s));
 }
 
 static inline int openos_putchar(int ch)
@@ -451,32 +466,67 @@ static inline int openos_printf(const char *fmt, ...)
 
 static inline int openos_getpid(void)
 {
-    return openos_syscall3(SYS_GETPID, 0, 0, 0);
+    return openos_syscall0(SYS_GETPID);
+}
+
+static inline int openos_gettid(void)
+{
+    return openos_syscall0(SYS_GETTID);
+}
+
+static inline int openos_getppid(void)
+{
+    return openos_syscall0(SYS_GETPPID);
+}
+
+static inline int openos_yield(void)
+{
+    return openos_syscall0(SYS_YIELD);
+}
+
+static inline int openos_sleep(int ticks)
+{
+    return openos_syscall1(SYS_SLEEP, ticks);
+}
+
+static inline int openos_fork(void)
+{
+    return openos_syscall0(SYS_FORK);
+}
+
+static inline int openos_wait(int *status)
+{
+    return openos_syscall1(SYS_WAIT, (int)status);
 }
 
 static inline int openos_getcwd(char *buf, int size)
 {
-    return openos_syscall3(SYS_GETCWD, (int)buf, size, 0);
+    return openos_syscall2(SYS_GETCWD, (int)buf, size);
+}
+
+static inline int openos_chdir(const char *path)
+{
+    return openos_syscall1(SYS_CHDIR, (int)path);
 }
 
 static inline int openos_mkdir(const char *path, int mode)
 {
-    return openos_syscall3(SYS_MKDIR, (int)path, mode, 0);
+    return openos_syscall2(SYS_MKDIR, (int)path, mode);
 }
 
 static inline int openos_unlink(const char *path)
 {
-    return openos_syscall3(SYS_UNLINK, (int)path, 0, 0);
+    return openos_syscall1(SYS_UNLINK, (int)path);
 }
 
 static inline int openos_rmdir(const char *path)
 {
-    return openos_syscall3(SYS_RMDIR, (int)path, 0, 0);
+    return openos_syscall1(SYS_RMDIR, (int)path);
 }
 
 static inline int openos_spawn(const char *path, char *const argv[])
 {
-    return openos_syscall3(SYS_SPAWN, (int)path, (int)argv, 0);
+    return openos_syscall2(SYS_SPAWN, (int)path, (int)argv);
 }
 
 static inline int openos_spawn_env(const char *path, char *const argv[], char *const envp[])
@@ -489,6 +539,31 @@ static inline int openos_waitpid(int pid, int *status, int options)
     return openos_syscall3(SYS_WAITPID, pid, (int)status, options);
 }
 
+static inline int openos_exec(const char *path, char *const argv[])
+{
+    return openos_syscall2(SYS_EXEC, (int)path, (int)argv);
+}
+
+static inline int openos_exec_env(const char *path, char *const argv[], char *const envp[])
+{
+    return openos_syscall3(SYS_EXEC_ENV, (int)path, (int)argv, (int)envp);
+}
+
+static inline void *openos_malloc(int size)
+{
+    return (void *)openos_syscall1(SYS_MALLOC, size);
+}
+
+static inline int openos_free(void *ptr)
+{
+    return openos_syscall1(SYS_FREE, (int)ptr);
+}
+
+static inline int openos_seek(int fd, int offset, int whence)
+{
+    return openos_syscall3(SYS_SEEK, fd, offset, whence);
+}
+
 
 typedef struct openos_DIR {
     char path[OPENOS_PATH_MAX];
@@ -499,12 +574,22 @@ typedef struct openos_DIR {
 
 static inline int openos_stat(const char *path, openos_stat_t *st)
 {
-    return openos_syscall3(SYS_STAT, (int)path, (int)st, 0);
+    return openos_syscall2(SYS_STAT, (int)path, (int)st);
+}
+
+static inline int openos_fstat(int fd, openos_stat_t *st)
+{
+    return openos_syscall2(SYS_FSTAT, fd, (int)st);
 }
 
 static inline int openos_lstat(const char *path, openos_stat_t *st)
 {
-    return openos_syscall3(SYS_LSTAT, (int)path, (int)st, 0);
+    return openos_syscall2(SYS_LSTAT, (int)path, (int)st);
+}
+
+static inline int openos_readdir_path(const char *path, int index, openos_dirent_t *entry)
+{
+    return openos_syscall3(SYS_READDIR, (int)path, index, (int)entry);
 }
 
 static inline openos_DIR *openos_opendir(const char *path)
@@ -533,7 +618,7 @@ static inline openos_dirent_t *openos_readdir(openos_DIR *dir)
     if (!dir || !dir->open)
         return 0;
 
-    r = openos_syscall3(SYS_READDIR, (int)dir->path, dir->index, (int)&dir->entry);
+    r = openos_readdir_path(dir->path, dir->index, &dir->entry);
     if (r <= 0)
         return 0;
 

@@ -126,6 +126,20 @@ if [ -f $USR/maintest.c ]; then
     echo "  Embedded: maintest.elf"
 fi
 
+if [ -f $USR/systest.c ]; then
+    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+        -fno-stack-protector -fno-builtin \
+        -I $SRC/include \
+        -c $USR/crt0.c -o $BUILD/crt0.o
+    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+        -fno-stack-protector -fno-builtin \
+        -I $SRC/include \
+        -c $USR/systest.c -o $BUILD/systest.o
+    ld -m elf_i386 -T $USR/user.ld -o $BUILD/systest.elf $BUILD/crt0.o $BUILD/systest.o
+    python3 _embed_elf.py $BUILD/systest.elf $SRC/include/embed_systest.h systest_elf
+    echo "  Embedded: systest.elf"
+fi
+
 if [ -f $USR/fstest.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \
