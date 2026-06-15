@@ -181,7 +181,7 @@ uint32_t syscall_dispatch(uint32_t num,
             uint32_t ret;
             if (b && !user_ptr_valid((void *)b, sizeof(status), USERMEM_WRITE))
                 return (uint32_t)-1;
-            ret = sys_waitpid(a, b ? &status : NULL, (int)c);
+            ret = sys_waitpid((int)a, b ? &status : NULL, (int)c);
             if (b && copy_to_user((void *)b, &status, sizeof(status)) < 0)
                 return (uint32_t)-1;
             return ret;

@@ -465,16 +465,17 @@ static void user_process_trampoline(void *arg) {
  * sys_wait / sys_waitpid - 等待子进程退出
  * ============================================================ */
 uint32_t sys_wait(int *status) {
-    return sys_waitpid(0, status, 0);
+    return sys_waitpid(-1, status, 0);
 }
 
-uint32_t sys_waitpid(uint32_t pid, int *status, int options) {
+uint32_t sys_waitpid(int pid, int *status, int options) {
     thread_t *cur = sched_get_current();
     if (!cur) return (uint32_t)-1;
     if (options & ~WAITPID_SUPPORTED_OPTIONS) return (uint32_t)-1;
+    if (pid < -1) return (uint32_t)-1;
 
-    if (pid != 0) {
-        process_t *target = proc_find(pid);
+    if (pid > 0) {
+        process_t *target = proc_find((uint32_t)pid);
         if (!target || target->ppid != cur->pid) {
             return (uint32_t)-1;
         }
@@ -487,12 +488,12 @@ uint32_t sys_waitpid(uint32_t pid, int *status, int options) {
             process_t *p = &proc_table[i];
             if (p->state == PROC_DEAD) continue;
             if (p->ppid != cur->pid) continue;
-            if (pid != 0 && p->pid != pid) continue;
+            if (pid > 0 && p->pid != (uint32_t)pid) continue;
 
             has_child = 1;
 
             if (p->state == PROC_ZOMBIE) {
-                if (status) *status = (int)p->exit_code;
+                if (status) *status = ((int)p->exit_code & 0xff) << 8;
                 uint32_t cpid = p->pid;
                 proc_reap_zombie(p);
                 return cpid;

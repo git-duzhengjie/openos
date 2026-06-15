@@ -37,7 +37,7 @@ int spawn_user_process(const char *path, char *const argv[]);
 uint32_t sys_wait(int *status);
 
 /* waitpid: 等待指定子进程 */
-uint32_t sys_waitpid(uint32_t pid, int *status, int options);
+uint32_t sys_waitpid(int pid, int *status, int options);
 
 /* getpid 增强 */
 uint32_t sys_getppid(void);

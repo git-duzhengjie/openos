@@ -26,3 +26,4 @@ modify_build_vga.py
 test_vga.py
 modify_serial.py
 src/kernel/include/embed_waittest.h
+src/kernel/include/embed_exit42.h

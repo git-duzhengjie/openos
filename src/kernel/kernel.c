@@ -37,6 +37,12 @@
 #else
 #define OPENOS_HAS_WAITTEST 0
 #endif
+#if __has_include("embed_exit42.h")
+#include "embed_exit42.h"  /* exit status 回归测试程序 */
+#define OPENOS_HAS_EXIT42 1
+#else
+#define OPENOS_HAS_EXIT42 0
+#endif
 
 /* 外部符号 */
 extern void gdt_init(void);
@@ -296,6 +302,17 @@ void kernel_main(void) {
         serial_write("[OK] Installed /bin/waittest user ELF\n");
     } else {
         serial_write("[WARN] Failed to install /bin/waittest\n");
+    }
+#endif
+
+#if OPENOS_HAS_EXIT42
+    fd = vfs_open("/bin/exit42", O_CREAT | O_RDWR, 0755);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)exit42_elf, exit42_elf_size);
+        vfs_close(fd);
+        serial_write("[OK] Installed /bin/exit42 user ELF\n");
+    } else {
+        serial_write("[WARN] Failed to install /bin/exit42\n");
     }
 #endif
 

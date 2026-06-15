@@ -10,20 +10,20 @@
 
 ### 1. 进程与 waitpid/spawn 语义
 
-- [ ] 完善 `waitpid` 错误返回语义
-  - [ ] `waitpid(不存在的 pid)`
-  - [ ] `waitpid(非子进程 pid)`
-  - [ ] `waitpid(已被回收的 pid)`
-  - [ ] `waitpid(options 非法)`
-- [ ] 支持 `waitpid(-1, &status, options)` 等待任意子进程
-- [ ] 支持 exit status 回传
-- [ ] 添加 `WIFEXITED` / `WEXITSTATUS` 等状态解析宏
-- [ ] 扩展 `/bin/waittest` 回归测试
-  - [ ] 正常子进程退出码
-  - [ ] `WNOHANG`
-  - [ ] 非法 options
-  - [ ] 重复 wait
-  - [ ] pid = -1
+- [x] 完善 `waitpid` 错误返回语义
+  - [x] `waitpid(不存在的 pid)`
+  - [x] `waitpid(非子进程 pid)`
+  - [x] `waitpid(已被回收的 pid)`
+  - [x] `waitpid(options 非法)`
+- [x] 支持 `waitpid(-1, &status, options)` 等待任意子进程
+- [x] 支持 exit status 回传
+- [x] 添加 `WIFEXITED` / `WEXITSTATUS` 等状态解析宏
+- [x] 扩展 `/bin/waittest` 回归测试
+  - [x] 正常子进程退出码
+  - [x] `WNOHANG`
+  - [x] 非法 options
+  - [x] 重复 wait
+  - [x] pid = -1
 - [ ] 完善子进程资源回收
 - [ ] 处理孤儿进程 reparent 到 init
 
