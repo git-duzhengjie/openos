@@ -46,8 +46,9 @@ static void shell_cancel_line(void);
 static void shell_backspace(void);
 
 
-/* 打印：默认输出到 VGA + 串口 + GUI；命令重定向时输出到 fd 1 */
+/* 打印：默认输出到 VGA + 串口 + GUI；命令重定向时输出到 fd 1/2 */
 static int shell_stdout_redirect_depth = 0;
+static int shell_stderr_redirect_depth = 0;
 
 static void shell_print_terminal(const char *s)
 {
@@ -69,6 +70,45 @@ static void print(const char *s)
     }
 
     shell_print_terminal(s);
+}
+
+static void print_err(const char *s)
+{
+    if (!s)
+        return;
+
+    if (shell_stderr_redirect_depth > 0 && vfs_get_file(2)) {
+        vfs_write(2, s, strlen(s));
+        return;
+    }
+
+    shell_print_terminal(s);
+}
+
+static void print_err_dec(int value)
+{
+    char buf[12];
+    int i = 0;
+
+    if (value == 0)
+    {
+        print_err("0");
+        return;
+    }
+
+    while (value > 0 && i < (int)(sizeof(buf) - 1))
+    {
+        buf[i++] = (char)('0' + (value % 10));
+        value /= 10;
+    }
+
+    while (i > 0)
+    {
+        char out[2];
+        out[0] = buf[--i];
+        out[1] = '\0';
+        print_err(out);
+    }
 }
 
 static char shell_ascii_lower(char c)
@@ -886,7 +926,7 @@ typedef struct shell_redirect {
 static int shell_set_redirect_path(shell_redirect_t *redir, int target, char *path, int append)
 {
     if (!path || !path[0]) {
-        print("redirect: missing filename\n");
+        print_err("redirect: missing filename\n");
         return -1;
     }
 
@@ -938,7 +978,7 @@ static int shell_parse_redirects(char *argv[], int argc, shell_redirect_t *redir
 
         if (target >= 0) {
             if (i + 1 >= argc) {
-                print("redirect: missing filename\n");
+                print_err("redirect: missing filename\n");
                 return -1;
             }
             if (shell_set_redirect_path(redir, target, argv[++i], append) < 0)
@@ -975,7 +1015,7 @@ static int shell_parse_redirects(char *argv[], int argc, shell_redirect_t *redir
             *op = '\0';
             if (!path[0]) {
                 if (i + 1 >= argc) {
-                    print("redirect: missing filename\n");
+                    print_err("redirect: missing filename\n");
                     return -1;
                 }
                 path = argv[++i];
@@ -1021,16 +1061,16 @@ static int shell_apply_one_redirect(const char *path, int target_fd, int append,
 {
     int fd = shell_open_redirect_path(path, target_fd, append);
     if (fd < 0) {
-        print("redirect: cannot open ");
-        print(path);
-        print("\n");
+        print_err("redirect: cannot open ");
+        print_err(path);
+        print_err("\n");
         return -1;
     }
 
     *saved_fd = vfs_dup(target_fd);
     if (vfs_dup2(fd, target_fd) < 0) {
         vfs_close(fd);
-        print("redirect: dup failed\n");
+        print_err("redirect: dup failed\n");
         return -1;
     }
 
@@ -1069,8 +1109,8 @@ static int shell_run_external_with_redirect(char *cmd, char *argv[], int argc)
     int ret = shell_spawn_user_program(cmd, argv, argc);
     if (ret < 0) {
         shell_restore_redirects(saved_stdin, saved_stdout, saved_stderr);
-        print(cmd);
-        print(": command not found\n");
+        print_err(cmd);
+        print_err(": command not found\n");
         return -1;
     }
 
@@ -1126,13 +1166,13 @@ static int shell_run_pipeline(char *cmdline)
         }
 
         if (segment_count >= SHELL_MAX_PIPE_CMDS) {
-            print("pipe: too many commands\n");
+            print_err("pipe: too many commands\n");
             return 1;
         }
 
         segments[segment_count] = shell_trim(start);
         if (!segments[segment_count][0]) {
-            print("pipe: missing command\n");
+            print_err("pipe: missing command\n");
             return 1;
         }
         segment_count++;
@@ -1148,13 +1188,13 @@ static int shell_run_pipeline(char *cmdline)
     for (int i = 0; i < segment_count; i++) {
         stage_argc[i] = split_args(segments[i], stage_argv[i], MAX_ARGS);
         if (stage_argc[i] <= 0) {
-            print("pipe: missing command\n");
+            print_err("pipe: missing command\n");
             return 1;
         }
 
         stage_argc[i] = shell_parse_redirects(stage_argv[i], stage_argc[i], &stage_redir[i]);
         if (stage_argc[i] <= 0) {
-            print("pipe: missing command\n");
+            print_err("pipe: missing command\n");
             return 1;
         }
         stage_argv[i][stage_argc[i]] = NULL;
@@ -1163,7 +1203,7 @@ static int shell_run_pipeline(char *cmdline)
     int pipe_count = segment_count - 1;
     for (int i = 0; i < pipe_count; i++) {
         if (vfs_pipe(pipes[i]) < 0) {
-            print("pipe: create failed\n");
+            print_err("pipe: create failed\n");
             for (int j = 0; j < i; j++) {
                 vfs_close(pipes[j][0]);
                 vfs_close(pipes[j][1]);
@@ -1189,7 +1229,7 @@ static int shell_run_pipeline(char *cmdline)
         } else if (i > 0) {
             saved_stdin = vfs_dup(0);
             if (vfs_dup2(pipes[i - 1][0], 0) < 0) {
-                print("pipe: dup stdin failed\n");
+                print_err("pipe: dup stdin failed\n");
                 goto done;
             }
         }
@@ -1200,7 +1240,7 @@ static int shell_run_pipeline(char *cmdline)
         } else if (i + 1 < segment_count) {
             saved_stdout = vfs_dup(1);
             if (vfs_dup2(pipes[i][1], 1) < 0) {
-                print("pipe: dup stdout failed\n");
+                print_err("pipe: dup stdout failed\n");
                 goto done;
             }
         }
@@ -1210,8 +1250,8 @@ static int shell_run_pipeline(char *cmdline)
 
         pids[i] = shell_execute_user_argv(stage_argc[i], stage_argv[i]);
         if (pids[i] < 0) {
-            print(stage_argv[i][0]);
-            print(": command not found\n");
+            print_err(stage_argv[i][0]);
+            print_err(": command not found\n");
         } else {
             for (int j = 0; j < pipe_count; j++) {
                 shell_close_child_fd(pids[i], pipes[j][0]);
@@ -1331,7 +1371,7 @@ static void cmd_ls(const char *path)
 
     if (!d || !d->inode)
     {
-        print("ls: not found\n");
+        print_err("ls: not found\n");
         return;
     }
     if ((d->inode->mode & 0xF000) != FS_DIR)
@@ -1364,7 +1404,7 @@ static void cmd_cat(const char *path)
     int fd = vfs_open(full, O_RDONLY, 0);
     if (fd < 0)
     {
-        print("cat: cannot open\n");
+        print_err("cat: cannot open\n");
         return;
     }
 
@@ -1383,7 +1423,7 @@ static void cmd_cat_append(const char *path, const char *text)
 {
     if (!path || !text)
     {
-        print("cat: usage: cat >> <file> <text>\n");
+        print_err("cat: usage: cat >> <file> <text>\n");
         return;
     }
 
@@ -1393,13 +1433,13 @@ static void cmd_cat_append(const char *path, const char *text)
     int fd = vfs_open(full, O_CREAT | O_RDWR, 0644);
     if (fd < 0)
     {
-        print("cat: cannot open\n");
+        print_err("cat: cannot open\n");
         return;
     }
 
     if (vfs_seek(fd, 0, SEEK_END) < 0)
     {
-        print("cat: seek failed\n");
+        print_err("cat: seek failed\n");
         vfs_close(fd);
         return;
     }
@@ -1407,13 +1447,13 @@ static void cmd_cat_append(const char *path, const char *text)
     int len = strlen(text);
     if (len > 0 && vfs_write(fd, text, len) < 0)
     {
-        print("cat: write failed\n");
+        print_err("cat: write failed\n");
         vfs_close(fd);
         return;
     }
 
     if (vfs_write(fd, "\n", 1) < 0)
-        print("cat: write failed\n");
+        print_err("cat: write failed\n");
 
     vfs_close(fd);
 }
@@ -1422,7 +1462,7 @@ static void cmd_mkdir(const char *path)
 {
     if (!path || path[0] == '\0')
     {
-        print("mkdir: usage: mkdir <path>\n");
+        print_err("mkdir: usage: mkdir <path>\n");
         return;
     }
 
@@ -1430,11 +1470,11 @@ static void cmd_mkdir(const char *path)
     make_path(path, full);
     if (vfs_path_lookup(full))
     {
-        print("mkdir: already exists\n");
+        print_err("mkdir: already exists\n");
         return;
     }
     if (vfs_mkdir(full, 0755) < 0)
-        print("mkdir: failed\n");
+        print_err("mkdir: failed\n");
 }
 
 static void cmd_touch(const char *path)
@@ -1444,7 +1484,7 @@ static void cmd_touch(const char *path)
     int fd = vfs_open(full, O_CREAT | O_RDWR, 0644);
     if (fd < 0)
     {
-        print("touch: failed\n");
+        print_err("touch: failed\n");
         return;
     }
     vfs_close(fd);
@@ -1465,7 +1505,7 @@ static void cmd_echo_append(const char *path, const char *text)
 {
     if (!path || !text)
     {
-        print("echo: usage: echo <text> >> <file>\n");
+        print_err("echo: usage: echo <text> >> <file>\n");
         return;
     }
 
@@ -1475,13 +1515,13 @@ static void cmd_echo_append(const char *path, const char *text)
     int fd = vfs_open(full, O_CREAT | O_RDWR, 0644);
     if (fd < 0)
     {
-        print("echo: cannot open file\n");
+        print_err("echo: cannot open file\n");
         return;
     }
 
     if (vfs_seek(fd, 0, SEEK_END) < 0)
     {
-        print("echo: seek failed\n");
+        print_err("echo: seek failed\n");
         vfs_close(fd);
         return;
     }
@@ -1489,13 +1529,13 @@ static void cmd_echo_append(const char *path, const char *text)
     int len = strlen(text);
     if (len > 0 && vfs_write(fd, text, len) < 0)
     {
-        print("echo: write failed\n");
+        print_err("echo: write failed\n");
         vfs_close(fd);
         return;
     }
 
     if (vfs_write(fd, "\n", 1) < 0)
-        print("echo: write failed\n");
+        print_err("echo: write failed\n");
 
     vfs_close(fd);
 }
@@ -1511,7 +1551,7 @@ static void cmd_cd(const char *path)
     }
     if (vfs_chdir(path) < 0)
     {
-        print("cd: failed\n");
+        print_err("cd: failed\n");
         return;
     }
     vfs_getcwd(cwd, sizeof(cwd));
@@ -1522,7 +1562,7 @@ static void cmd_pwd(void)
     char buf[MAX_PATH];
     if (vfs_getcwd(buf, sizeof(buf)) < 0)
     {
-        print("pwd: failed\n");
+        print_err("pwd: failed\n");
         return;
     }
     print(buf);
@@ -1536,11 +1576,11 @@ static void cmd_rm(const char *path)
     dentry_t *d = vfs_path_lookup(full);
     if (d && d->inode && (d->inode->mode & 0xF000) == FS_DIR)
     {
-        print("rm: cannot remove directory, use rmdir\n");
+        print_err("rm: cannot remove directory, use rmdir\n");
         return;
     }
     if (vfs_unlink(full) < 0)
-        print("rm: failed\n");
+        print_err("rm: failed\n");
 }
 
 static void cmd_write(const char *path, const char *data)
@@ -1555,14 +1595,14 @@ static void cmd_write(const char *path, const char *data)
     int fd = vfs_open(full, O_CREAT | O_RDWR, 0644);
     if (fd < 0)
     {
-        print("write: cannot open\n");
+        print_err("write: cannot open\n");
         return;
     }
     int len = 0;
     while (data[len])
         len++;
     if (len > 0 && vfs_write(fd, data, len) < 0)
-        print("write: failed\n");
+        print_err("write: failed\n");
     vfs_close(fd);
 }
 
@@ -1570,7 +1610,7 @@ static void cmd_history(void)
 {
     if (history_count <= 0)
     {
-        print("history: no commands\n");
+        print_err("history: no commands\n");
         return;
     }
 
@@ -1793,6 +1833,7 @@ void shell_run(void)
             int saved_stdout = SHELL_FD_UNCHANGED;
             int saved_stderr = SHELL_FD_UNCHANGED;
             int stdout_redirected = 0;
+            int stderr_redirected = 0;
             int redirect_failed = 0;
 
             if (argc > 0) {
@@ -1811,6 +1852,10 @@ void shell_run(void)
                     if (!redirect_failed && redir.stdout_path) {
                         stdout_redirected = 1;
                         shell_stdout_redirect_depth++;
+                    }
+                    if (!redirect_failed && redir.stderr_path) {
+                        stderr_redirected = 1;
+                        shell_stderr_redirect_depth++;
                     }
                 }
             }
@@ -1843,33 +1888,33 @@ void shell_run(void)
                             cmd_cat_append(argv[2], text_buf);
                         }
                         else
-                            print("cat: missing file or text\n");
+                            print_err("cat: missing file or text\n");
                     }
                     else if (argc > 1)
                         cmd_cat(argv[1]);
                     else
-                        print("cat: missing argument\n");
+                        print_err("cat: missing argument\n");
                 }
                 else if (shell_cmd_equals(cmd, "mkdir"))
                 {
                     if (argc > 1)
                         cmd_mkdir(argv[1]);
                     else
-                        print("mkdir: missing argument\n");
+                        print_err("mkdir: missing argument\n");
                 }
                 else if (shell_cmd_equals(cmd, "touch"))
                 {
                     if (argc > 1)
                         cmd_touch(argv[1]);
                     else
-                        print("touch: missing argument\n");
+                        print_err("touch: missing argument\n");
                 }
                 else if (shell_cmd_equals(cmd, "rm"))
                 {
                     if (argc > 1)
                         cmd_rm(argv[1]);
                     else
-                        print("rm: missing argument\n");
+                        print_err("rm: missing argument\n");
                 }
                 else if (shell_cmd_equals(cmd, "echo"))
                 {
@@ -1900,7 +1945,7 @@ void shell_run(void)
                         if (redirect + 1 < argc)
                             cmd_echo_append(argv[redirect + 1], text_buf);
                         else
-                            print("echo: missing filename\n");
+                            print_err("echo: missing filename\n");
                     }
                     else
                         cmd_echo(argc, argv);
@@ -1921,7 +1966,7 @@ void shell_run(void)
                 {
                     const char *dev = argc > 1 ? argv[1] : "ram0";
                     if (ext4_format_test_volume(dev) < 0)
-                        print("mkext4: format failed\n");
+                        print_err("mkext4: format failed\n");
                     else
                         print("mkext4: ok\n");
                 }
@@ -1930,7 +1975,7 @@ void shell_run(void)
                     const char *dev = argc > 1 ? argv[1] : "ram0";
                     const char *path = argc > 2 ? argv[2] : "/mnt";
                     if (ext4_mount(dev, path) < 0)
-                        print("mount_ext4: failed\n");
+                        print_err("mount_ext4: failed\n");
                     else
                         print("mount_ext4: ok\n");
                 }
@@ -1938,7 +1983,7 @@ void shell_run(void)
                 {
                     const char *path = argc > 1 ? argv[1] : "/tmp";
                     if (tmpfs_mount(path) < 0)
-                        print("mount_tmpfs: failed\n");
+                        print_err("mount_tmpfs: failed\n");
                     else
                         print("mount_tmpfs: ok\n");
                 }
@@ -1960,7 +2005,7 @@ void shell_run(void)
                         cmd_write(argv[1], text_buf);
                     }
                     else
-                        print("write: need file and text\n");
+                        print_err("write: need file and text\n");
                 }
                 else if (shell_cmd_equals(cmd, "fbinfo"))
                 {
@@ -1974,7 +2019,7 @@ void shell_run(void)
                 {
                     if (!framebuffer_is_available())
                     {
-                        print("fbtest: framebuffer not available\n");
+                        print_err("fbtest: framebuffer not available\n");
                     }
                     else
                     {
@@ -1995,7 +2040,7 @@ void shell_run(void)
                     else if (strcmp(argv[1], "scan") == 0 || strcmp(argv[1], "query") == 0)
                     {
                         if (discovery_query() < 0)
-                            print("discovery: scan failed\n");
+                            print_err("discovery: scan failed\n");
                         else
                             print("discovery: query broadcast sent\n");
                     }
@@ -2010,48 +2055,48 @@ void shell_run(void)
                     else if (strcmp(argv[1], "auth_secret") == 0)
                     {
                         if (argc < 3 || discovery_set_auth_secret(argv[2]) < 0)
-                            print("discovery: invalid auth secret\n");
+                            print_err("discovery: invalid auth secret\n");
                         else
                             print("discovery: auth secret configured\n");
                     }
                     else if (strcmp(argv[1], "auth_peer") == 0)
                     {
                         if (argc < 3 || discovery_auth_peer(argv[2]) < 0)
-                            print("discovery: auth peer failed\n");
+                            print_err("discovery: auth peer failed\n");
                         else
                             print("discovery: auth challenge sent\n");
                     }
                     else if (strcmp(argv[1], "announce") == 0)
                     {
                         if (discovery_announce() < 0)
-                            print("discovery: announce failed\n");
+                            print_err("discovery: announce failed\n");
                         else
                             print("discovery: hello broadcast sent\n");
                     }
                     else if (strcmp(argv[1], "bye") == 0)
                     {
                         if (discovery_goodbye() < 0)
-                            print("discovery: bye failed\n");
+                            print_err("discovery: bye failed\n");
                         else
                             print("discovery: bye broadcast sent\n");
                     }
                     else if (strcmp(argv[1], "name") == 0)
                     {
                         if (argc < 3 || discovery_set_local_name(argv[2]) < 0)
-                            print("discovery: invalid name\n");
+                            print_err("discovery: invalid name\n");
                         else
                             print("discovery: name updated\n");
                     }
                     else if (strcmp(argv[1], "caps") == 0)
                     {
                         if (argc < 3 || discovery_set_local_capabilities(argv[2]) < 0)
-                            print("discovery: invalid capabilities\n");
+                            print_err("discovery: invalid capabilities\n");
                         else
                             print("discovery: capabilities updated\n");
                     }
                     else
                     {
-                        print("usage: discovery [scan|peers|announce|bye|name <n>|caps <c>|auth|auth_secret <s>|auth_peer <id>]\n");
+                        print_err("usage: discovery [scan|peers|announce|bye|name <n>|caps <c>|auth|auth_secret <s>|auth_peer <id>]\n");
                     }
                 }
                 else if (shell_cmd_equals(cmd, "sync"))
@@ -2075,21 +2120,21 @@ void shell_run(void)
                     else if (strcmp(argv[1], "put") == 0)
                     {
                         if (argc < 4 || sync_put(argv[2], argv[3]) < 0)
-                            print("sync: put failed\n");
+                            print_err("sync: put failed\n");
                         else
                             print("sync: item updated and broadcast\n");
                     }
                     else if (strcmp(argv[1], "del") == 0)
                     {
                         if (argc < 3 || sync_delete(argv[2]) < 0)
-                            print("sync: delete failed\n");
+                            print_err("sync: delete failed\n");
                         else
                             print("sync: delete broadcast\n");
                     }
                     else if (strcmp(argv[1], "push") == 0)
                     {
                         if (argc < 3 || sync_broadcast_key(argv[2]) < 0)
-                            print("sync: push failed\n");
+                            print_err("sync: push failed\n");
                         else
                             print("sync: item broadcast\n");
                     }
@@ -2106,27 +2151,27 @@ void shell_run(void)
                         if (argc >= 6)
                             target = argv[5];
                         if (argc < 5 || sync_task_offer(argv[2], argv[3], argv[4], target) < 0)
-                            print("sync: offer failed\n");
+                            print_err("sync: offer failed\n");
                         else
                             print("sync: task offered\n");
                     }
                     else if (strcmp(argv[1], "accept") == 0)
                     {
                         if (argc < 3 || sync_task_accept(argv[2]) < 0)
-                            print("sync: accept failed\n");
+                            print_err("sync: accept failed\n");
                         else
                             print("sync: task accepted\n");
                     }
                     else if (strcmp(argv[1], "done") == 0)
                     {
                         if (argc < 4 || sync_task_done(argv[2], argv[3]) < 0)
-                            print("sync: done failed\n");
+                            print_err("sync: done failed\n");
                         else
                             print("sync: task done\n");
                     }
                     else
                     {
-                        print("usage: sync [info|items|tasks|reliable|put <k> <v>|del <k>|push <k>|push_all|offer <id> <title> <payload> [target]|accept <id>|done <id> <result>]\n");
+                        print_err("usage: sync [info|items|tasks|reliable|put <k> <v>|del <k>|push <k>|push_all|offer <id> <title> <payload> [target]|accept <id>|done <id> <result>]\n");
                     }
                 }
                 else if (shell_cmd_equals(cmd, "bus"))
@@ -2146,33 +2191,33 @@ void shell_run(void)
                     else if (strcmp(argv[1], "pub") == 0)
                     {
                         if (argc < 4 || bus_publish(argv[2], argv[3], BUS_PUBLISH_ALL) < 0)
-                            print("bus: publish failed\n");
+                            print_err("bus: publish failed\n");
                         else
                             print("bus: published local+remote\n");
                     }
                     else if (strcmp(argv[1], "pub_local") == 0)
                     {
                         if (argc < 4 || bus_publish(argv[2], argv[3], BUS_PUBLISH_LOCAL) < 0)
-                            print("bus: local publish failed\n");
+                            print_err("bus: local publish failed\n");
                         else
                             print("bus: published local\n");
                     }
                     else if (strcmp(argv[1], "sub") == 0)
                     {
                         if (argc < 3 || bus_shell_subscribe(argv[2]) < 0)
-                            print("bus: subscribe failed\n");
+                            print_err("bus: subscribe failed\n");
                         else
                             print("bus: shell subscriber updated\n");
                     }
                     else
                     {
-                        print("usage: bus [info|stats|subs|pub <topic> <payload>|pub_local <topic> <payload>|sub <topic>]\n");
+                        print_err("usage: bus [info|stats|subs|pub <topic> <payload>|pub_local <topic> <payload>|sub <topic>]\n");
                     }
                 }
                 else if (shell_cmd_equals(cmd, "ping_self"))
                 {
                     if (net_ping_self() < 0)
-                        print("ping_self: failed\n");
+                        print_err("ping_self: failed\n");
                     else
                         print("ping_self: ok\n");
                 }
@@ -2193,7 +2238,7 @@ void shell_run(void)
                         ai_backend_type_t backend;
                         if (ai_parse_backend(argv[1], &backend) < 0 || ai_set_default_backend(backend) < 0)
                         {
-                            print("ai_backend: expected local, cloud, or hybrid\n");
+                            print_err("ai_backend: expected local, cloud, or hybrid\n");
                         }
                         else
                         {
@@ -2207,7 +2252,7 @@ void shell_run(void)
                 {
                     if (argc < 2)
                     {
-                        print("ai_ask: missing prompt\n");
+                        print_err("ai_ask: missing prompt\n");
                     }
                     else
                     {
@@ -2236,7 +2281,7 @@ void shell_run(void)
 
                         if (ai_generate(&request, &response) < 0)
                         {
-                            print("ai_ask: failed\n");
+                            print_err("ai_ask: failed\n");
                         }
                         else
                         {
@@ -2253,11 +2298,11 @@ void shell_run(void)
                 {
                     if (argc < 2)
                     {
-                        print("ai_model_load: missing model name\n");
+                        print_err("ai_model_load: missing model name\n");
                     }
                     else if (ai_model_load(argv[1]) < 0)
                     {
-                        print("ai_model_load: failed\n");
+                        print_err("ai_model_load: failed\n");
                     }
                     else
                     {
@@ -2270,11 +2315,11 @@ void shell_run(void)
                 {
                     if (argc < 2)
                     {
-                        print("ai_model_unload: missing model name\n");
+                        print_err("ai_model_unload: missing model name\n");
                     }
                     else if (ai_model_unload(argv[1]) < 0)
                     {
-                        print("ai_model_unload: failed\n");
+                        print_err("ai_model_unload: failed\n");
                     }
                     else
                     {
@@ -2291,7 +2336,7 @@ void shell_run(void)
                     }
                     else if (ai_repo_set_path(argv[1]) < 0)
                     {
-                        print("ai_repo: failed\n");
+                        print_err("ai_repo: failed\n");
                     }
                     else
                     {
@@ -2310,11 +2355,11 @@ void shell_run(void)
                     {
                         if (argc < 3)
                         {
-                            print("ai_trust: missing key file\n");
+                            print_err("ai_trust: missing key file\n");
                         }
                         else if (ai_trust_key_load_file(argv[2]) < 0)
                         {
-                            print("ai_trust: load key failed\n");
+                            print_err("ai_trust: load key failed\n");
                         }
                         else
                         {
@@ -2325,7 +2370,7 @@ void shell_run(void)
                     }
                     else if (ai_trust_root_set_path(argv[1]) < 0)
                     {
-                        print("ai_trust: failed\n");
+                        print_err("ai_trust: failed\n");
                     }
                     else
                     {
@@ -2349,25 +2394,25 @@ void shell_run(void)
                         }
                         else
                         {
-                            print("ai_ed25519: signature invalid or unsupported, status=");
-                            shell_print_dec(status);
-                            print("\n");
+                            print_err("ai_ed25519: signature invalid or unsupported, status=");
+                            print_err_dec(status);
+                            print_err("\n");
                         }
                     }
                     else
                     {
-                        print("usage: ai_ed25519 [selftest|verify_sha256 <public_key_hex> <sha256_hex> <signature_hex>]\n");
+                        print_err("usage: ai_ed25519 [selftest|verify_sha256 <public_key_hex> <sha256_hex> <signature_hex>]\n");
                     }
                 }
                 else if (shell_cmd_equals(cmd, "ai_model_register"))
                 {
                     if (argc < 2)
                     {
-                        print("ai_model_register: missing manifest path\n");
+                        print_err("ai_model_register: missing manifest path\n");
                     }
                     else if (ai_model_register_manifest_file(argv[1]) < 0)
                     {
-                        print("ai_model_register: failed\n");
+                        print_err("ai_model_register: failed\n");
                     }
                     else
                     {
@@ -2381,7 +2426,7 @@ void shell_run(void)
                     int n = ai_repo_scan();
                     if (n < 0)
                     {
-                        print("ai_model_scan: failed\n");
+                        print_err("ai_model_scan: failed\n");
                     }
                     else
                     {
@@ -2403,7 +2448,7 @@ void shell_run(void)
                     hotplug_event_t event;
                     if (devmgr_poll_event(&event) < 0)
                     {
-                        print("hotplug_poll: no event\n");
+                        print_err("hotplug_poll: no event\n");
                     }
                     else
                     {
@@ -2423,7 +2468,7 @@ void shell_run(void)
                     print("guitest: starting GUI demo...\n");
                     if (!gui_is_ready()) {
                         if (gui_start(1024, 768) != 0) {
-                            print("guitest: gui_start failed\n");
+                            print_err("guitest: gui_start failed\n");
                             goto shell_command_done;
                         }
                     }
@@ -2472,9 +2517,9 @@ void shell_run(void)
                         int ret = shell_spawn_user_program(argv[1], &argv[1], argc - 1);
                         if (ret < 0)
                         {
-                            print("exec: failed to spawn ");
-                            print(argv[1]);
-                            print("\n");
+                            print_err("exec: failed to spawn ");
+                            print_err(argv[1]);
+                            print_err("\n");
                         }
                         else
                         {
@@ -2483,15 +2528,15 @@ void shell_run(void)
                     }
                     else
                     {
-                        print("exec: missing argument\n");
+                        print_err("exec: missing argument\n");
                     }
                 }
                 else
                 {
                     int ret = shell_spawn_user_program(cmd, argv, argc);
                     if (ret < 0) {
-                        print(cmd);
-                        print(": command not found\n");
+                        print_err(cmd);
+                        print_err(": command not found\n");
                     } else if (redir.stdin_path || redir.stdout_path || redir.stderr_path) {
                         sys_waitpid(ret, NULL, 0);
                     } else {
@@ -2503,6 +2548,9 @@ void shell_run(void)
 shell_command_done:
             if (stdout_redirected) {
                 shell_stdout_redirect_depth--;
+            }
+            if (stderr_redirected) {
+                shell_stderr_redirect_depth--;
             }
             shell_restore_redirects(saved_stdin, saved_stdout, saved_stderr);
 
