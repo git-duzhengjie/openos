@@ -41,6 +41,7 @@
 #define SYS_PIPE        244
 #define SYS_KILL        245
 #define SYS_ALARM       246
+#define SYS_LINK        247
 
 #define WNOHANG         1
 #define SIGKILL         9
@@ -769,6 +770,11 @@ static inline int openos_mkdir(const char *path, int mode)
 static inline int openos_unlink(const char *path)
 {
     return openos_syscall_result(openos_syscall1(SYS_UNLINK, (int)path));
+}
+
+static inline int openos_link(const char *oldpath, const char *newpath)
+{
+    return openos_syscall_result(openos_syscall2(SYS_LINK, (int)oldpath, (int)newpath));
 }
 
 static inline int openos_rmdir(const char *path)

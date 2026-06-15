@@ -152,10 +152,10 @@
 
 ### 7. VFS 完整语义
 
-- [ ] `vfs_link`
+- [√] `vfs_link`（已实现同一 inode 的目录项复用、nlinks/ref_count 维护，并接入 `SYS_LINK`）
 - [ ] `vfs_symlink`
 - [ ] `vfs_readlink`
-- [ ] hard link
+- [√] hard link（已新增 `/bin/ln OLD NEW`）
 - [ ] symbolic link
 - [ ] inode uid / gid 字段
 - [ ] chmod / chown 权限模型

@@ -200,6 +200,13 @@
 #define OPENOS_HAS_RMDIR 0
 #endif
 
+#if __has_include("embed_ln.h")
+#include "embed_ln.h"  /* ln user command */
+#define OPENOS_HAS_LN 1
+#else
+#define OPENOS_HAS_LN 0
+#endif
+
 #if __has_include("embed_kill.h")
 #include "embed_kill.h"  /* kill user command */
 #define OPENOS_HAS_KILL 1
@@ -841,6 +848,17 @@ void kernel_main(void) {
         serial_write("[OK] Installed /bin/rmdir user ELF\n");
     } else {
         serial_write("[WARN] Failed to install /bin/rmdir\n");
+    }
+#endif
+
+#if OPENOS_HAS_LN
+    fd = vfs_open("/bin/ln", O_CREAT | O_RDWR, 0755);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)ln_elf, ln_elf_size);
+        vfs_close(fd);
+        serial_write("[OK] Installed /bin/ln user ELF\n");
+    } else {
+        serial_write("[WARN] Failed to install /bin/ln\n");
     }
 #endif
 

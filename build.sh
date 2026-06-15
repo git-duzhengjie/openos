@@ -363,6 +363,16 @@ if [ -f $USR/rmdir.c ]; then
     echo "  Embedded: rmdir.elf"
 fi
 
+if [ -f $USR/ln.c ]; then
+    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+        -fno-stack-protector -fno-builtin \
+        -I $SRC/include \
+        -c $USR/ln.c -o $BUILD/ln.o
+    ld -m elf_i386 -T $USR/user.ld -o $BUILD/ln.elf $BUILD/ln.o
+    python3 _embed_elf.py $BUILD/ln.elf $SRC/include/embed_ln.h ln_elf
+    echo "  Embedded: ln.elf"
+fi
+
 if [ -f $USR/kill.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \

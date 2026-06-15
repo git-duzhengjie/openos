@@ -352,6 +352,17 @@ uint32_t syscall_dispatch(uint32_t num,
             return (uint32_t)vfs_rmdir(path);
         }
 
+    case SYS_LINK:
+        {
+            char oldpath[USERMEM_CSTR_MAX];
+            char newpath[USERMEM_CSTR_MAX];
+            if (syscall_copy_user_path(oldpath, (const char *)a) < 0)
+                return (uint32_t)-1;
+            if (syscall_copy_user_path(newpath, (const char *)b) < 0)
+                return (uint32_t)-1;
+            return (uint32_t)vfs_link(oldpath, newpath);
+        }
+
     case SYS_EXEC:
         {
             char path[USERMEM_CSTR_MAX];

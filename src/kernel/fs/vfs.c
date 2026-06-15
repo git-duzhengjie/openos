@@ -1108,6 +1108,7 @@ int vfs_unlink(const char *path) {
     if (!d || d == root_dentry || !d->parent || !d->inode) return -1;
     if (vfs_is_dir(d->inode)) return -1;
     if (d->mount) return -1;
+    if (d->inode->nlinks > 0) d->inode->nlinks--;
     detach_child(d);
     free_dentry(d);
     return 0;
@@ -1170,8 +1171,33 @@ int vfs_rename(const char *oldpath, const char *newpath) {
 }
 
 int vfs_link(const char *oldpath, const char *newpath) {
-    (void)oldpath; (void)newpath;
-    return -1; /* TODO */
+    char parent_path[MAX_PATH];
+    char name[MAX_NAME];
+    dentry_t *old;
+    dentry_t *parent;
+    dentry_t *link;
+
+    if (!oldpath || !newpath) return -1;
+
+    old = vfs_path_lookup(oldpath);
+    if (!old || !old->inode) return -1;
+    if (vfs_is_dir(old->inode)) return -1;
+    if (old->mount) return -1;
+
+    if (split_parent_path(newpath, parent_path, name) < 0) return -1;
+    parent = vfs_path_lookup(parent_path);
+    if (!parent || !vfs_is_dir(parent->inode)) return -1;
+    if (find_child(parent, name)) return -1;
+
+    link = alloc_dentry();
+    if (!link) return -1;
+    strncpy(link->name, name, MAX_NAME - 1);
+    link->name[MAX_NAME - 1] = 0;
+    link->inode = old->inode;
+    link->inode->ref_count++;
+    link->inode->nlinks++;
+    add_child(parent, link);
+    return 0;
 }
 
 int vfs_symlink(const char *target, const char *linkpath) {
