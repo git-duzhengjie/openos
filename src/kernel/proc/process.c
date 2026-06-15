@@ -317,18 +317,35 @@ uint32_t proc_reparent_children(uint32_t old_ppid, uint32_t new_ppid) {
     return count;
 }
 
+static void proc_wake_waiter(uint32_t pid)
+{
+    process_t *parent = proc_find(pid);
+    if (!parent || !parent->threads)
+        return;
+
+    thread_t *t = parent->threads;
+    while (t) {
+        thread_t *next = t->next;
+        thread_wake(t);
+        t = next;
+    }
+}
+
 void proc_mark_exit(uint32_t pid, int code) {
     if (pid == INIT_PID) return;
 
     process_t *proc = proc_find(pid);
     if (!proc) return;
 
+    uint32_t parent_pid = proc->ppid;
     proc_reparent_children(pid, INIT_PID);
 
     proc->exit_code = (uint32_t)code;
     proc->state = PROC_ZOMBIE;
     if (proc->threads)
         proc->threads->state = PROC_ZOMBIE;
+
+    proc_wake_waiter(parent_pid);
 
     /* Reap previously exited orphan children owned by init, but never reap
      * this process here: sys_exit() is still running on its kernel stack until
@@ -731,6 +748,7 @@ uint32_t sys_waitpid(int pid, int *status, int options) {
         if (options & WAITPID_WNOHANG)
             return 0;
 
+        cur->state = PROC_BLOCKED;
         sched_yield();
     }
 }
@@ -760,5 +778,6 @@ int proc_terminate(uint32_t pid, int exit_code)
     p->exit_code = exit_code;
     vfs_close_fds_for_process(p);
     p->state = PROC_ZOMBIE;
+    proc_wake_waiter(p->ppid);
     return 0;
 }

@@ -125,9 +125,9 @@
 
 ### 5. 调度与同步
 
-- [ ] waitpid 阻塞等待，避免忙等 `sched_yield`
+- [√] waitpid 阻塞等待，避免忙等 `sched_yield`
 - [ ] 完善进程 `BLOCKED` / `SLEEPING` 状态语义
-- [ ] 子进程 exit 唤醒父进程
+- [√] 子进程 exit 唤醒父进程
 - [ ] 多线程用户态 API
 - [ ] mutex
 - [ ] semaphore
