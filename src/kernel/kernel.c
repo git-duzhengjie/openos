@@ -200,6 +200,13 @@
 #define OPENOS_HAS_RMDIR 0
 #endif
 
+#if __has_include("embed_kill.h")
+#include "embed_kill.h"  /* kill user command */
+#define OPENOS_HAS_KILL 1
+#else
+#define OPENOS_HAS_KILL 0
+#endif
+
 
 /* 外部符号 */
 extern void gdt_init(void);
@@ -827,6 +834,17 @@ void kernel_main(void) {
         serial_write("[OK] Installed /bin/rmdir user ELF\n");
     } else {
         serial_write("[WARN] Failed to install /bin/rmdir\n");
+    }
+#endif
+
+#if OPENOS_HAS_KILL
+    fd = vfs_open("/bin/kill", O_CREAT | O_RDWR, 0755);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)kill_elf, kill_elf_size);
+        vfs_close(fd);
+        serial_write("[OK] Installed /bin/kill user ELF\n");
+    } else {
+        serial_write("[WARN] Failed to install /bin/kill\n");
     }
 #endif
 

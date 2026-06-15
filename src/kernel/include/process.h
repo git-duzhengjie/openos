@@ -138,6 +138,7 @@ void thread_wake(thread_t *thread);
 uint32_t sys_getpid(void);
 uint32_t sys_gettid(void);
 void sys_exit(int code);
+int sys_kill(int pid, int sig);
 
 /* 调度器核心函数 */
 void sched_init(void);

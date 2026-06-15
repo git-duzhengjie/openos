@@ -39,6 +39,7 @@
 #define SYS_DUP         242
 #define SYS_DUP2        243
 #define SYS_PIPE        244
+#define SYS_KILL        245
 
 #define WNOHANG         1
 #define WIFEXITED(status)      (((status) & 0x7f) == 0)
@@ -784,6 +785,11 @@ static inline int openos_spawn_env(const char *path, char *const argv[], char *c
 static inline int openos_waitpid(int pid, int *status, int options)
 {
     return openos_syscall_result(openos_syscall3(SYS_WAITPID, pid, (int)status, options));
+}
+
+static inline int openos_kill(int pid, int sig)
+{
+    return openos_syscall_result(openos_syscall2(SYS_KILL, pid, sig));
 }
 
 static inline int openos_exec(const char *path, char *const argv[])

@@ -363,6 +363,16 @@ if [ -f $USR/rmdir.c ]; then
     echo "  Embedded: rmdir.elf"
 fi
 
+if [ -f $USR/kill.c ]; then
+    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+        -fno-stack-protector -fno-builtin \
+        -I $SRC/include \
+        -c $USR/kill.c -o $BUILD/kill.o
+    ld -m elf_i386 -T $USR/user.ld -o $BUILD/kill.elf $BUILD/kill.o
+    python3 _embed_elf.py $BUILD/kill.elf $SRC/include/embed_kill.h kill_elf
+    echo "  Embedded: kill.elf"
+fi
+
 echo "[3/5] Compiling kernel C files..."
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \

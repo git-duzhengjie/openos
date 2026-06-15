@@ -775,6 +775,9 @@ int proc_terminate(uint32_t pid, int exit_code)
     if (!p || p->state == PROC_DEAD || p->state == PROC_ZOMBIE)
         return -1;
 
+    if (pid == INIT_PID)
+        return -1;
+
     thread_t *t = p->threads;
     while (t) {
         thread_t *next = t->next;
@@ -785,7 +788,21 @@ int proc_terminate(uint32_t pid, int exit_code)
 
     p->exit_code = exit_code;
     vfs_close_fds_for_process(p);
+    proc_reparent_children(pid, INIT_PID);
     p->state = PROC_ZOMBIE;
     proc_wake_waiter(p->ppid);
     return 0;
+}
+
+int sys_kill(int pid, int sig)
+{
+    if (pid <= 0)
+        return -1;
+
+    if (sig == 0)
+        return proc_find((uint32_t)pid) ? 0 : -1;
+    if (sig != 9 && sig != 15)
+        return -1;
+
+    return proc_terminate((uint32_t)pid, 128 + sig);
 }
