@@ -112,6 +112,20 @@ if [ -f $USR/libctest.c ]; then
     echo "  Embedded: libctest.elf"
 fi
 
+if [ -f $USR/maintest.c ]; then
+    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+        -fno-stack-protector -fno-builtin \
+        -I $SRC/include \
+        -c $USR/crt0.c -o $BUILD/crt0.o
+    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+        -fno-stack-protector -fno-builtin \
+        -I $SRC/include \
+        -c $USR/maintest.c -o $BUILD/maintest.o
+    ld -m elf_i386 -T $USR/user.ld -o $BUILD/maintest.elf $BUILD/crt0.o $BUILD/maintest.o
+    python3 _embed_elf.py $BUILD/maintest.elf $SRC/include/embed_maintest.h maintest_elf
+    echo "  Embedded: maintest.elf"
+fi
+
 if [ -f $USR/fstest.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \

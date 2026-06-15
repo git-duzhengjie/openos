@@ -6,7 +6,7 @@
 >
 > 最近完成：已补齐 shell 后台任务、`Ctrl+C` / `Ctrl+D`、`jobs` / `fg`、Tab 命令补全、脚本执行；本轮完成用户态运行库 libc 子集，`src/user/openos.h` 新增 `memset/memcpy/memmove/memcmp/strncmp/strchr/strrchr/strstr/isdigit/isspace/atoi/itoa/putchar/puts/printf` 等 header-only 能力，并新增 `/bin/libctest` 回归程序覆盖基础字符串、内存、转换与输出函数。
 >
-> 当前推荐下一步：继续 P5，完善 crt0 启动入口与用户态程序入口规范，为后续 malloc/free、errno、stdio 打基础。
+> 当前推荐下一步：继续 P5，标准化 syscall wrapper 命名与错误返回约定，为后续 errno、stdio 和更多用户态工具打基础。
 
 ---
 
@@ -265,7 +265,7 @@
 - [√] 标准 libc 子集（header-only：`memset/memcpy/memmove/memcmp/strlen/strcmp/strncmp/strchr/strrchr/strstr/isdigit/isspace/atoi/itoa` 等）
 - [√] 基础输出辅助（`putchar` / `puts` / 最小 `printf`，支持 `%s` / `%c` / `%d` / `%i` / `%x` / `%%`）
 - [√] 更多用户态测试程序（新增 `/bin/libctest` 覆盖 libc 子集）
-- [ ] crt0 启动入口完善
+- [√] crt0 启动入口完善（新增 `src/user/crt0.c`，支持标准 `main(argc, argv, envp)`，并新增 `/bin/maintest` 回归）
 - [ ] syscall wrapper 标准化
 - [ ] malloc/free 用户态实现
 - [ ] errno
