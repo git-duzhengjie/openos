@@ -336,10 +336,105 @@ static inline char *openos_strstr(const char *haystack, const char *needle)
     return 0;
 }
 
+static inline char *openos_strcpy(char *dst, const char *src)
+{
+    char *out = dst;
+    if (!dst || !src)
+        return dst;
+    while ((*dst++ = *src++) != 0) {
+    }
+    return out;
+}
+
+static inline char *openos_strncpy(char *dst, const char *src, int n)
+{
+    int i;
+    if (!dst || !src || n <= 0)
+        return dst;
+    for (i = 0; i < n && src[i]; i++)
+        dst[i] = src[i];
+    for (; i < n; i++)
+        dst[i] = 0;
+    return dst;
+}
+
+static inline char *openos_strcat(char *dst, const char *src)
+{
+    char *out = dst;
+    if (!dst || !src)
+        return dst;
+    while (*dst)
+        dst++;
+    while ((*dst++ = *src++) != 0) {
+    }
+    return out;
+}
+
+static inline char *openos_strncat(char *dst, const char *src, int n)
+{
+    char *out = dst;
+    int i;
+    if (!dst || !src || n <= 0)
+        return dst;
+    while (*dst)
+        dst++;
+    for (i = 0; i < n && src[i]; i++)
+        dst[i] = src[i];
+    dst[i] = 0;
+    return out;
+}
+
+
 static inline int openos_isdigit(int ch)
 {
     return ch >= '0' && ch <= '9';
 }
+
+static inline int openos_islower(int ch)
+{
+    return ch >= 'a' && ch <= 'z';
+}
+
+static inline int openos_isupper(int ch)
+{
+    return ch >= 'A' && ch <= 'Z';
+}
+
+static inline int openos_isalpha(int ch)
+{
+    return openos_islower(ch) || openos_isupper(ch);
+}
+
+static inline int openos_isalnum(int ch)
+{
+    return openos_isalpha(ch) || openos_isdigit(ch);
+}
+
+static inline int openos_isxdigit(int ch)
+{
+    return openos_isdigit(ch) || (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F');
+}
+
+static inline int openos_isprint(int ch)
+{
+    return ch >= 0x20 && ch <= 0x7e;
+}
+
+static inline int openos_iscntrl(int ch)
+{
+    return (ch >= 0 && ch < 0x20) || ch == 0x7f;
+}
+
+static inline int openos_tolower(int ch)
+{
+    return openos_isupper(ch) ? ch - 'A' + 'a' : ch;
+}
+
+static inline int openos_toupper(int ch)
+{
+    return openos_islower(ch) ? ch - 'a' + 'A' : ch;
+}
+
 
 static inline int openos_isspace(int ch)
 {
@@ -868,6 +963,23 @@ static inline int openos_free(void *ptr)
     return 0;
 }
 
+static inline char *openos_strdup(const char *s)
+{
+    char *copy;
+    int len;
+    if (!s) {
+        openos_set_errno(OPENOS_EINVAL);
+        return 0;
+    }
+    len = openos_strlen(s) + 1;
+    copy = (char *)openos_malloc(len);
+    if (!copy)
+        return 0;
+    openos_memcpy(copy, s, len);
+    openos_clear_errno();
+    return copy;
+}
+
 static inline void *openos_calloc(int count, int size)
 {
     int total;
@@ -1288,5 +1400,42 @@ static inline void openos_fail(int code, const char *msg)
     openos_write_str(msg);
     openos_exit(code);
 }
+
+
+#ifndef OPENOS_NO_LIBC_ALIASES
+#define memset(dst, value, len)       openos_memset((dst), (value), (len))
+#define memcpy(dst, src, len)         openos_memcpy((dst), (src), (len))
+#define memmove(dst, src, len)        openos_memmove((dst), (src), (len))
+#define memcmp(a, b, len)             openos_memcmp((a), (b), (len))
+#define strlen(s)                     openos_strlen((s))
+#define strcmp(a, b)                  openos_strcmp((a), (b))
+#define strncmp(a, b, n)              openos_strncmp((a), (b), (n))
+#define strcpy(dst, src)              openos_strcpy((dst), (src))
+#define strncpy(dst, src, n)          openos_strncpy((dst), (src), (n))
+#define strcat(dst, src)              openos_strcat((dst), (src))
+#define strncat(dst, src, n)          openos_strncat((dst), (src), (n))
+#define strchr(s, ch)                 openos_strchr((s), (ch))
+#define strrchr(s, ch)                openos_strrchr((s), (ch))
+#define strstr(h, n)                  openos_strstr((h), (n))
+#define strdup(s)                     openos_strdup((s))
+#define atoi(s)                       openos_atoi((s))
+#define isdigit(ch)                   openos_isdigit((ch))
+#define isspace(ch)                   openos_isspace((ch))
+#define isalpha(ch)                   openos_isalpha((ch))
+#define isalnum(ch)                   openos_isalnum((ch))
+#define isxdigit(ch)                  openos_isxdigit((ch))
+#define islower(ch)                   openos_islower((ch))
+#define isupper(ch)                   openos_isupper((ch))
+#define isprint(ch)                   openos_isprint((ch))
+#define iscntrl(ch)                   openos_iscntrl((ch))
+#define tolower(ch)                   openos_tolower((ch))
+#define toupper(ch)                   openos_toupper((ch))
+#define malloc(size)                  openos_malloc((size))
+#define free(ptr)                     openos_free((ptr))
+#define calloc(nmemb, size)           openos_calloc((nmemb), (size))
+#define realloc(ptr, size)            openos_realloc((ptr), (size))
+#define putchar(ch)                   openos_putchar((ch))
+#define puts(s)                       openos_puts((s))
+#endif
 
 #endif /* OPENOS_USER_OPENOS_H */
