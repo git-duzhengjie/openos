@@ -91,6 +91,12 @@
 #else
 #define OPENOS_HAS_ECHO 0
 #endif
+#if __has_include("embed_grep.h")
+#include "embed_grep.h"  /* grep user command */
+#define OPENOS_HAS_GREP 1
+#else
+#define OPENOS_HAS_GREP 0
+#endif
 #if __has_include("embed_mkdir.h")
 #include "embed_mkdir.h"  /* mkdir user command */
 #define OPENOS_HAS_MKDIR 1
@@ -539,6 +545,17 @@ void kernel_main(void) {
         serial_write("[OK] Installed /bin/echo user ELF\n");
     } else {
         serial_write("[WARN] Failed to install /bin/echo\n");
+    }
+#endif
+
+#if OPENOS_HAS_GREP
+    fd = vfs_open("/bin/grep", O_CREAT | O_RDWR, 0755);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)grep_elf, grep_elf_size);
+        vfs_close(fd);
+        serial_write("[OK] Installed /bin/grep user ELF\n");
+    } else {
+        serial_write("[WARN] Failed to install /bin/grep\n");
     }
 #endif
 
