@@ -4,9 +4,9 @@
 >
 > 当前状态：openos 已具备 32 位 x86 原型内核能力，能够启动、显示、输入、调度、运行基础用户程序，并具备基础 syscall、VFS、ramfs/tmpfs、shell、GUI Terminal 等模块。以下清单记录后续仍需开发或完善的功能。
 >
-> 最近完成：`9f584f2 fix(proc): reap orphaned child processes` 已完成子进程资源回收、孤儿进程 reparent 到 init，并新增 `/bin/orphan` 回归覆盖；`d2a2da0 fix(build): increase boot kernel load limit` 已将 bootloader 内核加载上限提升到 1024 扇区并修复 `NULL` 重定义警告；当前已搭建 PID1 init/reaper 内核线程，负责启动桌面 / shell fallback 并循环回收孤儿僵尸。
+> 最近完成：`9f584f2 fix(proc): reap orphaned child processes` 已完成子进程资源回收、孤儿进程 reparent 到 init，并新增 `/bin/orphan` 回归覆盖；`d2a2da0 fix(build): increase boot kernel load limit` 已将 bootloader 内核加载上限提升到 1024 扇区并修复 `NULL` 重定义警告；当前已搭建 PID1 init/reaper 内核线程，并已支持 shell 直接执行 `/bin/app arg1 arg2` 带参数用户程序。
 >
-> 当前推荐下一步：继续 P0，优先补齐 shell 命令参数解析和基础文件系统用户命令；随后推进 `envp` 环境变量传递。
+> 当前推荐下一步：继续 P0，优先补齐基础文件系统用户命令；随后推进 `envp` 环境变量传递。
 
 ---
 
@@ -66,7 +66,7 @@
 - [√] `spawn(path, argv)` 支持参数（新增 `/bin/argtest` 回归，提交：本提交）
 - [√] `exec(path, argv)` 支持参数（提交：本提交）
 - [√] 用户态入口支持 `main(argc, argv)` / `_start(argc, argv)` 参数栈（提交：本提交）
-- [ ] shell 支持执行 `/bin/app arg1 arg2`
+- [√] shell 支持执行 `/bin/app arg1 arg2`（提交：本提交）
 - [ ] 支持环境变量 `envp`
 
 ### 3. 文件系统基础接口

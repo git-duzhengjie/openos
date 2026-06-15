@@ -30,6 +30,7 @@ extern int spawn_user_process(const char *path, char *const argv[]);
 #endif
 
 static void make_path(const char *arg, char *out);
+static int shell_spawn_user_program(const char *path, char *argv[], int argc);
 static void shell_complete_command(void);
 static void shell_history_prev(void);
 static void shell_history_next(void);
@@ -796,6 +797,45 @@ static void make_path(const char *arg, char *out)
             out[ci] = arg[i];
         out[ci] = '\0';
     }
+}
+
+static const char *shell_basename(const char *path)
+{
+    const char *base = path;
+
+    if (!path)
+        return "";
+    for (int i = 0; path[i]; i++)
+    {
+        if (path[i] == '/')
+            base = &path[i + 1];
+    }
+    return base;
+}
+
+static int shell_spawn_user_program(const char *path, char *argv[], int argc)
+{
+    char full[MAX_PATH];
+    char *child_argv[MAX_ARGS + 1];
+    const char *arg0;
+
+    if (!path || !path[0])
+        return -1;
+
+    make_path(path, full);
+    arg0 = shell_basename(full);
+    child_argv[0] = (char *)(arg0 && arg0[0] ? arg0 : path);
+
+    int child_argc = 1;
+    for (int i = 1; i < argc && child_argc < MAX_ARGS; i++)
+        child_argv[child_argc++] = argv[i];
+    child_argv[child_argc] = NULL;
+
+    serial_write("[EXEC] spawning ");
+    serial_write(full);
+    serial_write("\n");
+
+    return spawn_user_process(full, child_argv);
 }
 
 /* ---- 内置命令 ---- */
@@ -1909,13 +1949,10 @@ void shell_run(void)
                 }
                 else if (shell_cmd_equals(cmd, "exec"))
                 {
-                    /* 执行 ELF 程序 */
+                    /* 执行 ELF 程序，支持参数：exec /bin/app arg1 arg2 */
                     if (argc > 1)
                     {
-                        serial_write("[EXEC] spawning ");
-                        serial_write(argv[1]);
-                        serial_write("\n");
-                        int ret = spawn_user_process(argv[1], NULL);
+                        int ret = shell_spawn_user_program(argv[1], &argv[1], argc - 1);
                         if (ret < 0)
                         {
                             print("exec: failed to spawn ");
@@ -1934,8 +1971,16 @@ void shell_run(void)
                 }
                 else
                 {
-                    print(cmd);
-                    print(": command not found\n");
+                    int ret = shell_spawn_user_program(cmd, argv, argc);
+                    if (ret < 0)
+                    {
+                        print(cmd);
+                        print(": command not found\n");
+                    }
+                    else
+                    {
+                        print("exec: spawned\n");
+                    }
                 }
             }
 
