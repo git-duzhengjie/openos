@@ -92,7 +92,7 @@
   - [√] 新增 `pipe` syscall 与 VFS 匿名管道读写端
   - [√] 新增 close-on-exec 标志，spawn/exec 继承 fd 时跳过 `FD_CLOEXEC`，shell 管道端点默认标记以减少 fd 泄漏
   - [√] shell 内置命令错误输出 fd 化，支持通过 `2>` / `2>>` 重定向内置错误信息
-- [ ] 可选：将现有 shell 内置基础命令拆分为独立 `/bin/*` 用户态程序
+- [√] 可选：将现有 shell 内置基础命令拆分为独立 `/bin/*` 用户态程序
   - [√] `/bin/ls`
   - [√] `/bin/cat`
   - [√] `/bin/pwd`
