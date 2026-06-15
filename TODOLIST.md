@@ -3,6 +3,30 @@
 > 更新时间：2026-06-15
 >
 > 当前状态：openos 已具备 32 位 x86 原型内核能力，能够启动、显示、输入、调度、运行基础用户程序，并具备基础 syscall、VFS、ramfs/tmpfs、shell、GUI Terminal 等模块。以下清单记录后续仍需开发或完善的功能。
+>
+> 最近完成：`daca8f2 fix(proc): improve waitpid status semantics` 已完成 `waitpid` 错误语义、`waitpid(-1)`、exit status 编码与 `/bin/waittest` 回归覆盖。
+>
+> 下一步建议：继续 P0，优先做“子进程资源回收 / orphan reparent 到 init”，再进入 `spawn/exec argv` 和基础文件系统用户命令。
+
+---
+
+## 已完成基线
+
+- [√] BIOS / x86 32 位启动
+- [√] GDT / IDT / 中断 / `int 0x80` 系统调用
+- [√] 物理内存管理 PMM / 基础分页 VMM
+- [√] 简单堆分配
+- [√] 进程 / 线程结构、基础调度器
+- [√] TSS 内核栈切换
+- [√] 用户态切换、ELF 用户程序加载
+- [√] VFS / ramfs / tmpfs 基础能力
+- [√] RAM disk / 内置用户程序嵌入
+- [√] Shell、VGA / GUI Terminal、基础输入
+- [√] 基础网络栈雏形（ARP / IPv4 / ICMP / UDP / TCP）
+- [√] `/bin/hello`、`/bin/fault`、`/bin/waittest` 基础用户程序
+- [√] 调度器 GPF 修复
+- [√] Shell 历史命令重绘修复
+- [√] `waitpid` 错误语义、`waitpid(-1)`、exit status 编码与回归测试（提交：`daca8f2`）
 
 ---
 
@@ -10,20 +34,20 @@
 
 ### 1. 进程与 waitpid/spawn 语义
 
-- [x] 完善 `waitpid` 错误返回语义
-  - [x] `waitpid(不存在的 pid)`
-  - [x] `waitpid(非子进程 pid)`
-  - [x] `waitpid(已被回收的 pid)`
-  - [x] `waitpid(options 非法)`
-- [x] 支持 `waitpid(-1, &status, options)` 等待任意子进程
-- [x] 支持 exit status 回传
-- [x] 添加 `WIFEXITED` / `WEXITSTATUS` 等状态解析宏
-- [x] 扩展 `/bin/waittest` 回归测试
-  - [x] 正常子进程退出码
-  - [x] `WNOHANG`
-  - [x] 非法 options
-  - [x] 重复 wait
-  - [x] pid = -1
+- [√] 完善 `waitpid` 错误返回语义（提交：`daca8f2`）
+  - [√] `waitpid(不存在的 pid)`
+  - [√] `waitpid(非子进程 pid)`
+  - [√] `waitpid(已被回收的 pid)`
+  - [√] `waitpid(options 非法)`
+- [√] 支持 `waitpid(-1, &status, options)` 等待任意子进程（提交：`daca8f2`）
+- [√] 支持 exit status 回传（提交：`daca8f2`）
+- [√] 添加 `WIFEXITED` / `WEXITSTATUS` 等状态解析宏（提交：`daca8f2`）
+- [√] 扩展 `/bin/waittest` 回归测试（提交：`daca8f2`）
+  - [√] 正常子进程退出码
+  - [√] `WNOHANG`
+  - [√] 非法 options
+  - [√] 重复 wait
+  - [√] pid = -1
 - [ ] 完善子进程资源回收
 - [ ] 处理孤儿进程 reparent 到 init
 
@@ -351,12 +375,18 @@
 
 ### 路线 A：继续完善当前 i386 稳定基线
 
-```text
-1. waitpid 错误返回语义
-2. waitpid(-1, &status, options)
-3. exit status 标准编码
-4. 扩展 /bin/waittest 回归测试
-```
+已完成第一阶段：
+
+- [√] waitpid 错误返回语义（提交：`daca8f2`）
+- [√] waitpid(-1, &status, options)（提交：`daca8f2`）
+- [√] exit status 标准编码（提交：`daca8f2`）
+- [√] 扩展 /bin/waittest 回归测试（提交：`daca8f2`）
+
+下一阶段建议：
+
+- [ ] 完善子进程资源回收
+- [ ] 处理孤儿进程 reparent 到 init
+- [ ] 支持 spawn/exec argv
 
 原因：这些任务集中在进程语义和测试程序，风险较低，收益较高，并且不会马上触碰调度器和地址空间隔离等高风险模块。
 
