@@ -723,6 +723,40 @@ int vfs_dup2(int oldfd, int newfd) {
     return newfd;
 }
 
+int vfs_clone_fds_for_process(void *dst_proc, void *src_proc) {
+    if (!dst_proc || !src_proc)
+        return -1;
+
+    process_t *dst = (process_t *)dst_proc;
+    process_t *src = (process_t *)src_proc;
+
+    for (int i = 0; i < MAX_FD; i++) {
+        file_t *file = (file_t *)src->fds[i];
+        if (!file)
+            continue;
+        vfs_file_get(file);
+        if (dst->fds[i])
+            vfs_file_put((file_t *)dst->fds[i]);
+        dst->fds[i] = file;
+    }
+
+    return 0;
+}
+
+int vfs_close_fd_for_process(void *proc, int fd) {
+    if (!proc || fd < 0 || fd >= MAX_FD)
+        return -1;
+
+    process_t *p = (process_t *)proc;
+    file_t *file = (file_t *)p->fds[fd];
+    if (!file)
+        return -1;
+
+    p->fds[fd] = NULL;
+    vfs_file_put(file);
+    return 0;
+}
+
 int vfs_pipe(int pipefd[2]) {
     if (!pipefd) return -1;
 

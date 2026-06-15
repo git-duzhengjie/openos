@@ -25,12 +25,14 @@
 #include "ext4.h"
 #include "include/io.h"
 extern int spawn_user_process(const char *path, char *const argv[]);
+extern int sys_waitpid(int pid, int *status, int options);
 #ifndef NULL
 #define NULL ((void *)0)
 #endif
 
 static void make_path(const char *arg, char *out);
 static int shell_spawn_user_program(const char *path, char *argv[], int argc);
+static int shell_run_single_pipe(char *cmdline);
 static void shell_complete_command(void);
 static void shell_history_prev(void);
 static void shell_history_next(void);
@@ -813,6 +815,137 @@ static const char *shell_basename(const char *path)
     return base;
 }
 
+static char *shell_trim(char *s)
+{
+    while (*s == ' ' || *s == '\t')
+        s++;
+
+    int len = strlen(s);
+    while (len > 0 && (s[len - 1] == ' ' || s[len - 1] == '\t'))
+        s[--len] = '\0';
+
+    return s;
+}
+
+static int shell_execute_user_argv(int argc, char *argv[])
+{
+    if (argc <= 0)
+        return -1;
+
+    char path[MAX_PATH];
+    make_path(argv[0], path);
+    return shell_spawn_user_program(path, argv, argc);
+}
+
+static void shell_restore_fd(int target_fd, int saved_fd)
+{
+    if (saved_fd >= 0) {
+        vfs_dup2(saved_fd, target_fd);
+        vfs_close(saved_fd);
+    } else {
+        vfs_close(target_fd);
+    }
+}
+
+static void shell_close_child_fd(int pid, int fd)
+{
+    process_t *child = proc_find((uint32_t)pid);
+    if (child)
+        vfs_close_fd_for_process(child, fd);
+}
+
+static int shell_run_single_pipe(char *cmdline)
+{
+    char *pipe_pos = NULL;
+    int pipe_count = 0;
+
+    for (int i = 0; cmdline[i]; i++) {
+        if (cmdline[i] == '|') {
+            pipe_pos = &cmdline[i];
+            pipe_count++;
+        }
+    }
+
+    if (pipe_count == 0)
+        return 0;
+
+    if (pipe_count > 1) {
+        print("pipe: only one pipe is supported now\n");
+        return 1;
+    }
+
+    *pipe_pos = '\0';
+    char *left = shell_trim(cmdline);
+    char *right = shell_trim(pipe_pos + 1);
+    if (!left[0] || !right[0]) {
+        print("pipe: missing command\n");
+        return 1;
+    }
+
+    char *left_argv[MAX_ARGS];
+    char *right_argv[MAX_ARGS];
+    int left_argc = split_args(left, left_argv, MAX_ARGS);
+    int right_argc = split_args(right, right_argv, MAX_ARGS);
+    if (left_argc <= 0 || right_argc <= 0) {
+        print("pipe: missing command\n");
+        return 1;
+    }
+
+    int pipefd[2];
+    if (vfs_pipe(pipefd) < 0) {
+        print("pipe: create failed\n");
+        return 1;
+    }
+
+    int saved_stdin = vfs_dup(0);
+    int saved_stdout = vfs_dup(1);
+    int left_pid = -1;
+    int right_pid = -1;
+
+    if (vfs_dup2(pipefd[1], 1) < 0) {
+        print("pipe: dup stdout failed\n");
+        goto done;
+    }
+    left_pid = shell_execute_user_argv(left_argc, left_argv);
+    if (left_pid >= 0)
+        shell_close_child_fd(left_pid, pipefd[0]);
+
+    shell_restore_fd(1, saved_stdout);
+    saved_stdout = -1;
+
+    if (vfs_dup2(pipefd[0], 0) < 0) {
+        print("pipe: dup stdin failed\n");
+        goto done;
+    }
+    right_pid = shell_execute_user_argv(right_argc, right_argv);
+    if (right_pid >= 0)
+        shell_close_child_fd(right_pid, pipefd[1]);
+
+    shell_restore_fd(0, saved_stdin);
+    saved_stdin = -1;
+
+    vfs_close(pipefd[0]);
+    vfs_close(pipefd[1]);
+
+    if (left_pid >= 0)
+        sys_waitpid(left_pid, NULL, 0);
+    if (right_pid >= 0)
+        sys_waitpid(right_pid, NULL, 0);
+
+    return 1;
+
+done:
+    shell_restore_fd(0, saved_stdin);
+    shell_restore_fd(1, saved_stdout);
+    vfs_close(pipefd[0]);
+    vfs_close(pipefd[1]);
+    if (left_pid >= 0)
+        sys_waitpid(left_pid, NULL, 0);
+    if (right_pid >= 0)
+        sys_waitpid(right_pid, NULL, 0);
+    return 1;
+}
+
 static int shell_spawn_user_program(const char *path, char *argv[], int argc)
 {
     char full[MAX_PATH];
@@ -1293,6 +1426,15 @@ void shell_run(void)
             print("\n");
             shell_save_history();
             shell_history_save_file();
+
+            if (shell_run_single_pipe(cmd_buf))
+            {
+                cmd_pos = 0;
+                cmd_cursor = 0;
+                cmd_buf[0] = '\0';
+                shell_prompt();
+                continue;
+            }
 
             /* 解析命令 */
             char *argv[MAX_ARGS];

@@ -202,5 +202,7 @@ int    vfs_getcwd(char *buf, uint32_t size);      /* 获取当前工作目录 */
 int    vfs_dup(int oldfd);
 int    vfs_dup2(int oldfd, int newfd);
 int    vfs_pipe(int pipefd[2]);
+int    vfs_clone_fds_for_process(void *dst_proc, void *src_proc);
+int    vfs_close_fd_for_process(void *proc, int fd);
 
 #endif /* KERNEL_FS_VFS_H */

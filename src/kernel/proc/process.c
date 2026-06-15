@@ -579,6 +579,10 @@ int spawn_user_process_env(const char *path, char *const argv[], char *const env
     child->ppid = cur ? cur->pid : 0;
     child->cr3 = vmm_get_cr3();
 
+    process_t *parent = cur ? proc_find(cur->pid) : NULL;
+    if (parent)
+        vfs_clone_fds_for_process(child, parent);
+
     int i = 0;
     for (; i < 31 && path[i]; i++)
         child->name[i] = path[i];
