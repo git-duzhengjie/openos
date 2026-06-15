@@ -1347,9 +1347,8 @@ int vfs_chown(const char *path, uint32_t uid, uint32_t gid) {
     if (!d || !d->inode) return -1;
     if (d->inode->iops && d->inode->iops->chown)
         return d->inode->iops->chown(d->inode, uid, gid);
-    /* 当前 inode 尚无 uid/gid 字段，只验证路径存在并返回成功。 */
-    (void)uid;
-    (void)gid;
+    d->inode->uid = uid;
+    d->inode->gid = gid;
     return 0;
 }
 

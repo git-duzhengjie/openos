@@ -134,6 +134,8 @@ typedef struct openos_stat {
     openos_uint32_t size;
     openos_uint32_t nlinks;
     openos_uint32_t fs_type;
+    openos_uint32_t uid;
+    openos_uint32_t gid;
 } openos_stat_t;
 
 typedef struct openos_dirent {

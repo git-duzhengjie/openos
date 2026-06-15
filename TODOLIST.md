@@ -157,7 +157,7 @@
 - [√] `vfs_readlink`（已接入 `SYS_READLINK` / `openos_readlink`）
 - [√] hard link（已新增 `/bin/ln OLD NEW`）
 - [√] symbolic link（已支持 `/bin/ln -s OLD NEW`）
-- [ ] inode uid / gid 字段
+- [√] inode uid / gid 字段（已加入 `inode_t`，`vfs_chown` 可写入元数据，`openos_stat_t` 可读取）
 - [ ] chmod / chown 权限模型
 - [ ] access 权限检查
 - [ ] per-process cwd 更严格集成

@@ -99,6 +99,8 @@ typedef struct inode {
     uint32_t nlinks;        /* 硬链接数 */
     uint32_t ref_count;     /* 引用计数 */
     uint32_t fs_type;       /* 所属文件系统类型 */
+    uint32_t uid;           /* 所有者用户 ID */
+    uint32_t gid;           /* 所有者组 ID */
     void     *fs_data;      /* 文件系统私有数据 */
     inode_ops_t *iops;      /* inode 操作 */
     file_ops_t *ops;        /* 文件操作 */
