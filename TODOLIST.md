@@ -4,9 +4,9 @@
 >
 > 当前状态：openos 已具备 32 位 x86 原型内核能力，能够启动、显示、输入、调度、运行基础用户程序，并具备基础 syscall、VFS、ramfs/tmpfs、shell、GUI Terminal 等模块。以下清单记录后续仍需开发或完善的功能。
 >
-> 最近完成：已补齐 shell 后台任务、`Ctrl+C` / `Ctrl+D`、`jobs` / `fg`、Tab 命令补全、脚本执行；本轮完成用户态运行库 libc 子集，并新增 `/bin/libctest` 回归程序；已补充 `/bin/touch`、`/bin/cp`、`/bin/mv`、`/bin/tee`、`/bin/head`、`/bin/tail`、`/bin/sort`、`/bin/env` 常用文件工具；已完善 `grep -n/-v/-c` 与 `wc -l/-w/-c` 选项。
+> 最近完成：已补齐 shell 后台任务、`Ctrl+C` / `Ctrl+D`、`jobs` / `fg`、Tab 命令补全、脚本执行；本轮完成用户态运行库 libc 子集，并新增 `/bin/libctest` 回归程序；已补充 `/bin/touch`、`/bin/cp`、`/bin/mv`、`/bin/tee`、`/bin/head`、`/bin/tail`、`/bin/sort`、`/bin/env` 常用文件工具；已完善 `grep -n/-v/-c` 与 `wc -l/-w/-c` 选项；已支持 shell 环境变量 `$VAR` / `${VAR}` 参数展开。
 >
-> 当前推荐下一步：继续增强 shell 和用户态工具；本轮已完善 `grep -n/-v/-c` 与 `wc -l/-w/-c`，建议后续补充环境变量 `$VAR` 参数展开。
+> 当前推荐下一步：继续增强 shell 和用户态工具；本轮已完成环境变量 `$VAR` / `${VAR}` 参数展开，建议后续继续补齐更多 shell 交互能力或用户态工具。
 
 ---
 
@@ -255,6 +255,7 @@
   - [√] 追加 `>>` / `2>>`
   - [√] shell 内置命令输出支持 fd 重定向
 - [√] 环境变量（shell 内置 `env` / `export` / `unset`，外部程序继承 envp）
+- [√] 环境变量 `$VAR` / `${VAR}` 参数展开（支持内置命令、外部命令、pipeline 与重定向参数）
 - [√] `PATH` 查找（未带 `/` 的外部命令自动尝试 `/bin/<cmd>`）
 - [√] 后台任务 `&`（行尾 `&` 后不等待，支持普通外部命令、`exec` 和 pipeline 后台执行）
 - [√] 后台任务状态管理 `jobs` / `fg`（支持查看后台 job、按 `%N` 或默认最近 job 拉回前台）

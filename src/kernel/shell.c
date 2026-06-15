@@ -32,6 +32,7 @@ extern void sched_yield(void);
 #define NULL ((void *)0)
 #endif
 
+
 static void make_path(const char *arg, char *out);
 static int shell_spawn_user_program(const char *path, char *argv[], int argc);
 static int shell_run_pipeline(char *cmdline, int background);
@@ -420,6 +421,125 @@ static char *const *shell_build_envp(void)
     }
     shell_envp[pos] = NULL;
     return shell_envp;
+}
+
+static int shell_env_name_char(int c, int first)
+{
+    if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '_')
+        return 1;
+    if (!first && c >= '0' && c <= '9')
+        return 1;
+    return 0;
+}
+
+static const char *shell_getenv_value(const char *name)
+{
+    int idx;
+
+    if (!name || !name[0])
+        return "";
+    shell_build_envp();
+    idx = shell_env_find(name);
+    if (idx < 0 || !shell_env[idx].used)
+        return "";
+    return shell_env[idx].value;
+}
+
+static int shell_expand_one_arg(const char *src, char *dst, int dst_size)
+{
+    int out = 0;
+
+    if (!src || !dst || dst_size <= 0)
+        return -1;
+
+    for (int i = 0; src[i]; i++) {
+        if (src[i] != '$') {
+            if (out + 1 >= dst_size)
+                return -1;
+            dst[out++] = src[i];
+            continue;
+        }
+
+        if (src[i + 1] == '$') {
+            if (out + 1 >= dst_size)
+                return -1;
+            dst[out++] = '$';
+            i++;
+            continue;
+        }
+
+        if (src[i + 1] == '{') {
+            char name[SHELL_ENV_NAME_MAX];
+            int ni = 0;
+            int j = i + 2;
+
+            while (src[j] && src[j] != '}') {
+                if (ni + 1 >= SHELL_ENV_NAME_MAX)
+                    return -1;
+                name[ni++] = src[j++];
+            }
+            if (src[j] != '}') {
+                if (out + 1 >= dst_size)
+                    return -1;
+                dst[out++] = '$';
+                continue;
+            }
+            name[ni] = '\0';
+            if (!shell_env_name_valid(name))
+                return -1;
+
+            const char *value = shell_getenv_value(name);
+            for (int k = 0; value[k]; k++) {
+                if (out + 1 >= dst_size)
+                    return -1;
+                dst[out++] = value[k];
+            }
+            i = j;
+            continue;
+        }
+
+        if (!shell_env_name_char((unsigned char)src[i + 1], 1)) {
+            if (out + 1 >= dst_size)
+                return -1;
+            dst[out++] = '$';
+            continue;
+        }
+
+        char name[SHELL_ENV_NAME_MAX];
+        int ni = 0;
+        int j = i + 1;
+        while (src[j] && shell_env_name_char((unsigned char)src[j], ni == 0)) {
+            if (ni + 1 >= SHELL_ENV_NAME_MAX)
+                return -1;
+            name[ni++] = src[j++];
+        }
+        name[ni] = '\0';
+
+        const char *value = shell_getenv_value(name);
+        for (int k = 0; value[k]; k++) {
+            if (out + 1 >= dst_size)
+                return -1;
+            dst[out++] = value[k];
+        }
+        i = j - 1;
+    }
+
+    dst[out] = '\0';
+    return 0;
+}
+
+static int shell_expand_argv(char *argv[], int argc, char storage[][CMD_BUF_SIZE])
+{
+    for (int i = 0; i < argc; i++) {
+        if (!argv[i])
+            continue;
+        if (shell_expand_one_arg(argv[i], storage[i], CMD_BUF_SIZE) < 0) {
+            print_err("shell: variable expansion failed\n");
+            return -1;
+        }
+        argv[i] = storage[i];
+    }
+    return 0;
 }
 
 static void cmd_env(void)
@@ -1846,6 +1966,7 @@ static int shell_run_pipeline(char *cmdline, int background)
 
     char *segments[SHELL_MAX_PIPE_CMDS];
     char *stage_argv[SHELL_MAX_PIPE_CMDS][MAX_ARGS];
+    char stage_arg_storage[SHELL_MAX_PIPE_CMDS][MAX_ARGS][CMD_BUF_SIZE];
     int stage_argc[SHELL_MAX_PIPE_CMDS];
     shell_redirect_t stage_redir[SHELL_MAX_PIPE_CMDS];
     int pids[SHELL_MAX_PIPE_CMDS];
@@ -1900,6 +2021,8 @@ static int shell_run_pipeline(char *cmdline, int background)
 
     for (int i = 0; i < segment_count; i++) {
         stage_argc[i] = split_args(segments[i], stage_argv[i], MAX_ARGS);
+        if (stage_argc[i] > 0 && shell_expand_argv(stage_argv[i], stage_argc[i], stage_arg_storage[i]) < 0)
+            return 1;
         if (stage_argc[i] <= 0) {
             print_err("pipe: missing command\n");
             return 1;
@@ -2579,7 +2702,9 @@ void shell_run(void)
 
             /* 解析命令 */
             char *argv[MAX_ARGS];
+            char arg_storage[MAX_ARGS][CMD_BUF_SIZE];
             int argc = split_args(cmd_buf, argv, MAX_ARGS);
+            int expand_failed = (argc > 0 && shell_expand_argv(argv, argc, arg_storage) < 0);
             shell_redirect_t redir;
             int saved_stdin = SHELL_FD_UNCHANGED;
             int saved_stdout = SHELL_FD_UNCHANGED;
@@ -2587,6 +2712,11 @@ void shell_run(void)
             int stdout_redirected = 0;
             int stderr_redirected = 0;
             int redirect_failed = 0;
+
+            if (expand_failed) {
+                redirect_failed = 1;
+                argc = 0;
+            }
 
             if (argc > 0) {
                 argc = shell_parse_redirects(argv, argc, &redir);
