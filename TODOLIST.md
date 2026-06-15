@@ -4,9 +4,9 @@
 >
 > 当前状态：openos 已具备 32 位 x86 原型内核能力，能够启动、显示、输入、调度、运行基础用户程序，并具备基础 syscall、VFS、ramfs/tmpfs、shell、GUI Terminal 等模块。以下清单记录后续仍需开发或完善的功能。
 >
-> 最近完成：已补齐 shell 后台任务、`Ctrl+C` / `Ctrl+D`、`jobs` / `fg`、Tab 命令补全、脚本执行；本轮完成用户态运行库 libc 子集，并新增 `/bin/libctest` 回归程序；已补充 `/bin/touch`、`/bin/cp`、`/bin/mv`、`/bin/tee`、`/bin/head`、`/bin/tail`、`/bin/sort`、`/bin/env` 常用文件工具。
+> 最近完成：已补齐 shell 后台任务、`Ctrl+C` / `Ctrl+D`、`jobs` / `fg`、Tab 命令补全、脚本执行；本轮完成用户态运行库 libc 子集，并新增 `/bin/libctest` 回归程序；已补充 `/bin/touch`、`/bin/cp`、`/bin/mv`、`/bin/tee`、`/bin/head`、`/bin/tail`、`/bin/sort`、`/bin/env` 常用文件工具；已完善 `grep -n/-v/-c` 与 `wc -l/-w/-c` 选项。
 >
-> 当前推荐下一步：继续增强用户态常用工具；本轮新增 `/bin/env`，建议后续完善 `grep/wc` 选项。
+> 当前推荐下一步：继续增强 shell 和用户态工具；本轮已完善 `grep -n/-v/-c` 与 `wc -l/-w/-c`，建议后续补充环境变量 `$VAR` 参数展开。
 
 ---
 

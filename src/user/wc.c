@@ -12,9 +12,21 @@ typedef struct wc_counts {
     int bytes;
 } wc_counts_t;
 
+typedef struct wc_options {
+    int show_lines;
+    int show_words;
+    int show_bytes;
+    int any;
+} wc_options_t;
+
 static int wc_is_space(char ch)
 {
     return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == '\v' || ch == '\f';
+}
+
+static void wc_usage(void)
+{
+    openos_write_fd(STDERR_FILENO, "usage: wc [-l] [-w] [-c] [file...]\n", 37);
 }
 
 static void wc_write_int(int value)
@@ -42,15 +54,28 @@ static void wc_write_int(int value)
         openos_write_fd(STDOUT_FILENO, &buf[j], 1);
 }
 
-static void wc_print_counts(const wc_counts_t *counts, const char *label)
+static void wc_print_one_count(int *printed, int value)
 {
-    wc_write_int(counts->lines);
-    openos_write_fd(STDOUT_FILENO, " ", 1);
-    wc_write_int(counts->words);
-    openos_write_fd(STDOUT_FILENO, " ", 1);
-    wc_write_int(counts->bytes);
-    if (label) {
+    if (*printed)
         openos_write_fd(STDOUT_FILENO, " ", 1);
+    wc_write_int(value);
+    *printed = 1;
+}
+
+static void wc_print_counts(const wc_counts_t *counts, const char *label, const wc_options_t *opts)
+{
+    int printed = 0;
+
+    if (opts->show_lines)
+        wc_print_one_count(&printed, counts->lines);
+    if (opts->show_words)
+        wc_print_one_count(&printed, counts->words);
+    if (opts->show_bytes)
+        wc_print_one_count(&printed, counts->bytes);
+
+    if (label) {
+        if (printed)
+            openos_write_fd(STDOUT_FILENO, " ", 1);
         openos_write_fd(STDOUT_FILENO, label, openos_strlen(label));
     }
     openos_write_fd(STDOUT_FILENO, "\n", 1);
@@ -118,19 +143,61 @@ static int wc_file(const char *path, wc_counts_t *counts)
     return wc_fd(fd, path, 1, counts);
 }
 
+static int wc_parse_options(int argc, char **argv, wc_options_t *opts, int *file_start)
+{
+    int i = 1;
+
+    opts->show_lines = 0;
+    opts->show_words = 0;
+    opts->show_bytes = 0;
+    opts->any = 0;
+
+    while (i < argc) {
+        if (openos_strcmp(argv[i], "--help") == 0) {
+            wc_usage();
+            openos_exit(0);
+        } else if (openos_strcmp(argv[i], "-l") == 0) {
+            opts->show_lines = 1;
+            opts->any = 1;
+        } else if (openos_strcmp(argv[i], "-w") == 0) {
+            opts->show_words = 1;
+            opts->any = 1;
+        } else if (openos_strcmp(argv[i], "-c") == 0) {
+            opts->show_bytes = 1;
+            opts->any = 1;
+        } else {
+            break;
+        }
+        i++;
+    }
+
+    if (!opts->any) {
+        opts->show_lines = 1;
+        opts->show_words = 1;
+        opts->show_bytes = 1;
+    }
+
+    *file_start = i;
+    return 0;
+}
+
 void _start(int argc, char **argv, char **envp)
 {
     wc_counts_t counts;
     wc_counts_t total;
+    wc_options_t opts;
+    int file_start;
     int i;
     int failed = 0;
 
     (void)envp;
 
-    if (argc <= 1) {
+    wc_parse_options(argc, argv, &opts, &file_start);
+
+    if (argc <= file_start) {
         if (wc_fd(STDIN_FILENO, "stdin", 0, &counts) < 0)
             openos_exit(1);
-        wc_print_counts(&counts, 0);
+        wc_print_counts(&counts, 0, &opts);
         openos_exit(0);
     }
 
@@ -138,20 +205,20 @@ void _start(int argc, char **argv, char **envp)
     total.words = 0;
     total.bytes = 0;
 
-    for (i = 1; i < argc; i++) {
+    for (i = file_start; i < argc; i++) {
         if (wc_file(argv[i], &counts) < 0) {
             failed = 1;
             continue;
         }
 
-        wc_print_counts(&counts, argv[i]);
+        wc_print_counts(&counts, argv[i], &opts);
         total.lines += counts.lines;
         total.words += counts.words;
         total.bytes += counts.bytes;
     }
 
-    if (argc > 2)
-        wc_print_counts(&total, "total");
+    if (argc - file_start > 1)
+        wc_print_counts(&total, "total", &opts);
 
     openos_exit(failed ? 1 : 0);
 }
