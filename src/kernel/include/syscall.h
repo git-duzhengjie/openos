@@ -30,6 +30,7 @@
 #define SYS_MKDIR       230
 #define SYS_UNLINK      231
 #define SYS_RMDIR       232
+#define SYS_SPAWN       233
 
 /* 调用号通过 EAX 传递，参数通过 EBX/ECX/EDX/ESI/EDI */
 uint32_t syscall_handler(uint32_t syscall_num,

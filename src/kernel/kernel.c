@@ -31,6 +31,12 @@
 #include "pmm.h"
 #include "embed_hello.h"  /* 嵌入的用户程�?*/
 #include "embed_fault.h"  /* 用户异常隔离测试程序 */
+#if __has_include("embed_waittest.h")
+#include "embed_waittest.h"  /* spawn/waitpid 回归测试程序 */
+#define OPENOS_HAS_WAITTEST 1
+#else
+#define OPENOS_HAS_WAITTEST 0
+#endif
 
 /* 外部符号 */
 extern void gdt_init(void);
@@ -281,6 +287,17 @@ void kernel_main(void) {
     } else {
         serial_write("[WARN] Failed to install /bin/fault\n");
     }
+
+#if OPENOS_HAS_WAITTEST
+    fd = vfs_open("/bin/waittest", O_CREAT | O_RDWR, 0755);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)waittest_elf, waittest_elf_size);
+        vfs_close(fd);
+        serial_write("[OK] Installed /bin/waittest user ELF\n");
+    } else {
+        serial_write("[WARN] Failed to install /bin/waittest\n");
+    }
+#endif
 
     /* 初始化调度器 */
     sched_init();

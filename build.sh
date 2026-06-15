@@ -53,6 +53,15 @@ if [ -f $USR/fault.c ]; then
     echo "  Embedded: fault.elf"
 fi
 
+if [ -f $USR/waittest.c ]; then
+    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+        -fno-stack-protector -fno-builtin \
+        -c $USR/waittest.c -o $BUILD/waittest.o
+    ld -m elf_i386 -T $USR/user.ld -o $BUILD/waittest.elf $BUILD/waittest.o
+    python3 _embed_elf.py $BUILD/waittest.elf $SRC/include/embed_waittest.h waittest_elf
+    echo "  Embedded: waittest.elf"
+fi
+
 echo "[3/5] Compiling kernel C files..."
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
