@@ -163,6 +163,16 @@ if [ -f $USR/grep.c ]; then
     echo "  Embedded: grep.elf"
 fi
 
+if [ -f $USR/wc.c ]; then
+    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+        -fno-stack-protector -fno-builtin \
+        -I $SRC/include \
+        -c $USR/wc.c -o $BUILD/wc.o
+    ld -m elf_i386 -T $USR/user.ld -o $BUILD/wc.elf $BUILD/wc.o
+    python3 _embed_elf.py $BUILD/wc.elf $SRC/include/embed_wc.h wc_elf
+    echo "  Embedded: wc.elf"
+fi
+
 if [ -f $USR/mkdir.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \

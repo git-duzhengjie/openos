@@ -97,6 +97,12 @@
 #else
 #define OPENOS_HAS_GREP 0
 #endif
+#if __has_include("embed_wc.h")
+#include "embed_wc.h"  /* wc user command */
+#define OPENOS_HAS_WC 1
+#else
+#define OPENOS_HAS_WC 0
+#endif
 #if __has_include("embed_mkdir.h")
 #include "embed_mkdir.h"  /* mkdir user command */
 #define OPENOS_HAS_MKDIR 1
@@ -556,6 +562,17 @@ void kernel_main(void) {
         serial_write("[OK] Installed /bin/grep user ELF\n");
     } else {
         serial_write("[WARN] Failed to install /bin/grep\n");
+    }
+#endif
+
+#if OPENOS_HAS_WC
+    fd = vfs_open("/bin/wc", O_CREAT | O_RDWR, 0755);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)wc_elf, wc_elf_size);
+        vfs_close(fd);
+        serial_write("[OK] Installed /bin/wc user ELF\n");
+    } else {
+        serial_write("[WARN] Failed to install /bin/wc\n");
     }
 #endif
 
