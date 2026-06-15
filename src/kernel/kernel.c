@@ -97,6 +97,12 @@
 #else
 #define OPENOS_HAS_MKDIR 0
 #endif
+#if __has_include("embed_rm.h")
+#include "embed_rm.h"  /* rm user command */
+#define OPENOS_HAS_RM 1
+#else
+#define OPENOS_HAS_RM 0
+#endif
 
 
 /* 外部符号 */
@@ -538,6 +544,17 @@ void kernel_main(void) {
         serial_write("[OK] Installed /bin/mkdir user ELF\n");
     } else {
         serial_write("[WARN] Failed to install /bin/mkdir\n");
+    }
+#endif
+
+#if OPENOS_HAS_RM
+    fd = vfs_open("/bin/rm", O_CREAT | O_RDWR, 0755);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)rm_elf, rm_elf_size);
+        vfs_close(fd);
+        serial_write("[OK] Installed /bin/rm user ELF\n");
+    } else {
+        serial_write("[WARN] Failed to install /bin/rm\n");
     }
 #endif
 

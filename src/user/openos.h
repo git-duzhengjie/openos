@@ -164,6 +164,16 @@ static inline int openos_mkdir(const char *path, int mode)
     return openos_syscall3(SYS_MKDIR, (int)path, mode, 0);
 }
 
+static inline int openos_unlink(const char *path)
+{
+    return openos_syscall3(SYS_UNLINK, (int)path, 0, 0);
+}
+
+static inline int openos_rmdir(const char *path)
+{
+    return openos_syscall3(SYS_RMDIR, (int)path, 0, 0);
+}
+
 static inline int openos_spawn(const char *path, char *const argv[])
 {
     return openos_syscall3(SYS_SPAWN, (int)path, (int)argv, 0);
