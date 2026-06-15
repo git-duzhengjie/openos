@@ -6,7 +6,7 @@
 >
 > 最近完成：已补齐 shell 后台任务、`Ctrl+C` / `Ctrl+D`、`jobs` / `fg`、Tab 命令补全、脚本执行；本轮完成用户态运行库 libc 子集，并新增 `/bin/libctest` 回归程序；已补充 `/bin/touch`、`/bin/cp`、`/bin/mv`、`/bin/tee`、`/bin/head`、`/bin/tail`、`/bin/sort`、`/bin/env` 常用文件工具；已完善 `grep -n/-v/-c` 与 `wc -l/-w/-c` 选项；已支持 shell 环境变量 `$VAR` / `${VAR}` 参数展开；已新增最小 `kill` syscall 与 `/bin/kill`；已补充最小 signal pending/default terminate 机制；已新增 alarm/timer signal 与 `/bin/alarmtest`。
 >
-> 当前推荐下一步：继续增强 shell 和用户态工具；本轮已完成 alarm/timer signal，建议后续继续补齐更多用户态工具或完善信号处理器。
+> 当前推荐下一步：继续增强 shell 和用户态工具；本轮已同步作业控制基础状态，建议后续继续补齐更多用户态工具、完善信号处理器或推进 P1 内存管理。
 
 ---
 
@@ -144,7 +144,7 @@
 - [√] `kill`（最小实现：支持 SIGTERM/SIGKILL/signal 0，新增 `/bin/kill`）
 - [√] signal 机制（最小实现：pending signal 位图，SIGTERM/SIGKILL 默认终止，signal 0 存在性检查）
 - [√] alarm / timer signal（最小实现：SYS_ALARM、SIGALRM 默认终止、/bin/alarmtest）
-- [ ] 作业控制基础
+- [√] 作业控制基础（shell 已支持后台任务 `&`、`jobs`、`fg`）
 
 ---
 
