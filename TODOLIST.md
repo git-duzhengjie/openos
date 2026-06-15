@@ -4,9 +4,9 @@
 >
 > 当前状态：openos 已具备 32 位 x86 原型内核能力，能够启动、显示、输入、调度、运行基础用户程序，并具备基础 syscall、VFS、ramfs/tmpfs、shell、GUI Terminal 等模块。以下清单记录后续仍需开发或完善的功能。
 >
-> 最近完成：`9f584f2 fix(proc): reap orphaned child processes` 已完成子进程资源回收、孤儿进程 reparent 到 init，并新增 `/bin/orphan` 回归覆盖；`d2a2da0 fix(build): increase boot kernel load limit` 已将 bootloader 内核加载上限提升到 1024 扇区并修复 `NULL` 重定义警告；当前已搭建 PID1 init/reaper 内核线程，已支持 shell 直接执行 `/bin/app arg1 arg2` 带参数用户程序，已补齐 `envp` 环境变量传递，并已暴露 `stat/getcwd/chdir/readdir/fstat/lstat` 文件系统 syscall，同时新增最小用户态公共 runtime 头文件 `src/user/openos.h`，且已新增独立 `/bin/pwd` 用户态命令。
+> 最近完成：`9f584f2 fix(proc): reap orphaned child processes` 已完成子进程资源回收、孤儿进程 reparent 到 init，并新增 `/bin/orphan` 回归覆盖；`d2a2da0 fix(build): increase boot kernel load limit` 已将 bootloader 内核加载上限提升到 1024 扇区并修复 `NULL` 重定义警告；当前已搭建 PID1 init/reaper 内核线程，已支持 shell 直接执行 `/bin/app arg1 arg2` 带参数用户程序，已补齐 `envp` 环境变量传递，并已暴露 `stat/getcwd/chdir/readdir/fstat/lstat` 文件系统 syscall，同时新增最小用户态公共 runtime 头文件 `src/user/openos.h`，且已新增独立 `/bin/pwd`、`/bin/ls` 用户态命令。
 >
-> 当前推荐下一步：继续 P0，已新增独立 `/bin/pwd` 用户态命令，可继续拆分 `/bin/ls` 或完善文件 IO 语义（dup/pipe/标准输入输出）。
+> 当前推荐下一步：继续 P0，已新增独立 `/bin/pwd`、`/bin/ls` 用户态命令，可继续拆分 `/bin/cat` 或完善文件 IO 语义（dup/pipe/标准输入输出）。
 
 ---
 
@@ -24,7 +24,7 @@
 - [√] bootloader 内核加载上限提升到 1024 扇区（提交：`d2a2da0`）
 - [√] Shell、VGA / GUI Terminal、基础输入
 - [√] 基础网络栈雏形（ARP / IPv4 / ICMP / UDP / TCP）
-- [√] `/bin/hello`、`/bin/fault`、`/bin/waittest`、`/bin/orphan`、`/bin/argtest`、`/bin/envtest`、`/bin/fstest`、`/bin/pwd` 基础用户程序
+- [√] `/bin/hello`、`/bin/fault`、`/bin/waittest`、`/bin/orphan`、`/bin/argtest`、`/bin/envtest`、`/bin/fstest`、`/bin/pwd`、`/bin/ls` 基础用户程序
 - [√] 新增最小用户态公共 runtime 头文件 `src/user/openos.h`，统一 syscall 编号、基础 wrapper、状态宏与 FS 结构体
 - [√] 调度器 GPF 修复
 - [√] Shell 历史命令重绘修复
@@ -86,7 +86,7 @@
   - [√] 进程释放时关闭残留 fd，避免 fd/file_t 泄漏
   - [√] 新增 `/bin/fstest --leak-fd-child` 回归覆盖 fd 隔离与退出自动回收
 - [ ] 可选：将现有 shell 内置基础命令拆分为独立 `/bin/*` 用户态程序
-  - [ ] `/bin/ls`
+  - [√] `/bin/ls`
   - [ ] `/bin/cat`
   - [√] `/bin/pwd`
   - [ ] `/bin/mkdir`

@@ -122,6 +122,17 @@ if [ -f $USR/pwd.c ]; then
     echo "  Embedded: pwd.elf"
 fi
 
+
+if [ -f $USR/ls.c ]; then
+    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+        -fno-stack-protector -fno-builtin \
+        -I $SRC/include \
+        -c $USR/ls.c -o $BUILD/ls.o
+    ld -m elf_i386 -T $USR/user.ld -o $BUILD/ls.elf $BUILD/ls.o
+    python3 _embed_elf.py $BUILD/ls.elf $SRC/include/embed_ls.h ls_elf
+    echo "  Embedded: ls.elf"
+fi
+
 echo "[3/5] Compiling kernel C files..."
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \

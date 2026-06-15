@@ -73,6 +73,13 @@
 #else
 #define OPENOS_HAS_PWD 0
 #endif
+#if __has_include("embed_ls.h")
+#include "embed_ls.h"  /* ls user command */
+#define OPENOS_HAS_LS 1
+#else
+#define OPENOS_HAS_LS 0
+#endif
+
 
 /* 外部符号 */
 extern void gdt_init(void);
@@ -469,6 +476,17 @@ void kernel_main(void) {
         serial_write("[OK] Installed /bin/pwd user ELF\n");
     } else {
         serial_write("[WARN] Failed to install /bin/pwd\n");
+    }
+#endif
+
+#if OPENOS_HAS_LS
+    fd = vfs_open("/bin/ls", O_CREAT | O_RDWR, 0755);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)ls_elf, ls_elf_size);
+        vfs_close(fd);
+        serial_write("[OK] Installed /bin/ls user ELF\n");
+    } else {
+        serial_write("[WARN] Failed to install /bin/ls\n");
     }
 #endif
 

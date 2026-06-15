@@ -4,55 +4,6 @@
 
 #include "openos.h"
 
-struct openos_DIR {
-    char path[OPENOS_PATH_MAX];
-    int index;
-    int open;
-    openos_dirent_t entry;
-};
-
-static struct openos_DIR *openos_opendir(const char *path)
-{
-    static struct openos_DIR dir;
-    openos_stat_t st;
-
-    if (!path)
-        return 0;
-    if (openos_syscall3(SYS_STAT, (int)path, (int)&st, 0) < 0)
-        return 0;
-    if ((st.mode & FS_DIR) != FS_DIR)
-        return 0;
-    if (openos_str_copy(dir.path, path, sizeof(dir.path)) < 0)
-        return 0;
-
-    dir.index = 0;
-    dir.open = 1;
-    return &dir;
-}
-
-static openos_dirent_t *openos_readdir(struct openos_DIR *dir)
-{
-    int r;
-
-    if (!dir || !dir->open)
-        return 0;
-
-    r = openos_syscall3(SYS_READDIR, (int)dir->path, dir->index, (int)&dir->entry);
-    if (r <= 0)
-        return 0;
-
-    dir->index++;
-    return &dir->entry;
-}
-
-static int openos_closedir(struct openos_DIR *dir)
-{
-    if (!dir || !dir->open)
-        return -1;
-    dir->open = 0;
-    return 0;
-}
-
 void _start(int argc, char **argv, char **envp)
 {
     (void)envp;
@@ -66,7 +17,7 @@ void _start(int argc, char **argv, char **envp)
     }
 
     openos_stat_t st;
-    struct openos_DIR *dir;
+    openos_DIR *dir;
     openos_dirent_t *de;
     char cwd[128];
     int found_bin = 0;

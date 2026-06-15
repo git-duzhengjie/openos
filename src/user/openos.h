@@ -154,6 +154,66 @@ static inline int openos_waitpid(int pid, int *status, int options)
     return openos_syscall3(SYS_WAITPID, pid, (int)status, options);
 }
 
+
+typedef struct openos_DIR {
+    char path[OPENOS_PATH_MAX];
+    int index;
+    int open;
+    openos_dirent_t entry;
+} openos_DIR;
+
+static inline int openos_stat(const char *path, openos_stat_t *st)
+{
+    return openos_syscall3(SYS_STAT, (int)path, (int)st, 0);
+}
+
+static inline int openos_lstat(const char *path, openos_stat_t *st)
+{
+    return openos_syscall3(SYS_LSTAT, (int)path, (int)st, 0);
+}
+
+static inline openos_DIR *openos_opendir(const char *path)
+{
+    static openos_DIR dir;
+    openos_stat_t st;
+
+    if (!path)
+        return 0;
+    if (openos_stat(path, &st) < 0)
+        return 0;
+    if ((st.mode & FS_DIR) != FS_DIR)
+        return 0;
+    if (openos_str_copy(dir.path, path, sizeof(dir.path)) < 0)
+        return 0;
+
+    dir.index = 0;
+    dir.open = 1;
+    return &dir;
+}
+
+static inline openos_dirent_t *openos_readdir(openos_DIR *dir)
+{
+    int r;
+
+    if (!dir || !dir->open)
+        return 0;
+
+    r = openos_syscall3(SYS_READDIR, (int)dir->path, dir->index, (int)&dir->entry);
+    if (r <= 0)
+        return 0;
+
+    dir->index++;
+    return &dir->entry;
+}
+
+static inline int openos_closedir(openos_DIR *dir)
+{
+    if (!dir || !dir->open)
+        return -1;
+    dir->open = 0;
+    return 0;
+}
+
 static inline void openos_fail(int code, const char *msg)
 {
     openos_write_str(msg);
