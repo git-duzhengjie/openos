@@ -29,6 +29,9 @@ typedef struct user_spawn_args {
 
 static void user_process_trampoline(void *arg);
 
+#define WAITPID_WNOHANG 1
+#define WAITPID_SUPPORTED_OPTIONS WAITPID_WNOHANG
+
 void proc_table_init(void) {
     for (int i = 0; i < MAX_PROCS; i++) {
         proc_table[i].pid = 0;
@@ -361,6 +364,13 @@ int spawn_user_process(const char *path, char *const argv[]) {
     (void)argv;
     if (!path || !path[0]) return -1;
 
+    /* Fail early when the executable path is invalid. Without this check,
+     * spawn would return a child pid even though the trampoline will fail
+     * exec immediately, which makes user-space error handling ambiguous. */
+    int fd = vfs_open(path, 0, 0);
+    if (fd < 0) return -1;
+    vfs_close(fd);
+
     process_t *child = proc_alloc();
     if (!child) return -1;
 
@@ -461,6 +471,7 @@ uint32_t sys_wait(int *status) {
 uint32_t sys_waitpid(uint32_t pid, int *status, int options) {
     thread_t *cur = sched_get_current();
     if (!cur) return (uint32_t)-1;
+    if (options & ~WAITPID_SUPPORTED_OPTIONS) return (uint32_t)-1;
 
     for (;;) {
         int has_child = 0;
@@ -484,8 +495,7 @@ uint32_t sys_waitpid(uint32_t pid, int *status, int options) {
         if (!has_child)
             return (uint32_t)-1;
 
-        /* options bit0 acts as a small WNOHANG-compatible flag. */
-        if (options & 1)
+        if (options & WAITPID_WNOHANG)
             return 0;
 
         sched_yield();

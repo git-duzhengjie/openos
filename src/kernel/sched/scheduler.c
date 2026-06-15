@@ -170,11 +170,20 @@ thread_t *timer_schedule_handler(void) {
 }
 
 void sched_yield(void) {
-    if (!sched.initialized || !sched.current) return;
+    uint32_t saved_eflags;
+    __asm__ volatile("pushfl; pop %0; cli" : "=r"(saved_eflags) :: "memory");
+
+#define SCHED_RESTORE_FLAGS_AND_RETURN() \
+    do { \
+        __asm__ volatile("push %0; popfl" :: "r"(saved_eflags) : "memory"); \
+        return; \
+    } while (0)
+
+    if (!sched.initialized || !sched.current) SCHED_RESTORE_FLAGS_AND_RETURN();
 
     thread_t *next = pick_next();
-    if (!next) return;
-    if (next == sched.current) return;
+    if (!next) SCHED_RESTORE_FLAGS_AND_RETURN();
+    if (next == sched.current) SCHED_RESTORE_FLAGS_AND_RETURN();
 
     remove_from_queue(next);
 
@@ -189,23 +198,28 @@ void sched_yield(void) {
     sched.current_ticks = 0;
     tss_set_kernel_stack(next->kernel_stack_top);
 
-    /* 构建完整栈帧，格式与 timer_isr + thread_create 一致：
-     * 从低到高: [EFLAGS][CS][EIP][pushad: EAX..EDI][DS][ES][FS][GS]
-     * ESP 指向 GS（栈顶）
-     * 必须关中断防止 timer_isr 在切换中途触发嵌套上下文切换 */
+    /* Build a full interrupt-compatible frame:
+     * low to high: [EFLAGS][CS][EIP][pushad: EAX..EDI][DS][ES][FS][GS]
+     * ESP points at GS.
+     *
+     * The whole scheduler state update must run with interrupts disabled.
+     * Otherwise timer_isr may save the current ESP into the wrong thread after
+     * sched.current has been changed but before this function switches stacks. */
+    uint32_t *prev_kernel_esp_slot = &prev->kernel_esp;
+    uint32_t next_kernel_esp = next->kernel_esp;
+    uint32_t resume_eflags = saved_eflags | 0x200;
+
     __asm__ volatile(
-        "cli\n"
-        "pushfl\n"          /* EFLAGS */
-        "orl $0x200, (%%esp)\n" /* keep IF enabled when this thread resumes */
-        "pushl $0x08\n"     /* CS */
-        "pushl $1f\n"       /* EIP */
-        "pushal\n"          /* EAX ECX EDX EBX ESP EBP ESI EDI */
+        "pushl %2\n"         /* EFLAGS */
+        "pushl $0x08\n"      /* CS */
+        "pushl $1f\n"        /* EIP */
+        "pushal\n"           /* EAX ECX EDX EBX ESP EBP ESI EDI */
         "push %%ds\n"
         "push %%es\n"
         "push %%fs\n"
         "push %%gs\n"
-        "mov %%esp, %0\n"   /* 保存到 prev->kernel_esp */
-        "mov %1, %%esp\n"   /* 切换到 next->kernel_esp */
+        "mov %%esp, (%0)\n"  /* save prev->kernel_esp */
+        "mov %1, %%esp\n"    /* switch to next->kernel_esp */
         "pop %%gs\n"
         "pop %%fs\n"
         "pop %%es\n"
@@ -213,9 +227,12 @@ void sched_yield(void) {
         "popa\n"
         "iret\n"
         "1:\n"
-        : "=m"(prev->kernel_esp)
-        : "m"(next->kernel_esp)
+        :
+        : "r"(prev_kernel_esp_slot), "r"(next_kernel_esp), "r"(resume_eflags)
+        : "memory"
     );
+
+#undef SCHED_RESTORE_FLAGS_AND_RETURN
 }
 
 process_t *proc_create(const char *name, uint32_t entry, uint32_t esp) {

@@ -6,6 +6,7 @@
 #define SYS_WRITE       64
 #define SYS_WAITPID     223
 #define SYS_SPAWN       233
+#define WNOHANG         1
 
 static int syscall3(int num, int a, int b, int c)
 {
@@ -48,18 +49,33 @@ void _start(void)
     int child;
     int waited;
 
+    write_str("[waittest] checking spawn error path...\n");
+    child = spawn("/bin/does-not-exist");
+    if (child >= 0) {
+        write_str("[waittest] missing executable unexpectedly spawned\n");
+        syscall3(SYS_EXIT, 1, 0, 0);
+    }
+
     write_str("[waittest] spawning /bin/hello and waiting...\n");
 
     child = spawn("/bin/hello");
     if (child < 0) {
         write_str("[waittest] spawn failed\n");
-        syscall3(SYS_EXIT, 1, 0, 0);
+        syscall3(SYS_EXIT, 2, 0, 0);
     }
 
-    waited = waitpid(child, &status, 0);
+    waited = waitpid(child, &status, WNOHANG);
+    if (waited < 0) {
+        write_str("[waittest] waitpid WNOHANG failed\n");
+        syscall3(SYS_EXIT, 3, 0, 0);
+    }
+
+    if (waited == 0) {
+        waited = waitpid(child, &status, 0);
+    }
     if (waited != child) {
         write_str("[waittest] waitpid failed\n");
-        syscall3(SYS_EXIT, 2, 0, 0);
+        syscall3(SYS_EXIT, 4, 0, 0);
     }
 
     write_str("[waittest] waitpid ok\n");

@@ -25,3 +25,4 @@ fix_tmr_err.py
 modify_build_vga.py
 test_vga.py
 modify_serial.py
+src/kernel/include/embed_waittest.h
