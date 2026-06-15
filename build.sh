@@ -112,6 +112,16 @@ if [ -f $USR/fstest.c ]; then
     echo "  Embedded: fstest.elf"
 fi
 
+if [ -f $USR/pwd.c ]; then
+    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+        -fno-stack-protector -fno-builtin \
+        -I $SRC/include \
+        -c $USR/pwd.c -o $BUILD/pwd.o
+    ld -m elf_i386 -T $USR/user.ld -o $BUILD/pwd.elf $BUILD/pwd.o
+    python3 _embed_elf.py $BUILD/pwd.elf $SRC/include/embed_pwd.h pwd_elf
+    echo "  Embedded: pwd.elf"
+fi
+
 echo "[3/5] Compiling kernel C files..."
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \

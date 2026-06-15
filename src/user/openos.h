@@ -134,6 +134,11 @@ static inline int openos_getpid(void)
     return openos_syscall3(SYS_GETPID, 0, 0, 0);
 }
 
+static inline int openos_getcwd(char *buf, int size)
+{
+    return openos_syscall3(SYS_GETCWD, (int)buf, size, 0);
+}
+
 static inline int openos_spawn(const char *path, char *const argv[])
 {
     return openos_syscall3(SYS_SPAWN, (int)path, (int)argv, 0);
