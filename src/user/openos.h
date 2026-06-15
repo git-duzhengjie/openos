@@ -40,8 +40,12 @@
 #define SYS_DUP2        243
 #define SYS_PIPE        244
 #define SYS_KILL        245
+#define SYS_ALARM       246
 
 #define WNOHANG         1
+#define SIGKILL         9
+#define SIGALRM         14
+#define SIGTERM         15
 #define WIFEXITED(status)      (((status) & 0x7f) == 0)
 #define WEXITSTATUS(status)    (((status) >> 8) & 0xff)
 
@@ -790,6 +794,11 @@ static inline int openos_waitpid(int pid, int *status, int options)
 static inline int openos_kill(int pid, int sig)
 {
     return openos_syscall_result(openos_syscall2(SYS_KILL, pid, sig));
+}
+
+static inline int openos_alarm(unsigned int seconds)
+{
+    return openos_syscall_result(openos_syscall1(SYS_ALARM, (int)seconds));
 }
 
 static inline int openos_exec(const char *path, char *const argv[])

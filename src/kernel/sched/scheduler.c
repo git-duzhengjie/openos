@@ -130,10 +130,15 @@ void sched_start(void) {
     );
 }
 
+uint32_t sched_time_ms(void) {
+    return sched.time_ms;
+}
+
 void sched_tick(void) {
     sync_tick(1);
     bus_reliable_tick(1);
     sched.time_ms++;
+    proc_check_alarms(sched.time_ms);
     proc_wake_sleepers(sched.time_ms);
     if (!sched.current) return;
     sched.current_ticks++;

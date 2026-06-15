@@ -373,6 +373,16 @@ if [ -f $USR/kill.c ]; then
     echo "  Embedded: kill.elf"
 fi
 
+if [ -f $USR/alarmtest.c ]; then
+    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+        -fno-stack-protector -fno-builtin \
+        -I $SRC/include \
+        -c $USR/alarmtest.c -o $BUILD/alarmtest.o
+    ld -m elf_i386 -T $USR/user.ld -o $BUILD/alarmtest.elf $BUILD/alarmtest.o
+    python3 _embed_elf.py $BUILD/alarmtest.elf $SRC/include/embed_alarmtest.h alarmtest_elf
+    echo "  Embedded: alarmtest.elf"
+fi
+
 echo "[3/5] Compiling kernel C files..."
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \

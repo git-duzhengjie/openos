@@ -207,6 +207,13 @@
 #define OPENOS_HAS_KILL 0
 #endif
 
+#if __has_include("embed_alarmtest.h")
+#include "embed_alarmtest.h"  /* alarmtest user command */
+#define OPENOS_HAS_ALARMTEST 1
+#else
+#define OPENOS_HAS_ALARMTEST 0
+#endif
+
 
 /* 外部符号 */
 extern void gdt_init(void);
@@ -845,6 +852,17 @@ void kernel_main(void) {
         serial_write("[OK] Installed /bin/kill user ELF\n");
     } else {
         serial_write("[WARN] Failed to install /bin/kill\n");
+    }
+#endif
+
+#if OPENOS_HAS_ALARMTEST
+    fd = vfs_open("/bin/alarmtest", O_CREAT | O_RDWR, 0755);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)alarmtest_elf, alarmtest_elf_size);
+        vfs_close(fd);
+        serial_write("[OK] Installed /bin/alarmtest user ELF\n");
+    } else {
+        serial_write("[WARN] Failed to install /bin/alarmtest\n");
     }
 #endif
 

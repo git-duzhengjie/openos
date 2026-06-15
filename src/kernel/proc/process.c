@@ -235,6 +235,8 @@ process_t *proc_alloc(void) {
             p->cwd[0] = '/';
             p->cwd[1] = '\0';
             p->pending_signals = 0;
+            p->alarm_deadline_ms = 0;
+            p->alarm_active = 0;
             return p;
         }
     }
@@ -256,6 +258,8 @@ void proc_free(process_t *proc) {
     proc->heap_end = 0;
     proc->exit_code = 0;
     proc->pending_signals = 0;
+    proc->alarm_deadline_ms = 0;
+    proc->alarm_active = 0;
     for (int i = 0; i < MAX_FD; i++) {
         proc->fds[i] = NULL;
         proc->fd_flags[i] = 0;
@@ -338,6 +342,42 @@ void proc_wake_sleepers(uint32_t now_ms)
         thread_t *t = p->threads;
         if (t->state == PROC_SLEEPING && t->wake_time <= now_ms)
             thread_wake(t);
+    }
+}
+
+int proc_set_alarm(uint32_t pid, uint32_t seconds, uint32_t now_ms)
+{
+    process_t *p = proc_find(pid);
+    uint32_t remaining = 0;
+
+    if (!p || p->state == PROC_DEAD || p->state == PROC_ZOMBIE)
+        return -1;
+
+    if (p->alarm_active && p->alarm_deadline_ms > now_ms)
+        remaining = (p->alarm_deadline_ms - now_ms + 999u) / 1000u;
+
+    if (seconds == 0) {
+        p->alarm_active = 0;
+        p->alarm_deadline_ms = 0;
+    } else {
+        p->alarm_active = 1;
+        p->alarm_deadline_ms = now_ms + seconds * 1000u;
+    }
+
+    return (int)remaining;
+}
+
+void proc_check_alarms(uint32_t now_ms)
+{
+    for (int i = 0; i < MAX_PROCS; i++) {
+        process_t *p = &proc_table[i];
+        if (!p->alarm_active || p->pid == 0 || p->state == PROC_DEAD || p->state == PROC_ZOMBIE)
+            continue;
+        if (p->alarm_deadline_ms <= now_ms) {
+            p->alarm_active = 0;
+            p->alarm_deadline_ms = 0;
+            proc_send_signal(p->pid, OPENOS_SIGALRM);
+        }
     }
 }
 
@@ -809,7 +849,7 @@ int proc_send_signal(uint32_t pid, int sig)
 
     if (sig == 0)
         return 0;
-    if (sig != OPENOS_SIGKILL && sig != OPENOS_SIGTERM)
+    if (sig != OPENOS_SIGKILL && sig != OPENOS_SIGTERM && sig != OPENOS_SIGALRM)
         return -1;
 
     p->pending_signals |= (1u << sig);
@@ -835,6 +875,8 @@ int proc_handle_pending_signals(uint32_t pid)
         sig = OPENOS_SIGKILL;
     else if (p->pending_signals & (1u << OPENOS_SIGTERM))
         sig = OPENOS_SIGTERM;
+    else if (p->pending_signals & (1u << OPENOS_SIGALRM))
+        sig = OPENOS_SIGALRM;
 
     if (!sig)
         return 0;
@@ -850,4 +892,13 @@ int sys_kill(int pid, int sig)
         return -1;
 
     return proc_send_signal((uint32_t)pid, sig);
+}
+
+
+int sys_alarm(unsigned int seconds)
+{
+    uint32_t pid = proc_current_pid();
+    if (!pid)
+        return -1;
+    return proc_set_alarm(pid, seconds, sched_time_ms());
 }

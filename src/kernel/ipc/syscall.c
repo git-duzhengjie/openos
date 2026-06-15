@@ -271,6 +271,9 @@ uint32_t syscall_dispatch(uint32_t num,
     case SYS_KILL:
         return syscall_return((uint32_t)sys_kill((int)a, (int)b));
 
+    case SYS_ALARM:
+        return syscall_return((uint32_t)sys_alarm((unsigned int)a));
+
     case SYS_MKDIR:
         {
             char path[USERMEM_CSTR_MAX];

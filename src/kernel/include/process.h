@@ -30,6 +30,7 @@ typedef enum {
 #define INIT_PID 1u
 #define WAITPID_WNOHANG 1
 #define OPENOS_SIGKILL 9
+#define OPENOS_SIGALRM 14
 #define OPENOS_SIGTERM 15
 #define OPENOS_SIGNAL_MAX 31
 
@@ -85,6 +86,8 @@ typedef struct process {
 
     /* 信号 */
     uint32_t pending_signals; /* 待处理信号掩码 */
+    uint32_t alarm_deadline_ms; /* alarm 到期时间，单位 ms */
+    uint8_t alarm_active;       /* alarm 是否启用 */
 
     /* 统计 */
     uint64_t total_ticks;     /* 总运行时间 */
@@ -133,6 +136,8 @@ void proc_wake_sleepers(uint32_t now_ms);
 int proc_terminate(uint32_t pid, int exit_code);
 int proc_send_signal(uint32_t pid, int sig);
 int proc_handle_pending_signals(uint32_t pid);
+int proc_set_alarm(uint32_t pid, uint32_t seconds, uint32_t now_ms);
+void proc_check_alarms(uint32_t now_ms);
 uint32_t proc_current_pid(void);
 
 /* 睡眠/唤醒 */
@@ -144,6 +149,7 @@ uint32_t sys_getpid(void);
 uint32_t sys_gettid(void);
 void sys_exit(int code);
 int sys_kill(int pid, int sig);
+int sys_alarm(unsigned int seconds);
 
 /* 调度器核心函数 */
 void sched_init(void);
@@ -155,5 +161,6 @@ thread_t *sched_get_current(void);
 int sched_need_resched(void);
 void sched_set_need_resched(int need);
 void sched_tick(void);
+uint32_t sched_time_ms(void);
 
 #endif /* KERNEL_PROCESS_H */
