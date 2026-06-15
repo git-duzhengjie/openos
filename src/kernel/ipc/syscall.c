@@ -7,6 +7,7 @@
 #include "../include/pmm.h"
 #include "../include/serial.h"
 #include "../include/vga.h"
+#include "../include/input_buffer.h"
 #include "../include/usermem.h"
 #include "../proc/process.h"
 #include "../fs/vfs.h"
@@ -17,6 +18,10 @@
 #define VGA ((volatile uint16_t *)0xB8000)
 
 #define SYSCALL_IO_CHUNK 256u
+
+#define STDIN_FILENO  0
+#define STDOUT_FILENO 1
+#define STDERR_FILENO 2
 
 static void vga_write_str(const char *s, uint8_t color) {
     int row = 1;
@@ -43,8 +48,8 @@ static uint32_t syscall_write_user_buffer(int fd, const void *user_buf, uint32_t
     if (!user_ptr_valid(user_buf, count, USERMEM_READ))
         return (uint32_t)-1;
 
-    if (fd == 1) {
-        serial_write("[USER] ");
+    if (fd == STDOUT_FILENO || fd == STDERR_FILENO) {
+        serial_write(fd == STDERR_FILENO ? "[USER-ERR] " : "[USER] ");
     }
 
     while (done < count) {
@@ -56,7 +61,7 @@ static uint32_t syscall_write_user_buffer(int fd, const void *user_buf, uint32_t
         if (copy_from_user(chunk, (const char *)user_buf + done, n) < 0)
             return done ? done : (uint32_t)-1;
 
-        if (fd == 1) {
+        if (fd == STDOUT_FILENO || fd == STDERR_FILENO) {
             for (uint32_t i = 0; i < n; i++) {
                 serial_putc(chunk[i]);
                 vga_putc(chunk[i]);
@@ -96,7 +101,19 @@ static uint32_t syscall_read_user_buffer(int fd, void *user_buf, uint32_t count)
         if (n > SYSCALL_IO_CHUNK)
             n = SYSCALL_IO_CHUNK;
 
-        got = vfs_read(fd, chunk, n);
+        if (fd == STDIN_FILENO) {
+            got = 0;
+            while (got == 0) {
+                while ((uint32_t)got < n && input_has_data()) {
+                    chunk[got++] = input_getc();
+                }
+                if (got == 0) {
+                    sched_yield();
+                }
+            }
+        } else {
+            got = vfs_read(fd, chunk, n);
+        }
         if (got < 0)
             return done ? done : (uint32_t)-1;
         if (got == 0)

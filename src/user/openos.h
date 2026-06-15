@@ -44,6 +44,9 @@
 #define FS_FILE         0x1000
 #define FS_DIR          0x2000
 #define O_RDONLY        0
+#define STDIN_FILENO    0
+#define STDOUT_FILENO   1
+#define STDERR_FILENO   2
 #define OPENOS_PATH_MAX 128
 
 typedef unsigned int openos_uint32_t;

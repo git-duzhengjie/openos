@@ -555,7 +555,11 @@ static dentry_t *create_regular_file(dentry_t *parent, const char *name, uint32_
 
 int vfs_alloc_fd(void) {
     file_t **fds = get_current_fd_table();
-    for (int i = 0; i < MAX_FD; i++) {
+
+    /* Reserve fd 0/1/2 for stdin/stdout/stderr.  They are handled by
+     * the syscall layer for now, so regular VFS opens start at fd 3.
+     */
+    for (int i = 3; i < MAX_FD; i++) {
         if (!fds[i]) return i;
     }
     return -1;
