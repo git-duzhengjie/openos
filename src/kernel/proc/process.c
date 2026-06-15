@@ -192,7 +192,10 @@ void proc_table_init(void) {
     init->name[2] = 'i';
     init->name[3] = 't';
     init->name[4] = '\0';
-    for (int i = 0; i < MAX_FD; i++) init->fds[i] = NULL;
+    for (int i = 0; i < MAX_FD; i++) {
+        init->fds[i] = NULL;
+        init->fd_flags[i] = 0;
+    }
     init->cwd[0] = '/';
     init->cwd[1] = '\0';
     init->pending_signals = 0;
@@ -224,7 +227,10 @@ process_t *proc_alloc(void) {
             for (int j = 0; j < 31; j++) p->name[j] = 0;
             p->name[0] = '\0';
             /* 初始化文件描述符表 */
-            for (int j = 0; j < MAX_FD; j++) p->fds[j] = NULL;
+            for (int j = 0; j < MAX_FD; j++) {
+                p->fds[j] = NULL;
+                p->fd_flags[j] = 0;
+            }
             /* 初始化当前工作目录为 / */
             p->cwd[0] = '/';
             p->cwd[1] = '\0';
@@ -248,7 +254,10 @@ void proc_free(process_t *proc) {
     proc->heap_start = 0;
     proc->heap_end = 0;
     proc->exit_code = 0;
-    for (int i = 0; i < MAX_FD; i++) proc->fds[i] = NULL;
+    for (int i = 0; i < MAX_FD; i++) {
+        proc->fds[i] = NULL;
+        proc->fd_flags[i] = 0;
+    }
 }
 
 void proc_reap_zombie(process_t *proc) {

@@ -468,7 +468,10 @@ dentry_t *vfs_path_lookup(const char *path) {
 void vfs_init_fds_for_process(void *proc) {
     process_t *p = (process_t *)proc;
     if (!p) return;
-    for (int i = 0; i < MAX_FD; i++) p->fds[i] = NULL;
+    for (int i = 0; i < MAX_FD; i++) {
+        p->fds[i] = NULL;
+        p->fd_flags[i] = 0;
+    }
     strncpy(p->cwd, "/", sizeof(p->cwd) - 1);
     p->cwd[sizeof(p->cwd) - 1] = 0;
 }
@@ -695,6 +698,33 @@ static void vfs_file_put(file_t *f) {
     pmm_free_page(f);
 }
 
+int vfs_get_fd_flags(int fd) {
+    if (fd < 0 || fd >= MAX_FD) return -1;
+    process_t *proc = vfs_current_process();
+    if (!proc) return 0;
+    return (int)proc->fd_flags[fd];
+}
+
+int vfs_set_fd_flags(int fd, uint32_t flags) {
+    if (fd < 0 || fd >= MAX_FD) return -1;
+    process_t *proc = vfs_current_process();
+    if (!proc) return -1;
+    proc->fd_flags[fd] = flags;
+    return 0;
+}
+
+int vfs_mark_fd_cloexec(int fd) {
+    int flags = vfs_get_fd_flags(fd);
+    if (flags < 0) return -1;
+    return vfs_set_fd_flags(fd, (uint32_t)flags | FD_CLOEXEC);
+}
+
+int vfs_clear_fd_cloexec(int fd) {
+    int flags = vfs_get_fd_flags(fd);
+    if (flags < 0) return -1;
+    return vfs_set_fd_flags(fd, (uint32_t)flags & ~((uint32_t)FD_CLOEXEC));
+}
+
 int vfs_dup(int oldfd) {
     file_t *f = vfs_get_file(oldfd);
     if (!f) return -1;
@@ -704,6 +734,7 @@ int vfs_dup(int oldfd) {
 
     vfs_file_get(f);
     vfs_put_file(newfd, f);
+    vfs_clear_fd_cloexec(newfd);
     return newfd;
 }
 
@@ -720,6 +751,7 @@ int vfs_dup2(int oldfd, int newfd) {
 
     vfs_file_get(f);
     vfs_put_file(newfd, f);
+    vfs_clear_fd_cloexec(newfd);
     return newfd;
 }
 
@@ -732,12 +764,13 @@ int vfs_clone_fds_for_process(void *dst_proc, void *src_proc) {
 
     for (int i = 0; i < MAX_FD; i++) {
         file_t *file = (file_t *)src->fds[i];
-        if (!file)
+        if (!file || (src->fd_flags[i] & FD_CLOEXEC))
             continue;
         vfs_file_get(file);
         if (dst->fds[i])
             vfs_file_put((file_t *)dst->fds[i]);
         dst->fds[i] = file;
+        dst->fd_flags[i] = src->fd_flags[i] & ~((uint32_t)FD_CLOEXEC);
     }
 
     return 0;
@@ -753,6 +786,7 @@ int vfs_close_fd_for_process(void *proc, int fd) {
         return -1;
 
     p->fds[fd] = NULL;
+    p->fd_flags[fd] = 0;
     vfs_file_put(file);
     return 0;
 }
@@ -808,6 +842,8 @@ int vfs_pipe(int pipefd[2]) {
 
     vfs_put_file(rfd, rf);
     vfs_put_file(wfd, wf);
+    vfs_clear_fd_cloexec(rfd);
+    vfs_clear_fd_cloexec(wfd);
     pipefd[0] = rfd;
     pipefd[1] = wfd;
     return 0;
@@ -874,6 +910,7 @@ int vfs_open(const char *path, int flags, int mode) {
     }
 
     vfs_put_file(fd, f);
+    vfs_clear_fd_cloexec(fd);
     return fd;
 }
 
@@ -881,6 +918,7 @@ int vfs_close(int fd) {
     file_t *f = vfs_get_file(fd);
     if (!f) return -1;
     vfs_put_file(fd, NULL);
+    vfs_clear_fd_cloexec(fd);
     vfs_file_put(f);
     return 0;
 }
@@ -892,6 +930,7 @@ void vfs_close_fds_for_process(void *proc) {
     for (int i = 0; i < MAX_FD; i++) {
         file_t *f = (file_t *)p->fds[i];
         p->fds[i] = NULL;
+        p->fd_flags[i] = 0;
         vfs_file_put(f);
     }
 }

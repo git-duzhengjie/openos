@@ -77,6 +77,7 @@ typedef struct process {
 
     /* 文件系统 */
     void *fds[MAX_FD];        /* 文件描述符表 (per-process fd table) */
+    uint32_t fd_flags[MAX_FD]; /* fd flags, e.g. FD_CLOEXEC */
     char cwd[256];            /* 当前工作目录 (绝对路径) */
 
     /* 信号 */

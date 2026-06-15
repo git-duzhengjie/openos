@@ -204,5 +204,9 @@ int    vfs_dup2(int oldfd, int newfd);
 int    vfs_pipe(int pipefd[2]);
 int    vfs_clone_fds_for_process(void *dst_proc, void *src_proc);
 int    vfs_close_fd_for_process(void *proc, int fd);
+int    vfs_get_fd_flags(int fd);
+int    vfs_set_fd_flags(int fd, uint32_t flags);
+int    vfs_mark_fd_cloexec(int fd);
+int    vfs_clear_fd_cloexec(int fd);
 
 #endif /* KERNEL_FS_VFS_H */

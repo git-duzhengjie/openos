@@ -1170,6 +1170,8 @@ static int shell_run_pipeline(char *cmdline)
             }
             return 1;
         }
+        vfs_mark_fd_cloexec(pipes[i][0]);
+        vfs_mark_fd_cloexec(pipes[i][1]);
     }
 
     int saved_stdin = SHELL_FD_UNCHANGED;
