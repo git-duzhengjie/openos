@@ -57,6 +57,7 @@ static void shell_backspace(void);
 #define SHELL_MAX_JOBS 16
 #define SHELL_MAX_JOB_PIDS 8
 #define SHELL_JOB_CMD_MAX 128
+#define SHELL_SCRIPT_STACK_MAX 4
 
 typedef enum shell_job_state {
     SHELL_JOB_UNUSED = 0,
@@ -226,6 +227,17 @@ static shell_env_entry_t shell_env[SHELL_ENV_MAX];
 static char *shell_envp[SHELL_ENV_MAX + 1];
 static int shell_env_initialized = 0;
 
+typedef struct shell_script_frame {
+    int fd;
+    int line;
+    int eof_newline_sent;
+    char path[MAX_PATH];
+} shell_script_frame_t;
+
+static shell_script_frame_t shell_script_stack[SHELL_SCRIPT_STACK_MAX];
+static int shell_script_depth = 0;
+static int shell_script_prompt_pending = 0;
+
 /* ---- 辅助函数 ---- */
 static void shell_prompt(void)
 {
@@ -268,7 +280,10 @@ static const char *builtin_commands[] = {
     "ai_model_register",
     "ai_model_scan",
     "jobs",
-    "fg"
+    "fg",
+    "source",
+    ".",
+    "sh"
 };
 
 #define BUILTIN_COMMAND_COUNT (sizeof(builtin_commands) / sizeof(builtin_commands[0]))
@@ -519,6 +534,15 @@ static void shell_append_char(char c)
     int overshoot = cmd_pos - cmd_cursor;
     while (overshoot-- > 0)
         print("\b");
+}
+
+static void shell_append_char_silent(char c)
+{
+    if (cmd_pos >= CMD_BUF_SIZE - 1)
+        return;
+    cmd_buf[cmd_pos++] = c;
+    cmd_cursor = cmd_pos;
+    cmd_buf[cmd_pos] = '\0';
 }
 
 static void shell_redraw_input_line(void)
@@ -1308,6 +1332,85 @@ static int shell_open_redirect_path(const char *path, int fd, int append)
         }
     }
     return opened;
+}
+
+static int shell_script_has_active_input(void)
+{
+    return shell_script_depth > 0;
+}
+
+static void shell_prompt_after_command(void)
+{
+    if (shell_script_has_active_input())
+        return;
+    shell_prompt();
+}
+
+static int shell_source_script(const char *path)
+{
+    if (!path || !path[0]) {
+        print_err("source: missing file\n");
+        return -1;
+    }
+    if (shell_script_depth >= SHELL_SCRIPT_STACK_MAX) {
+        print_err("source: script nesting too deep\n");
+        return -1;
+    }
+
+    char full[MAX_PATH];
+    make_path(path, full);
+    int fd = vfs_open(full, O_RDONLY, 0);
+    if (fd < 0) {
+        print_err("source: cannot open ");
+        print_err(path);
+        print_err("\n");
+        return -1;
+    }
+
+    shell_script_frame_t *frame = &shell_script_stack[shell_script_depth++];
+    frame->fd = fd;
+    frame->line = 1;
+    frame->eof_newline_sent = 0;
+    int i = 0;
+    while (full[i] && i < MAX_PATH - 1) {
+        frame->path[i] = full[i];
+        i++;
+    }
+    frame->path[i] = '\0';
+    shell_script_prompt_pending = 0;
+    return 0;
+}
+
+static char shell_read_script_char(int *from_script)
+{
+    if (from_script)
+        *from_script = 0;
+
+    while (shell_script_depth > 0) {
+        shell_script_frame_t *frame = &shell_script_stack[shell_script_depth - 1];
+        char c = 0;
+        ssize_t n = vfs_read(frame->fd, &c, 1);
+        if (n == 1) {
+            if (from_script)
+                *from_script = 1;
+            if (c == '\n')
+                frame->line++;
+            return c;
+        }
+
+        if (!frame->eof_newline_sent && cmd_pos > 0) {
+            frame->eof_newline_sent = 1;
+            if (from_script)
+                *from_script = 1;
+            return '\n';
+        }
+
+        vfs_close(frame->fd);
+        shell_script_depth--;
+    }
+
+    shell_script_prompt_pending = 1;
+    return 0;
 }
 
 static int shell_apply_one_redirect(const char *path, int target_fd, int append, int *saved_fd)
@@ -2254,6 +2357,9 @@ static void cmd_help(void)
     print("  history         - Show command history\n");
     print("  jobs            - Show background jobs\n");
     print("  fg [%job]       - Bring background job to foreground\n");
+    print("  source <file>   - Execute shell commands from file\n");
+    print("  . <file>        - Alias of source\n");
+    print("  sh <file>       - Execute shell commands from file\n");
     print("  env             - Show shell environment\n");
     print("  export NAME=VALUE - Set shell environment variable\n");
     print("  unset NAME      - Remove shell environment variable\n");
@@ -2317,9 +2423,16 @@ void shell_run(void)
 
         /* 先把串口数据灌入输入缓冲�?*/
         /* 从统一输入缓冲区读取；同时把串口数据灌入输入缓冲区 */
-        char c = shell_read_input_char(0);
+        int from_script = 0;
+        char c = shell_read_script_char(&from_script);
+        if (!c)
+            c = shell_read_input_char(0);
 
         if (!c) {
+            if (shell_script_prompt_pending) {
+                shell_script_prompt_pending = 0;
+                shell_prompt();
+            }
             static unsigned idle_spin = 0;
             __asm__ volatile("pause");
             idle_spin++;
@@ -2329,7 +2442,7 @@ void shell_run(void)
             continue;
         }
 
-        if (c == 0x1B)
+        if (!from_script && c == 0x1B)
         {
             char c2 = shell_read_input_char(10000);
             char c3 = shell_read_input_char(10000);
@@ -2361,7 +2474,7 @@ void shell_run(void)
                 }
             }
 
-            if (gui_key && gui_should_capture_key_code(gui_key))
+            if (!from_script && gui_key && gui_should_capture_key_code(gui_key))
             {
                 gui_post_key_code(gui_key);
                 continue;
@@ -2430,17 +2543,28 @@ void shell_run(void)
         if (c == '\r' || c == '\n')
         {
             cmd_buf[cmd_pos] = '\0';
-            print("\n");
-            shell_save_history();
-            shell_history_save_file();
+            if (!from_script)
+                print("\n");
+            if (!from_script) {
+                shell_save_history();
+                shell_history_save_file();
+            }
 
             int background = shell_extract_background(cmd_buf);
-            if (background && !shell_trim(cmd_buf)[0]) {
+            char *trimmed_command = shell_trim(cmd_buf);
+            if (from_script && (!trimmed_command[0] || trimmed_command[0] == '#')) {
+                cmd_pos = 0;
+                cmd_cursor = 0;
+                cmd_buf[0] = '\0';
+                shell_prompt_after_command();
+                continue;
+            }
+            if (background && !trimmed_command[0]) {
                 print_err("background: missing command\n");
                 cmd_pos = 0;
                 cmd_cursor = 0;
                 cmd_buf[0] = '\0';
-                shell_prompt();
+                shell_prompt_after_command();
                 continue;
             }
 
@@ -2449,7 +2573,7 @@ void shell_run(void)
                 cmd_pos = 0;
                 cmd_cursor = 0;
                 cmd_buf[0] = '\0';
-                shell_prompt();
+                shell_prompt_after_command();
                 continue;
             }
 
@@ -2585,6 +2709,13 @@ void shell_run(void)
                 else if (shell_cmd_equals(cmd, "pwd"))
                 {
                     cmd_pwd();
+                }
+                else if (shell_cmd_equals(cmd, "source") || shell_cmd_equals(cmd, ".") || shell_cmd_equals(cmd, "sh"))
+                {
+                    if (argc > 1)
+                        shell_source_script(argv[1]);
+                    else
+                        print_err("source: missing file\n");
                 }
                 else if (shell_cmd_equals(cmd, "history"))
                 {
@@ -3223,7 +3354,7 @@ shell_command_done:
                 serial_write_hex(reaped);
                 serial_write("\n");
             }
-            shell_prompt();
+            shell_prompt_after_command();
         }
         else if (c == '\t')
         {
@@ -3265,7 +3396,10 @@ shell_command_done:
         }
         else if (c >= ' ')
         {
-            shell_append_char(c);
+            if (from_script)
+                shell_append_char_silent(c);
+            else
+                shell_append_char(c);
         }
     }
 }
