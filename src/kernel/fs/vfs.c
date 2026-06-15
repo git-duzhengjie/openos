@@ -31,6 +31,10 @@ static dentry_t dentry_pool[MAX_DENTRY];
 #define MAX_MOUNTS 16
 static mount_t mount_pool[MAX_MOUNTS];
 
+#define MAX_SYMLINKS 64
+static char symlink_target_pool[MAX_SYMLINKS][MAX_PATH];
+static uint8_t symlink_target_used[MAX_SYMLINKS];
+
 /* ============================================================
  * 小工具函数
  * ============================================================ */
@@ -43,6 +47,32 @@ static int vfs_is_dir(inode_t *ip) {
 
 static int vfs_is_file(inode_t *ip) {
     return ip && ((ip->mode & VFS_FILE_TYPE_MASK) == FS_FILE);
+}
+
+static int vfs_is_symlink(inode_t *ip) {
+    return ip && ((ip->mode & VFS_FILE_TYPE_MASK) == FS_SYMLINK);
+}
+
+static char *alloc_symlink_target(void) {
+    for (int i = 0; i < MAX_SYMLINKS; i++) {
+        if (!symlink_target_used[i]) {
+            symlink_target_used[i] = 1;
+            symlink_target_pool[i][0] = 0;
+            return symlink_target_pool[i];
+        }
+    }
+    return NULL;
+}
+
+static void free_symlink_target(void *ptr) {
+    if (!ptr) return;
+    for (int i = 0; i < MAX_SYMLINKS; i++) {
+        if (ptr == symlink_target_pool[i]) {
+            symlink_target_used[i] = 0;
+            symlink_target_pool[i][0] = 0;
+            return;
+        }
+    }
 }
 
 // static int vfs_is_chardev(inode_t *ip) { return ip && ((ip->mode & VFS_FILE_TYPE_MASK) == FS_CHAR_DEVICE); }
@@ -129,6 +159,8 @@ static dentry_t *alloc_dentry(void) {
 
 static void free_dentry(dentry_t *d) {
     if (!d) return;
+    if (d->inode && d->inode->ref_count <= 1 && vfs_is_symlink(d->inode))
+        free_symlink_target(d->inode->fs_data);
     if (d->inode) free_inode(d->inode);
     memset(d, 0, sizeof(dentry_t));
 }
@@ -422,13 +454,13 @@ static int split_parent_path(const char *path, char *parent_out, char *name_out)
     return 0;
 }
 
-static dentry_t *vfs_path_lookup_internal(const char *path, int follow_final_mount) {
-    if (!root_dentry || !path) return NULL;
+static dentry_t *vfs_path_lookup_internal_depth(const char *path, int follow_final, int depth) {
+    if (!root_dentry || !path || depth > 8) return NULL;
 
     char norm[MAX_PATH];
     if (vfs_normalize_path(path, norm, sizeof(norm)) < 0) return NULL;
     if (strcmp(norm, "/") == 0) {
-        return follow_final_mount ? resolve_mount(root_dentry) : root_dentry;
+        return resolve_mount(root_dentry);
     }
 
     dentry_t *cur = root_dentry;
@@ -448,13 +480,52 @@ static dentry_t *vfs_path_lookup_internal(const char *path, int follow_final_mou
         cur = find_child(cur, name);
         if (!cur) return NULL;
 
-        if (norm[i]) {
+        int final = norm[i] == 0;
+        if (vfs_is_symlink(cur->inode) && (!final || follow_final)) {
+            const char *target = (const char *)cur->inode->fs_data;
+            char next[MAX_PATH];
+            if (!target || !target[0]) return NULL;
+            if (target[0] == '/') {
+                strncpy(next, target, sizeof(next) - 1);
+                next[sizeof(next) - 1] = 0;
+            } else {
+                uint32_t slash = 0;
+                uint32_t tlen = (uint32_t)strlen(target);
+                uint32_t pos = 0;
+                for (uint32_t j = 0; norm[j]; j++) {
+                    if (norm[j] == '/') slash = j;
+                }
+                if (slash == 0) {
+                    if (1 + tlen + 1 > sizeof(next)) return NULL;
+                    next[pos++] = '/';
+                } else {
+                    if (slash + 1 + tlen + 1 > sizeof(next)) return NULL;
+                    for (uint32_t j = 0; j < slash; j++) next[pos++] = norm[j];
+                    next[pos++] = '/';
+                }
+                strcpy(next + pos, target);
+            }
+            if (!final) {
+                uint32_t len = (uint32_t)strlen(next);
+                uint32_t rest = (uint32_t)strlen(&norm[i]);
+                if (len + 1 + rest + 1 > sizeof(next)) return NULL;
+                next[len++] = '/';
+                strcpy(next + len, &norm[i]);
+            }
+            return vfs_path_lookup_internal_depth(next, follow_final, depth + 1);
+        }
+
+        if (!final) {
             cur = resolve_mount(cur);
-        } else if (follow_final_mount) {
+        } else if (follow_final) {
             cur = resolve_mount(cur);
         }
     }
     return cur;
+}
+
+static dentry_t *vfs_path_lookup_internal(const char *path, int follow_final) {
+    return vfs_path_lookup_internal_depth(path, follow_final, 0);
 }
 
 dentry_t *vfs_path_lookup(const char *path) {
@@ -486,6 +557,7 @@ void vfs_init(void) {
     memset(inode_pool, 0, sizeof(inode_pool));
     memset(dentry_pool, 0, sizeof(dentry_pool));
     memset(mount_pool, 0, sizeof(mount_pool));
+    memset(symlink_target_used, 0, sizeof(symlink_target_used));
     mount_list = NULL;
     next_ino = 1;
     vfs_init_fds();
@@ -1201,13 +1273,64 @@ int vfs_link(const char *oldpath, const char *newpath) {
 }
 
 int vfs_symlink(const char *target, const char *linkpath) {
-    (void)target; (void)linkpath;
-    return -1; /* TODO */
+    char parent_path[MAX_PATH];
+    char name[MAX_NAME];
+    dentry_t *parent;
+    dentry_t *link;
+    inode_t *inode;
+    char *stored;
+    uint32_t len;
+
+    if (!target || !linkpath || !target[0]) return -1;
+    len = (uint32_t)strlen(target);
+    if (len >= MAX_PATH) return -1;
+    if (split_parent_path(linkpath, parent_path, name) < 0) return -1;
+    parent = vfs_path_lookup(parent_path);
+    if (!parent || !vfs_is_dir(parent->inode)) return -1;
+    if (find_child(parent, name)) return -1;
+
+    stored = alloc_symlink_target();
+    if (!stored) return -1;
+    strcpy(stored, target);
+
+    inode = alloc_inode();
+    if (!inode) {
+        free_symlink_target(stored);
+        return -1;
+    }
+    inode->mode = FS_SYMLINK | 0777;
+    inode->size = len;
+    inode->nlinks = 1;
+    inode->ref_count = 1;
+    inode->fs_data = stored;
+
+    link = alloc_dentry();
+    if (!link) {
+        free_symlink_target(stored);
+        free_inode(inode);
+        return -1;
+    }
+    strncpy(link->name, name, MAX_NAME - 1);
+    link->name[MAX_NAME - 1] = 0;
+    link->inode = inode;
+    add_child(parent, link);
+    return 0;
 }
 
 int vfs_readlink(const char *path, char *buf, uint32_t size) {
-    (void)path; (void)buf; (void)size;
-    return -1; /* TODO */
+    dentry_t *d;
+    const char *target;
+    uint32_t len;
+
+    if (!path || !buf || size == 0) return -1;
+    d = vfs_path_lookup_internal(path, 0);
+    if (!d || !vfs_is_symlink(d->inode)) return -1;
+    target = (const char *)d->inode->fs_data;
+    if (!target) return -1;
+    len = (uint32_t)strlen(target);
+    if (len >= size) return -1;
+    strcpy(buf, target);
+    return (int)len;
 }
 
 int vfs_chmod(const char *path, uint32_t mode) {

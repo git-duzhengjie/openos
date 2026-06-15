@@ -42,6 +42,8 @@
 #define SYS_KILL        245
 #define SYS_ALARM       246
 #define SYS_LINK        247
+#define SYS_SYMLINK     248
+#define SYS_READLINK    249
 
 #define WNOHANG         1
 #define SIGKILL         9
@@ -52,6 +54,7 @@
 
 #define FS_FILE         0x1000
 #define FS_DIR          0x2000
+#define FS_SYMLINK      0xA000
 #define O_RDONLY        0
 #define O_WRONLY        1
 #define O_RDWR          2
@@ -775,6 +778,16 @@ static inline int openos_unlink(const char *path)
 static inline int openos_link(const char *oldpath, const char *newpath)
 {
     return openos_syscall_result(openos_syscall2(SYS_LINK, (int)oldpath, (int)newpath));
+}
+
+static inline int openos_symlink(const char *target, const char *linkpath)
+{
+    return openos_syscall_result(openos_syscall2(SYS_SYMLINK, (int)target, (int)linkpath));
+}
+
+static inline int openos_readlink(const char *path, char *buf, int size)
+{
+    return openos_syscall_result(openos_syscall3(SYS_READLINK, (int)path, (int)buf, size));
 }
 
 static inline int openos_rmdir(const char *path)

@@ -363,6 +363,34 @@ uint32_t syscall_dispatch(uint32_t num,
             return (uint32_t)vfs_link(oldpath, newpath);
         }
 
+    case SYS_SYMLINK:
+        {
+            char target[USERMEM_CSTR_MAX];
+            char linkpath[USERMEM_CSTR_MAX];
+            if (syscall_copy_user_path(target, (const char *)a) < 0)
+                return (uint32_t)-1;
+            if (syscall_copy_user_path(linkpath, (const char *)b) < 0)
+                return (uint32_t)-1;
+            return (uint32_t)vfs_symlink(target, linkpath);
+        }
+
+    case SYS_READLINK:
+        {
+            char path[USERMEM_CSTR_MAX];
+            char target[USERMEM_CSTR_MAX];
+            int ret;
+            if (syscall_copy_user_path(path, (const char *)a) < 0)
+                return (uint32_t)-1;
+            if (c <= 0 || c > USERMEM_CSTR_MAX)
+                return (uint32_t)-1;
+            ret = vfs_readlink(path, target, (uint32_t)c);
+            if (ret < 0)
+                return (uint32_t)-1;
+            if (copy_to_user((void *)b, target, (uint32_t)ret + 1) < 0)
+                return (uint32_t)-1;
+            return (uint32_t)ret;
+        }
+
     case SYS_EXEC:
         {
             char path[USERMEM_CSTR_MAX];
