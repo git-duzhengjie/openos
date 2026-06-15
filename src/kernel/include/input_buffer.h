@@ -17,4 +17,9 @@ char input_getc(void);
 /* 缓冲区是否有数据 */
 int input_has_data(void);
 
+/* 标记/消费一次输入 EOF（Ctrl+D） */
+void input_mark_eof(void);
+int input_consume_eof(void);
+int input_has_eof(void);
+
 #endif /* INPUT_BUFFER_H */

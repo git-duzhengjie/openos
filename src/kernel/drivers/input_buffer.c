@@ -12,6 +12,7 @@ static char buf[INPUT_BUF_SIZE];
 static volatile int head = 0;  /* 写入位置 */
 static volatile int tail = 0;  /* 读取位置 */
 static volatile int count = 0; /* 当前数据量 */
+static volatile int eof_pending = 0; /* Ctrl+D 触发的一次性 EOF */
 
 static inline uint32_t input_irq_save(void) {
     uint32_t flags;
@@ -49,6 +50,29 @@ int input_has_data(void) {
     int has;
     uint32_t flags = input_irq_save();
     has = count > 0;
+    input_irq_restore(flags);
+    return has;
+}
+
+void input_mark_eof(void) {
+    uint32_t flags = input_irq_save();
+    eof_pending = 1;
+    input_irq_restore(flags);
+}
+
+int input_consume_eof(void) {
+    int had;
+    uint32_t flags = input_irq_save();
+    had = eof_pending;
+    eof_pending = 0;
+    input_irq_restore(flags);
+    return had;
+}
+
+int input_has_eof(void) {
+    int has;
+    uint32_t flags = input_irq_save();
+    has = eof_pending;
     input_irq_restore(flags);
     return has;
 }

@@ -742,3 +742,23 @@ uint32_t sys_getppid(void) {
     if (!p) return 0;
     return p->ppid;
 }
+
+int proc_terminate(uint32_t pid, int exit_code)
+{
+    process_t *p = proc_find(pid);
+    if (!p || p->state == PROC_DEAD || p->state == PROC_ZOMBIE)
+        return -1;
+
+    thread_t *t = p->threads;
+    while (t) {
+        thread_t *next = t->next;
+        sched_remove_thread(t);
+        t->state = PROC_ZOMBIE;
+        t = next;
+    }
+
+    p->exit_code = exit_code;
+    vfs_close_fds_for_process(p);
+    p->state = PROC_ZOMBIE;
+    return 0;
+}

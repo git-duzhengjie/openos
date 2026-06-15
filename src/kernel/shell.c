@@ -27,6 +27,7 @@
 extern int spawn_user_process(const char *path, char *const argv[]);
 extern int spawn_user_process_env(const char *path, char *const argv[], char *const envp[]);
 extern int sys_waitpid(int pid, int *status, int options);
+extern void sched_yield(void);
 #ifndef NULL
 #define NULL ((void *)0)
 #endif
@@ -46,6 +47,9 @@ static void shell_delete_char(void);
 static void shell_cancel_line(void);
 static void shell_backspace(void);
 
+#define SHELL_WAITPID_WNOHANG 1
+#define SHELL_CTRL_C 0x03
+#define SHELL_CTRL_D 0x04
 
 /* 打印：默认输出到 VGA + 串口 + GUI；命令重定向时输出到 fd 1/2 */
 static int shell_stdout_redirect_depth = 0;
@@ -1280,6 +1284,64 @@ static void shell_restore_redirects(int saved_stdin, int saved_stdout, int saved
     shell_restore_fd(2, saved_stderr);
 }
 
+static void shell_interrupt_pid(int pid)
+{
+    if (pid < 0)
+        return;
+    proc_terminate((uint32_t)pid, 130);
+}
+
+static int shell_wait_foreground_pids(int *pids, int count)
+{
+    int remaining = 0;
+    int interrupted = 0;
+
+    for (int i = 0; i < count; i++) {
+        if (pids[i] >= 0)
+            remaining++;
+    }
+
+    while (remaining > 0) {
+        for (int i = 0; i < count; i++) {
+            if (pids[i] < 0)
+                continue;
+            int ret = sys_waitpid(pids[i], NULL, SHELL_WAITPID_WNOHANG);
+            if (ret == pids[i]) {
+                pids[i] = -1;
+                remaining--;
+            }
+        }
+
+        if (remaining <= 0)
+            break;
+
+        while (input_has_data()) {
+            char c = input_getc();
+            if (c == SHELL_CTRL_C) {
+                for (int i = 0; i < count; i++) {
+                    if (pids[i] >= 0)
+                        shell_interrupt_pid(pids[i]);
+                }
+                interrupted = 1;
+                print("^C\n");
+            } else if (c == SHELL_CTRL_D) {
+                input_mark_eof();
+            }
+        }
+
+        sched_yield();
+    }
+
+    return interrupted ? -1 : 0;
+}
+
+static int shell_wait_foreground_pid(int pid)
+{
+    int pids[1];
+    pids[0] = pid;
+    return shell_wait_foreground_pids(pids, 1);
+}
+
 static int shell_extract_background(char *cmdline)
 {
     if (!cmdline)
@@ -1351,7 +1413,7 @@ static int shell_run_external_with_redirect(char *cmd, char *argv[], int argc)
     }
 
     if (redir.stdin_path || redir.stdout_path || redir.stderr_path)
-        sys_waitpid(ret, NULL, 0);
+        shell_wait_foreground_pid(ret);
     else
         print("exec: spawned\n");
 
@@ -1514,10 +1576,7 @@ done:
     if (background) {
         shell_print_background_pipeline(pids, segment_count);
     } else {
-        for (int i = 0; i < segment_count; i++) {
-            if (pids[i] >= 0)
-                sys_waitpid(pids[i], NULL, 0);
-        }
+        shell_wait_foreground_pids(pids, segment_count);
     }
 
     return 1;
@@ -1910,6 +1969,8 @@ static void cmd_help(void)
     print("  clear           - Clear screen\n");
     print("  yield           - Yield CPU\n");
     print("  exec <elf>      - Execute ELF program\n");
+    print("  Ctrl+C          - Interrupt foreground command or cancel line\n");
+    print("  Ctrl+D          - Send EOF to stdin or logout on empty line\n");
     print("  fbinfo          - Show framebuffer information\n");
     print("  fbtest          - Draw framebuffer test pattern\n");
     print("  gui             - Show GUI/window system information\n");
@@ -2792,7 +2853,7 @@ void shell_run(void)
                         }
                         else
                         {
-                            sys_waitpid(ret, NULL, 0);
+                            shell_wait_foreground_pid(ret);
                         }
                     }
                     else
@@ -2809,7 +2870,7 @@ void shell_run(void)
                     } else if (background) {
                         shell_print_background_job(ret);
                     } else {
-                        sys_waitpid(ret, NULL, 0);
+                        shell_wait_foreground_pid(ret);
                     }
                 }
             }
@@ -2850,13 +2911,21 @@ shell_command_done:
         {
             shell_move_cursor_end();
         }
-        else if (c == 0x03)  /* Ctrl+C - copy selection or cancel current line */
+        else if (c == SHELL_CTRL_C)  /* Ctrl+C - copy selection or cancel current line */
         {
             if (gui_terminal_copy_selection()) {
                 gui_terminal_clear_selection();
             } else {
                 shell_cancel_line();
             }
+        }
+        else if (c == SHELL_CTRL_D)  /* Ctrl+D - send EOF to stdin or logout on empty line */
+        {
+            if (cmd_pos == 0) {
+                print("logout\n");
+                return;
+            }
+            input_mark_eof();
         }
         else if (c == 0x16)  /* Ctrl+V - paste terminal clipboard */
         {

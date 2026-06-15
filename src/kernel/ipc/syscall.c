@@ -107,6 +107,8 @@ static uint32_t syscall_read_user_buffer(int fd, void *user_buf, uint32_t count)
                 while ((uint32_t)got < n && input_has_data()) {
                     chunk[got++] = input_getc();
                 }
+                if (got == 0 && input_consume_eof())
+                    break;
                 if (got == 0) {
                     sched_yield();
                 }
