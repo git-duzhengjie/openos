@@ -85,6 +85,12 @@
 #else
 #define OPENOS_HAS_MALLOCTEST 0
 #endif
+#if __has_include("embed_errnotest.h")
+#include "embed_errnotest.h"  /* userspace errno 回归测试程序 */
+#define OPENOS_HAS_ERRNOTEST 1
+#else
+#define OPENOS_HAS_ERRNOTEST 0
+#endif
 #if __has_include("embed_fstest.h")
 #include "embed_fstest.h"  /* filesystem syscall 回归测试程序 */
 #define OPENOS_HAS_FSTEST 1
@@ -564,6 +570,17 @@ void kernel_main(void) {
         serial_write("[OK] Installed /bin/malloctest user ELF\n");
     } else {
         serial_write("[WARN] Failed to install /bin/malloctest\n");
+    }
+#endif
+
+#if OPENOS_HAS_ERRNOTEST
+    fd = vfs_open("/bin/errnotest", O_CREAT | O_RDWR, 0755);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)errnotest_elf, errnotest_elf_size);
+        vfs_close(fd);
+        serial_write("[OK] Installed /bin/errnotest user ELF\n");
+    } else {
+        serial_write("[WARN] Failed to install /bin/errnotest\n");
     }
 #endif
 

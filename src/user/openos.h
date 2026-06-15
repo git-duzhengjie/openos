@@ -52,6 +52,59 @@
 #define STDERR_FILENO   2
 #define OPENOS_PATH_MAX 128
 
+#define OPENOS_EPERM       1
+#define OPENOS_ENOENT      2
+#define OPENOS_EIO         5
+#define OPENOS_EBADF       9
+#define OPENOS_ENOMEM      12
+#define OPENOS_EACCES      13
+#define OPENOS_EFAULT      14
+#define OPENOS_EBUSY       16
+#define OPENOS_EEXIST      17
+#define OPENOS_ENODEV      19
+#define OPENOS_ENOTDIR     20
+#define OPENOS_EISDIR      21
+#define OPENOS_EINVAL      22
+#define OPENOS_ENFILE      23
+#define OPENOS_EMFILE      24
+#define OPENOS_ENOSPC      28
+#define OPENOS_EPIPE       32
+#define OPENOS_ENOSYS      38
+#define OPENOS_ENOTEMPTY   39
+#define OPENOS_ESPIPE      29
+
+static int openos_errno = 0;
+
+static inline int *openos_errno_location(void)
+{
+    return &openos_errno;
+}
+
+static inline int openos_get_errno(void)
+{
+    return openos_errno;
+}
+
+static inline void openos_set_errno(int err)
+{
+    openos_errno = err < 0 ? -err : err;
+}
+
+static inline void openos_clear_errno(void)
+{
+    openos_errno = 0;
+}
+
+static inline int openos_syscall_result(int ret)
+{
+    if (ret < 0) {
+        openos_set_errno(ret);
+        return -1;
+    }
+    openos_clear_errno();
+    return ret;
+}
+
 typedef unsigned int openos_uint32_t;
 
 typedef struct openos_stat {
@@ -343,42 +396,42 @@ static inline char *openos_itoa(int value, char *buf, int base)
 
 static inline int openos_write(int fd, const char *s, int len)
 {
-    return openos_syscall3(SYS_WRITE, fd, (int)s, len);
+    return openos_syscall_result(openos_syscall3(SYS_WRITE, fd, (int)s, len));
 }
 
 static inline int openos_open(const char *path, int flags, int mode)
 {
-    return openos_syscall3(SYS_OPEN, (int)path, flags, mode);
+    return openos_syscall_result(openos_syscall3(SYS_OPEN, (int)path, flags, mode));
 }
 
 static inline int openos_close(int fd)
 {
-    return openos_syscall1(SYS_CLOSE, fd);
+    return openos_syscall_result(openos_syscall1(SYS_CLOSE, fd));
 }
 
 static inline int openos_read(int fd, void *buf, int len)
 {
-    return openos_syscall3(SYS_READ_FD, fd, (int)buf, len);
+    return openos_syscall_result(openos_syscall3(SYS_READ_FD, fd, (int)buf, len));
 }
 
 static inline int openos_write_fd(int fd, const void *buf, int len)
 {
-    return openos_syscall3(SYS_WRITE_FD, fd, (int)buf, len);
+    return openos_syscall_result(openos_syscall3(SYS_WRITE_FD, fd, (int)buf, len));
 }
 
 static inline int openos_dup(int oldfd)
 {
-    return openos_syscall1(SYS_DUP, oldfd);
+    return openos_syscall_result(openos_syscall1(SYS_DUP, oldfd));
 }
 
 static inline int openos_dup2(int oldfd, int newfd)
 {
-    return openos_syscall3(SYS_DUP2, oldfd, newfd, 0);
+    return openos_syscall_result(openos_syscall3(SYS_DUP2, oldfd, newfd, 0));
 }
 
 static inline int openos_pipe(int pipefd[2])
 {
-    return openos_syscall1(SYS_PIPE, (int)pipefd);
+    return openos_syscall_result(openos_syscall1(SYS_PIPE, (int)pipefd));
 }
 
 static inline void openos_write_str(const char *s)
@@ -466,87 +519,87 @@ static inline int openos_printf(const char *fmt, ...)
 
 static inline int openos_getpid(void)
 {
-    return openos_syscall0(SYS_GETPID);
+    return openos_syscall_result(openos_syscall0(SYS_GETPID));
 }
 
 static inline int openos_gettid(void)
 {
-    return openos_syscall0(SYS_GETTID);
+    return openos_syscall_result(openos_syscall0(SYS_GETTID));
 }
 
 static inline int openos_getppid(void)
 {
-    return openos_syscall0(SYS_GETPPID);
+    return openos_syscall_result(openos_syscall0(SYS_GETPPID));
 }
 
 static inline int openos_yield(void)
 {
-    return openos_syscall0(SYS_YIELD);
+    return openos_syscall_result(openos_syscall0(SYS_YIELD));
 }
 
 static inline int openos_sleep(int ticks)
 {
-    return openos_syscall1(SYS_SLEEP, ticks);
+    return openos_syscall_result(openos_syscall1(SYS_SLEEP, ticks));
 }
 
 static inline int openos_fork(void)
 {
-    return openos_syscall0(SYS_FORK);
+    return openos_syscall_result(openos_syscall0(SYS_FORK));
 }
 
 static inline int openos_wait(int *status)
 {
-    return openos_syscall1(SYS_WAIT, (int)status);
+    return openos_syscall_result(openos_syscall1(SYS_WAIT, (int)status));
 }
 
 static inline int openos_getcwd(char *buf, int size)
 {
-    return openos_syscall2(SYS_GETCWD, (int)buf, size);
+    return openos_syscall_result(openos_syscall2(SYS_GETCWD, (int)buf, size));
 }
 
 static inline int openos_chdir(const char *path)
 {
-    return openos_syscall1(SYS_CHDIR, (int)path);
+    return openos_syscall_result(openos_syscall1(SYS_CHDIR, (int)path));
 }
 
 static inline int openos_mkdir(const char *path, int mode)
 {
-    return openos_syscall2(SYS_MKDIR, (int)path, mode);
+    return openos_syscall_result(openos_syscall2(SYS_MKDIR, (int)path, mode));
 }
 
 static inline int openos_unlink(const char *path)
 {
-    return openos_syscall1(SYS_UNLINK, (int)path);
+    return openos_syscall_result(openos_syscall1(SYS_UNLINK, (int)path));
 }
 
 static inline int openos_rmdir(const char *path)
 {
-    return openos_syscall1(SYS_RMDIR, (int)path);
+    return openos_syscall_result(openos_syscall1(SYS_RMDIR, (int)path));
 }
 
 static inline int openos_spawn(const char *path, char *const argv[])
 {
-    return openos_syscall2(SYS_SPAWN, (int)path, (int)argv);
+    return openos_syscall_result(openos_syscall2(SYS_SPAWN, (int)path, (int)argv));
 }
 
 static inline int openos_spawn_env(const char *path, char *const argv[], char *const envp[])
 {
-    return openos_syscall3(SYS_SPAWN_ENV, (int)path, (int)argv, (int)envp);
+    return openos_syscall_result(openos_syscall3(SYS_SPAWN_ENV, (int)path, (int)argv, (int)envp));
 }
 
 static inline int openos_waitpid(int pid, int *status, int options)
 {
-    return openos_syscall3(SYS_WAITPID, pid, (int)status, options);
+    return openos_syscall_result(openos_syscall3(SYS_WAITPID, pid, (int)status, options));
 }
 
 static inline int openos_exec(const char *path, char *const argv[])
 {
-    return openos_syscall2(SYS_EXEC, (int)path, (int)argv);
+    return openos_syscall_result(openos_syscall2(SYS_EXEC, (int)path, (int)argv));
 }
 
 static inline int openos_exec_env(const char *path, char *const argv[], char *const envp[])
 {
-    return openos_syscall3(SYS_EXEC_ENV, (int)path, (int)argv, (int)envp);
+    return openos_syscall_result(openos_syscall3(SYS_EXEC_ENV, (int)path, (int)argv, (int)envp));
 }
 
 #define OPENOS_HEAP_PAGE_SIZE 4096
@@ -565,12 +618,18 @@ static openos_heap_block_t *openos_heap_head = 0;
 
 static inline void *openos_heap_alloc_page(void)
 {
-    return (void *)openos_syscall1(SYS_MALLOC, OPENOS_HEAP_PAGE_SIZE);
+    int ret = openos_syscall1(SYS_MALLOC, OPENOS_HEAP_PAGE_SIZE);
+    if (ret <= 0) {
+        openos_set_errno(ret < 0 ? ret : OPENOS_ENOMEM);
+        return 0;
+    }
+    openos_clear_errno();
+    return (void *)ret;
 }
 
 static inline int openos_heap_free_page(void *ptr)
 {
-    return openos_syscall1(SYS_FREE, (int)ptr);
+    return openos_syscall_result(openos_syscall1(SYS_FREE, (int)ptr));
 }
 
 static inline int openos_heap_align_size(int size)
@@ -658,24 +717,30 @@ static inline void *openos_malloc(int size)
     openos_heap_block_t *cur;
     int aligned = openos_heap_align_size(size);
 
-    if (aligned <= 0)
+    if (aligned <= 0) {
+        openos_set_errno(OPENOS_EINVAL);
         return 0;
+    }
 
     cur = openos_heap_head;
     while (cur) {
         if (cur->magic == OPENOS_HEAP_MAGIC && cur->free && (int)cur->size >= aligned) {
             openos_heap_split_block(cur, aligned);
             cur->free = 0;
+            openos_clear_errno();
             return (void *)(cur + 1);
         }
         cur = cur->next;
     }
 
     cur = openos_heap_add_page(aligned);
-    if (!cur)
+    if (!cur) {
+        openos_set_errno(OPENOS_ENOMEM);
         return 0;
+    }
     openos_heap_split_block(cur, aligned);
     cur->free = 0;
+    openos_clear_errno();
     return (void *)(cur + 1);
 }
 
@@ -683,17 +748,24 @@ static inline int openos_free(void *ptr)
 {
     openos_heap_block_t *block;
 
-    if (!ptr)
+    if (!ptr) {
+        openos_clear_errno();
         return 0;
+    }
 
     block = ((openos_heap_block_t *)ptr) - 1;
-    if (block->magic != OPENOS_HEAP_MAGIC)
+    if (block->magic != OPENOS_HEAP_MAGIC) {
+        openos_set_errno(OPENOS_EINVAL);
         return -1;
-    if (block->free)
+    }
+    if (block->free) {
+        openos_set_errno(OPENOS_EINVAL);
         return -1;
+    }
 
     block->free = OPENOS_HEAP_FREE;
     openos_heap_coalesce();
+    openos_clear_errno();
     return 0;
 }
 
@@ -702,11 +774,15 @@ static inline void *openos_calloc(int count, int size)
     int total;
     void *ptr;
 
-    if (count <= 0 || size <= 0)
+    if (count <= 0 || size <= 0) {
+        openos_set_errno(OPENOS_EINVAL);
         return 0;
+    }
     total = count * size;
-    if (size != 0 && total / size != count)
+    if (size != 0 && total / size != count) {
+        openos_set_errno(OPENOS_ENOMEM);
         return 0;
+    }
     ptr = openos_malloc(total);
     if (ptr)
         openos_memset(ptr, 0, total);
@@ -727,25 +803,32 @@ static inline void *openos_realloc(void *ptr, int size)
     }
 
     block = ((openos_heap_block_t *)ptr) - 1;
-    if (block->magic != OPENOS_HEAP_MAGIC)
+    if (block->magic != OPENOS_HEAP_MAGIC) {
+        openos_set_errno(OPENOS_EINVAL);
         return 0;
-    if ((int)block->size >= size)
+    }
+    if ((int)block->size >= size) {
+        openos_clear_errno();
         return ptr;
+    }
 
     next = openos_malloc(size);
-    if (!next)
+    if (!next) {
+        openos_set_errno(OPENOS_ENOMEM);
         return 0;
+    }
     copy = (int)block->size;
     if (copy > size)
         copy = size;
     openos_memcpy(next, ptr, copy);
     openos_free(ptr);
+    openos_clear_errno();
     return next;
 }
 
 static inline int openos_seek(int fd, int offset, int whence)
 {
-    return openos_syscall3(SYS_SEEK, fd, offset, whence);
+    return openos_syscall_result(openos_syscall3(SYS_SEEK, fd, offset, whence));
 }
 
 
@@ -758,22 +841,22 @@ typedef struct openos_DIR {
 
 static inline int openos_stat(const char *path, openos_stat_t *st)
 {
-    return openos_syscall2(SYS_STAT, (int)path, (int)st);
+    return openos_syscall_result(openos_syscall2(SYS_STAT, (int)path, (int)st));
 }
 
 static inline int openos_fstat(int fd, openos_stat_t *st)
 {
-    return openos_syscall2(SYS_FSTAT, fd, (int)st);
+    return openos_syscall_result(openos_syscall2(SYS_FSTAT, fd, (int)st));
 }
 
 static inline int openos_lstat(const char *path, openos_stat_t *st)
 {
-    return openos_syscall2(SYS_LSTAT, (int)path, (int)st);
+    return openos_syscall_result(openos_syscall2(SYS_LSTAT, (int)path, (int)st));
 }
 
 static inline int openos_readdir_path(const char *path, int index, openos_dirent_t *entry)
 {
-    return openos_syscall3(SYS_READDIR, (int)path, index, (int)entry);
+    return openos_syscall_result(openos_syscall3(SYS_READDIR, (int)path, index, (int)entry));
 }
 
 static inline openos_DIR *openos_opendir(const char *path)
@@ -781,17 +864,24 @@ static inline openos_DIR *openos_opendir(const char *path)
     static openos_DIR dir;
     openos_stat_t st;
 
-    if (!path)
+    if (!path) {
+        openos_set_errno(OPENOS_EINVAL);
         return 0;
+    }
     if (openos_stat(path, &st) < 0)
         return 0;
-    if ((st.mode & FS_DIR) != FS_DIR)
+    if ((st.mode & FS_DIR) != FS_DIR) {
+        openos_set_errno(OPENOS_ENOTDIR);
         return 0;
-    if (openos_str_copy(dir.path, path, sizeof(dir.path)) < 0)
+    }
+    if (openos_str_copy(dir.path, path, sizeof(dir.path)) < 0) {
+        openos_set_errno(OPENOS_EINVAL);
         return 0;
+    }
 
     dir.index = 0;
     dir.open = 1;
+    openos_clear_errno();
     return &dir;
 }
 
@@ -799,22 +889,28 @@ static inline openos_dirent_t *openos_readdir(openos_DIR *dir)
 {
     int r;
 
-    if (!dir || !dir->open)
+    if (!dir || !dir->open) {
+        openos_set_errno(OPENOS_EINVAL);
         return 0;
+    }
 
     r = openos_readdir_path(dir->path, dir->index, &dir->entry);
     if (r <= 0)
         return 0;
 
     dir->index++;
+    openos_clear_errno();
     return &dir->entry;
 }
 
 static inline int openos_closedir(openos_DIR *dir)
 {
-    if (!dir || !dir->open)
+    if (!dir || !dir->open) {
+        openos_set_errno(OPENOS_EINVAL);
         return -1;
+    }
     dir->open = 0;
+    openos_clear_errno();
     return 0;
 }
 
