@@ -808,6 +808,17 @@ void kernel_main(void) {
     }
 #endif
 
+#if OPENOS_HAS_ENV
+    fd = vfs_open("/bin/env", O_CREAT | O_RDWR, 0755);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)env_elf, env_elf_size);
+        vfs_close(fd);
+        serial_write("[OK] Installed /bin/env user ELF\n");
+    } else {
+        serial_write("[WARN] Failed to install /bin/env\n");
+    }
+#endif
+
 #if OPENOS_HAS_RMDIR
     fd = vfs_open("/bin/rmdir", O_CREAT | O_RDWR, 0755);
     if (fd >= 0) {

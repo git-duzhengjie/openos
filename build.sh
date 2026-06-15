@@ -343,6 +343,16 @@ if [ -f $USR/sort.c ]; then
     echo "  Embedded: sort.elf"
 fi
 
+if [ -f $USR/env.c ]; then
+    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+        -fno-stack-protector -fno-builtin \
+        -I $SRC/include \
+        -c $USR/env.c -o $BUILD/env.o
+    ld -m elf_i386 -T $USR/user.ld -o $BUILD/env.elf $BUILD/env.o
+    python3 _embed_elf.py $BUILD/env.elf $SRC/include/embed_env.h env_elf
+    echo "  Embedded: env.elf"
+fi
+
 if [ -f $USR/rmdir.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \
