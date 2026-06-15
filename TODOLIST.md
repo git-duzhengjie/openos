@@ -6,7 +6,7 @@
 >
 > 最近完成：`9f584f2 fix(proc): reap orphaned child processes` 已完成子进程资源回收、孤儿进程 reparent 到 init，并新增 `/bin/orphan` 回归覆盖；`d2a2da0 fix(build): increase boot kernel load limit` 已将 bootloader 内核加载上限提升到 1024 扇区并修复 `NULL` 重定义警告；当前已搭建 PID1 init/reaper 内核线程，已支持 shell 直接执行 `/bin/app arg1 arg2` 带参数用户程序，已补齐 `envp` 环境变量传递，并已暴露 `stat/getcwd/chdir/readdir/fstat/lstat` 文件系统 syscall，同时新增最小用户态公共 runtime 头文件 `src/user/openos.h`，且已新增独立 `/bin/pwd`、`/bin/ls`、`/bin/cat`、`/bin/echo`、`/bin/mkdir`、`/bin/rm`、`/bin/rmdir`、`/bin/grep`、`/bin/wc` 用户态命令；本轮已初步标准化 `stdin/stdout/stderr`，`/bin/cat` 支持无参数从 stdin 读取，并已新增 `dup` / `dup2` / `pipe` syscall 与 VFS fd 引用计数语义。
 >
-> 当前推荐下一步：继续 P5，补齐后台任务状态管理（`jobs` / `fg`），为后续完整作业控制和信号处理打基础。
+> 当前推荐下一步：继续 P5，补齐 shell 命令补全能力，为后续脚本执行和更完整的交互式 shell 打基础。
 
 ---
 
@@ -255,6 +255,7 @@
 - [√] 环境变量（shell 内置 `env` / `export` / `unset`，外部程序继承 envp）
 - [√] `PATH` 查找（未带 `/` 的外部命令自动尝试 `/bin/<cmd>`）
 - [√] 后台任务 `&`（行尾 `&` 后不等待，支持普通外部命令、`exec` 和 pipeline 后台执行）
+- [√] 后台任务状态管理 `jobs` / `fg`（支持查看后台 job、按 `%N` 或默认最近 job 拉回前台）
 - [√] `Ctrl+C` / `Ctrl+D`
 - [ ] 命令补全
 - [ ] 脚本执行

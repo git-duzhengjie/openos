@@ -36,6 +36,10 @@ static void make_path(const char *arg, char *out);
 static int shell_spawn_user_program(const char *path, char *argv[], int argc);
 static int shell_run_pipeline(char *cmdline, int background);
 static int shell_run_external_with_redirect(char *cmd, char *argv[], int argc);
+static int shell_register_background_job(int *pids, int count, const char *command);
+static void shell_jobs_poll(void);
+static void cmd_jobs(void);
+static void cmd_fg(int argc, char *argv[]);
 static void shell_complete_command(void);
 static void shell_history_prev(void);
 static void shell_history_next(void);
@@ -50,6 +54,28 @@ static void shell_backspace(void);
 #define SHELL_WAITPID_WNOHANG 1
 #define SHELL_CTRL_C 0x03
 #define SHELL_CTRL_D 0x04
+#define SHELL_MAX_JOBS 16
+#define SHELL_MAX_JOB_PIDS 8
+#define SHELL_JOB_CMD_MAX 128
+
+typedef enum shell_job_state {
+    SHELL_JOB_UNUSED = 0,
+    SHELL_JOB_RUNNING,
+    SHELL_JOB_DONE
+} shell_job_state_t;
+
+typedef struct shell_job {
+    int id;
+    shell_job_state_t state;
+    int pid_count;
+    int pids[SHELL_MAX_JOB_PIDS];
+    int completed[SHELL_MAX_JOB_PIDS];
+    int statuses[SHELL_MAX_JOB_PIDS];
+    char command[SHELL_JOB_CMD_MAX];
+} shell_job_t;
+
+static shell_job_t shell_jobs[SHELL_MAX_JOBS];
+static int shell_next_job_id = 1;
 
 /* 打印：默认输出到 VGA + 串口 + GUI；命令重定向时输出到 fd 1/2 */
 static int shell_stdout_redirect_depth = 0;
@@ -1383,6 +1409,262 @@ static void shell_print_background_pipeline(int *pids, int count)
     print("\n");
 }
 
+static void shell_copy_job_command(char *dst, const char *src)
+{
+    int i = 0;
+    if (!dst)
+        return;
+    if (!src) {
+        dst[0] = '\0';
+        return;
+    }
+    while (src[i] && i + 1 < SHELL_JOB_CMD_MAX) {
+        dst[i] = src[i];
+        i++;
+    }
+    dst[i] = '\0';
+}
+
+static void shell_print_job_line(shell_job_t *job)
+{
+    if (!job || job->state == SHELL_JOB_UNUSED)
+        return;
+
+    print("[");
+    shell_print_dec(job->id);
+    print("] ");
+    if (job->state == SHELL_JOB_DONE)
+        print("Done    ");
+    else
+        print("Running ");
+    if (job->command[0])
+        print(job->command);
+    else
+        print("<background job>");
+    print("\n");
+}
+
+static shell_job_t *shell_find_job_by_id(int id)
+{
+    for (int i = 0; i < SHELL_MAX_JOBS; i++) {
+        if (shell_jobs[i].state != SHELL_JOB_UNUSED && shell_jobs[i].id == id)
+            return &shell_jobs[i];
+    }
+    return NULL;
+}
+
+static shell_job_t *shell_find_recent_job(void)
+{
+    shell_job_t *best = NULL;
+    for (int i = 0; i < SHELL_MAX_JOBS; i++) {
+        if (shell_jobs[i].state != SHELL_JOB_UNUSED && shell_jobs[i].state != SHELL_JOB_DONE) {
+            if (!best || shell_jobs[i].id > best->id)
+                best = &shell_jobs[i];
+        }
+    }
+    if (best)
+        return best;
+
+    for (int i = 0; i < SHELL_MAX_JOBS; i++) {
+        if (shell_jobs[i].state != SHELL_JOB_UNUSED) {
+            if (!best || shell_jobs[i].id > best->id)
+                best = &shell_jobs[i];
+        }
+    }
+    return best;
+}
+
+static int shell_job_active_pid_count(shell_job_t *job)
+{
+    int active = 0;
+    if (!job)
+        return 0;
+    for (int i = 0; i < job->pid_count; i++) {
+        if (job->pids[i] >= 0 && !job->completed[i])
+            active++;
+    }
+    return active;
+}
+
+static void shell_job_poll_one(shell_job_t *job)
+{
+    if (!job || job->state == SHELL_JOB_UNUSED || job->state == SHELL_JOB_DONE)
+        return;
+
+    int all_done = 1;
+    for (int i = 0; i < job->pid_count; i++) {
+        if (job->pids[i] < 0)
+            continue;
+        if (job->completed[i])
+            continue;
+
+        int status = 0;
+        int ret = sys_waitpid(job->pids[i], &status, SHELL_WAITPID_WNOHANG);
+        if (ret == job->pids[i]) {
+            job->completed[i] = 1;
+            job->statuses[i] = status;
+        } else if (ret == 0) {
+            all_done = 0;
+        } else {
+            job->completed[i] = 1;
+        }
+    }
+
+    for (int i = 0; i < job->pid_count; i++) {
+        if (job->pids[i] >= 0 && !job->completed[i]) {
+            all_done = 0;
+            break;
+        }
+    }
+
+    if (all_done)
+        job->state = SHELL_JOB_DONE;
+}
+
+static void shell_jobs_poll(void)
+{
+    for (int i = 0; i < SHELL_MAX_JOBS; i++)
+        shell_job_poll_one(&shell_jobs[i]);
+}
+
+static int shell_register_background_job(int *pids, int count, const char *command)
+{
+    shell_job_t *slot = NULL;
+    shell_jobs_poll();
+
+    for (int i = 0; i < SHELL_MAX_JOBS; i++) {
+        if (shell_jobs[i].state == SHELL_JOB_UNUSED) {
+            slot = &shell_jobs[i];
+            break;
+        }
+    }
+    if (!slot) {
+        for (int i = 0; i < SHELL_MAX_JOBS; i++) {
+            if (shell_jobs[i].state == SHELL_JOB_DONE) {
+                slot = &shell_jobs[i];
+                break;
+            }
+        }
+    }
+    if (!slot) {
+        print_err("jobs: table full\n");
+        return -1;
+    }
+
+    slot->id = shell_next_job_id++;
+    if (shell_next_job_id <= 0)
+        shell_next_job_id = 1;
+    slot->state = SHELL_JOB_RUNNING;
+    slot->pid_count = 0;
+    shell_copy_job_command(slot->command, command);
+
+    for (int i = 0; i < SHELL_MAX_JOB_PIDS; i++) {
+        slot->pids[i] = -1;
+        slot->completed[i] = 1;
+        slot->statuses[i] = 0;
+    }
+
+    for (int i = 0; i < count && slot->pid_count < SHELL_MAX_JOB_PIDS; i++) {
+        if (pids[i] < 0)
+            continue;
+        int out = slot->pid_count++;
+        slot->pids[out] = pids[i];
+        slot->completed[out] = 0;
+        slot->statuses[out] = 0;
+    }
+
+    if (slot->pid_count <= 0) {
+        slot->state = SHELL_JOB_UNUSED;
+        return -1;
+    }
+
+    print("[");
+    shell_print_dec(slot->id);
+    print("] ");
+    for (int i = 0; i < slot->pid_count; i++) {
+        if (i > 0)
+            print(" ");
+        shell_print_dec(slot->pids[i]);
+    }
+    print("\n");
+    return slot->id;
+}
+
+static void cmd_jobs(void)
+{
+    int shown = 0;
+    shell_jobs_poll();
+    for (int i = 0; i < SHELL_MAX_JOBS; i++) {
+        if (shell_jobs[i].state != SHELL_JOB_UNUSED) {
+            shell_print_job_line(&shell_jobs[i]);
+            shown = 1;
+        }
+    }
+    if (!shown)
+        print("jobs: no background jobs\n");
+}
+
+static int shell_parse_job_id(const char *s, int *out)
+{
+    int i = 0;
+    int value = 0;
+    if (!s || !out)
+        return -1;
+    if (s[0] == '%')
+        i = 1;
+    if (!s[i])
+        return -1;
+    for (; s[i]; i++) {
+        if (s[i] < '0' || s[i] > '9')
+            return -1;
+        value = value * 10 + (s[i] - '0');
+    }
+    *out = value;
+    return 0;
+}
+
+static void cmd_fg(int argc, char *argv[])
+{
+    shell_jobs_poll();
+
+    shell_job_t *job = NULL;
+    if (argc > 1) {
+        int id = 0;
+        if (shell_parse_job_id(argv[1], &id) < 0) {
+            print_err("fg: invalid job id\n");
+            return;
+        }
+        job = shell_find_job_by_id(id);
+    } else {
+        job = shell_find_recent_job();
+    }
+
+    if (!job) {
+        print_err("fg: no current job\n");
+        return;
+    }
+    if (job->state == SHELL_JOB_DONE || shell_job_active_pid_count(job) <= 0) {
+        print_err("fg: job already done\n");
+        shell_print_job_line(job);
+        return;
+    }
+
+    print(job->command[0] ? job->command : "<background job>");
+    print("\n");
+
+    int pids[SHELL_MAX_JOB_PIDS];
+    int count = 0;
+    for (int i = 0; i < job->pid_count; i++) {
+        if (job->pids[i] >= 0 && !job->completed[i])
+            pids[count++] = job->pids[i];
+    }
+
+    shell_wait_foreground_pids(pids, count);
+    job->state = SHELL_JOB_DONE;
+    for (int i = 0; i < job->pid_count; i++)
+        job->completed[i] = 1;
+}
+
 static int shell_run_external_with_redirect(char *cmd, char *argv[], int argc)
 {
     shell_redirect_t redir;
@@ -1428,6 +1710,8 @@ fail:
 static int shell_run_pipeline(char *cmdline, int background)
 {
     enum { SHELL_MAX_PIPE_CMDS = 8 };
+    char job_command[SHELL_JOB_CMD_MAX];
+    shell_copy_job_command(job_command, cmdline);
 
     char *segments[SHELL_MAX_PIPE_CMDS];
     char *stage_argv[SHELL_MAX_PIPE_CMDS][MAX_ARGS];
@@ -1574,7 +1858,7 @@ done:
     }
 
     if (background) {
-        shell_print_background_pipeline(pids, segment_count);
+        shell_register_background_job(pids, segment_count, job_command);
     } else {
         shell_wait_foreground_pids(pids, segment_count);
     }
@@ -1940,6 +2224,8 @@ static void cmd_help(void)
     print("  cd [path]       - Change directory\n");
     print("  pwd             - Print working directory\n");
     print("  history         - Show command history\n");
+    print("  jobs            - Show background jobs\n");
+    print("  fg [%job]       - Bring background job to foreground\n");
     print("  env             - Show shell environment\n");
     print("  export NAME=VALUE - Set shell environment variable\n");
     print("  unset NAME      - Remove shell environment variable\n");
@@ -2824,6 +3110,14 @@ void shell_run(void)
                 {
                     cmd_help();
                 }
+                else if (shell_cmd_equals(cmd, "jobs"))
+                {
+                    cmd_jobs();
+                }
+                else if (shell_cmd_equals(cmd, "fg"))
+                {
+                    cmd_fg(argc, argv);
+                }
                 else if (shell_cmd_equals(cmd, "clear"))
                 {
                     vga_clear();
@@ -2849,7 +3143,9 @@ void shell_run(void)
                         }
                         else if (background)
                         {
-                            shell_print_background_job(ret);
+                            int bg_pids[1];
+                            bg_pids[0] = ret;
+                            shell_register_background_job(bg_pids, 1, cmd);
                         }
                         else
                         {
@@ -2868,7 +3164,9 @@ void shell_run(void)
                         print_err(cmd);
                         print_err(": command not found\n");
                     } else if (background) {
-                        shell_print_background_job(ret);
+                        int bg_pids[1];
+                        bg_pids[0] = ret;
+                        shell_register_background_job(bg_pids, 1, cmd);
                     } else {
                         shell_wait_foreground_pid(ret);
                     }
@@ -2890,6 +3188,7 @@ shell_command_done:
             history_view = history_count;
             history_saved_valid = 0;
             history_saved_line[0] = '\0';
+            shell_jobs_poll();
             uint32_t reaped = proc_reap_zombies_for_parent(proc_current_pid());
             if (reaped > 0) {
                 serial_write("[REAP] collected zombie children: ");
