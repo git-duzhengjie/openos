@@ -1798,6 +1798,30 @@ static void gui_terminal_scroll(void) {
     gui_terminal_invalidate_body();
 }
 
+static void gui_terminal_handle_carriage_return(void) {
+    /* CR returns to the beginning of the current line. It must not scroll or move down. */
+    g_gui.terminal.cursor_x = 0;
+}
+
+static void gui_terminal_handle_line_feed(int *body_dirty) {
+    /* LF advances to the next display line. Keep the existing console convention of column 0. */
+    g_gui.terminal.cursor_x = 0;
+    g_gui.terminal.cursor_y++;
+    if (g_gui.terminal.cursor_y >= g_gui.terminal.rows) {
+        gui_terminal_scroll();
+        *body_dirty = 1;
+    }
+}
+
+static void gui_terminal_handle_backspace(void) {
+    if (g_gui.terminal.cursor_x > 0) {
+        g_gui.terminal.cursor_x--;
+    } else if (g_gui.terminal.cursor_y > 0) {
+        g_gui.terminal.cursor_y--;
+        g_gui.terminal.cursor_x = g_gui.terminal.cols - 1;
+    }
+}
+
 void gui_terminal_putc(char ch) {
     uint32_t old_x, old_y;
     int body_dirty = 0;
@@ -1810,21 +1834,14 @@ void gui_terminal_putc(char ch) {
     gui_terminal_invalidate_cursor_at(old_x, old_y);
 
     if (ch == '\n') {
-        g_gui.terminal.cursor_x = 0;
-        g_gui.terminal.cursor_y++;
+        gui_terminal_handle_line_feed(&body_dirty);
     } else if (ch == '\r') {
-        g_gui.terminal.cursor_x = 0;
+        gui_terminal_handle_carriage_return();
     } else if (ch == '\b') {
-        if (g_gui.terminal.cursor_x > 0) {
-            g_gui.terminal.cursor_x--;
-        } else if (g_gui.terminal.cursor_y > 0) {
-            g_gui.terminal.cursor_y--;
-            g_gui.terminal.cursor_x = g_gui.terminal.cols - 1;
-        }
+        gui_terminal_handle_backspace();
     } else {
         if (g_gui.terminal.cursor_x >= g_gui.terminal.cols) {
-            g_gui.terminal.cursor_x = 0;
-            g_gui.terminal.cursor_y++;
+            gui_terminal_handle_line_feed(&body_dirty);
         }
         if (g_gui.terminal.cursor_y >= g_gui.terminal.rows) {
             gui_terminal_scroll();
