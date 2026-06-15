@@ -137,6 +137,60 @@ static int syscall_copy_user_path(char *dst, const char *user_path)
     return strncpy_from_user(dst, user_path, USERMEM_CSTR_MAX);
 }
 
+#define SYSCALL_ARG_MAX 8
+#define SYSCALL_ARG_LEN 64
+#define SYSCALL_ENV_MAX 8
+#define SYSCALL_ENV_LEN 96
+
+typedef struct syscall_strvec {
+    char storage[SYSCALL_ARG_MAX + 1][SYSCALL_ENV_LEN];
+    char *ptrs[SYSCALL_ARG_MAX + 1];
+} syscall_strvec_t;
+
+static int syscall_copy_user_strvec(syscall_strvec_t *out,
+                                    char *const *user_vec,
+                                    int max_items,
+                                    int max_len)
+{
+    int i;
+
+    if (!out)
+        return -1;
+
+    for (i = 0; i <= SYSCALL_ARG_MAX; i++) {
+        out->ptrs[i] = 0;
+        out->storage[i][0] = '\0';
+    }
+
+    if (!user_vec)
+        return 0;
+
+    for (i = 0; i < max_items; i++) {
+        char *user_item = 0;
+
+        if (copy_from_user(&user_item, user_vec + i, sizeof(user_item)) < 0)
+            return -1;
+        if (!user_item) {
+            out->ptrs[i] = 0;
+            return 0;
+        }
+        if (strncpy_from_user(out->storage[i], user_item, (uint32_t)max_len) < 0)
+            return -1;
+        out->ptrs[i] = out->storage[i];
+    }
+
+    {
+        char *extra = 0;
+        if (copy_from_user(&extra, user_vec + max_items, sizeof(extra)) < 0)
+            return -1;
+        if (extra)
+            return -1;
+    }
+
+    out->ptrs[max_items] = 0;
+    return 0;
+}
+
 static void syscall_fill_user_stat(openos_stat_t *user_st, const inode_t *st)
 {
     user_st->ino = st->ino;
@@ -301,39 +355,57 @@ uint32_t syscall_dispatch(uint32_t num,
     case SYS_EXEC:
         {
             char path[USERMEM_CSTR_MAX];
-            char *const *argv = (char *const *)b;
+            syscall_strvec_t argv;
             if (syscall_copy_user_path(path, (const char *)a) < 0)
                 return (uint32_t)-1;
-            return (uint32_t)sys_exec(path, argv);
+            if (syscall_copy_user_strvec(&argv, (char *const *)b,
+                                         SYSCALL_ARG_MAX, SYSCALL_ARG_LEN) < 0)
+                return (uint32_t)-1;
+            return (uint32_t)sys_exec(path, argv.ptrs);
         }
 
     case SYS_SPAWN:
         {
             char path[USERMEM_CSTR_MAX];
-            char *const *argv = (char *const *)b;
+            syscall_strvec_t argv;
             if (syscall_copy_user_path(path, (const char *)a) < 0)
                 return (uint32_t)-1;
-            return (uint32_t)spawn_user_process(path, argv);
+            if (syscall_copy_user_strvec(&argv, (char *const *)b,
+                                         SYSCALL_ARG_MAX, SYSCALL_ARG_LEN) < 0)
+                return (uint32_t)-1;
+            return (uint32_t)spawn_user_process(path, argv.ptrs);
         }
 
     case SYS_EXEC_ENV:
         {
             char path[USERMEM_CSTR_MAX];
-            char *const *argv = (char *const *)b;
-            char *const *envp = (char *const *)c;
+            syscall_strvec_t argv;
+            syscall_strvec_t envp;
             if (syscall_copy_user_path(path, (const char *)a) < 0)
                 return (uint32_t)-1;
-            return (uint32_t)sys_exec_env(path, argv, envp);
+            if (syscall_copy_user_strvec(&argv, (char *const *)b,
+                                         SYSCALL_ARG_MAX, SYSCALL_ARG_LEN) < 0)
+                return (uint32_t)-1;
+            if (syscall_copy_user_strvec(&envp, (char *const *)c,
+                                         SYSCALL_ENV_MAX, SYSCALL_ENV_LEN) < 0)
+                return (uint32_t)-1;
+            return (uint32_t)sys_exec_env(path, argv.ptrs, envp.ptrs);
         }
 
     case SYS_SPAWN_ENV:
         {
             char path[USERMEM_CSTR_MAX];
-            char *const *argv = (char *const *)b;
-            char *const *envp = (char *const *)c;
+            syscall_strvec_t argv;
+            syscall_strvec_t envp;
             if (syscall_copy_user_path(path, (const char *)a) < 0)
                 return (uint32_t)-1;
-            return (uint32_t)spawn_user_process_env(path, argv, envp);
+            if (syscall_copy_user_strvec(&argv, (char *const *)b,
+                                         SYSCALL_ARG_MAX, SYSCALL_ARG_LEN) < 0)
+                return (uint32_t)-1;
+            if (syscall_copy_user_strvec(&envp, (char *const *)c,
+                                         SYSCALL_ENV_MAX, SYSCALL_ENV_LEN) < 0)
+                return (uint32_t)-1;
+            return (uint32_t)spawn_user_process_env(path, argv.ptrs, envp.ptrs);
         }
 
     case SYS_STAT:

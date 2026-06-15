@@ -13,6 +13,7 @@ int main(int argc, char **argv, char **envp)
     int pipefd[2];
     char ch = 0;
     void *ptr;
+    char *valid_argv[] = { "hello", 0 };
 
     (void)argc;
     (void)argv;
@@ -72,6 +73,11 @@ int main(int argc, char **argv, char **envp)
     openos_memset(ptr, 0, 16);
     if (openos_free(ptr) < 0)
         openos_fail(21, "[systest] free failed");
+
+    if (openos_spawn("/bin/hello", (char *const *)0x1000) >= 0)
+        openos_fail(22, "[systest] invalid argv accepted");
+    if (openos_spawn_env("/bin/hello", valid_argv, (char *const *)0x1000) >= 0)
+        openos_fail(23, "[systest] invalid envp accepted");
 
     openos_puts("[systest] syscall wrappers ok");
     return 0;
