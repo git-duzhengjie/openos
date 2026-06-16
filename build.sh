@@ -723,6 +723,11 @@ gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
     -I $SRC/include \
+    -c $SRC/window_manager.c -o $BUILD/window_manager.o
+
+gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
+    -I $SRC/include \
     -c $SRC/font.c -o $BUILD/font.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
@@ -851,6 +856,7 @@ ld -m elf_i386 -T $SRC/linker.ld \
     $BUILD/vga.o \
     $BUILD/framebuffer.o \
     $BUILD/gui.o \
+    $BUILD/window_manager.o \
     $BUILD/font.o \
     $BUILD/string.o \
     $BUILD/keyboard.o \

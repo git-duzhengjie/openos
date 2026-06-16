@@ -39,6 +39,7 @@
 #include "vga.h"
 #include "framebuffer.h"
 #include "gui.h"
+#include "window_manager.h"
 #include "mouse.h"
 #include "usb_tablet.h"
 #include "usb.h"
@@ -403,14 +404,14 @@ void kernel_start_shell_thread(void) {
 
 static void desktop_thread(void) {
     serial_write("[GUI] Starting graphical desktop...\n");
-    if (gui_start_desktop() != 0) {
+    if (window_manager_start_desktop() != 0) {
         serial_write("[GUI] Failed to start graphical desktop; starting shell fallback.\n");
         kernel_start_shell_thread();
         while (1) sched_yield();
     }
 
     while (1) {
-        gui_poll();
+        window_manager_poll();
         sched_yield();
     }
 }
@@ -537,8 +538,8 @@ void kernel_main(void) {
     /* 探测图形 framebuffer；默认不切图形模式，避免影响文本 Shell */
     framebuffer_init();
 
-    /* 初始化 GUI/窗口系统对象池；默认不切图形模式 */
-    gui_init();
+    /* 初始化窗口管理器/GUI 对象池；默认不切图形模式 */
+    window_manager_init();
     
     /* 测试系统调用接口 (int 0x80) */
     serial_write("[TEST] Testing syscall interface (int 0x80)...\n");
