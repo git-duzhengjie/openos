@@ -229,7 +229,7 @@
 - [√] TCP 拥塞控制（已支持 cwnd/ssthresh、慢启动、拥塞避免、超时降窗，并限制发送窗口）
 - [√] TCP 窗口管理（已支持接收窗口通告、对端发送窗口跟踪、cwnd/swnd 综合发送限制）
 - [√] UDP 用户态接口（已实现 sendto/recvfrom syscall、用户态 wrapper、DGRAM 发送和接收队列投递）
-- [x] ping / ifconfig / netstat 等工具
+- [√] ping / ifconfig / netstat 等工具（已提供用户态命令、构建接入和内核 /bin 嵌入安装）
 - [x] 网络配置管理
 - [x] 防火墙 / 权限控制
 
