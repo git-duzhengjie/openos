@@ -810,6 +810,17 @@ int net_tcp_state(int conn_id) {
     return c ? c->state : -1;
 }
 
+int net_tcp_get_endpoint(int conn_id, uint32_t *local_ip, uint16_t *local_port,
+                         uint32_t *remote_ip, uint16_t *remote_port) {
+    struct tcp_connection *c = tcp_find_conn(conn_id);
+    if (!c) return -1;
+    if (local_ip) *local_ip = c->local_ip;
+    if (local_port) *local_port = c->local_port;
+    if (remote_ip) *remote_ip = c->remote_ip;
+    if (remote_port) *remote_port = c->remote_port;
+    return 0;
+}
+
 int net_tcp_send_syn(uint32_t dst_ip, uint16_t src_port, uint16_t dst_port) {
     return tcp_send_segment(dst_ip, src_port, dst_port, 1, 0, TCP_FLAG_SYN, 0, 0);
 }

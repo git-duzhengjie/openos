@@ -479,24 +479,84 @@ int socket_listen_fd(int fd, int backlog) {
 int socket_accept_fd(int fd, openos_sockaddr_t *addr, uint32_t *addrlen) {
     file_t *file;
     socket_file_t *sock;
+    socket_file_t *accepted;
+    int new_fd;
+    int old_conn;
+    int new_listen_conn;
+    uint32_t local_ip;
+    uint16_t local_port;
+    uint32_t remote_ip;
+    uint16_t remote_port;
 
     file = vfs_get_file(fd);
     sock = socket_from_file(file);
     if (!sock || sock->info.state != OPENOS_SOCKET_STATE_LISTENING) {
         return -1;
     }
-    if (socket_type_base(sock->info.type) != OPENOS_SOCK_STREAM) {
+    if (sock->info.domain != OPENOS_AF_INET ||
+        socket_type_base(sock->info.type) != OPENOS_SOCK_STREAM) {
         return -1;
     }
-    if (addr && addrlen) {
-        if (*addrlen < sizeof(openos_sockaddr_in_t)) {
+    if (net_tcp_state(sock->info.tcp_conn_id) != NET_TCP_STATE_ESTABLISHED) {
+        return -1;
+    }
+    if (net_tcp_get_endpoint(sock->info.tcp_conn_id, &local_ip, &local_port,
+                             &remote_ip, &remote_port) < 0) {
+        return -1;
+    }
+    if (addr || addrlen) {
+        if (!addr || !addrlen || *addrlen < sizeof(openos_sockaddr_in_t)) {
             return -1;
         }
-        *addrlen = sizeof(openos_sockaddr_in_t);
+    }
+
+    new_fd = vfs_alloc_fd();
+    if (new_fd < 0) {
+        return -1;
+    }
+    accepted = (socket_file_t *)pmm_alloc_page();
+    if (!accepted) {
+        vfs_put_file(new_fd, NULL);
+        return -1;
+    }
+    memset(accepted, 0, sizeof(socket_file_t));
+    accepted->magic = SOCKET_MAGIC;
+    accepted->info.id = next_socket_id++;
+
+    accepted->info.domain = sock->info.domain;
+    accepted->info.type = sock->info.type;
+    accepted->info.protocol = sock->info.protocol;
+    accepted->info.state = OPENOS_SOCKET_STATE_CONNECTED;
+    accepted->info.local_ip = local_ip;
+    accepted->info.local_port = local_port;
+    accepted->info.remote_ip = remote_ip;
+    accepted->info.remote_port = remote_port;
+    accepted->info.tcp_conn_id = sock->info.tcp_conn_id;
+    accepted->info.listen_backlog = 0;
+
+    if (socket_init_file_fd(new_fd, accepted) < 0) {
+        accepted->magic = 0;
+        vfs_put_file(new_fd, NULL);
+        return -1;
+    }
+
+    if (addr && addrlen) {
         memset(addr, 0, sizeof(openos_sockaddr_in_t));
         ((openos_sockaddr_in_t *)addr)->sin_family = OPENOS_AF_INET;
+        ((openos_sockaddr_in_t *)addr)->sin_port = socket_bswap16(remote_port);
+        ((openos_sockaddr_in_t *)addr)->sin_addr = remote_ip;
+        *addrlen = sizeof(openos_sockaddr_in_t);
     }
-    return -1;
+
+    old_conn = sock->info.tcp_conn_id;
+    new_listen_conn = net_tcp_open(sock->info.local_ip, sock->info.local_port, 0, 0, 0);
+    if (new_listen_conn >= 0) {
+        sock->info.tcp_conn_id = new_listen_conn;
+    } else {
+        sock->info.tcp_conn_id = old_conn;
+        sock->info.state = OPENOS_SOCKET_STATE_CONNECTED;
+    }
+    return new_fd;
 }
 
 int socket_connect_fd(int fd, const openos_sockaddr_t *addr, uint32_t addrlen) {
