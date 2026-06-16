@@ -228,7 +228,7 @@
 - [√] TCP 重传（已支持未确认段缓存、定时重传、最大重试关闭和 3 次重复 ACK 快速重传）
 - [√] TCP 拥塞控制（已支持 cwnd/ssthresh、慢启动、拥塞避免、超时降窗，并限制发送窗口）
 - [√] TCP 窗口管理（已支持接收窗口通告、对端发送窗口跟踪、cwnd/swnd 综合发送限制）
-- [x] UDP 用户态接口
+- [√] UDP 用户态接口（已实现 sendto/recvfrom syscall、用户态 wrapper、DGRAM 发送和接收队列投递）
 - [x] ping / ifconfig / netstat 等工具
 - [x] 网络配置管理
 - [x] 防火墙 / 权限控制
