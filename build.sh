@@ -486,6 +486,18 @@ if [ -f $USR/sbrktest.c ]; then
     echo "  Embedded: sbrktest.elf"
 fi
 
+for app in ping ifconfig netstat; do
+    if [ -f $USR/$app.c ]; then
+        gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+            -fno-stack-protector -fno-builtin \
+            -I $SRC/include \
+            -c $USR/$app.c -o $BUILD/$app.o
+        ld -m elf_i386 -T $USR/user.ld -o $BUILD/$app.elf $BUILD/$app.o
+        python3 _embed_elf.py $BUILD/$app.elf $SRC/include/embed_$app.h ${app}_elf
+        echo "  Embedded: $app.elf"
+    fi
+done
+
 echo "[3/5] Compiling kernel C files..."
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
@@ -819,7 +831,7 @@ objcopy -O binary $BUILD/kernel.elf $BUILD/kernel.bin
 
 KERNEL_BYTES=$(stat -c%s "$BUILD/kernel.bin")
 KERNEL_SECTORS=$(( (KERNEL_BYTES + 511) / 512 ))
-BOOT_LOAD_SECTORS=1152
+BOOT_LOAD_SECTORS=1216
 if [ "$KERNEL_SECTORS" -gt "$BOOT_LOAD_SECTORS" ]; then
     echo "ERROR: kernel.bin is ${KERNEL_SECTORS} sectors, but bootloader loads only ${BOOT_LOAD_SECTORS} sectors."
     echo "Increase bootloader kernel load chunks before building the image."

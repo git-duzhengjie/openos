@@ -154,6 +154,8 @@ struct tcp_connection {
 };
 
 static net_device_t *default_dev;
+static uint32_t icmp_echo_requests;
+static uint32_t icmp_echo_replies;
 static struct arp_entry arp_cache[ARP_CACHE_SIZE];
 static struct udp_binding udp_bindings[UDP_BIND_SIZE];
 static struct tcp_listener tcp_listeners[TCP_LISTEN_SIZE];
@@ -377,7 +379,10 @@ static void handle_icmp(uint32_t src_ip, const uint8_t *payload, uint16_t len) {
     if (len < sizeof(struct icmp_header)) return;
     icmp = (const struct icmp_header *)payload;
     if (icmp->type == ICMP_ECHO_REQUEST) {
+        icmp_echo_requests++;
         icmp_send_reply(src_ip, payload, len);
+    } else if (icmp->type == ICMP_ECHO_REPLY) {
+        icmp_echo_replies++;
     }
 }
 
@@ -1035,7 +1040,7 @@ static int loopback_transmit(net_device_t *dev, const uint8_t *frame, uint16_t l
     return 0;
 }
 
-int net_ping_self(void) {
+int net_ping_ipv4(uint32_t dst_ip) {
     uint8_t payload[sizeof(struct icmp_header) + 4];
     struct icmp_header *icmp = (struct icmp_header *)payload;
     if (!default_dev) return -1;
@@ -1043,13 +1048,49 @@ int net_ping_self(void) {
     icmp->type = ICMP_ECHO_REQUEST;
     icmp->code = 0;
     icmp->ident = htons(1);
-    icmp->seq = htons(1);
+    icmp->seq = htons((uint16_t)(icmp_echo_requests + icmp_echo_replies + 1U));
     payload[sizeof(struct icmp_header) + 0] = 'p';
     payload[sizeof(struct icmp_header) + 1] = 'i';
     payload[sizeof(struct icmp_header) + 2] = 'n';
     payload[sizeof(struct icmp_header) + 3] = 'g';
     icmp->checksum = htons(checksum16(payload, sizeof(payload)));
-    return net_send_ipv4(default_dev->ip, IP_PROTO_ICMP, payload, sizeof(payload));
+    return net_send_ipv4(dst_ip, IP_PROTO_ICMP, payload, sizeof(payload));
+}
+
+int net_ping_self(void) {
+    if (!default_dev) return -1;
+    return net_ping_ipv4(default_dev->ip);
+}
+
+int net_get_diag_stats(net_diag_stats_t *stats) {
+    int i;
+    if (!stats || !default_dev) return -1;
+    memset(stats, 0, sizeof(*stats));
+    strncpy(stats->name, default_dev->name, sizeof(stats->name) - 1);
+    stats->name[sizeof(stats->name) - 1] = '\0';
+    copy_mac(stats->mac, default_dev->mac);
+    stats->ip = default_dev->ip;
+    stats->netmask = default_dev->netmask;
+    stats->gateway = default_dev->gateway;
+    stats->rx_packets = default_dev->rx_packets;
+    stats->tx_packets = default_dev->tx_packets;
+    stats->rx_dropped = default_dev->rx_dropped;
+    stats->tx_dropped = default_dev->tx_dropped;
+    for (i = 0; i < ARP_CACHE_SIZE; i++) {
+        if (arp_cache[i].used) stats->arp_entries++;
+    }
+    for (i = 0; i < UDP_BIND_SIZE; i++) {
+        if (udp_bindings[i].used) stats->udp_bindings++;
+    }
+    for (i = 0; i < TCP_LISTEN_SIZE; i++) {
+        if (tcp_listeners[i].used) stats->tcp_listeners++;
+    }
+    for (i = 0; i < TCP_CONN_SIZE; i++) {
+        if (tcp_connections[i].state != NET_TCP_STATE_CLOSED) stats->tcp_connections++;
+    }
+    stats->icmp_echo_requests = icmp_echo_requests;
+    stats->icmp_echo_replies = icmp_echo_replies;
+    return 0;
 }
 
 void net_init(void) {
@@ -1059,6 +1100,8 @@ void net_init(void) {
     memset(tcp_listeners, 0, sizeof(tcp_listeners));
     memset(tcp_connections, 0, sizeof(tcp_connections));
     tcp_next_id = 1;
+    icmp_echo_requests = 0;
+    icmp_echo_replies = 0;
     memset(&loopdev, 0, sizeof(loopdev));
     strcpy(loopdev.name, "loopnet0");
     loopdev.mac[0] = 0x02;

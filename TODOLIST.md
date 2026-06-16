@@ -229,7 +229,7 @@
 - [x] TCP 拥塞控制
 - [x] TCP 窗口管理
 - [x] UDP 用户态接口
-- [ ] ping / ifconfig / netstat 等工具
+- [x] ping / ifconfig / netstat 等工具
 - [ ] 网络配置管理
 - [ ] 防火墙 / 权限控制
 

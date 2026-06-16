@@ -14,6 +14,24 @@
 
 typedef struct net_device net_device_t;
 
+typedef struct net_diag_stats {
+    char name[16];
+    uint8_t mac[NET_ETH_ADDR_LEN];
+    uint32_t ip;
+    uint32_t netmask;
+    uint32_t gateway;
+    uint32_t rx_packets;
+    uint32_t tx_packets;
+    uint32_t rx_dropped;
+    uint32_t tx_dropped;
+    uint32_t arp_entries;
+    uint32_t udp_bindings;
+    uint32_t tcp_listeners;
+    uint32_t tcp_connections;
+    uint32_t icmp_echo_requests;
+    uint32_t icmp_echo_replies;
+} net_diag_stats_t;
+
 typedef int (*net_tx_func_t)(net_device_t *dev, const uint8_t *frame, uint16_t len);
 
 struct net_device {
@@ -71,6 +89,8 @@ int net_tcp_state(int conn_id);
 void net_tick(uint32_t elapsed_ms);
 int net_tcp_send_syn(uint32_t dst_ip, uint16_t src_port, uint16_t dst_port);
 int net_ping_self(void);
+int net_ping_ipv4(uint32_t dst_ip);
+int net_get_diag_stats(net_diag_stats_t *stats);
 void net_print_info(void);
 void net_format_ipv4(uint32_t ip, char *out);
 int net_parse_ipv4(const char *text, uint32_t *out);

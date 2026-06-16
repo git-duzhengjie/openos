@@ -298,6 +298,27 @@
 #define OPENOS_HAS_SBRKTEST 0
 #endif
 
+#if __has_include("embed_ping.h")
+#include "embed_ping.h"  /* ping user command */
+#define OPENOS_HAS_PING 1
+#else
+#define OPENOS_HAS_PING 0
+#endif
+
+#if __has_include("embed_ifconfig.h")
+#include "embed_ifconfig.h"  /* ifconfig user command */
+#define OPENOS_HAS_IFCONFIG 1
+#else
+#define OPENOS_HAS_IFCONFIG 0
+#endif
+
+#if __has_include("embed_netstat.h")
+#include "embed_netstat.h"  /* netstat user command */
+#define OPENOS_HAS_NETSTAT 1
+#else
+#define OPENOS_HAS_NETSTAT 0
+#endif
+
 
 /* 外部符号 */
 extern void gdt_init(void);
@@ -1102,6 +1123,39 @@ void kernel_main(void) {
         serial_write("[OK] Installed /bin/sbrktest user ELF\n");
     } else {
         serial_write("[WARN] Failed to install /bin/sbrktest\n");
+    }
+#endif
+
+#if OPENOS_HAS_PING
+    fd = vfs_open("/bin/ping", O_CREAT | O_RDWR, 0755);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)ping_elf, ping_elf_size);
+        vfs_close(fd);
+        serial_write("[OK] Installed /bin/ping user ELF\n");
+    } else {
+        serial_write("[WARN] Failed to install /bin/ping\n");
+    }
+#endif
+
+#if OPENOS_HAS_IFCONFIG
+    fd = vfs_open("/bin/ifconfig", O_CREAT | O_RDWR, 0755);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)ifconfig_elf, ifconfig_elf_size);
+        vfs_close(fd);
+        serial_write("[OK] Installed /bin/ifconfig user ELF\n");
+    } else {
+        serial_write("[WARN] Failed to install /bin/ifconfig\n");
+    }
+#endif
+
+#if OPENOS_HAS_NETSTAT
+    fd = vfs_open("/bin/netstat", O_CREAT | O_RDWR, 0755);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)netstat_elf, netstat_elf_size);
+        vfs_close(fd);
+        serial_write("[OK] Installed /bin/netstat user ELF\n");
+    } else {
+        serial_write("[WARN] Failed to install /bin/netstat\n");
     }
 #endif
 

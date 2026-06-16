@@ -27,16 +27,17 @@ start:
     call print_string
 
     ; 从磁盘读取内核 (LBA模式)
-    ; 每次读取 64 扇区 = 32KB，共读取 17 次 = 1088 扇区 = 544KB。
-    ; 当前 kernel.bin 已超过旧版 512 扇区加载上限，因此必须覆盖完整内核，
+    ; 每次读取 64 扇区 = 32KB，共读取 19 次 = 1216 扇区 = 608KB。
+    ; 当前 kernel.bin 已超过旧版 1088 扇区加载上限，因此必须覆盖完整内核，
     ; 否则 .rodata/字符串常量等后半段内容不会进入内存。
-    ; 最高加载到约 0x88000，仍低于保护模式栈 0x9F000。
+    ; 最高加载到约 0xA0000；链接脚本保证实际镜像低于 0x9E000，
+    ; 为保护模式栈顶 0x9F000 保留至少 4KB 守卫空间。
     mov word [dap + 2], 0x40     ; sectors per chunk
     mov word [dap + 4], 0x8000   ; first buffer offset: 0000:8000
     mov word [dap + 6], 0x0000   ; first buffer segment
     mov dword [dap + 8], 1       ; first kernel LBA
     mov dword [dap + 12], 0
-    mov cx, 17
+    mov cx, 19
 .load_kernel_chunk:
     push cx
     mov ah, 0x42

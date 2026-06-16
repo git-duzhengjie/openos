@@ -15,6 +15,7 @@
 #include "../include/string.h"
 #include "../include/blockdev.h"
 #include "../net/socket.h"
+#include "../net/net.h"
 #include <stddef.h>  /* NULL */
 
 /* VGA */
@@ -1476,6 +1477,38 @@ uint32_t syscall_dispatch(uint32_t num,
             pmm_free_page(kbuf);
             return (uint32_t)ret;
         }
+
+    case SYS_NETINFO:
+        {
+            net_diag_stats_t stats;
+            openos_netinfo_t info;
+            if (!a || !user_ptr_valid((void *)a, sizeof(info), USERMEM_WRITE))
+                return (uint32_t)-1;
+            if (net_get_diag_stats(&stats) < 0)
+                return (uint32_t)-1;
+            memset(&info, 0, sizeof(info));
+            strncpy(info.name, stats.name, sizeof(info.name) - 1);
+            memcpy(info.mac, stats.mac, sizeof(info.mac));
+            info.ip = stats.ip;
+            info.netmask = stats.netmask;
+            info.gateway = stats.gateway;
+            info.rx_packets = stats.rx_packets;
+            info.tx_packets = stats.tx_packets;
+            info.rx_dropped = stats.rx_dropped;
+            info.tx_dropped = stats.tx_dropped;
+            info.arp_entries = stats.arp_entries;
+            info.udp_bindings = stats.udp_bindings;
+            info.tcp_listeners = stats.tcp_listeners;
+            info.tcp_connections = stats.tcp_connections;
+            info.icmp_echo_requests = stats.icmp_echo_requests;
+            info.icmp_echo_replies = stats.icmp_echo_replies;
+            if (copy_to_user((void *)a, &info, sizeof(info)) < 0)
+                return (uint32_t)-1;
+            return 0;
+        }
+
+    case SYS_PING:
+        return (uint32_t)net_ping_ipv4((uint32_t)a);
 
     case SYS_FSYNC:
         {

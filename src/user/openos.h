@@ -86,6 +86,8 @@
 #define SYS_RECV          289
 #define SYS_SENDTO        290
 #define SYS_RECVFROM      291
+#define SYS_NETINFO       292
+#define SYS_PING          293
 
 #define OPENOS_AF_UNSPEC  0
 #define OPENOS_AF_INET    2
@@ -105,6 +107,24 @@ typedef struct openos_sockaddr_in {
     unsigned int sin_addr;
     unsigned char sin_zero[8];
 } openos_sockaddr_in_t;
+
+typedef struct openos_netinfo {
+    char name[16];
+    unsigned char mac[6];
+    unsigned int ip;
+    unsigned int netmask;
+    unsigned int gateway;
+    unsigned int rx_packets;
+    unsigned int tx_packets;
+    unsigned int rx_dropped;
+    unsigned int tx_dropped;
+    unsigned int arp_entries;
+    unsigned int udp_bindings;
+    unsigned int tcp_listeners;
+    unsigned int tcp_connections;
+    unsigned int icmp_echo_requests;
+    unsigned int icmp_echo_replies;
+} openos_netinfo_t;
 
 static inline unsigned short openos_htons(unsigned short v)
 {
@@ -342,6 +362,16 @@ static inline int openos_recvfrom(int fd, void *buf, unsigned int len, int flags
     if (ret >= 0 && addr && addrlen)
         *addrlen = sizeof(openos_sockaddr_in_t);
     return ret;
+}
+
+static inline int openos_netinfo(openos_netinfo_t *info)
+{
+    return openos_syscall_result(openos_syscall1(SYS_NETINFO, (int)info));
+}
+
+static inline int openos_ping(unsigned int ip)
+{
+    return openos_syscall_result(openos_syscall1(SYS_PING, (int)ip));
 }
 
 static inline void openos_thread_exit(int code);
@@ -1765,6 +1795,17 @@ static inline void openos_clearerr(openos_FILE *stream)
 #define fprintf(stream, fmt, ...) openos_fprintf((stream), (fmt), ##__VA_ARGS__)
 #define printf(fmt, ...)        openos_printf((fmt), ##__VA_ARGS__)
 #define snprintf(buf, size, fmt, ...) openos_snprintf((buf), (size), (fmt), ##__VA_ARGS__)
+#define netinfo(info)          openos_netinfo((info))
+#define ping(ip)               openos_ping((ip))
+#define socket(domain, type, protocol) openos_socket((domain), (type), (protocol))
+#define bind(fd, addr, len)    openos_bind((fd), (addr), (len))
+#define listen(fd, backlog)    openos_listen((fd), (backlog))
+#define accept(fd, addr, len)  openos_accept((fd), (addr), (len))
+#define connect(fd, addr, len) openos_connect((fd), (addr), (len))
+#define send(fd, buf, len, flags) openos_send((fd), (buf), (len), (flags))
+#define recv(fd, buf, len, flags) openos_recv((fd), (buf), (len), (flags))
+#define sendto(fd, buf, len, flags, addr, addrlen) openos_sendto((fd), (buf), (len), (flags), (addr), (addrlen))
+#define recvfrom(fd, buf, len, flags, addr, addrlen) openos_recvfrom((fd), (buf), (len), (flags), (addr), (addrlen))
 #define feof(stream)            openos_feof((stream))
 #define ferror(stream)          openos_ferror((stream))
 #define clearerr(stream)        openos_clearerr((stream))

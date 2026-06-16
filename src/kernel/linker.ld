@@ -63,6 +63,6 @@ SECTIONS
     /* 低端内存栈顶。必须高于内核镜像，且低于 EBDA/显存区域。 */
     kernel_stack_top = 0x9F000;
 
-    ASSERT(__kernel_image_end < 0x9A000, "kernel image overlaps low-memory stack reserve")
+    ASSERT(__kernel_image_end < 0x9E000, "kernel image overlaps low-memory stack guard")
     ASSERT(kernel_stack_top <= 0x9F000, "kernel stack top exceeds safe low memory")
 }

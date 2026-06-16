@@ -89,6 +89,8 @@
 #define SYS_RECV          289
 #define SYS_SENDTO        290
 #define SYS_RECVFROM      291
+#define SYS_NETINFO       292
+#define SYS_PING          293
 
 #define OPENOS_POLLIN     0x0001
 #define OPENOS_POLLOUT    0x0004
@@ -117,6 +119,24 @@ typedef struct openos_dirent {
     uint32_t size;
     char name[32];
 } openos_dirent_t;
+
+typedef struct openos_netinfo {
+    char name[16];
+    uint8_t mac[6];
+    uint32_t ip;
+    uint32_t netmask;
+    uint32_t gateway;
+    uint32_t rx_packets;
+    uint32_t tx_packets;
+    uint32_t rx_dropped;
+    uint32_t tx_dropped;
+    uint32_t arp_entries;
+    uint32_t udp_bindings;
+    uint32_t tcp_listeners;
+    uint32_t tcp_connections;
+    uint32_t icmp_echo_requests;
+    uint32_t icmp_echo_replies;
+} openos_netinfo_t;
 
 /* 调用号通过 EAX 传递，参数通过 EBX/ECX/EDX/ESI/EDI */
 uint32_t syscall_handler(uint32_t syscall_num,
