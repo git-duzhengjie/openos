@@ -274,6 +274,10 @@ typedef int openos_cond_t;
 typedef int openos_mq_t;
 typedef int openos_shm_t;
 typedef int openos_eventfd_t;
+typedef struct openos_service_channel {
+    int client_fd;
+    int server_fd;
+} openos_service_channel_t;
 typedef void (*openos_thread_start_t)(void *);
 
 typedef struct openos_stat {
@@ -1104,6 +1108,73 @@ static inline int openos_read(int fd, void *buf, int len)
 static inline int openos_write_fd(int fd, const void *buf, int len)
 {
     return openos_syscall_result(openos_syscall3(SYS_WRITE_FD, fd, (int)buf, len));
+}
+
+static inline int openos_service_channel_create(openos_service_channel_t *channel)
+{
+    int sv[2];
+    if (!channel) return -1;
+    channel->client_fd = -1;
+    channel->server_fd = -1;
+    if (openos_socketpair(OPENOS_AF_UNSPEC, OPENOS_SOCK_STREAM, 0, sv) != 0)
+        return -1;
+    channel->client_fd = sv[0];
+    channel->server_fd = sv[1];
+    return 0;
+}
+
+static inline int openos_service_client_close(openos_service_channel_t *channel)
+{
+    int ret = 0;
+    if (!channel) return -1;
+    if (channel->client_fd >= 0) ret = openos_close(channel->client_fd);
+    channel->client_fd = -1;
+    return ret;
+}
+
+static inline int openos_service_server_close(openos_service_channel_t *channel)
+{
+    int ret = 0;
+    if (!channel) return -1;
+    if (channel->server_fd >= 0) ret = openos_close(channel->server_fd);
+    channel->server_fd = -1;
+    return ret;
+}
+
+static inline int openos_service_channel_close(openos_service_channel_t *channel)
+{
+    int ret = 0;
+    if (!channel) return -1;
+    if (channel->client_fd >= 0 && openos_close(channel->client_fd) != 0) ret = -1;
+    if (channel->server_fd >= 0 && openos_close(channel->server_fd) != 0) ret = -1;
+    channel->client_fd = -1;
+    channel->server_fd = -1;
+    return ret;
+}
+
+static inline int openos_service_call(openos_service_channel_t *channel, const void *request, int request_len, void *reply, int reply_len)
+{
+    int n;
+    if (!channel || channel->client_fd < 0 || !request || request_len <= 0 || !reply || reply_len <= 0)
+        return -1;
+    if (openos_write_fd(channel->client_fd, request, request_len) != request_len)
+        return -1;
+    n = openos_read(channel->client_fd, reply, reply_len);
+    return n;
+}
+
+static inline int openos_service_recv(openos_service_channel_t *channel, void *request, int request_len)
+{
+    if (!channel || channel->server_fd < 0 || !request || request_len <= 0)
+        return -1;
+    return openos_read(channel->server_fd, request, request_len);
+}
+
+static inline int openos_service_reply(openos_service_channel_t *channel, const void *reply, int reply_len)
+{
+    if (!channel || channel->server_fd < 0 || !reply || reply_len <= 0)
+        return -1;
+    return openos_write_fd(channel->server_fd, reply, reply_len);
 }
 
 static inline int openos_dup(int oldfd)
