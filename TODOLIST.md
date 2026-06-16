@@ -193,7 +193,7 @@
 ### 10. 存储驱动
 
 - [x] IDE / ATA
-- [ ] AHCI / SATA
+- [x] AHCI / SATA
 - [ ] virtio-blk
 
 ### 11. 网络驱动
