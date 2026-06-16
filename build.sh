@@ -32,7 +32,7 @@ nasm -f elf32 $SRC/sched/context_switch.asm -o $BUILD/context_switch.o
 nasm -f elf32 $SRC/timer_isr.asm -o $BUILD/timer_isr.o
 nasm -f elf32 $SRC/switch_to_user.asm -o $BUILD/switch_to_user.o
 
-# 编译用户程序并嵌入内�?
+# 编译用户程序并嵌入内�?
 echo "[2.5] Building user program..."
 USR=src/user
 if [ -f $USR/hello.c ]; then
@@ -550,6 +550,11 @@ gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
     -I $SRC/include \
+    -c $SRC/drivers/usb.c -o $BUILD/usb.o
+
+gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
+    -I $SRC/include \
     -c $SRC/drivers/chardev.c -o $BUILD/chardev.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
@@ -753,6 +758,7 @@ ld -m elf_i386 -T $SRC/linker.ld \
     $BUILD/keyboard.o \
     $BUILD/mouse.o \
     $BUILD/usb_tablet.o \
+    $BUILD/usb.o \
     $BUILD/chardev.o \
     $BUILD/blockdev.o \
     $BUILD/ata.o \

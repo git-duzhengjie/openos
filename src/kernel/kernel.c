@@ -39,6 +39,7 @@
 #include "gui.h"
 #include "mouse.h"
 #include "usb_tablet.h"
+#include "usb.h"
 #include "pmm.h"
 #include "embed_hello.h"  /* 嵌入的用户程�?*/
 #include "embed_fault.h"  /* 用户异常隔离测试程序 */
@@ -566,6 +567,9 @@ void kernel_main(void) {
     /* 扫描 PCI 总线 */
     pci_scan_all();
     serial_write("[OK] PCI SCAN\n");
+
+    /* 初始化 USB 通用栈：发现 USB host controller，建立 USB bus/device 模型 */
+    usb_init();
 
     /* 初始化块设备框架�?RAM disk */
     blockdev_init();

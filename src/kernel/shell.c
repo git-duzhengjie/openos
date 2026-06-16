@@ -28,6 +28,7 @@
 #include "../fs/fat32.h"
 #include "power.h"
 #include "pci.h"
+#include "usb.h"
 #include "include/io.h"
 extern int spawn_user_process(const char *path, char *const argv[]);
 extern int spawn_user_process_env(const char *path, char *const argv[], char *const envp[]);
@@ -2565,6 +2566,8 @@ static void cmd_help(void)
     print("  guitest         - Start GUI demo desktop\n");
     print("  cursor [on|off] - Show/hide OpenOS software cursor\n");
     print("  mouse           - Show PS/2 mouse driver status\n");
+    print("  usb             - Show USB bus/controller status\n");
+    print("  usb_rescan      - Rescan USB host controllers\n");
 }
 
 /* ---- Shell 主循�?---- */
@@ -3507,6 +3510,17 @@ void shell_run(void)
                 {
                     mouse_print_info();
                     print("mouse: status written to serial log\n");
+                }
+                else if (shell_cmd_equals(cmd, "usb"))
+                {
+                    usb_print_info();
+                    print("usb: status written to serial log\n");
+                }
+                else if (shell_cmd_equals(cmd, "usb_rescan"))
+                {
+                    usb_rescan();
+                    usb_print_info();
+                    print("usb: rescan complete\n");
                 }
                 else if (shell_cmd_equals(cmd, "pfstats"))
                 {
