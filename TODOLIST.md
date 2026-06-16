@@ -186,7 +186,7 @@
 - [√] PCI 总线扫描（已接入启动：配置空间读写、全总线扫描、多功能设备、devmgr 注册/热插拔重扫）
 - [√] ACPI（已接入启动：RSDP 扫描/校验、RSDT/XSDT 表查找，供 APIC/电源管理复用）
 - [√] APIC / IOAPIC（已实现 MADT 枚举、LAPIC MMIO/EOI、IOAPIC 寄存器访问与 IRQ 重定向/屏蔽接口）
-- [x] RTC 时钟
+- [√] RTC 时钟（已实现 CMOS 读取、UIP 稳定采样、BCD/12h 转换、启动时间缓存并接入 kernel 初始化）
 - [x] 电源管理
 - [x] 热插拔支持
 
