@@ -33,6 +33,8 @@
 #define OPENOS_USER_HOME_MAX 64u
 #define OPENOS_USER_SHELL_MAX 64u
 
+static int syscall_require_cap(uint32_t cap);
+
 typedef struct kernel_user_record {
     uint32_t uid;
     uint32_t gid;
@@ -235,20 +237,34 @@ static uint32_t syscall_getpriority(uint32_t pid)
 static uint32_t syscall_setpriority(uint32_t pid, int nice_value)
 {
     thread_t *thread = syscall_find_thread(pid);
+    uint32_t current_pid = proc_current_pid();
+    int current_nice;
     if (!thread)
         return (uint32_t)-1;
+
+    current_nice = priority_to_nice(thread->priority);
+    if ((pid != 0 && pid != current_pid) || nice_value < current_nice) {
+        if (syscall_require_cap(OPENOS_CAP_SYS_ADMIN) < 0)
+            return (uint32_t)-1;
+    }
+
     return (sched_set_thread_priority(thread, nice_to_priority(nice_value)) == 0) ? 0u : (uint32_t)-1;
 }
 
 static uint32_t syscall_nice(int inc)
 {
     thread_t *current = sched_get_current();
+    int current_nice;
     int next_nice;
     if (!current)
         return (uint32_t)NICE_ERROR;
-    next_nice = priority_to_nice(current->priority) + inc;
+
+    current_nice = priority_to_nice(current->priority);
+    next_nice = current_nice + inc;
     if (next_nice < NICE_MIN) next_nice = NICE_MIN;
     if (next_nice > NICE_MAX) next_nice = NICE_MAX;
+    if (next_nice < current_nice && syscall_require_cap(OPENOS_CAP_SYS_ADMIN) < 0)
+        return (uint32_t)-1;
     if (sched_set_thread_priority(current, nice_to_priority(next_nice)) < 0)
         return (uint32_t)-1;
     return (uint32_t)next_nice;
