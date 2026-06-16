@@ -28,5 +28,7 @@ void pci_write16(uint8_t bus, uint8_t dev, uint8_t func, uint8_t off, uint16_t v
 void pci_write8(uint8_t bus, uint8_t dev, uint8_t func, uint8_t off, uint8_t val);
 
 void pci_scan_all(void);
+int pci_rescan_hotplug(void);
+uint32_t pci_known_device_count(void);
 
 #endif

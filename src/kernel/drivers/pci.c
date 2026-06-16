@@ -1,9 +1,29 @@
 /* ============================================================
- * openos - PCI bus driver
+ * openos - PCI bus driver with devmgr hotplug tracking
  * ============================================================ */
 #include "../include/pci.h"
+#include "../include/devmgr.h"
 #include "../include/serial.h"
 #include "../include/io.h"
+#include "../include/string.h"
+
+#define PCI_TRACK_MAX 128u
+
+typedef struct pci_snapshot_entry {
+    uint8_t present;
+    uint8_t bus;
+    uint8_t dev;
+    uint8_t func;
+    uint8_t class_code;
+    uint8_t sub_class;
+    uint8_t prog_if;
+    uint16_t vendor;
+    uint16_t device;
+    char name[DEVMGR_NAME_MAX];
+} pci_snapshot_entry_t;
+
+static pci_snapshot_entry_t pci_known[PCI_TRACK_MAX];
+static uint32_t pci_known_count;
 
 uint32_t pci_addr(uint8_t bus, uint8_t dev, uint8_t func, uint8_t off) {
     return (1u << 31)
@@ -47,6 +67,132 @@ void pci_write8(uint8_t bus, uint8_t dev, uint8_t func, uint8_t off, uint8_t val
     uint32_t nv = (old & mask) | ((uint32_t)val << ((off & 3) * 8));
     outl(PCI_CONFIG_ADDR, pci_addr(bus, dev, func, off));
     outl(PCI_CONFIG_DATA, nv);
+}
+
+static char hex_digit(uint8_t value) {
+    value &= 0x0Fu;
+    if (value < 10u) return (char)('0' + (char)value);
+    return (char)('a' + (char)(value - 10u));
+}
+
+static void pci_make_name(char *name, uint8_t bus, uint8_t dev, uint8_t func) {
+    name[0] = 'p'; name[1] = 'c'; name[2] = 'i';
+    name[3] = hex_digit((uint8_t)(bus >> 4));
+    name[4] = hex_digit(bus);
+    name[5] = ':';
+    name[6] = hex_digit((uint8_t)(dev >> 4));
+    name[7] = hex_digit(dev);
+    name[8] = '.';
+    name[9] = hex_digit(func);
+    name[10] = '\0';
+}
+
+static devmgr_type_t pci_type_from_class(uint8_t class_code) {
+    if (class_code == 0x01u) return DEVMGR_TYPE_STORAGE;
+    if (class_code == 0x02u) return DEVMGR_TYPE_NET;
+    if (class_code == 0x03u) return DEVMGR_TYPE_CHAR;
+    return DEVMGR_TYPE_UNKNOWN;
+}
+
+static int pci_entry_same_slot(const pci_snapshot_entry_t *a, const pci_snapshot_entry_t *b) {
+    return a->bus == b->bus && a->dev == b->dev && a->func == b->func;
+}
+
+static int pci_entry_same_identity(const pci_snapshot_entry_t *a, const pci_snapshot_entry_t *b) {
+    return a->vendor == b->vendor && a->device == b->device &&
+           a->class_code == b->class_code && a->sub_class == b->sub_class &&
+           a->prog_if == b->prog_if;
+}
+
+static uint32_t pci_collect_snapshot(pci_snapshot_entry_t *out, uint32_t max) {
+    uint16_t bus, dev, func;
+    uint32_t count = 0;
+
+    for (bus = 0; bus < 256; bus++) {
+        for (dev = 0; dev < 32; dev++) {
+            for (func = 0; func < 8; func++) {
+                uint16_t vendor = pci_read16((uint8_t)bus, (uint8_t)dev, (uint8_t)func, PCI_OFFSET_VENDOR);
+                if (vendor == PCI_VENDOR_INVALID) {
+                    if (func == 0) break;
+                    continue;
+                }
+
+                if (count < max) {
+                    pci_snapshot_entry_t *entry = &out[count++];
+                    memset(entry, 0, sizeof(*entry));
+                    entry->present = 1;
+                    entry->bus = (uint8_t)bus;
+                    entry->dev = (uint8_t)dev;
+                    entry->func = (uint8_t)func;
+                    entry->vendor = vendor;
+                    entry->device = pci_read16((uint8_t)bus, (uint8_t)dev, (uint8_t)func, PCI_OFFSET_DEVICE);
+                    entry->class_code = pci_read8((uint8_t)bus, (uint8_t)dev, (uint8_t)func, PCI_OFFSET_CLASS + 2);
+                    entry->sub_class = pci_read8((uint8_t)bus, (uint8_t)dev, (uint8_t)func, PCI_OFFSET_CLASS + 1);
+                    entry->prog_if = pci_read8((uint8_t)bus, (uint8_t)dev, (uint8_t)func, PCI_OFFSET_CLASS + 0);
+                    pci_make_name(entry->name, entry->bus, entry->dev, entry->func);
+                }
+
+                if ((pci_read8((uint8_t)bus, (uint8_t)dev, (uint8_t)func, PCI_OFFSET_HEADER) & 0x80u) == 0) break;
+            }
+        }
+    }
+    return count;
+}
+
+static void pci_register_entry(const pci_snapshot_entry_t *entry) {
+    uint32_t major = ((uint32_t)entry->vendor << 16) | entry->device;
+    uint32_t minor = ((uint32_t)entry->bus << 16) | ((uint32_t)entry->dev << 8) | entry->func;
+    if (!devmgr_find(entry->name)) {
+        (void)devmgr_register(entry->name, "pci", pci_type_from_class(entry->class_code),
+                              major, minor, 0, 0);
+    }
+}
+
+uint32_t pci_known_device_count(void) {
+    return pci_known_count;
+}
+
+int pci_rescan_hotplug(void) {
+    pci_snapshot_entry_t now[PCI_TRACK_MAX];
+    uint8_t matched_old[PCI_TRACK_MAX];
+    uint32_t now_count;
+    uint32_t i, j;
+    int changes = 0;
+
+    memset(now, 0, sizeof(now));
+    memset(matched_old, 0, sizeof(matched_old));
+    now_count = pci_collect_snapshot(now, PCI_TRACK_MAX);
+
+    for (i = 0; i < now_count; i++) {
+        int found = -1;
+        for (j = 0; j < pci_known_count; j++) {
+            if (pci_entry_same_slot(&now[i], &pci_known[j])) {
+                found = (int)j;
+                matched_old[j] = 1;
+                break;
+            }
+        }
+
+        if (found < 0) {
+            pci_register_entry(&now[i]);
+            changes++;
+        } else if (!pci_entry_same_identity(&now[i], &pci_known[(uint32_t)found])) {
+            pci_register_entry(&now[i]);
+            (void)devmgr_notify_change(now[i].name);
+            changes++;
+        }
+    }
+
+    for (j = 0; j < pci_known_count; j++) {
+        if (!matched_old[j]) {
+            (void)devmgr_unregister(pci_known[j].name);
+            changes++;
+        }
+    }
+
+    memcpy(pci_known, now, sizeof(pci_known));
+    pci_known_count = now_count;
+    return changes;
 }
 
 void pci_scan_all(void) {
@@ -95,5 +241,6 @@ void pci_scan_all(void) {
         }
     }
 
+    (void)pci_rescan_hotplug();
     serial_write("=====================================\n");
 }

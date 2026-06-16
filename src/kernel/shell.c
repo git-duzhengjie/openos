@@ -27,6 +27,7 @@
 #include "../fs/pfs.h"
 #include "../fs/fat32.h"
 #include "power.h"
+#include "pci.h"
 #include "include/io.h"
 extern int spawn_user_process(const char *path, char *const argv[]);
 extern int spawn_user_process_env(const char *path, char *const argv[], char *const envp[]);
@@ -2550,6 +2551,7 @@ static void cmd_help(void)
     print("  devices         - List registered kernel devices\n");
     print("  hotplug         - Show pending hotplug events\n");
     print("  hotplug_poll    - Pop one hotplug event from queue\n");
+    print("  pci_rescan      - Rescan PCI bus and emit hotplug events\n");
     print("  pfstats         - Show page fault/COW/demand statistics\n");
     print("  help            - Show this help\n");
     print("  clear           - Clear screen\n");
@@ -3461,6 +3463,15 @@ void shell_run(void)
                         print(event.name);
                         print("\n");
                     }
+                }
+                else if (shell_cmd_equals(cmd, "pci_rescan"))
+                {
+                    int changes = pci_rescan_hotplug();
+                    print("pci_rescan: tracked=");
+                    shell_print_dec((int)pci_known_device_count());
+                    print(" changes=");
+                    shell_print_dec(changes);
+                    print("\n");
                 }
                 else if (shell_cmd_equals(cmd, "gui"))
                 {
