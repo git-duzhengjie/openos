@@ -221,7 +221,7 @@
 - [x] `bind`
 - [x] `listen`
 - [x] `accept`
-- [ ] `connect`
+- [x] `connect`
 - [ ] `send`
 - [ ] `recv`
 - [ ] TCP 完整状态机

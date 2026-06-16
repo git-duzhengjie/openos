@@ -232,6 +232,8 @@ int socket_create_fd(int domain, int type, int protocol) {
     sock->info.state = OPENOS_SOCKET_STATE_CREATED;
     sock->info.local_ip = OPENOS_INADDR_ANY;
     sock->info.local_port = 0;
+    sock->info.remote_ip = OPENOS_INADDR_ANY;
+    sock->info.remote_port = 0;
     sock->info.listen_backlog = 0;
 
     file->flags = O_RDWR;
@@ -297,6 +299,53 @@ int socket_accept_fd(int fd, openos_sockaddr_t *addr, uint32_t *addrlen) {
         ((openos_sockaddr_in_t *)addr)->sin_family = OPENOS_AF_INET;
     }
     return -1;
+}
+
+int socket_connect_fd(int fd, const openos_sockaddr_t *addr, uint32_t addrlen) {
+    file_t *file;
+    socket_file_t *sock;
+    const openos_sockaddr_in_t *in;
+    uint16_t port;
+    uint32_t ip;
+    int base_type;
+
+    if (!addr || addrlen < sizeof(openos_sockaddr_in_t)) {
+        return -1;
+    }
+
+    file = vfs_get_file(fd);
+    sock = socket_from_file(file);
+    if (!sock || sock->info.state == OPENOS_SOCKET_STATE_CLOSED ||
+        sock->info.state == OPENOS_SOCKET_STATE_LISTENING ||
+        sock->info.state == OPENOS_SOCKET_STATE_CONNECTED) {
+        return -1;
+    }
+    if (sock->info.domain != OPENOS_AF_INET || addr->sa_family != OPENOS_AF_INET) {
+        return -1;
+    }
+
+    base_type = socket_type_base(sock->info.type);
+    if (base_type != OPENOS_SOCK_STREAM && base_type != OPENOS_SOCK_DGRAM) {
+        return -1;
+    }
+
+    in = (const openos_sockaddr_in_t *)addr;
+    port = socket_bswap16(in->sin_port);
+    ip = in->sin_addr;
+    if (port == 0 || ip == OPENOS_INADDR_ANY) {
+        return -1;
+    }
+
+    if (sock->info.state == OPENOS_SOCKET_STATE_CREATED) {
+        if (socket_reserve_port(sock, OPENOS_INADDR_ANY, 0) < 0) {
+            return -1;
+        }
+    }
+
+    sock->info.remote_ip = ip;
+    sock->info.remote_port = port;
+    sock->info.state = OPENOS_SOCKET_STATE_CONNECTED;
+    return 0;
 }
 
 int socket_bind_fd(int fd, const openos_sockaddr_t *addr, uint32_t addrlen) {

@@ -1381,6 +1381,16 @@ uint32_t syscall_dispatch(uint32_t num,
             return (uint32_t)ret;
         }
 
+    case SYS_CONNECT:
+        {
+            openos_sockaddr_in_t addr;
+            if (!b || c < sizeof(openos_sockaddr_in_t) || c > sizeof(openos_sockaddr_in_t))
+                return (uint32_t)-1;
+            if (copy_from_user(&addr, (const void *)b, sizeof(addr)) < 0)
+                return (uint32_t)-1;
+            return (uint32_t)socket_connect_fd((int)a, (const openos_sockaddr_t *)&addr, sizeof(addr));
+        }
+
     case SYS_FSYNC:
         {
             file_t *f = vfs_get_file((int)a);
