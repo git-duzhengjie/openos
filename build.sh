@@ -107,6 +107,15 @@ if [ -f $USR/condtest.c ]; then
     echo "  Embedded: condtest.elf"
 fi
 
+if [ -f $USR/futextest.c ]; then
+    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+        -fno-stack-protector -fno-builtin \
+        -c $USR/futextest.c -o $BUILD/futextest.o
+    ld -m elf_i386 -T $USR/user.ld -o $BUILD/futextest.elf $BUILD/futextest.o
+    python3 _embed_elf.py $BUILD/futextest.elf $SRC/include/embed_futextest.h futextest_elf
+    echo "  Embedded: futextest.elf"
+fi
+
 if [ -f $USR/isotest.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \

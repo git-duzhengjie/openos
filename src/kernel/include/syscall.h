@@ -66,6 +66,8 @@
 #define SYS_COND_SIGNAL   266
 #define SYS_COND_BROADCAST 267
 #define SYS_COND_DESTROY  268
+#define SYS_FUTEX_WAIT    269
+#define SYS_FUTEX_WAKE    270
 
 typedef struct openos_stat {
     uint32_t ino;

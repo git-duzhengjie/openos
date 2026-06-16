@@ -63,6 +63,8 @@
 #define SYS_COND_SIGNAL   266
 #define SYS_COND_BROADCAST 267
 #define SYS_COND_DESTROY  268
+#define SYS_FUTEX_WAIT    269
+#define SYS_FUTEX_WAKE    270
 
 #define WNOHANG         1
 #define SIGKILL         9
@@ -384,6 +386,16 @@ static inline int openos_cond_destroy(openos_cond_t *cond)
     if (ret == 0)
         *cond = 0;
     return ret;
+}
+
+static inline int openos_futex_wait(volatile unsigned int *uaddr, unsigned int expected)
+{
+    return openos_syscall_result(openos_syscall2(SYS_FUTEX_WAIT, (int)uaddr, (int)expected));
+}
+
+static inline int openos_futex_wake(volatile unsigned int *uaddr, unsigned int max_wake)
+{
+    return openos_syscall_result(openos_syscall2(SYS_FUTEX_WAKE, (int)uaddr, (int)max_wake));
 }
 
 static inline void openos_exit(int code)

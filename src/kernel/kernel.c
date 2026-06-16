@@ -73,6 +73,12 @@
 #else
 #define OPENOS_HAS_CONDTEST 0
 #endif
+#if __has_include("embed_futextest.h")
+#include "embed_futextest.h"  /* futex 回归测试程序 */
+#define OPENOS_HAS_FUTEXTEST 1
+#else
+#define OPENOS_HAS_FUTEXTEST 0
+#endif
 #if __has_include("embed_exit42.h")
 #include "embed_exit42.h"  /* exit status 回归测试程序 */
 #define OPENOS_HAS_EXIT42 1
@@ -667,6 +673,17 @@ void kernel_main(void) {
         serial_write("[OK] Installed /bin/condtest user ELF\n");
     } else {
         serial_write("[WARN] Failed to install /bin/condtest\n");
+    }
+#endif
+
+#if OPENOS_HAS_FUTEXTEST
+    fd = vfs_open("/bin/futextest", O_CREAT | O_RDWR, 0755);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)futextest_elf, futextest_elf_size);
+        vfs_close(fd);
+        serial_write("[OK] Installed /bin/futextest user ELF\n");
+    } else {
+        serial_write("[WARN] Failed to install /bin/futextest\n");
     }
 #endif
 

@@ -27,6 +27,7 @@
 #define SYSCALL_MAX_MUTEXES 64u
 #define SYSCALL_MAX_SEMAPHORES 64u
 #define SYSCALL_MAX_CONDS 64u
+#define SYSCALL_MAX_FUTEX_WAITERS 128u
 
 #define MUTEX_UNUSED 0u
 #define MUTEX_READY  1u
@@ -34,6 +35,7 @@
 #define SEM_READY    1u
 #define COND_UNUSED  0u
 #define COND_READY   1u
+#define FUTEX_WAIT_ACTIVE 1u
 
 #define MUTEX_WAIT_QUEUE_LIMIT 32u
 #define SEM_WAIT_QUEUE_LIMIT   32u
@@ -62,9 +64,17 @@ typedef struct syscall_cond {
     uint32_t wait_count;
 } syscall_cond_t;
 
+typedef struct syscall_futex_waiter {
+    uint8_t used;
+    uint32_t pid;
+    uint32_t uaddr;
+    thread_t *thread;
+} syscall_futex_waiter_t;
+
 static syscall_mutex_t syscall_mutexes[SYSCALL_MAX_MUTEXES];
 static syscall_sem_t syscall_sems[SYSCALL_MAX_SEMAPHORES];
 static syscall_cond_t syscall_conds[SYSCALL_MAX_CONDS];
+static syscall_futex_waiter_t syscall_futex_waiters[SYSCALL_MAX_FUTEX_WAITERS];
 
 static syscall_mutex_t *syscall_mutex_from_handle(uint32_t handle)
 {
@@ -387,6 +397,81 @@ static uint32_t syscall_cond_destroy(uint32_t handle)
         thread_wake(waiter);
     memset(cond, 0, sizeof(*cond));
     return 0;
+}
+
+static void syscall_futex_remove_waiter(thread_t *thread)
+{
+    if (!thread)
+        return;
+
+    for (uint32_t i = 0; i < SYSCALL_MAX_FUTEX_WAITERS; i++) {
+        if (syscall_futex_waiters[i].used == FUTEX_WAIT_ACTIVE &&
+            syscall_futex_waiters[i].thread == thread) {
+            memset(&syscall_futex_waiters[i], 0, sizeof(syscall_futex_waiters[i]));
+            return;
+        }
+    }
+}
+
+static uint32_t syscall_futex_wait(uint32_t uaddr, uint32_t expected)
+{
+    uint32_t current_value = 0;
+    thread_t *current = sched_get_current();
+    uint32_t pid = proc_current_pid();
+    syscall_futex_waiter_t *slot = NULL;
+
+    if (!current || uaddr == 0 || (uaddr & 0x3u) != 0)
+        return (uint32_t)-1;
+    if (copy_from_user(&current_value, (const void *)uaddr, sizeof(current_value)) < 0)
+        return (uint32_t)-1;
+    if (current_value != expected)
+        return 1;
+
+    for (uint32_t i = 0; i < SYSCALL_MAX_FUTEX_WAITERS; i++) {
+        if (syscall_futex_waiters[i].used != FUTEX_WAIT_ACTIVE) {
+            slot = &syscall_futex_waiters[i];
+            break;
+        }
+    }
+    if (!slot)
+        return (uint32_t)-1;
+
+    slot->used = FUTEX_WAIT_ACTIVE;
+    slot->pid = pid;
+    slot->uaddr = uaddr;
+    slot->thread = current;
+
+    current->state = PROC_BLOCKED;
+    sched_yield();
+
+    syscall_futex_remove_waiter(current);
+    return 0;
+}
+
+static uint32_t syscall_futex_wake(uint32_t uaddr, uint32_t max_wake)
+{
+    uint32_t pid = proc_current_pid();
+    uint32_t woke = 0;
+
+    if (uaddr == 0 || (uaddr & 0x3u) != 0)
+        return (uint32_t)-1;
+    if (!user_ptr_valid((const void *)uaddr, sizeof(uint32_t), USERMEM_READ))
+        return (uint32_t)-1;
+    if (max_wake == 0)
+        return 0;
+
+    for (uint32_t i = 0; i < SYSCALL_MAX_FUTEX_WAITERS && woke < max_wake; i++) {
+        syscall_futex_waiter_t *waiter = &syscall_futex_waiters[i];
+        if (waiter->used == FUTEX_WAIT_ACTIVE && waiter->pid == pid &&
+            waiter->uaddr == uaddr && waiter->thread) {
+            thread_t *thread = waiter->thread;
+            memset(waiter, 0, sizeof(*waiter));
+            thread_wake(thread);
+            woke++;
+        }
+    }
+
+    return woke;
 }
 
 static void vga_write_str(const char *s, uint8_t color) {
@@ -811,6 +896,10 @@ uint32_t syscall_dispatch(uint32_t num,
 
     case SYS_COND_DESTROY:
         return syscall_cond_destroy(a);
+    case SYS_FUTEX_WAIT:
+        return syscall_futex_wait(a, b);
+    case SYS_FUTEX_WAKE:
+        return syscall_futex_wake(a, b);
 
     case SYS_FORK:
         return sys_fork();

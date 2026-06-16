@@ -133,7 +133,7 @@
 - [√] mutex（已实现 `SYS_MUTEX_CREATE/LOCK/UNLOCK/DESTROY`、用户态 `openos_mutex_*` API、阻塞等待队列，并由 `/bin/mutextest` 覆盖）
 - [√] semaphore（已实现 `SYS_SEM_CREATE/WAIT/POST/DESTROY`、用户态 `openos_sem_*` API、计数信号量阻塞等待队列，并由 `/bin/semtest` 覆盖）
 - [√] condition variable（已实现 `SYS_COND_CREATE/WAIT/SIGNAL/BROADCAST/DESTROY`、用户态 `openos_cond_*` API、条件变量等待队列，并由 `/bin/condtest` 覆盖）
-- [ ] futex 或类似轻量同步机制
+- [√] futex 或类似轻量同步机制
 - [ ] priority / nice
 - [ ] 更完整的调度策略
 
