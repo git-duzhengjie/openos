@@ -132,6 +132,14 @@ if [ -f $USR/shmtest.c ]; then
     echo "  Built: shmtest.elf"
 fi
 
+if [ -f $USR/eventfdtest.c ]; then
+    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+        -fno-stack-protector -fno-builtin \
+        -c $USR/eventfdtest.c -o $BUILD/eventfdtest.o
+    ld -m elf_i386 -T $USR/user.ld -o $BUILD/eventfdtest.elf $BUILD/eventfdtest.o
+    echo "  Built: eventfdtest.elf"
+fi
+
 if [ -f $USR/nicetest.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \

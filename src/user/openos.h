@@ -97,6 +97,10 @@
 #define SYS_SHM_CREATE    300
 #define SYS_SHM_MAP       301
 #define SYS_SHM_DESTROY   302
+#define SYS_EVENTFD_CREATE 303
+#define SYS_EVENTFD_WRITE  304
+#define SYS_EVENTFD_READ   305
+#define SYS_EVENTFD_DESTROY 306
 
 #define OPENOS_AF_UNSPEC  0
 #define OPENOS_AF_INET    2
@@ -268,6 +272,7 @@ typedef int openos_sem_t;
 typedef int openos_cond_t;
 typedef int openos_mq_t;
 typedef int openos_shm_t;
+typedef int openos_eventfd_t;
 typedef void (*openos_thread_start_t)(void *);
 
 typedef struct openos_stat {
@@ -672,6 +677,37 @@ static inline int openos_shm_destroy(openos_shm_t *shm)
     if (!shm || *shm <= 0) return -1;
     ret = openos_syscall_result(openos_syscall1(SYS_SHM_DESTROY, *shm));
     if (ret == 0) *shm = 0;
+    return ret;
+}
+
+static inline int openos_eventfd_create(openos_eventfd_t *efd, unsigned int initval)
+{
+    int handle;
+    if (!efd) return -1;
+    handle = openos_syscall_result(openos_syscall1(SYS_EVENTFD_CREATE, (int)initval));
+    if (handle < 0) return -1;
+    *efd = handle;
+    return 0;
+}
+
+static inline int openos_eventfd_write(openos_eventfd_t *efd, unsigned int value)
+{
+    if (!efd || *efd <= 0) return -1;
+    return openos_syscall_result(openos_syscall2(SYS_EVENTFD_WRITE, *efd, (int)value));
+}
+
+static inline int openos_eventfd_read(openos_eventfd_t *efd, unsigned int *value)
+{
+    if (!efd || *efd <= 0 || !value) return -1;
+    return openos_syscall_result(openos_syscall2(SYS_EVENTFD_READ, *efd, (int)value));
+}
+
+static inline int openos_eventfd_destroy(openos_eventfd_t *efd)
+{
+    int ret;
+    if (!efd || *efd <= 0) return -1;
+    ret = openos_syscall_result(openos_syscall1(SYS_EVENTFD_DESTROY, *efd));
+    if (ret == 0) *efd = 0;
     return ret;
 }
 

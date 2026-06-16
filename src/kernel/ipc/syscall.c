@@ -37,6 +37,7 @@
 #define MQ_MAX_MESSAGES 4u
 #define MQ_MAX_MESSAGE_SIZE 64u
 #define SYSCALL_MAX_SHM_SEGMENTS 8u
+#define SYSCALL_MAX_EVENTFDS 32u
 
 #define MUTEX_UNUSED 0u
 #define MUTEX_READY  1u
@@ -49,6 +50,8 @@
 #define MQ_READY  1u
 #define SHM_UNUSED 0u
 #define SHM_READY  1u
+#define EVENTFD_UNUSED 0u
+#define EVENTFD_READY  1u
 
 #define MUTEX_WAIT_QUEUE_LIMIT 32u
 #define SEM_WAIT_QUEUE_LIMIT   32u
@@ -101,12 +104,18 @@ typedef struct syscall_shm_segment {
     uint32_t phys;
 } syscall_shm_segment_t;
 
+typedef struct syscall_eventfd {
+    uint8_t used;
+    uint32_t counter;
+} syscall_eventfd_t;
+
 static syscall_mutex_t syscall_mutexes[SYSCALL_MAX_MUTEXES];
 static syscall_sem_t syscall_sems[SYSCALL_MAX_SEMAPHORES];
 static syscall_cond_t syscall_conds[SYSCALL_MAX_CONDS];
 static syscall_futex_waiter_t syscall_futex_waiters[SYSCALL_MAX_FUTEX_WAITERS];
 static syscall_mq_t syscall_mqueues[SYSCALL_MAX_MQUEUES];
 static syscall_shm_segment_t syscall_shm_segments[SYSCALL_MAX_SHM_SEGMENTS];
+static syscall_eventfd_t syscall_eventfds[SYSCALL_MAX_EVENTFDS];
 
 #define NICE_MIN (-20)
 #define NICE_MAX 19
@@ -964,6 +973,67 @@ static uint32_t syscall_shm_destroy(uint32_t handle)
     return 0;
 }
 
+static syscall_eventfd_t *syscall_eventfd_from_handle(uint32_t handle)
+{
+    if (handle == 0 || handle > SYSCALL_MAX_EVENTFDS)
+        return NULL;
+    if (syscall_eventfds[handle - 1].used != EVENTFD_READY)
+        return NULL;
+    return &syscall_eventfds[handle - 1];
+}
+
+static uint32_t syscall_eventfd_create(uint32_t initval)
+{
+    for (uint32_t i = 0; i < SYSCALL_MAX_EVENTFDS; i++) {
+        if (syscall_eventfds[i].used == EVENTFD_READY)
+            continue;
+        memset(&syscall_eventfds[i], 0, sizeof(syscall_eventfds[i]));
+        syscall_eventfds[i].used = EVENTFD_READY;
+        syscall_eventfds[i].counter = initval;
+        return i + 1;
+    }
+    return (uint32_t)-1;
+}
+
+static uint32_t syscall_eventfd_write(uint32_t handle, uint32_t value)
+{
+    syscall_eventfd_t *efd = syscall_eventfd_from_handle(handle);
+
+    if (!efd)
+        return (uint32_t)-1;
+    if (value > UINT32_MAX - efd->counter)
+        efd->counter = UINT32_MAX;
+    else
+        efd->counter += value;
+    return 0;
+}
+
+static uint32_t syscall_eventfd_read(uint32_t handle, uint32_t user_value)
+{
+    syscall_eventfd_t *efd = syscall_eventfd_from_handle(handle);
+    uint32_t value;
+
+    if (!efd || user_value == 0)
+        return (uint32_t)-1;
+    value = efd->counter;
+    efd->counter = 0;
+    if (copy_to_user((void *)user_value, &value, sizeof(value)) < 0) {
+        efd->counter = value;
+        return (uint32_t)-1;
+    }
+    return 0;
+}
+
+static uint32_t syscall_eventfd_destroy(uint32_t handle)
+{
+    syscall_eventfd_t *efd = syscall_eventfd_from_handle(handle);
+
+    if (!efd)
+        return (uint32_t)-1;
+    memset(efd, 0, sizeof(*efd));
+    return 0;
+}
+
 static void sys_munmap_range(uint32_t addr, uint32_t len)
 {
     uint32_t end = addr + len;
@@ -1028,11 +1098,6 @@ static uint32_t sys_munmap_user(uint32_t addr, uint32_t len)
         proc->mmap_end = addr;
 
     return 0;
-}
-
-static uint32_t page_align_down_u32(uint32_t value)
-{
-    return value & ~(PAGE_SIZE - 1u);
 }
 
 static uint32_t sys_brk_set(uint32_t new_end)
@@ -1723,6 +1788,18 @@ uint32_t syscall_dispatch(uint32_t num,
 
     case SYS_SHM_DESTROY:
         return syscall_shm_destroy((uint32_t)a);
+
+    case SYS_EVENTFD_CREATE:
+        return syscall_eventfd_create((uint32_t)a);
+
+    case SYS_EVENTFD_WRITE:
+        return syscall_eventfd_write((uint32_t)a, (uint32_t)b);
+
+    case SYS_EVENTFD_READ:
+        return syscall_eventfd_read((uint32_t)a, (uint32_t)b);
+
+    case SYS_EVENTFD_DESTROY:
+        return syscall_eventfd_destroy((uint32_t)a);
 
     case SYS_FSYNC:
         {
