@@ -545,10 +545,12 @@ int proc_set_current_uid(uint32_t uid) {
     if (p->uid != uid && !proc_current_has_cap(OPENOS_CAP_SETUID)) return -1;
     old_uid = p->uid;
     p->uid = uid;
-    if (uid == 0)
-        p->caps = OPENOS_CAP_ALL;
-    else if (old_uid == 0)
+    if (uid == 0) {
+        if (!p->sandboxed)
+            p->caps = OPENOS_CAP_ALL;
+    } else if (old_uid == 0) {
         p->caps = OPENOS_CAP_BASIC;
+    }
     return 0;
 }
 
