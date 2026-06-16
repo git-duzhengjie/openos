@@ -372,6 +372,7 @@ void gui_terminal_clear(void);
 void gui_terminal_redraw(void);
 void gui_terminal_on_input(char ch);
 void gui_terminal_set_input_focus(int focused);
+int gui_terminal_is_active(void);
 void gui_terminal_open(void);
 void gui_terminal_minimize(void);
 int gui_terminal_copy_selection(void);

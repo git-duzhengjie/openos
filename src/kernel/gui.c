@@ -2488,6 +2488,14 @@ void gui_terminal_open(void) {
     serial_write("[GUI] terminal activated\n");
 }
 
+int gui_terminal_is_active(void) {
+    return g_gui.initialized &&
+           g_gui.terminal.enabled &&
+           g_gui.terminal.window &&
+           g_gui.terminal.window->visible &&
+           !(g_gui.terminal.window->flags & GUI_WINDOW_FLAG_MINIMIZED);
+}
+
 void gui_terminal_minimize(void) {
     if (!g_gui.initialized || !g_gui.terminal.window) return;
     gui_minimize_window(g_gui.terminal.window);
