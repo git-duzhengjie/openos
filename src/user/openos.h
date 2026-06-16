@@ -90,6 +90,10 @@
 #define SYS_PING          293
 #define SYS_NETCONFIG     294
 #define SYS_FIREWALL      295
+#define SYS_MQ_CREATE     296
+#define SYS_MQ_SEND       297
+#define SYS_MQ_RECV       298
+#define SYS_MQ_DESTROY    299
 
 #define OPENOS_AF_UNSPEC  0
 #define OPENOS_AF_INET    2
@@ -259,6 +263,7 @@ typedef int openos_thread_t;
 typedef int openos_mutex_t;
 typedef int openos_sem_t;
 typedef int openos_cond_t;
+typedef int openos_mq_t;
 typedef void (*openos_thread_start_t)(void *);
 
 typedef struct openos_stat {
@@ -605,6 +610,37 @@ static inline int openos_futex_wait(volatile unsigned int *uaddr, unsigned int e
 static inline int openos_futex_wake(volatile unsigned int *uaddr, unsigned int max_wake)
 {
     return openos_syscall_result(openos_syscall2(SYS_FUTEX_WAKE, (int)uaddr, (int)max_wake));
+}
+
+static inline int openos_mq_create(openos_mq_t *mq)
+{
+    int handle;
+    if (!mq) return -1;
+    handle = openos_syscall_result(openos_syscall0(SYS_MQ_CREATE));
+    if (handle < 0) return handle;
+    *mq = handle;
+    return 0;
+}
+
+static inline int openos_mq_send(openos_mq_t *mq, const void *buf, unsigned int len)
+{
+    if (!mq || *mq <= 0 || !buf || len == 0) return -1;
+    return openos_syscall_result(openos_syscall3(SYS_MQ_SEND, *mq, (int)buf, (int)len));
+}
+
+static inline int openos_mq_recv(openos_mq_t *mq, void *buf, unsigned int len)
+{
+    if (!mq || *mq <= 0 || !buf || len == 0) return -1;
+    return openos_syscall_result(openos_syscall3(SYS_MQ_RECV, *mq, (int)buf, (int)len));
+}
+
+static inline int openos_mq_destroy(openos_mq_t *mq)
+{
+    int ret;
+    if (!mq || *mq <= 0) return -1;
+    ret = openos_syscall_result(openos_syscall1(SYS_MQ_DESTROY, *mq));
+    if (ret == 0) *mq = 0;
+    return ret;
 }
 
 static inline int openos_getpriority(int pid)

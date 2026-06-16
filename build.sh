@@ -116,6 +116,14 @@ if [ -f $USR/futextest.c ]; then
     echo "  Embedded: futextest.elf"
 fi
 
+if [ -f $USR/mqtest.c ]; then
+    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+        -fno-stack-protector -fno-builtin \
+        -c $USR/mqtest.c -o $BUILD/mqtest.o
+    ld -m elf_i386 -T $USR/user.ld -o $BUILD/mqtest.elf $BUILD/mqtest.o
+    echo "  Built: mqtest.elf"
+fi
+
 if [ -f $USR/nicetest.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \

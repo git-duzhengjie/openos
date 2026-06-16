@@ -236,7 +236,7 @@
 ### 14. IPC
 
 - [√] pipe（已实现 VFS 匿名管道、`SYS_PIPE`、shell pipeline，并由 `/bin/systest` 覆盖）
-- [ ] message queue
+- [x] message queue
 - [ ] shared memory
 - [ ] eventfd 类机制
 - [ ] socketpair

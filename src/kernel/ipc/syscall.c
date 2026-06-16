@@ -33,6 +33,9 @@
 #define SYSCALL_MAX_SEMAPHORES 64u
 #define SYSCALL_MAX_CONDS 64u
 #define SYSCALL_MAX_FUTEX_WAITERS 128u
+#define SYSCALL_MAX_MQUEUES 4u
+#define MQ_MAX_MESSAGES 4u
+#define MQ_MAX_MESSAGE_SIZE 64u
 
 #define MUTEX_UNUSED 0u
 #define MUTEX_READY  1u
@@ -41,6 +44,8 @@
 #define COND_UNUSED  0u
 #define COND_READY   1u
 #define FUTEX_WAIT_ACTIVE 1u
+#define MQ_UNUSED 0u
+#define MQ_READY  1u
 
 #define MUTEX_WAIT_QUEUE_LIMIT 32u
 #define SEM_WAIT_QUEUE_LIMIT   32u
@@ -76,10 +81,23 @@ typedef struct syscall_futex_waiter {
     thread_t *thread;
 } syscall_futex_waiter_t;
 
+typedef struct syscall_mq_message {
+    uint32_t len;
+    uint8_t data[MQ_MAX_MESSAGE_SIZE];
+} syscall_mq_message_t;
+
+typedef struct syscall_mq {
+    uint8_t used;
+    syscall_mq_message_t messages[MQ_MAX_MESSAGES];
+    uint32_t head;
+    uint32_t count;
+} syscall_mq_t;
+
 static syscall_mutex_t syscall_mutexes[SYSCALL_MAX_MUTEXES];
 static syscall_sem_t syscall_sems[SYSCALL_MAX_SEMAPHORES];
 static syscall_cond_t syscall_conds[SYSCALL_MAX_CONDS];
 static syscall_futex_waiter_t syscall_futex_waiters[SYSCALL_MAX_FUTEX_WAITERS];
+static syscall_mq_t syscall_mqueues[SYSCALL_MAX_MQUEUES];
 
 #define NICE_MIN (-20)
 #define NICE_MAX 19
@@ -540,6 +558,77 @@ static uint32_t syscall_futex_wake(uint32_t uaddr, uint32_t max_wake)
     }
 
     return woke;
+}
+
+static syscall_mq_t *syscall_mq_from_handle(uint32_t handle)
+{
+    if (handle == 0 || handle > SYSCALL_MAX_MQUEUES)
+        return NULL;
+    if (syscall_mqueues[handle - 1].used != MQ_READY)
+        return NULL;
+    return &syscall_mqueues[handle - 1];
+}
+
+static uint32_t syscall_mq_create(void)
+{
+    for (uint32_t i = 0; i < SYSCALL_MAX_MQUEUES; i++) {
+        if (syscall_mqueues[i].used != MQ_READY) {
+            memset(&syscall_mqueues[i], 0, sizeof(syscall_mqueues[i]));
+            syscall_mqueues[i].used = MQ_READY;
+            return i + 1;
+        }
+    }
+    return (uint32_t)-1;
+}
+
+static uint32_t syscall_mq_send(uint32_t handle, const void *buf, uint32_t len)
+{
+    syscall_mq_t *mq = syscall_mq_from_handle(handle);
+    syscall_mq_message_t *msg;
+    uint32_t tail;
+
+    if (!mq || !buf || len == 0 || len > MQ_MAX_MESSAGE_SIZE || mq->count >= MQ_MAX_MESSAGES)
+        return (uint32_t)-1;
+
+    tail = (mq->head + mq->count) % MQ_MAX_MESSAGES;
+    msg = &mq->messages[tail];
+    if (copy_from_user(msg->data, buf, len) < 0)
+        return (uint32_t)-1;
+    msg->len = len;
+    mq->count++;
+    return len;
+}
+
+static uint32_t syscall_mq_recv(uint32_t handle, void *buf, uint32_t len)
+{
+    syscall_mq_t *mq = syscall_mq_from_handle(handle);
+    syscall_mq_message_t *msg;
+    uint32_t copy_len;
+
+    if (!mq || !buf || len == 0 || mq->count == 0)
+        return (uint32_t)-1;
+
+    msg = &mq->messages[mq->head];
+    copy_len = msg->len;
+    if (copy_len > len)
+        copy_len = len;
+    if (copy_to_user(buf, msg->data, copy_len) < 0)
+        return (uint32_t)-1;
+
+    memset(msg, 0, sizeof(*msg));
+    mq->head = (mq->head + 1) % MQ_MAX_MESSAGES;
+    mq->count--;
+    return copy_len;
+}
+
+static uint32_t syscall_mq_destroy(uint32_t handle)
+{
+    syscall_mq_t *mq = syscall_mq_from_handle(handle);
+
+    if (!mq)
+        return (uint32_t)-1;
+    memset(mq, 0, sizeof(*mq));
+    return 0;
 }
 
 static void vga_write_str(const char *s, uint8_t color) {
@@ -1537,6 +1626,18 @@ uint32_t syscall_dispatch(uint32_t num,
             }
             return (uint32_t)-1;
         }
+
+    case SYS_MQ_CREATE:
+        return syscall_mq_create();
+
+    case SYS_MQ_SEND:
+        return syscall_mq_send((uint32_t)a, (const void *)b, (uint32_t)c);
+
+    case SYS_MQ_RECV:
+        return syscall_mq_recv((uint32_t)a, (void *)b, (uint32_t)c);
+
+    case SYS_MQ_DESTROY:
+        return syscall_mq_destroy((uint32_t)a);
 
     case SYS_FSYNC:
         {

@@ -93,6 +93,10 @@
 #define SYS_PING          293
 #define SYS_NETCONFIG     294
 #define SYS_FIREWALL      295
+#define SYS_MQ_CREATE     296
+#define SYS_MQ_SEND       297
+#define SYS_MQ_RECV       298
+#define SYS_MQ_DESTROY    299
 
 #define OPENOS_POLLIN     0x0001
 #define OPENOS_POLLOUT    0x0004
