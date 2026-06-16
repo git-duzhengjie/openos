@@ -15,9 +15,13 @@
 #define PS2_CMD_READ_CONFIG   0x20
 #define PS2_CMD_WRITE_CONFIG  0x60
 #define PS2_MOUSE_ENABLE      0xF4
+#define PS2_MOUSE_SET_SAMPLE  0xF3
+#define PS2_MOUSE_GET_ID      0xF2
 #define PS2_MOUSE_ACK         0xFA
 
 static mouse_state_t g_mouse;
+
+static void mouse_write(uint8_t val);
 
 static void mouse_wait_input() {
     int timeout = 10000;
@@ -32,6 +36,18 @@ static void mouse_wait_output() {
 static uint8_t mouse_read() {
     mouse_wait_output();
     return inb(PS2_DATA_PORT);
+}
+
+static uint8_t mouse_write_ack(uint8_t val) {
+    mouse_write(val);
+    return mouse_read();
+}
+
+static void mouse_set_sample_rate(uint8_t rate) {
+    if (mouse_write_ack(PS2_MOUSE_SET_SAMPLE) != PS2_MOUSE_ACK) {
+        return;
+    }
+    (void)mouse_write_ack(rate);
 }
 
 static int mouse_clamp_int(int value, int min, int max) {
@@ -70,7 +86,7 @@ void mouse_irq_handle(void) {
     }
 
     g_mouse.packet[g_mouse.packet_index++] = data;
-    if (g_mouse.packet_index < 3) {
+    if (g_mouse.packet_index < g_mouse.packet_size) {
         return;
     }
 
@@ -83,12 +99,20 @@ void mouse_irq_handle(void) {
 
     int dx = (int)g_mouse.packet[1];
     int dy = (int)g_mouse.packet[2];
+    int wheel = 0;
+    if (g_mouse.packet_size >= 4) {
+        wheel = (int8_t)(g_mouse.packet[3] & 0x0F);
+        if (wheel & 0x08) {
+            wheel |= 0xFFFFFFF0;
+        }
+    }
 
     /* 溢出包通常表示移动量不可用，直接丢弃避免坐标漂移 */
     if (status & 0xC0) {
         g_mouse.desync_count++;
         g_mouse.dx = 0;
         g_mouse.dy = 0;
+        g_mouse.wheel = 0;
         g_mouse.buttons = status & 0x07;
         return;
     }
@@ -100,6 +124,8 @@ void mouse_irq_handle(void) {
     g_mouse.packet_count++;
     g_mouse.dx = dx;
     g_mouse.dy = dy;
+    g_mouse.wheel = wheel;
+    g_mouse.z += wheel;
     g_mouse.buttons = status & 0x07;
     g_mouse.x += dx;
     g_mouse.y += dy;
@@ -116,6 +142,7 @@ void mouse_init(void) {
     g_mouse.max_y = 0;
     g_mouse.x = 0;
     g_mouse.y = 0;
+    g_mouse.packet_size = 3;
 
     /* 使能辅助设备端口 */
     mouse_wait_input();
@@ -137,6 +164,18 @@ void mouse_init(void) {
     mouse_wait_input();
     outb(PS2_DATA_PORT, config);
     io_wait();
+
+    /* IntelliMouse 探测序列：200, 100, 80 后 GET_ID 返回 3 表示支持滚轮 4 字节包。 */
+    mouse_set_sample_rate(200);
+    mouse_set_sample_rate(100);
+    mouse_set_sample_rate(80);
+    uint8_t id = 0;
+    if (mouse_write_ack(PS2_MOUSE_GET_ID) == PS2_MOUSE_ACK) {
+        id = mouse_read();
+        if (id == 3) {
+            g_mouse.packet_size = 4;
+        }
+    }
 
     /* 启用鼠标采样 */
     mouse_write(PS2_MOUSE_ENABLE);
@@ -166,6 +205,7 @@ void mouse_snapshot_and_clear_delta(mouse_state_t *out) {
     *out = g_mouse;
     g_mouse.dx = 0;
     g_mouse.dy = 0;
+    g_mouse.wheel = 0;
     __asm__ volatile("pushl %0; popfl" :: "r"(flags) : "memory", "cc");
 }
 
@@ -181,6 +221,7 @@ void mouse_set_position(int x, int y) {
     g_mouse.y = y;
     g_mouse.dx = 0;
     g_mouse.dy = 0;
+    g_mouse.wheel = 0;
     mouse_clamp_position();
 }
 
@@ -195,6 +236,7 @@ void mouse_set_absolute_position(int x, int y, uint8_t buttons) {
     mouse_clamp_position();
     g_mouse.dx = g_mouse.x - old_x;
     g_mouse.dy = g_mouse.y - old_y;
+    g_mouse.wheel = 0;
     g_mouse.buttons = buttons & 0x07;
     g_mouse.present = 1;
     g_mouse.absolute_mode = 1;
@@ -207,6 +249,6 @@ void mouse_print_info(void) {
     serial_write("[MOUSE] PS/2 mouse status\n");
     serial_write(g_mouse.present ? "  present=yes\n" : "  present=no\n");
     serial_write("  buttons="); serial_write_hex(g_mouse.buttons); serial_write(" last_ack="); serial_write_hex(g_mouse.last_ack); serial_write("\n");
-    serial_write("  irq_bytes="); serial_write_hex(g_mouse.irq_count); serial_write(" packets="); serial_write_hex(g_mouse.packet_count); serial_write(" desync="); serial_write_hex(g_mouse.desync_count); serial_write("\n");
-    serial_write("  pos="); serial_write_hex((uint32_t)g_mouse.x); serial_write(","); serial_write_hex((uint32_t)g_mouse.y); serial_write(" bounds="); serial_write_hex((uint32_t)g_mouse.max_x); serial_write(","); serial_write_hex((uint32_t)g_mouse.max_y); serial_write(" absolute="); serial_write_hex((uint32_t)g_mouse.absolute_mode); serial_write("\n");
+    serial_write("  irq_bytes="); serial_write_hex(g_mouse.irq_count); serial_write(" packets="); serial_write_hex(g_mouse.packet_count); serial_write(" desync="); serial_write_hex(g_mouse.desync_count); serial_write(" packet_size="); serial_write_hex((uint32_t)g_mouse.packet_size); serial_write("\n");
+    serial_write("  pos="); serial_write_hex((uint32_t)g_mouse.x); serial_write(","); serial_write_hex((uint32_t)g_mouse.y); serial_write(" z="); serial_write_hex((uint32_t)g_mouse.z); serial_write(" wheel="); serial_write_hex((uint32_t)g_mouse.wheel); serial_write(" bounds="); serial_write_hex((uint32_t)g_mouse.max_x); serial_write(","); serial_write_hex((uint32_t)g_mouse.max_y); serial_write(" absolute="); serial_write_hex((uint32_t)g_mouse.absolute_mode); serial_write("\n");
 }

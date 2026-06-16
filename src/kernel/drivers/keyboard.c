@@ -1,14 +1,17 @@
 /* ============================================================
  * openos - PS/2 Keyboard Driver
- * Handles IRQ1, scancode to ASCII, proper break code handling
+ * Handles IRQ1, scancode set 1, modifiers, locks and extended keys
  * ============================================================ */
 
+#include "../include/keyboard.h"
 #include "../include/idt.h"
 #include "../include/serial.h"
 #include "../include/io.h"
 #include "../include/input_buffer.h"
 
 #define KEYBOARD_DATA_PORT   0x60
+#define KEYBOARD_STATUS_PORT 0x64
+#define KEYBOARD_CMD_LED     0xED
 
 static const char scancode_ascii[] = {
     0,0,'1','2','3','4','5','6',
@@ -38,102 +41,208 @@ static const char scancode_ascii_shift[] = {
     '2','3','0','.',0,0,0,0
 };
 
-/* 键盘状态机（PS/2 Set 1 扫描码）：
- * 0 = 正常
- * 1 = 收到 0xE0 (扩展键前缀)，下一个字节是 make/break
- */
-static int kb_state = 0;
-static int shift_pressed = 0;
-static int ctrl_pressed = 0;
+static keyboard_state_t kb;
+
+static void keyboard_put_esc3(char a, char b, char c) {
+    input_putc(0x1B);
+    input_putc(a);
+    input_putc(b);
+    if (c) {
+        input_putc(c);
+    }
+}
+
+static void keyboard_put_csi_tilde(char n) {
+    input_putc(0x1B);
+    input_putc('[');
+    input_putc(n);
+    input_putc('~');
+}
+
+static void keyboard_put_csi_number_tilde(const char *number) {
+    input_putc(0x1B);
+    input_putc('[');
+    while (*number) {
+        input_putc(*number++);
+    }
+    input_putc('~');
+}
+
+static void keyboard_wait_input(void) {
+    int timeout = 10000;
+    while (--timeout && (inb(KEYBOARD_STATUS_PORT) & 2) != 0) {
+    }
+}
+
+static void keyboard_update_leds(void) {
+    uint8_t leds = 0;
+    if (kb.scroll_lock) leds |= 1;
+    if (kb.num_lock) leds |= 2;
+    if (kb.caps_lock) leds |= 4;
+    keyboard_wait_input();
+    outb(KEYBOARD_DATA_PORT, KEYBOARD_CMD_LED);
+    keyboard_wait_input();
+    outb(KEYBOARD_DATA_PORT, leds);
+}
+
+static int keyboard_is_letter(char c) {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+}
+
+static char keyboard_translate(uint8_t sc) {
+    char c;
+    int shifted;
+    if (sc >= sizeof(scancode_ascii)) {
+        return 0;
+    }
+    shifted = kb.shift ? 1 : 0;
+    c = shifted ? scancode_ascii_shift[sc] : scancode_ascii[sc];
+    if (keyboard_is_letter(c) && kb.caps_lock) {
+        if (c >= 'a' && c <= 'z') c = (char)(c - 'a' + 'A');
+        else if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
+    }
+    return c;
+}
+
+static void keyboard_handle_function(uint8_t sc) {
+    static const char fn_code[] = { 'P','Q','R','S','t','u','v','w','x','y' };
+    if (sc >= 0x3B && sc <= 0x44) {
+        keyboard_put_esc3('O', fn_code[sc - 0x3B], 0);
+    } else if (sc == 0x57) {
+        keyboard_put_csi_number_tilde("23");
+    } else if (sc == 0x58) {
+        keyboard_put_csi_number_tilde("24");
+    }
+}
+
+static void keyboard_handle_extended(uint8_t sc, int release) {
+    if (sc == 0x1D) {
+        kb.ctrl = release ? 0 : 1;
+        return;
+    }
+    if (sc == 0x38) {
+        kb.alt = release ? 0 : 1;
+        return;
+    }
+    if (release) {
+        return;
+    }
+    switch (sc) {
+        case 0x48: keyboard_put_esc3('[', 'A', 0); break;
+        case 0x50: keyboard_put_esc3('[', 'B', 0); break;
+        case 0x4D: keyboard_put_esc3('[', 'C', 0); break;
+        case 0x4B: keyboard_put_esc3('[', 'D', 0); break;
+        case 0x52: keyboard_put_csi_tilde('2'); break;
+        case 0x53: keyboard_put_csi_tilde('3'); break;
+        case 0x47: keyboard_put_esc3('[', 'H', 0); break;
+        case 0x4F: keyboard_put_esc3('[', 'F', 0); break;
+        case 0x49: keyboard_put_csi_tilde('5'); break;
+        case 0x51: keyboard_put_csi_tilde('6'); break;
+        case 0x1C: input_putc(0x0A); break;
+        case 0x35: input_putc('/'); break;
+        default: break;
+    }
+}
 
 static void keyboard_handler(registers_t *regs) {
     uint8_t sc;
+    int release;
     char c;
 
     (void)regs;
     sc = inb(KEYBOARD_DATA_PORT);
+    kb.irq_count++;
 
-    /* Set 1 扩展键前缀 */
     if (sc == 0xE0) {
-        kb_state = 1;
+        kb.extended = 1;
+        return;
+    }
+    if (sc == 0xE1) {
+        kb.extended = 2;
+        return;
+    }
+    if (kb.extended == 2) {
+        kb.extended = 0;
         return;
     }
 
-    /* Set 1 断码：最高位为1表示键释放，直接忽略 */
-    if (sc & 0x80) {
-        /* Shift / Ctrl 释放 */
-        if (sc == 0xAA || sc == 0xB6) {
-            shift_pressed = 0;
-        } else if (sc == 0x9D) {
-            ctrl_pressed = 0;
+    release = (sc & 0x80) != 0;
+    sc &= 0x7F;
+    if (release) kb.break_count++; else kb.make_count++;
+
+    if (kb.extended == 1) {
+        kb.extended = 0;
+        keyboard_handle_extended(sc, release);
+        return;
+    }
+
+    switch (sc) {
+        case 0x2A:
+        case 0x36:
+            kb.shift = release ? 0 : 1;
+            return;
+        case 0x1D:
+            kb.ctrl = release ? 0 : 1;
+            return;
+        case 0x38:
+            kb.alt = release ? 0 : 1;
+            return;
+        case 0x3A:
+            if (!release) { kb.caps_lock ^= 1; keyboard_update_leds(); }
+            return;
+        case 0x45:
+            if (!release) { kb.num_lock ^= 1; keyboard_update_leds(); }
+            return;
+        case 0x46:
+            if (!release) { kb.scroll_lock ^= 1; keyboard_update_leds(); }
+            return;
+        default:
+            break;
+    }
+
+    if (release) {
+        return;
+    }
+
+    if ((sc >= 0x3B && sc <= 0x44) || sc == 0x57 || sc == 0x58) {
+        keyboard_handle_function(sc);
+        return;
+    }
+
+    c = keyboard_translate(sc);
+    if (c) {
+        if (kb.alt) {
+            input_putc(0x1B);
         }
-        kb_state = 0;
-        return;
-    }
-
-    /* 扩展键 make 码（方向键、编辑键等）：转换为 ANSI 转义序列 */
-    if (kb_state == 1) {
-        kb_state = 0;
-        switch (sc) {
-            case 0x48: /* Up    -> ESC [ A */
-                input_putc(0x1B); input_putc('['); input_putc('A');
-                break;
-            case 0x50: /* Down  -> ESC [ B */
-                input_putc(0x1B); input_putc('['); input_putc('B');
-                break;
-            case 0x4D: /* Right -> ESC [ C */
-                input_putc(0x1B); input_putc('['); input_putc('C');
-                break;
-            case 0x4B: /* Left  -> ESC [ D */
-                input_putc(0x1B); input_putc('['); input_putc('D');
-                break;
-            case 0x52: /* Insert  -> ESC [ 2 ~ */
-                input_putc(0x1B); input_putc('['); input_putc('2'); input_putc('~');
-                break;
-            case 0x53: /* Delete  -> ESC [ 3 ~ */
-                input_putc(0x1B); input_putc('['); input_putc('3'); input_putc('~');
-                break;
-            case 0x47: /* Home    -> ESC [ H */
-                input_putc(0x1B); input_putc('['); input_putc('H');
-                break;
-            case 0x4F: /* End     -> ESC [ F */
-                input_putc(0x1B); input_putc('['); input_putc('F');
-                break;
-            case 0x49: /* Page Up   -> ESC [ 5 ~ */
-                input_putc(0x1B); input_putc('['); input_putc('5'); input_putc('~');
-                break;
-            case 0x51: /* Page Down -> ESC [ 6 ~ */
-                input_putc(0x1B); input_putc('['); input_putc('6'); input_putc('~');
-                break;
-            default:
-                break;
+        if (kb.ctrl && c >= 'a' && c <= 'z') {
+            c = (char)(c - 'a' + 1);
+        } else if (kb.ctrl && c >= 'A' && c <= 'Z') {
+            c = (char)(c - 'A' + 1);
         }
-        return;
-    }
-
-    /* 普通 make code */
-    if (sc == 0x2A || sc == 0x36) {
-        shift_pressed = 1;
-        return;
-    }
-    if (sc == 0x1D) {
-        ctrl_pressed = 1;
-        return;
-    }
-    if (sc < sizeof(scancode_ascii)) {
-        c = shift_pressed ? scancode_ascii_shift[sc] : scancode_ascii[sc];
-        if (c) {
-            if (ctrl_pressed && c >= 'a' && c <= 'z')
-                input_putc(c - 'a' + 1);
-            else if (ctrl_pressed && c >= 'A' && c <= 'Z')
-                input_putc(c - 'A' + 1);
-            else
-                input_putc(c);
+        if (c == 4) {
+            input_mark_eof();
+        } else {
+            input_putc(c);
         }
     }
 }
 
+const keyboard_state_t *keyboard_get_state(void) {
+    return &kb;
+}
+
 void keyboard_init(void) {
+    kb.shift = 0;
+    kb.ctrl = 0;
+    kb.alt = 0;
+    kb.caps_lock = 0;
+    kb.num_lock = 1;
+    kb.scroll_lock = 0;
+    kb.extended = 0;
+    kb.irq_count = 0;
+    kb.make_count = 0;
+    kb.break_count = 0;
+    keyboard_update_leds();
     isr_install_handler(33, keyboard_handler);
-    serial_write("[OK] Keyboard\n");
+    serial_write("[OK] PS/2 keyboard\n");
 }

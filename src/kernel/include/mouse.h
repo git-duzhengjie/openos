@@ -14,13 +14,16 @@ typedef struct {
     uint8_t buttons;       /* bit0=left, bit1=right, bit2=middle */
     int dx;                /* 相对移动量 */
     int dy;
+    int wheel;             /* 最近一次滚轮增量，向上为正 */
+    int z;                 /* 累计滚轮位置 */
     int present;           /* 鼠标是否存在 */
     uint32_t irq_count;     /* 已接收 IRQ12 包字节数 */
     uint32_t packet_count;  /* 已解析完整数据包数量 */
     uint32_t desync_count;  /* 丢弃的错位字节数量 */
     uint8_t last_ack;       /* 初始化时最后一次 ACK/响应 */
-    int packet_index;       /* 当前包字节索引 (0,1,2) */
-    uint8_t packet[3];      /* 3字节包缓存 */
+    int packet_index;       /* 当前包字节索引 */
+    int packet_size;        /* 3=标准鼠标，4=IntelliMouse 滚轮鼠标 */
+    uint8_t packet[4];      /* 包缓存 */
     int max_x;              /* 坐标右边界，通常为屏幕宽度-1 */
     int max_y;              /* 坐标下边界，通常为屏幕高度-1 */
     int absolute_mode;      /* 非 0 表示最近坐标来自绝对指针设备 */
