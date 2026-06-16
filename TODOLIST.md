@@ -237,7 +237,7 @@
 
 - [√] pipe（已实现 VFS 匿名管道、`SYS_PIPE`、shell pipeline，并由 `/bin/systest` 覆盖）
 - [√] message queue（已实现 SYS_MQ_CREATE/SEND/RECV/DESTROY、环形消息队列和用户态 wrapper）
-- [x] shared memory
+- [√] shared memory（已实现 SYS_SHM_CREATE/MAP/DESTROY、页级共享段和用户态 wrapper）
 - [x] eventfd 类机制
 - [x] socketpair
 - [x] 用户态服务进程通信模型
