@@ -197,6 +197,12 @@ typedef struct gui_accel_info {
     uint32_t rect_fill_pixels;
     uint32_t backbuffer_fast_fills;
     uint32_t framebuffer_fast_fills;
+    uint32_t blits;
+    uint32_t blit_pixels;
+    uint32_t backbuffer_fast_blits;
+    uint32_t framebuffer_fast_blits;
+    uint32_t rect_copies;
+    uint32_t rect_copy_pixels;
     uint32_t flush_rects;
     uint32_t flush_pixels;
     uint32_t flush_rows;
@@ -355,6 +361,8 @@ void gui_post_key_code(int key);
 int gui_should_capture_key_code(int key);
 void gui_invalidate_rect(int x, int y, int w, int h);
 void gui_invalidate_all(void);
+int gui_blit_rgba32(int x, int y, int w, int h, const uint32_t *pixels, uint32_t src_stride);
+int gui_copy_rect(int dst_x, int dst_y, int src_x, int src_y, int w, int h);
 
 void gui_terminal_init(void);
 void gui_terminal_putc(char ch);

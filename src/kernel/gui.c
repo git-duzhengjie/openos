@@ -752,6 +752,108 @@ void gui_invalidate_all(void) {
     g_gui.dirty_count = 0;
 }
 
+int gui_blit_rgba32(int x, int y, int w, int h, const uint32_t *pixels, uint32_t src_stride) {
+    int row;
+    int col;
+    int src_skip_x = 0;
+    int src_skip_y = 0;
+    gui_rect_t rect;
+    gui_rect_t screen;
+    gui_rect_t clipped;
+    uint32_t copied;
+
+    if (!g_gui.initialized || !pixels || w <= 0 || h <= 0) return -1;
+    if (src_stride == 0) src_stride = (uint32_t)w;
+    if (src_stride < (uint32_t)w) return -1;
+
+    rect.x = x; rect.y = y; rect.w = w; rect.h = h;
+    screen.x = 0; screen.y = 0; screen.w = (int)g_gui.width; screen.h = (int)g_gui.height;
+    if (!gui_rect_intersect(&rect, &screen, &clipped)) return 0;
+    if (g_gui.clip_enabled) {
+        gui_rect_t clip2;
+        if (!gui_rect_intersect(&clipped, &g_gui.clip_rect, &clip2)) return 0;
+        clipped = clip2;
+    }
+
+    src_skip_x = clipped.x - x;
+    src_skip_y = clipped.y - y;
+    copied = (uint32_t)clipped.w * (uint32_t)clipped.h;
+    g_gui_accel.blits++;
+    g_gui_accel.blit_pixels += copied;
+
+    if (gui_compositor_active()) {
+        for (row = 0; row < clipped.h; row++) {
+            const uint32_t *src = pixels + ((uint32_t)(src_skip_y + row) * src_stride) + (uint32_t)src_skip_x;
+            uint32_t *dst = &g_gui.backbuffer[(uint32_t)(clipped.y + row) * g_gui.width + (uint32_t)clipped.x];
+            memcpy(dst, src, (uint32_t)clipped.w * sizeof(uint32_t));
+        }
+        g_gui_accel.backbuffer_fast_blits++;
+        gui_invalidate_rect(clipped.x, clipped.y, clipped.w, clipped.h);
+        return (int)copied;
+    }
+
+    for (row = 0; row < clipped.h; row++) {
+        const uint32_t *src = pixels + ((uint32_t)(src_skip_y + row) * src_stride) + (uint32_t)src_skip_x;
+        for (col = 0; col < clipped.w; col++) {
+            framebuffer_put_pixel((uint32_t)(clipped.x + col), (uint32_t)(clipped.y + row), src[col]);
+        }
+    }
+    g_gui_accel.framebuffer_fast_blits++;
+    return (int)copied;
+}
+
+int gui_copy_rect(int dst_x, int dst_y, int src_x, int src_y, int w, int h) {
+    int row;
+    int sy;
+    int dy;
+    int src_adj_x = src_x;
+    int src_adj_y = src_y;
+    gui_rect_t dst;
+    gui_rect_t screen;
+    gui_rect_t clipped;
+    uint32_t copied;
+
+    if (!g_gui.initialized || !gui_compositor_active() || w <= 0 || h <= 0) return -1;
+    dst.x = dst_x; dst.y = dst_y; dst.w = w; dst.h = h;
+    screen.x = 0; screen.y = 0; screen.w = (int)g_gui.width; screen.h = (int)g_gui.height;
+    if (!gui_rect_intersect(&dst, &screen, &clipped)) return 0;
+    if (g_gui.clip_enabled) {
+        gui_rect_t clip2;
+        if (!gui_rect_intersect(&clipped, &g_gui.clip_rect, &clip2)) return 0;
+        clipped = clip2;
+    }
+
+    src_adj_x += clipped.x - dst_x;
+    src_adj_y += clipped.y - dst_y;
+    if (src_adj_x < 0 || src_adj_y < 0) return -1;
+    if (src_adj_x + clipped.w > (int)g_gui.width) return -1;
+    if (src_adj_y + clipped.h > (int)g_gui.height) return -1;
+
+    copied = (uint32_t)clipped.w * (uint32_t)clipped.h;
+    g_gui_accel.rect_copies++;
+    g_gui_accel.rect_copy_pixels += copied;
+
+    if (src_adj_y < clipped.y || (src_adj_y == clipped.y && src_adj_x < clipped.x)) {
+        for (row = clipped.h - 1; row >= 0; row--) {
+            sy = src_adj_y + row;
+            dy = clipped.y + row;
+            memmove(&g_gui.backbuffer[(uint32_t)dy * g_gui.width + (uint32_t)clipped.x],
+                    &g_gui.backbuffer[(uint32_t)sy * g_gui.width + (uint32_t)src_adj_x],
+                    (uint32_t)clipped.w * sizeof(uint32_t));
+        }
+    } else {
+        for (row = 0; row < clipped.h; row++) {
+            sy = src_adj_y + row;
+            dy = clipped.y + row;
+            memmove(&g_gui.backbuffer[(uint32_t)dy * g_gui.width + (uint32_t)clipped.x],
+                    &g_gui.backbuffer[(uint32_t)sy * g_gui.width + (uint32_t)src_adj_x],
+                    (uint32_t)clipped.w * sizeof(uint32_t));
+        }
+    }
+    gui_invalidate_rect(clipped.x, clipped.y, clipped.w, clipped.h);
+    return (int)copied;
+}
+
 static void gui_flush_rect(const gui_rect_t *r) {
     int x, y;
     if (!r || !g_gui.backbuffer) return;
