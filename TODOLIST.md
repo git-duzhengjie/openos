@@ -187,7 +187,7 @@
 - [√] ACPI（已接入启动：RSDP 扫描/校验、RSDT/XSDT 表查找，供 APIC/电源管理复用）
 - [√] APIC / IOAPIC（已实现 MADT 枚举、LAPIC MMIO/EOI、IOAPIC 寄存器访问与 IRQ 重定向/屏蔽接口）
 - [√] RTC 时钟（已实现 CMOS 读取、UIP 稳定采样、BCD/12h 转换、启动时间缓存并接入 kernel 初始化）
-- [x] 电源管理
+- [√] 电源管理（已接入启动：FADT/DSDT 解析、_S5_ 提取、ACPI S5 关机、KBC 重启与 shell power/shutdown/reboot 命令）
 - [x] 热插拔支持
 
 ### 10. 存储驱动
