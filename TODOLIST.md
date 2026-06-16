@@ -141,7 +141,7 @@
 
 - [√] init 进程模型（已实现 PID1 init/reaper 内核线程模型）
 - [√] `fork` 稳定化（已新增 /bin/forktest，覆盖 fork 父子返回、私有数据复制、waitpid 退出码回收）
-- [ ] `exec` 完整替换当前进程镜像
+- [√] `exec` 完整替换当前进程镜像
 - [√] `kill`（最小实现：支持 SIGTERM/SIGKILL/signal 0，新增 `/bin/kill`）
 - [√] signal 机制（最小实现：pending signal 位图，SIGTERM/SIGKILL 默认终止，signal 0 存在性检查）
 - [√] alarm / timer signal（最小实现：SYS_ALARM、SIGALRM 默认终止、/bin/alarmtest）

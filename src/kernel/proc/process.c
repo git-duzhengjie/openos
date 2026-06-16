@@ -652,6 +652,7 @@ int sys_exec_env(const char *path, char *const argv[], char *const envp[]) {
     user_spawn_args_t exec_args;
     if (!path || !path[0]) return -1;
     if (copy_exec_args(&exec_args, path, argv, envp) != 0) return -1;
+
     thread_t *cur = sched_get_current();
     if (!cur) return -1;
 
@@ -666,7 +667,8 @@ int sys_exec_env(const char *path, char *const argv[], char *const envp[]) {
         cur->pid = proc->pid;  /* 关联线程到新进程 */
     }
 
-    /* 打开 ELF 文件 */
+    /* Open the executable before switching address spaces so ordinary errors
+     * leave the current process image untouched, as exec should. */
     int fd = vfs_open(path, 0, 0);
     serial_write("[EXEC] vfs_open returned fd=");
     serial_write_hex(fd);
@@ -678,45 +680,75 @@ int sys_exec_env(const char *path, char *const argv[], char *const envp[]) {
         return -1;
     }
 
-    /* 加载 ELF */
-    elf_load_result_t load_result = elf_load(fd);
-    vfs_close(fd);  /* 关闭文件 */
-
-    if (load_result.entry == 0 || load_result.num_segments <= 0 || load_result.brk_start == 0) {
-        serial_write("[EXEC] ELF load failed\n");
+    uint32_t old_cr3 = proc->cr3 ? proc->cr3 : vmm_get_cr3();
+    uint32_t old_owned = proc->owns_address_space;
+    uint32_t new_cr3 = vmm_create_user_address_space();
+    if (!new_cr3) {
+        vfs_close(fd);
         return -1;
     }
 
-    /* 更新进程信息 */
-    proc->code_addr = load_result.brk_start;  /* 实际上是 brk 起点 */
-    proc->heap_start = load_result.brk_start;
-    proc->heap_end = load_result.brk_start;
-    proc->mmap_base = 0x50000000u;
-    proc->mmap_end = proc->mmap_base;
+    vmm_load_cr3(new_cr3);
 
-    serial_write("[EXEC] Loaded, entry=0x");
-    serial_write_hex(load_result.entry);
-    serial_write("\n");
+    elf_load_result_t load_result = elf_load(fd);
+    vfs_close(fd);
 
-    /* 分配用户栈 */
+    if (load_result.entry == 0 || load_result.num_segments <= 0 || load_result.brk_start == 0) {
+        serial_write("[EXEC] ELF load failed\n");
+        vmm_load_cr3(old_cr3);
+        proc_free_cloned_address_space((uint32_t *)new_cr3);
+        return -1;
+    }
+
     uint32_t stack_top = alloc_user_stack();
     if (!stack_top) {
         serial_write("[EXEC] user stack allocation failed\n");
+        vmm_load_cr3(old_cr3);
+        proc_free_cloned_address_space((uint32_t *)new_cr3);
         return -1;
     }
 
     uint32_t user_sp = setup_user_args_stack(stack_top, &exec_args);
     if (!user_sp) {
         serial_write("[EXEC] argv stack setup failed\n");
+        vmm_load_cr3(old_cr3);
+        proc_free_cloned_address_space((uint32_t *)new_cr3);
         return -1;
     }
 
-    /* CPU switches to TSS.esp0 on every ring3 -> ring0 interrupt.
-     * Keep it pointed at this thread's kernel stack before entering user mode;
-     * otherwise int 0x80/IRQ from ring3 may corrupt another stack or fault. */
-    tss_set_kernel_stack(cur->kernel_stack_top);
+    /* Commit: from here the new image is current. Keep the existing process,
+     * pid, parent relationship, cwd/fd table, and kernel stack; replace only
+     * the user address space and executable metadata. */
+    proc->cr3 = new_cr3;
+    proc->owns_address_space = 1;
 
-    /* 切换到用户态执行 */
+    proc->code_addr = load_result.brk_start;  /* actually brk start */
+    proc->heap_start = load_result.brk_start;
+    proc->heap_end = load_result.brk_start;
+    proc->mmap_base = 0x50000000u;
+    proc->mmap_end = proc->mmap_base;
+
+    int name_i = 0;
+    for (; name_i < 31 && path[name_i]; name_i++)
+        proc->name[name_i] = path[name_i];
+    proc->name[name_i] = '\0';
+
+    for (int i = 0; i < MAX_FD; i++) {
+        if ((proc->fd_flags[i] & FD_CLOEXEC) && proc->fds[i]) {
+            vfs_close_fd_for_process(proc, i);
+        }
+    }
+
+    if (old_owned && old_cr3 && old_cr3 != new_cr3) {
+        proc_free_cloned_address_space((uint32_t *)old_cr3);
+    }
+
+    serial_write("[EXEC] Replaced image, entry=0x");
+    serial_write_hex(load_result.entry);
+    serial_write("\n");
+
+    /* CPU switches to TSS.esp0 on every ring3 -> ring0 interrupt. */
+    tss_set_kernel_stack(cur->kernel_stack_top);
     switch_to_user_asm(load_result.entry, user_sp);
 
     /* 不会到达这里 */
