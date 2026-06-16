@@ -29,3 +29,4 @@ src/kernel/include/embed_waittest.h
 src/kernel/include/embed_exit42.h
 src/kernel/include/embed_orphan.h
 src/kernel/include/embed_argtest.h
+src/kernel/include/version.h

@@ -19,6 +19,42 @@ qemu-system-i386 -drive format=raw,file=target/openos.img -m 512M -serial stdio 
 # 启动后在 OpenOS Shell 中执行：guitest
 ```
 
+## 调试
+
+```bash
+# 构建调试符号和镜像
+bash build.sh
+
+# 终端 1：启动暂停在复位入口、开启 GDB stub
+bash scripts/debug-qemu-gdb.sh
+
+# 终端 2：加载符号并连接 QEMU
+OPENOS_GDB_PORT=1234 gdb -q -x scripts/gdb-openos.gdb
+(gdb) openos-connect
+(gdb) openos-break-boot
+(gdb) continue
+```
+
+常用 GDB 辅助命令：`openos-help`、`openos-regs`、`openos-panic-dump`。
+
+## 发布打包
+
+```bash
+bash scripts/package-release.sh --version nightly
+```
+
+发布包输出到 `target/release/`，包含 `openos.img`、`kernel.elf`、`kernel.bin`、文档、调试脚本和 SHA256 校验文件。详见 `docs/release.md`。
+
+## 版本管理
+
+基础版本记录在根目录 `VERSION`，完整版本可通过以下命令查询：
+
+```bash
+bash scripts/version.sh --full
+```
+
+构建时会自动生成 `src/kernel/include/version.h`，发布打包默认使用同一版本来源。详见 `docs/versioning.md`。
+
 ## 设计理念
 
 - **开源** — 完全开放，社区驱动

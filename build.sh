@@ -64,6 +64,11 @@ if [ -n "${1:-}" ]; then
     exit 1
 fi
 
+if [ -x scripts/gen-version-header.sh ]; then
+    OPENOS_VERSION_HEADER=$(bash scripts/gen-version-header.sh)
+    echo "Version header: $OPENOS_VERSION_HEADER"
+fi
+
 if [ "$BUILD_ARCH" = "x86_64" ]; then
     echo "===== Building openos Phase 2 (x86_64 kernel + hello64 regression) ====="
     ARCH64_SRC=src/arch/x86_64
