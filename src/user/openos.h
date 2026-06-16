@@ -78,12 +78,31 @@
 #define SYS_SELECT        281
 #define SYS_FSYNC         282
 #define SYS_SOCKET        283
+#define SYS_BIND          284
 
 #define OPENOS_AF_UNSPEC  0
 #define OPENOS_AF_INET    2
 #define OPENOS_SOCK_STREAM 1
 #define OPENOS_SOCK_DGRAM  2
 #define OPENOS_SOCK_RAW    3
+#define OPENOS_INADDR_ANY  0u
+
+typedef struct openos_sockaddr {
+    unsigned short sa_family;
+    char sa_data[14];
+} openos_sockaddr_t;
+
+typedef struct openos_sockaddr_in {
+    unsigned short sin_family;
+    unsigned short sin_port;
+    unsigned int sin_addr;
+    unsigned char sin_zero[8];
+} openos_sockaddr_in_t;
+
+static inline unsigned short openos_htons(unsigned short v)
+{
+    return (unsigned short)((v >> 8) | (v << 8));
+}
 
 #define OPENOS_POLLIN     0x0001
 #define OPENOS_POLLOUT    0x0004
@@ -245,6 +264,11 @@ static inline int openos_syscall2(int num, int a, int b)
 static inline int openos_socket(int domain, int type, int protocol)
 {
     return openos_syscall_result(openos_syscall3(SYS_SOCKET, domain, type, protocol));
+}
+
+static inline int openos_bind(int fd, const openos_sockaddr_t *addr, unsigned int addrlen)
+{
+    return openos_syscall_result(openos_syscall3(SYS_BIND, fd, (int)addr, (int)addrlen));
 }
 
 static inline int openos_syscall5(int num, int a, int b, int c, int d, int e)

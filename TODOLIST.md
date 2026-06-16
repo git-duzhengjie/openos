@@ -218,7 +218,7 @@
 - [√] DHCP
 - [√] DNS
 - [x] socket syscall
-- [ ] `bind`
+- [x] `bind`
 - [ ] `listen`
 - [ ] `accept`
 - [ ] `connect`

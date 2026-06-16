@@ -1,9 +1,9 @@
 /* ============================================================
  * openos - Socket syscall fd layer
  *
- * This module provides the POSIX-like socket() entry point as a
- * real file descriptor. Protocol binding (bind/listen/connect and
- * send/recv) is intentionally layered on top in later tasks.
+ * This module provides POSIX-like socket() and bind() entry
+ * points as real file descriptors. Data-plane syscalls are layered
+ * on top in later tasks.
  * ============================================================ */
 
 #include "socket.h"
@@ -13,13 +13,31 @@
 #include "../include/string.h"
 
 #define SOCKET_MAGIC 0x534F434Bu /* 'SOCK' */
+#define SOCKET_MAX_BINDS 64
+#define SOCKET_EPHEMERAL_FIRST 49152u
+#define SOCKET_EPHEMERAL_LAST  65535u
 
 typedef struct socket_file {
     uint32_t magic;
     openos_socket_info_t info;
 } socket_file_t;
 
+typedef struct socket_bind_slot {
+    uint8_t used;
+    uint32_t socket_id;
+    int domain;
+    int type;
+    uint32_t ip;
+    uint16_t port;
+} socket_bind_slot_t;
+
 static uint32_t next_socket_id = 1;
+static uint16_t next_ephemeral_port = SOCKET_EPHEMERAL_FIRST;
+static socket_bind_slot_t bind_slots[SOCKET_MAX_BINDS];
+
+static uint16_t socket_bswap16(uint16_t v) {
+    return (uint16_t)((v >> 8) | (v << 8));
+}
 
 static int socket_type_base(int type) {
     return type & 0xF;
@@ -53,9 +71,83 @@ static socket_file_t *socket_from_file(file_t *f) {
     return sock;
 }
 
+static int socket_port_conflicts(int domain, int type, uint32_t ip, uint16_t port) {
+    int base_type = socket_type_base(type);
+    for (uint32_t i = 0; i < SOCKET_MAX_BINDS; i++) {
+        socket_bind_slot_t *slot = &bind_slots[i];
+        if (!slot->used) {
+            continue;
+        }
+        if (slot->domain != domain || socket_type_base(slot->type) != base_type) {
+            continue;
+        }
+        if (slot->port != port) {
+            continue;
+        }
+        if (slot->ip == OPENOS_INADDR_ANY || ip == OPENOS_INADDR_ANY || slot->ip == ip) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int socket_reserve_port(socket_file_t *sock, uint32_t ip, uint16_t port) {
+    socket_bind_slot_t *free_slot = NULL;
+    for (uint32_t i = 0; i < SOCKET_MAX_BINDS; i++) {
+        if (bind_slots[i].used && bind_slots[i].socket_id == sock->info.id) {
+            return -1;
+        }
+        if (!bind_slots[i].used && !free_slot) {
+            free_slot = &bind_slots[i];
+        }
+    }
+    if (!free_slot) {
+        return -1;
+    }
+    if (port == 0) {
+        uint32_t attempts = SOCKET_EPHEMERAL_LAST - SOCKET_EPHEMERAL_FIRST + 1u;
+        while (attempts--) {
+            uint16_t candidate = next_ephemeral_port++;
+            if (next_ephemeral_port == 0 || next_ephemeral_port > SOCKET_EPHEMERAL_LAST) {
+                next_ephemeral_port = SOCKET_EPHEMERAL_FIRST;
+            }
+            if (!socket_port_conflicts(sock->info.domain, sock->info.type, ip, candidate)) {
+                port = candidate;
+                break;
+            }
+        }
+        if (port == 0) {
+            return -1;
+        }
+    } else if (socket_port_conflicts(sock->info.domain, sock->info.type, ip, port)) {
+        return -1;
+    }
+
+    free_slot->used = 1;
+    free_slot->socket_id = sock->info.id;
+    free_slot->domain = sock->info.domain;
+    free_slot->type = sock->info.type;
+    free_slot->ip = ip;
+    free_slot->port = port;
+    sock->info.local_ip = ip;
+    sock->info.local_port = port;
+    sock->info.state = OPENOS_SOCKET_STATE_BOUND;
+    return 0;
+}
+
+static void socket_release_bind(uint32_t socket_id) {
+    for (uint32_t i = 0; i < SOCKET_MAX_BINDS; i++) {
+        if (bind_slots[i].used && bind_slots[i].socket_id == socket_id) {
+            memset(&bind_slots[i], 0, sizeof(bind_slots[i]));
+            return;
+        }
+    }
+}
+
 static int socket_close(file_t *f) {
     socket_file_t *sock = socket_from_file(f);
     if (sock) {
+        socket_release_bind(sock->info.id);
         sock->info.state = OPENOS_SOCKET_STATE_CLOSED;
         sock->magic = 0;
     }
@@ -86,7 +178,7 @@ static int socket_seek(file_t *f, int offset, int whence) {
 static int socket_poll(file_t *f, uint32_t events) {
     socket_file_t *sock = socket_from_file(f);
     uint32_t ready = 0;
-    if (!sock || sock->info.state != OPENOS_SOCKET_STATE_CREATED) {
+    if (!sock || sock->info.state == OPENOS_SOCKET_STATE_CLOSED) {
         return VFS_POLLERR | VFS_POLLHUP;
     }
     if (events & VFS_POLLOUT) {
@@ -138,6 +230,8 @@ int socket_create_fd(int domain, int type, int protocol) {
     sock->info.type = type;
     sock->info.protocol = protocol;
     sock->info.state = OPENOS_SOCKET_STATE_CREATED;
+    sock->info.local_ip = OPENOS_INADDR_ANY;
+    sock->info.local_port = 0;
 
     file->flags = O_RDWR;
     file->offset = 0;
@@ -150,6 +244,38 @@ int socket_create_fd(int domain, int type, int protocol) {
         return -1;
     }
     return fd;
+}
+
+int socket_bind_fd(int fd, const openos_sockaddr_t *addr, uint32_t addrlen) {
+    file_t *file;
+    socket_file_t *sock;
+    const openos_sockaddr_in_t *in;
+    uint16_t port;
+    uint32_t ip;
+
+    if (!addr || addrlen < sizeof(openos_sockaddr_in_t)) {
+        return -1;
+    }
+
+    file = vfs_get_file(fd);
+    sock = socket_from_file(file);
+    if (!sock || sock->info.state != OPENOS_SOCKET_STATE_CREATED) {
+        return -1;
+    }
+    if (sock->info.domain != OPENOS_AF_INET) {
+        return -1;
+    }
+    if (addr->sa_family != OPENOS_AF_INET) {
+        return -1;
+    }
+    if (socket_type_base(sock->info.type) == OPENOS_SOCK_RAW) {
+        return -1;
+    }
+
+    in = (const openos_sockaddr_in_t *)addr;
+    port = socket_bswap16(in->sin_port);
+    ip = in->sin_addr;
+    return socket_reserve_port(sock, ip, port);
 }
 
 const openos_socket_info_t *socket_get_info(int fd) {
