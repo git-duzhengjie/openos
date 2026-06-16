@@ -240,7 +240,7 @@
 - [√] shared memory（已实现 SYS_SHM_CREATE/MAP/DESTROY、页级共享段和用户态 wrapper）
 - [√] eventfd（已实现 SYS_EVENTFD_CREATE/WRITE/READ/DESTROY、计数语义和用户态 wrapper） 类机制
 - [√] socketpair（已实现 SYS_SOCKETPAIR、成对 fd 创建、内存队列收发和用户态 wrapper）
-- [x] 用户态服务进程通信模型
+- [√] 用户态服务进程通信模型（已基于 socketpair 提供 service channel、同步 call/reply helper 和 servicetest）
 - [x] 微内核式服务消息机制
 
 ---
