@@ -14,6 +14,8 @@
 #include "string.h"
 #include "heap.h"
 
+static void gui_desktop_run_action(uint32_t action);
+
 static gui_system_t g_gui;
 static gui_accel_info_t g_gui_accel;
 
@@ -30,6 +32,7 @@ static gui_accel_info_t g_gui_accel;
 #define GUI_DESKTOP_ACTION_TERMINAL 1u
 #define GUI_DESKTOP_ACTION_ABOUT    2u
 #define GUI_DESKTOP_ACTION_MENU     3u
+#define GUI_DESKTOP_ACTION_DEMO     4u
 static volatile uint32_t g_terminal_out_head = 0;
 static volatile uint32_t g_terminal_out_tail = 0;
 static char g_terminal_out_queue[GUI_TERMINAL_OUTPUT_QUEUE_SIZE];
@@ -59,6 +62,21 @@ int gui_get_desktop_info(gui_desktop_info_t *info) {
     return 0;
 }
 
+int gui_get_launcher_info(gui_launcher_info_t *info) {
+    if (!info) return -1;
+    info->enabled = g_gui.launcher_enabled;
+    info->app_count = g_gui.launcher_app_count;
+    info->menu_rect = g_gui.desktop_start_menu_rect;
+    return 0;
+}
+
+int gui_launcher_launch(uint32_t index) {
+    if (!g_gui.launcher_enabled || index >= g_gui.launcher_app_count) return -1;
+    if (!g_gui.launcher_entries[index].used) return -1;
+    gui_desktop_run_action(g_gui.launcher_entries[index].action);
+    return 0;
+}
+
 static int gui_rect_contains(const gui_rect_t *r, int x, int y);
 static int gui_rect_intersect(const gui_rect_t *a, const gui_rect_t *b, gui_rect_t *out);
 static gui_window_t *gui_top_window(void);
@@ -72,6 +90,7 @@ static void gui_terminal_drain_output_queue(void);
 static void gui_desktop_init(void);
 static void gui_desktop_draw(void);
 static int gui_desktop_handle_click(int x, int y);
+static void gui_launcher_init(void);
 static int gui_terminal_point_to_cell(int x, int y, uint32_t *col, uint32_t *row);
 static void gui_terminal_update_selection(uint32_t col, uint32_t row);
 static int gui_terminal_cell_selected(uint32_t col, uint32_t row);
@@ -1685,6 +1704,31 @@ int gui_start(uint32_t width, uint32_t height) {
     return 0;
 }
 
+static void gui_launcher_add(uint32_t index, const char *name, const char *title, uint32_t action, uint32_t color) {
+    gui_launcher_entry_t *entry;
+    uint32_t i;
+
+    if (index >= GUI_LAUNCHER_MAX_APPS || !name || !title) return;
+    entry = &g_gui.launcher_entries[index];
+    memset(entry, 0, sizeof(*entry));
+    entry->used = 1;
+    entry->action = action;
+    entry->color = color;
+    for (i = 0; i < sizeof(entry->name) - 1 && name[i]; i++) entry->name[i] = name[i];
+    entry->name[i] = 0;
+    for (i = 0; i < sizeof(entry->title) - 1 && title[i]; i++) entry->title[i] = title[i];
+    entry->title[i] = 0;
+}
+
+static void gui_launcher_init(void) {
+    memset(g_gui.launcher_entries, 0, sizeof(g_gui.launcher_entries));
+    g_gui.launcher_enabled = 1;
+    g_gui.launcher_app_count = 3;
+    gui_launcher_add(0, "terminal", "Terminal", GUI_DESKTOP_ACTION_TERMINAL, gui_rgb(68, 144, 245));
+    gui_launcher_add(1, "demo", "Window Demo", GUI_DESKTOP_ACTION_DEMO, gui_rgb(170, 112, 235));
+    gui_launcher_add(2, "about", "About OpenOS", GUI_DESKTOP_ACTION_ABOUT, gui_rgb(88, 196, 128));
+}
+
 static void gui_desktop_add_icon(uint32_t index, int x, int y, const char *label, uint32_t color, uint32_t action) {
     gui_desktop_icon_t *icon;
     uint32_t i;
@@ -1708,7 +1752,8 @@ static void gui_desktop_init(void) {
 
     g_gui.desktop_enabled = 1;
     g_gui.desktop_start_menu_open = 0;
-    g_gui.desktop_icon_count = 2;
+    g_gui.desktop_icon_count = 3;
+    gui_launcher_init();
 
     top = g_gui.height > GUI_TASKBAR_HEIGHT ? g_gui.height - GUI_TASKBAR_HEIGHT : 0;
     g_gui.desktop_taskbar_rect.x = 0;
@@ -1726,7 +1771,8 @@ static void gui_desktop_init(void) {
 
     memset(g_gui.desktop_icons, 0, sizeof(g_gui.desktop_icons));
     gui_desktop_add_icon(0, 28, 42, "Terminal", gui_rgb(68, 144, 245), GUI_DESKTOP_ACTION_TERMINAL);
-    gui_desktop_add_icon(1, 28, 128, "About", gui_rgb(88, 196, 128), GUI_DESKTOP_ACTION_ABOUT);
+    gui_desktop_add_icon(1, 28, 128, "Demo", gui_rgb(170, 112, 235), GUI_DESKTOP_ACTION_DEMO);
+    gui_desktop_add_icon(2, 28, 214, "About", gui_rgb(88, 196, 128), GUI_DESKTOP_ACTION_ABOUT);
 }
 
 static void gui_desktop_draw_icon(gui_desktop_icon_t *icon) {
@@ -1751,6 +1797,7 @@ static void gui_desktop_draw_icon(gui_desktop_icon_t *icon) {
 
 static void gui_desktop_draw_start_menu(void) {
     gui_rect_t *r = &g_gui.desktop_start_menu_rect;
+    uint32_t i;
     if (!g_gui.desktop_start_menu_open) return;
 
     gui_raw_fill_rect(r->x, r->y, r->w, r->h, gui_rgb(28, 36, 54));
@@ -1758,11 +1805,16 @@ static void gui_desktop_draw_start_menu(void) {
     gui_raw_line(r->x, r->y, r->x, r->y + r->h - 1, gui_rgb(112, 146, 198));
     gui_raw_line(r->x + r->w - 1, r->y, r->x + r->w - 1, r->y + r->h - 1, gui_rgb(10, 13, 20));
     gui_raw_line(r->x, r->y + r->h - 1, r->x + r->w - 1, r->y + r->h - 1, gui_rgb(10, 13, 20));
-    gui_draw_text(r->x + 12, r->y + 12, "OpenOS", gui_rgb(245, 250, 255));
-    gui_raw_fill_rect(r->x + 10, r->y + 36, r->w - 20, 24, gui_rgb(46, 64, 92));
-    gui_draw_text(r->x + 18, r->y + 42, "Open Terminal", gui_rgb(232, 240, 255));
-    gui_raw_fill_rect(r->x + 10, r->y + 68, r->w - 20, 24, gui_rgb(46, 64, 92));
-    gui_draw_text(r->x + 18, r->y + 74, "About OpenOS", gui_rgb(232, 240, 255));
+    gui_draw_text(r->x + 12, r->y + 12, "OpenOS Launcher", gui_rgb(245, 250, 255));
+
+    for (i = 0; i < g_gui.launcher_app_count && i < GUI_LAUNCHER_MAX_APPS; i++) {
+        gui_launcher_entry_t *entry = &g_gui.launcher_entries[i];
+        int iy = r->y + 36 + (int)i * GUI_LAUNCHER_ITEM_H;
+        if (!entry->used) continue;
+        gui_raw_fill_rect(r->x + 10, iy, r->w - 20, GUI_LAUNCHER_ITEM_H - 2, gui_rgb(46, 64, 92));
+        gui_raw_fill_rect(r->x + 14, iy + 5, 12, 12, entry->color);
+        gui_draw_text(r->x + 34, iy + 5, entry->title, gui_rgb(232, 240, 255));
+    }
 }
 
 static void gui_desktop_draw(void) {
@@ -1783,6 +1835,11 @@ static void gui_desktop_run_action(uint32_t action) {
         return;
     }
     if (action == GUI_DESKTOP_ACTION_ABOUT) {
+        serial_write("[GUI] OpenOS launcher about\n");
+        gui_demo();
+        return;
+    }
+    if (action == GUI_DESKTOP_ACTION_DEMO) {
         gui_demo();
         return;
     }
@@ -1802,22 +1859,17 @@ static int gui_desktop_handle_click(int x, int y) {
         return 1;
     }
     if (g_gui.desktop_start_menu_open && gui_rect_contains(&g_gui.desktop_start_menu_rect, x, y)) {
-        item.x = g_gui.desktop_start_menu_rect.x + 10;
-        item.y = g_gui.desktop_start_menu_rect.y + 36;
-        item.w = g_gui.desktop_start_menu_rect.w - 20;
-        item.h = 24;
-        if (gui_rect_contains(&item, x, y)) {
-            g_gui.desktop_start_menu_open = 0;
-            gui_desktop_run_action(GUI_DESKTOP_ACTION_TERMINAL);
-            gui_invalidate_all();
-            return 1;
-        }
-        item.y = g_gui.desktop_start_menu_rect.y + 68;
-        if (gui_rect_contains(&item, x, y)) {
-            g_gui.desktop_start_menu_open = 0;
-            gui_desktop_run_action(GUI_DESKTOP_ACTION_ABOUT);
-            gui_invalidate_all();
-            return 1;
+        for (i = 0; i < g_gui.launcher_app_count && i < GUI_LAUNCHER_MAX_APPS; i++) {
+            item.x = g_gui.desktop_start_menu_rect.x + 10;
+            item.y = g_gui.desktop_start_menu_rect.y + 36 + (int)i * GUI_LAUNCHER_ITEM_H;
+            item.w = g_gui.desktop_start_menu_rect.w - 20;
+            item.h = GUI_LAUNCHER_ITEM_H - 2;
+            if (gui_rect_contains(&item, x, y)) {
+                g_gui.desktop_start_menu_open = 0;
+                gui_launcher_launch(i);
+                gui_invalidate_all();
+                return 1;
+            }
         }
         return 1;
     }

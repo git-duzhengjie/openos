@@ -26,8 +26,10 @@
 #define GUI_DESKTOP_MAX_ICONS    8u
 #define GUI_DESKTOP_ICON_W       72
 #define GUI_DESKTOP_ICON_H       64
-#define GUI_DESKTOP_MENU_W       168
-#define GUI_DESKTOP_MENU_H       112
+#define GUI_DESKTOP_MENU_W       184
+#define GUI_DESKTOP_MENU_H       144
+#define GUI_LAUNCHER_MAX_APPS    8u
+#define GUI_LAUNCHER_ITEM_H      24
 
 #define GUI_WINDOW_FLAG_NONE      0x00000000u
 #define GUI_WINDOW_FLAG_CLOSABLE  0x00000001u
@@ -217,6 +219,20 @@ typedef struct gui_desktop_info {
     gui_rect_t start_menu_rect;
 } gui_desktop_info_t;
 
+typedef struct gui_launcher_entry {
+    int used;
+    char name[GUI_APP_NAME_LEN];
+    char title[64];
+    uint32_t action;
+    uint32_t color;
+} gui_launcher_entry_t;
+
+typedef struct gui_launcher_info {
+    int enabled;
+    uint32_t app_count;
+    gui_rect_t menu_rect;
+} gui_launcher_info_t;
+
 typedef struct gui_system {
     int initialized;
     uint32_t width;
@@ -269,6 +285,9 @@ typedef struct gui_system {
     gui_rect_t desktop_start_menu_rect;
     gui_desktop_icon_t desktop_icons[GUI_DESKTOP_MAX_ICONS];
     uint32_t desktop_icon_count;
+    int launcher_enabled;
+    gui_launcher_entry_t launcher_entries[GUI_LAUNCHER_MAX_APPS];
+    uint32_t launcher_app_count;
 
     gui_terminal_t terminal;
 } gui_system_t;
@@ -286,6 +305,8 @@ const gui_system_t *gui_get_system(void);
 void gui_get_compositor_info(gui_compositor_info_t *info);
 void gui_get_accel_info(gui_accel_info_t *info);
 int gui_get_desktop_info(gui_desktop_info_t *info);
+int gui_get_launcher_info(gui_launcher_info_t *info);
+int gui_launcher_launch(uint32_t index);
 int gui_accel_is_enabled(void);
 int gui_compositor_is_active(void);
 void gui_set_compositor_enabled(int enabled);
