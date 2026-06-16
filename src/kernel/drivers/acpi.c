@@ -35,6 +35,13 @@ static int acpi_memcmp(const char *a, const char *b, uint32_t n) {
     return 0;
 }
 
+static uint32_t acpi_phys32_from64(uint64_t value) {
+    if ((value >> 32) != 0) {
+        return 0;
+    }
+    return (uint32_t)value;
+}
+
 static uint8_t acpi_checksum(const uint8_t *ptr, uint32_t len) {
     uint8_t sum = 0;
     uint32_t i;
@@ -85,6 +92,55 @@ static void acpi_copy_oem_id(char out[7], const char in[6]) {
 
 const acpi_rsdp_info_t *acpi_get_rsdp_info(void) {
     return &g_acpi_info;
+}
+
+static const acpi_table_header_t *acpi_validate_table(uint32_t addr) {
+    const acpi_table_header_t *hdr;
+    if (addr == 0) return 0;
+    hdr = (const acpi_table_header_t *)addr;
+    if (hdr->length < sizeof(acpi_table_header_t)) return 0;
+    if (acpi_checksum((const uint8_t *)hdr, hdr->length) != 0) return 0;
+    return hdr;
+}
+
+static const acpi_table_header_t *acpi_find_in_rsdt(const acpi_table_header_t *rsdt,
+                                                    const char signature[4]) {
+    uint32_t count;
+    uint32_t i;
+    const uint32_t *entries;
+    if (!rsdt) return 0;
+    count = (rsdt->length - sizeof(acpi_table_header_t)) / sizeof(uint32_t);
+    entries = (const uint32_t *)((const uint8_t *)rsdt + sizeof(acpi_table_header_t));
+    for (i = 0; i < count; i++) {
+        const acpi_table_header_t *hdr = acpi_validate_table(entries[i]);
+        if (hdr && acpi_memcmp(hdr->signature, signature, 4) == 0) return hdr;
+    }
+    return 0;
+}
+
+static const acpi_table_header_t *acpi_find_in_xsdt(const acpi_table_header_t *xsdt,
+                                                    const char signature[4]) {
+    uint32_t count;
+    uint32_t i;
+    const uint64_t *entries;
+    if (!xsdt) return 0;
+    count = (xsdt->length - sizeof(acpi_table_header_t)) / sizeof(uint64_t);
+    entries = (const uint64_t *)((const uint8_t *)xsdt + sizeof(acpi_table_header_t));
+    for (i = 0; i < count; i++) {
+        const acpi_table_header_t *hdr = acpi_validate_table(acpi_phys32_from64(entries[i]));
+        if (hdr && acpi_memcmp(hdr->signature, signature, 4) == 0) return hdr;
+    }
+    return 0;
+}
+
+const acpi_table_header_t *acpi_find_table(const char signature[4]) {
+    const acpi_table_header_t *table = 0;
+    if (!g_acpi_info.found) return 0;
+    if (g_acpi_info.xsdt_addr != 0) {
+        table = acpi_find_in_xsdt(acpi_validate_table(acpi_phys32_from64(g_acpi_info.xsdt_addr)), signature);
+        if (table) return table;
+    }
+    return acpi_find_in_rsdt(acpi_validate_table(g_acpi_info.rsdt_addr), signature);
 }
 
 void acpi_init(void) {

@@ -25,6 +25,7 @@
 #include "blockdev.h"
 #include "pci.h"
 #include "acpi.h"
+#include "apic.h"
 #include "vga.h"
 #include "framebuffer.h"
 #include "gui.h"
@@ -541,6 +542,10 @@ void kernel_main(void) {
     /* 扫描 ACPI 表 */
     acpi_init();
     serial_write("[OK] ACPI\n");
+
+    /* 探测 APIC / IOAPIC */
+    apic_init();
+    serial_write("[OK] APIC\n");
 
     /* 扫描 PCI 总线 */
     pci_scan_all();
