@@ -81,6 +81,9 @@ typedef struct fat32_node {
     fat32_fs_t *fs;
     uint32_t first_cluster;
     uint32_t size;
+    uint32_t dirent_lba;
+    uint32_t dirent_offset;
+    uint8_t attr;
     uint8_t is_dir;
 } fat32_node_t;
 
@@ -193,17 +196,77 @@ static int fat32_file_read(file_t *f, void *buf, uint32_t count) {
     return (int)done;
 }
 
+static int fat32_update_dirent_size(fat32_node_t *node, uint32_t size) {
+    uint8_t sector[FAT32_SECTOR_SIZE];
+    fat32_dirent_t *de;
+
+    if (!node || !node->fs || node->is_dir) return -1;
+    if (node->dirent_offset + sizeof(fat32_dirent_t) > FAT32_SECTOR_SIZE) return -1;
+    if (fat32_read_sector(node->fs, node->dirent_lba, sector) < 0) return -1;
+    de = (fat32_dirent_t *)(sector + node->dirent_offset);
+    wr32(&de->file_size, size);
+    if (fat32_write_sector(node->fs->dev, node->dirent_lba, sector) < 0) return -1;
+    return 0;
+}
+
 static int fat32_file_write(file_t *f, const void *buf, uint32_t count) {
-    (void)f;
-    (void)buf;
-    (void)count;
-    return -1;
+    fat32_node_t *node;
+    const uint8_t *in = (const uint8_t *)buf;
+    uint8_t sector[FAT32_SECTOR_SIZE];
+    uint32_t done = 0;
+    uint32_t end_off;
+
+    if (!f || !buf || !f->inode || !f->inode->fs_data) return -1;
+    node = (fat32_node_t *)f->inode->fs_data;
+    if (node->is_dir || !node->fs || !node->fs->dev) return -1;
+    if (node->attr & FAT32_ATTR_READ_ONLY) return -1;
+    if (count == 0) return 0;
+
+    end_off = f->offset + count;
+    if (end_off < f->offset) return -1;
+
+    /* 当前 FAT32 写支持安全的原地覆盖：不分配新 cluster，禁止扩容。 */
+    if (end_off > node->size) return -1;
+
+    while (done < count) {
+        uint32_t abs_off = f->offset + done;
+        uint32_t cluster_index = abs_off / node->fs->bytes_per_cluster;
+        uint32_t cluster_off = abs_off % node->fs->bytes_per_cluster;
+        uint32_t sector_in_cluster = cluster_off / FAT32_SECTOR_SIZE;
+        uint32_t sector_off = cluster_off % FAT32_SECTOR_SIZE;
+        uint32_t cluster = fat32_nth_cluster(node->fs, node->first_cluster, cluster_index);
+        uint32_t lba;
+        uint32_t chunk;
+
+        if (cluster < 2) break;
+        lba = fat32_cluster_lba(node->fs, cluster) + sector_in_cluster;
+        if (fat32_read_sector(node->fs, lba, sector) < 0) break;
+        chunk = FAT32_SECTOR_SIZE - sector_off;
+        if (chunk > count - done) chunk = count - done;
+        memcpy(sector + sector_off, in + done, chunk);
+        if (fat32_write_sector(node->fs->dev, lba, sector) < 0) break;
+        done += chunk;
+    }
+
+    f->offset += done;
+    if (f->inode->size != node->size) f->inode->size = node->size;
+    return (int)done;
 }
 
 static int fat32_truncate(inode_t *inode, uint32_t size) {
-    (void)inode;
-    (void)size;
-    return -1;
+    fat32_node_t *node;
+
+    if (!inode || !inode->fs_data) return -1;
+    node = (fat32_node_t *)inode->fs_data;
+    if (node->is_dir || !node->fs || !node->fs->dev) return -1;
+    if (node->attr & FAT32_ATTR_READ_ONLY) return -1;
+
+    /* 支持安全缩短文件；增长需要 FAT cluster 分配器，暂不隐式扩容。 */
+    if (size > node->size) return -1;
+    if (fat32_update_dirent_size(node, size) < 0) return -1;
+    node->size = size;
+    inode->size = size;
+    return 0;
 }
 
 static file_ops_t fat32_file_ops = {
@@ -245,13 +308,14 @@ static uint32_t fat32_entry_cluster(const fat32_dirent_t *de) {
     return ((uint32_t)rd16(&de->first_cluster_hi) << 16) | rd16(&de->first_cluster_lo);
 }
 
-static fat32_node_t *fat32_alloc_node(fat32_fs_t *fs, uint32_t first_cluster, uint32_t size, uint8_t is_dir) {
+static fat32_node_t *fat32_alloc_node(fat32_fs_t *fs, uint32_t first_cluster, uint32_t size, uint8_t attr, uint8_t is_dir) {
     fat32_node_t *node = (fat32_node_t *)kmalloc(sizeof(fat32_node_t));
     if (!node) return 0;
     memset(node, 0, sizeof(*node));
     node->fs = fs;
     node->first_cluster = first_cluster;
     node->size = size;
+    node->attr = attr;
     node->is_dir = is_dir;
     return node;
 }
@@ -288,12 +352,14 @@ static int fat32_load_dir(fat32_fs_t *fs, dentry_t *parent, uint32_t first_clust
                 child_cluster = fat32_entry_cluster(de);
                 if (de->attr & FAT32_ATTR_DIRECTORY) {
                     mode = FS_DIR | S_IRUSR | S_IXUSR | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH;
-                    node = fat32_alloc_node(fs, child_cluster, 0, 1);
+                    node = fat32_alloc_node(fs, child_cluster, 0, de->attr, 1);
                 } else {
-                    mode = FS_FILE | S_IRUSR | S_IRGRP | S_IROTH;
-                    node = fat32_alloc_node(fs, child_cluster, rd32(&de->file_size), 0);
+                    mode = FS_FILE | S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH;
+                    node = fat32_alloc_node(fs, child_cluster, rd32(&de->file_size), de->attr, 0);
                 }
                 if (!node) return -1;
+                node->dirent_lba = lba;
+                node->dirent_offset = off;
                 child = vfs_create_node_under(parent, name, mode, node->is_dir ? 0 : &fat32_file_ops, node, node->size);
                 if (!child) {
                     kfree(node);
@@ -458,7 +524,7 @@ int fat32_mount(const char *path, const char *dev_name) {
         return -1;
     }
     fs->mount_root = mp->mount;
-    root_node = fat32_alloc_node(fs, fs->root_cluster, 0, 1);
+    root_node = fat32_alloc_node(fs, fs->root_cluster, 0, FAT32_ATTR_DIRECTORY, 1);
     if (!root_node) {
         blockdev_close(dev);
         fat32_release_mount(fs);
