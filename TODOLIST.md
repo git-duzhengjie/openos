@@ -225,7 +225,7 @@
 - [√] `send`（已支持 socketpair / TCP / UDP connected socket 发送）
 - [√] `recv`（已支持 socketpair / TCP / UDP 接收队列）
 - [√] TCP 完整状态机（已覆盖 SYN/ESTABLISHED/FIN/CLOSE_WAIT/LAST_ACK/TIME_WAIT，含 TIME_WAIT 回收）
-- [x] TCP 重传
+- [√] TCP 重传（已支持未确认段缓存、定时重传、最大重试关闭和 3 次重复 ACK 快速重传）
 - [x] TCP 拥塞控制
 - [x] TCP 窗口管理
 - [x] UDP 用户态接口

@@ -148,6 +148,8 @@ struct tcp_connection {
     uint8_t unacked_flags;
     uint32_t unacked_sent_ms;
     uint8_t unacked_retries;
+    uint32_t last_ack_seen;
+    uint8_t dup_ack_count;
     uint32_t cwnd;
     uint32_t ssthresh;
     uint32_t cwnd_acked;
@@ -620,6 +622,7 @@ static void tcp_clear_unacked(struct tcp_connection *c) {
     c->unacked_used = 0;
     c->unacked_len = 0;
     c->unacked_retries = 0;
+    c->dup_ack_count = 0;
 }
 
 static void tcp_set_state(struct tcp_connection *c, uint8_t state) {
@@ -710,7 +713,24 @@ static void tcp_record_unacked(struct tcp_connection *c, uint32_t seq, uint32_t 
     c->unacked_len = len;
     c->unacked_sent_ms = tcp_clock_ms;
     c->unacked_retries = 0;
+    c->last_ack_seen = c->unacked_seq;
+    c->dup_ack_count = 0;
     if (len && data) memcpy(c->unacked_data, data, len);
+}
+
+static int tcp_retransmit_unacked(struct tcp_connection *c) {
+    if (!c || !c->unacked_used) return -1;
+    tcp_congestion_on_timeout(c);
+    tcp_refresh_receive_window(c);
+    if (tcp_send_segment_window(c->remote_ip, c->local_port, c->remote_port,
+                                c->unacked_seq, c->unacked_ack, c->unacked_flags,
+                                c->rcv_wnd,
+                                c->unacked_len ? c->unacked_data : 0, c->unacked_len) != 0) {
+        return -1;
+    }
+    c->unacked_sent_ms = tcp_clock_ms;
+    if (c->unacked_retries < TCP_RETX_MAX_RETRIES) c->unacked_retries++;
+    return 0;
 }
 
 static int tcp_ack_unacked(struct tcp_connection *c, uint32_t ack) {
@@ -719,8 +739,18 @@ static int tcp_ack_unacked(struct tcp_connection *c, uint32_t ack) {
     consume = tcp_state_consume(c->unacked_flags, c->unacked_len);
     if (tcp_seq_acked(ack, c->unacked_seq, consume)) {
         tcp_congestion_on_ack(c, consume);
+        c->last_ack_seen = ack;
         tcp_clear_unacked(c);
         return 1;
+    }
+    if (ack == c->last_ack_seen) {
+        if (c->dup_ack_count < 255) c->dup_ack_count++;
+        if (c->dup_ack_count == 3) {
+            tcp_retransmit_unacked(c);
+        }
+    } else {
+        c->last_ack_seen = ack;
+        c->dup_ack_count = 0;
     }
     return 0;
 }
@@ -856,15 +886,7 @@ void net_tick(uint32_t elapsed_ms) {
             tcp_release_conn(c);
             continue;
         }
-        tcp_congestion_on_timeout(c);
-        tcp_refresh_receive_window(c);
-        if (tcp_send_segment_window(c->remote_ip, c->local_port, c->remote_port,
-                                    c->unacked_seq, c->unacked_ack, c->unacked_flags,
-                                    c->rcv_wnd,
-                                    c->unacked_len ? c->unacked_data : 0, c->unacked_len) == 0) {
-            c->unacked_sent_ms = tcp_clock_ms;
-            c->unacked_retries++;
-        }
+        tcp_retransmit_unacked(c);
     }
 }
 
