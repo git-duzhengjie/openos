@@ -313,6 +313,15 @@ if [ -f $USR/fstest.c ]; then
     echo "  Embedded: fstest.elf"
 fi
 
+if [ -f $USR/sh.c ]; then
+    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+        -fno-stack-protector -fno-builtin \
+        -I $SRC/include \
+        -c $USR/sh.c -o $BUILD/sh.o
+    ld -m elf_i386 -T $USR/user.ld -o $BUILD/sh.elf $BUILD/sh.o
+    echo "  Built: sh.elf"
+fi
+
 if [ -f $USR/pwd.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \
