@@ -320,6 +320,20 @@
 #define OPENOS_HAS_NETSTAT 0
 #endif
 
+#if __has_include("embed_id.h")
+#include "embed_id.h"  /* id user command */
+#define OPENOS_HAS_ID 1
+#else
+#define OPENOS_HAS_ID 0
+#endif
+
+#if __has_include("embed_groups.h")
+#include "embed_groups.h"  /* groups user command */
+#define OPENOS_HAS_GROUPS 1
+#else
+#define OPENOS_HAS_GROUPS 0
+#endif
+
 
 /* 外部符号 */
 extern void gdt_init(void);
@@ -1157,6 +1171,28 @@ void kernel_main(void) {
         serial_write("[OK] Installed /bin/netstat user ELF\n");
     } else {
         serial_write("[WARN] Failed to install /bin/netstat\n");
+    }
+#endif
+
+#if OPENOS_HAS_ID
+    fd = vfs_open("/bin/id", O_CREAT | O_RDWR, 0755);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)id_elf, id_elf_size);
+        vfs_close(fd);
+        serial_write("[OK] Installed /bin/id user ELF\n");
+    } else {
+        serial_write("[WARN] Failed to install /bin/id\n");
+    }
+#endif
+
+#if OPENOS_HAS_GROUPS
+    fd = vfs_open("/bin/groups", O_CREAT | O_RDWR, 0755);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)groups_elf, groups_elf_size);
+        vfs_close(fd);
+        serial_write("[OK] Installed /bin/groups user ELF\n");
+    } else {
+        serial_write("[WARN] Failed to install /bin/groups\n");
     }
 #endif
 

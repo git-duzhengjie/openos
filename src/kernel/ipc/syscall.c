@@ -29,6 +29,80 @@
 #define STDOUT_FILENO 1
 #define STDERR_FILENO 2
 
+#define OPENOS_USER_NAME_MAX 32u
+#define OPENOS_USER_HOME_MAX 64u
+#define OPENOS_USER_SHELL_MAX 64u
+
+typedef struct kernel_user_record {
+    uint32_t uid;
+    uint32_t gid;
+    const char *name;
+    const char *home;
+    const char *shell;
+} kernel_user_record_t;
+
+typedef struct kernel_group_record {
+    uint32_t gid;
+    const char *name;
+} kernel_group_record_t;
+
+static const kernel_user_record_t g_user_table[] = {
+    {0u, 0u, "root", "/root", "/bin/sh"},
+    {1000u, 1000u, "user", "/home/user", "/bin/sh"},
+};
+
+static const kernel_group_record_t g_group_table[] = {
+    {0u, "root"},
+    {1000u, "users"},
+};
+
+static void syscall_copy_fixed_string(char *dst, uint32_t dst_len, const char *src)
+{
+    uint32_t i;
+
+    if (!dst || dst_len == 0) return;
+    for (i = 0; i + 1 < dst_len && src && src[i]; i++)
+        dst[i] = src[i];
+    dst[i] = '\0';
+}
+
+static int syscall_getpwuid(uint32_t uid, openos_user_t *user)
+{
+    openos_user_t out;
+    uint32_t i;
+
+    if (!user) return -1;
+    for (i = 0; i < sizeof(g_user_table) / sizeof(g_user_table[0]); i++) {
+        if (g_user_table[i].uid != uid)
+            continue;
+        memset(&out, 0, sizeof(out));
+        out.uid = g_user_table[i].uid;
+        out.gid = g_user_table[i].gid;
+        syscall_copy_fixed_string(out.name, sizeof(out.name), g_user_table[i].name);
+        syscall_copy_fixed_string(out.home, sizeof(out.home), g_user_table[i].home);
+        syscall_copy_fixed_string(out.shell, sizeof(out.shell), g_user_table[i].shell);
+        return copy_to_user(user, &out, sizeof(out));
+    }
+    return -1;
+}
+
+static int syscall_getgrgid(uint32_t gid, openos_group_t *group)
+{
+    openos_group_t out;
+    uint32_t i;
+
+    if (!group) return -1;
+    for (i = 0; i < sizeof(g_group_table) / sizeof(g_group_table[0]); i++) {
+        if (g_group_table[i].gid != gid)
+            continue;
+        memset(&out, 0, sizeof(out));
+        out.gid = g_group_table[i].gid;
+        syscall_copy_fixed_string(out.name, sizeof(out.name), g_group_table[i].name);
+        return copy_to_user(group, &out, sizeof(out));
+    }
+    return -1;
+}
+
 #define SYSCALL_MAX_MUTEXES 64u
 #define SYSCALL_MAX_SEMAPHORES 64u
 #define SYSCALL_MAX_CONDS 64u
@@ -1572,6 +1646,12 @@ uint32_t syscall_dispatch(uint32_t num,
 
     case SYS_SETGID:
         return (uint32_t)proc_set_current_gid((uint32_t)a);
+
+    case SYS_GETPWUID:
+        return (uint32_t)syscall_getpwuid((uint32_t)a, (openos_user_t *)b);
+
+    case SYS_GETGRGID:
+        return (uint32_t)syscall_getgrgid((uint32_t)a, (openos_group_t *)b);
 
     case SYS_POLL:
         return syscall_poll((openos_pollfd_t *)a, b, c);

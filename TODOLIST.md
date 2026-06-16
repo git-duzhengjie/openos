@@ -300,7 +300,7 @@
 
 ### 18. 安全模型
 
-- [ ] 用户 / 组
+- [x] 用户 / 组
 - [√] uid / gid（已加入进程 `uid/gid` 凭据、fork 继承、`SYS_GETUID` / `SYS_SETUID` / `SYS_GETGID` / `SYS_SETGID` 和用户态封装）
 - [√] 文件权限检查（VFS 已按 `S_IRWXU/G/O` 对文件、目录、符号链接和挂载操作执行权限校验）
 - [√] 进程权限（已支持当前进程凭据查询/切换，非 root 仅允许保持自身 uid/gid，root 可切换）

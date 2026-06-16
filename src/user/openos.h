@@ -102,6 +102,8 @@
 #define SYS_EVENTFD_READ   305
 #define SYS_EVENTFD_DESTROY 306
 #define SYS_SOCKETPAIR    307
+#define SYS_GETPWUID      308
+#define SYS_GETGRGID      309
 
 #define OPENOS_AF_UNSPEC  0
 #define OPENOS_AF_INET    2
@@ -139,6 +141,19 @@ typedef struct openos_netinfo {
     unsigned int icmp_echo_requests;
     unsigned int icmp_echo_replies;
 } openos_netinfo_t;
+
+typedef struct openos_user {
+    unsigned int uid;
+    unsigned int gid;
+    char name[32];
+    char home[64];
+    char shell[64];
+} openos_user_t;
+
+typedef struct openos_group {
+    unsigned int gid;
+    char name[32];
+} openos_group_t;
 
 #define OPENOS_FW_OP_GET    0u
 #define OPENOS_FW_OP_ADD    1u
@@ -2157,6 +2172,16 @@ static inline int openos_getgid(void)
 static inline int openos_setgid(openos_uint32_t gid)
 {
     return openos_syscall_result(openos_syscall1(SYS_SETGID, (int)gid));
+}
+
+static inline int openos_getpwuid(openos_uint32_t uid, openos_user_t *user)
+{
+    return openos_syscall_result(openos_syscall2(SYS_GETPWUID, (int)uid, (int)user));
+}
+
+static inline int openos_getgrgid(openos_uint32_t gid, openos_group_t *group)
+{
+    return openos_syscall_result(openos_syscall2(SYS_GETGRGID, (int)gid, (int)group));
 }
 
 static inline int openos_poll(openos_pollfd_t *fds, openos_uint32_t nfds, openos_uint32_t timeout_ms)

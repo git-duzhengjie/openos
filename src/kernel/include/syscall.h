@@ -105,6 +105,8 @@
 #define SYS_EVENTFD_READ   305
 #define SYS_EVENTFD_DESTROY 306
 #define SYS_SOCKETPAIR    307
+#define SYS_GETPWUID      308
+#define SYS_GETGRGID      309
 
 #define OPENOS_POLLIN     0x0001
 #define OPENOS_POLLOUT    0x0004
@@ -151,6 +153,19 @@ typedef struct openos_netinfo {
     uint32_t icmp_echo_requests;
     uint32_t icmp_echo_replies;
 } openos_netinfo_t;
+
+typedef struct openos_user {
+    uint32_t uid;
+    uint32_t gid;
+    char name[32];
+    char home[64];
+    char shell[64];
+} openos_user_t;
+
+typedef struct openos_group {
+    uint32_t gid;
+    char name[32];
+} openos_group_t;
 
 /* 调用号通过 EAX 传递，参数通过 EBX/ECX/EDX/ESI/EDI */
 uint32_t syscall_handler(uint32_t syscall_num,
