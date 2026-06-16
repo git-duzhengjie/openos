@@ -36,6 +36,7 @@
 #define TCP_MSS TCP_RETX_BUFFER_SIZE
 #define TCP_INITIAL_CWND TCP_MSS
 #define TCP_INITIAL_SSTHRESH (TCP_MSS * 4u)
+#define TCP_DEFAULT_WINDOW TCP_RECV_BUFFER_SIZE
 
 #define TCP_STATE_CLOSED      NET_TCP_STATE_CLOSED
 #define TCP_STATE_LISTEN      NET_TCP_STATE_LISTEN
@@ -135,6 +136,8 @@ struct tcp_connection {
     uint16_t remote_port;
     uint32_t snd_nxt;
     uint32_t rcv_nxt;
+    uint16_t snd_wnd;
+    uint16_t rcv_wnd;
     uint8_t rx[TCP_RECV_BUFFER_SIZE];
     uint16_t rx_len;
     int unacked_used;
@@ -464,9 +467,9 @@ static uint16_t tcp_checksum(uint32_t src_ip, uint32_t dst_ip, const uint8_t *tc
     return checksum16(pseudo, plen);
 }
 
-static int tcp_send_segment(uint32_t dst_ip, uint16_t src_port, uint16_t dst_port,
-                            uint32_t seq, uint32_t ack, uint8_t flags,
-                            const uint8_t *data, uint16_t data_len) {
+static int tcp_send_segment_window(uint32_t dst_ip, uint16_t src_port, uint16_t dst_port,
+                                   uint32_t seq, uint32_t ack, uint8_t flags,
+                                   uint16_t window, const uint8_t *data, uint16_t data_len) {
     uint8_t payload[NET_ETH_MTU];
     struct tcp_header *tcp;
     uint16_t tcp_len;
@@ -480,11 +483,18 @@ static int tcp_send_segment(uint32_t dst_ip, uint16_t src_port, uint16_t dst_por
     tcp->ack = htonl(ack);
     tcp->data_offset = (uint8_t)(5 << 4);
     tcp->flags = flags;
-    tcp->window = htons(4096);
+    tcp->window = htons(window);
     if (data_len) memcpy(payload + sizeof(struct tcp_header), data, data_len);
     tcp->checksum = 0;
     tcp->checksum = htons(tcp_checksum(default_dev ? default_dev->ip : 0, dst_ip, payload, tcp_len));
     return net_send_ipv4(dst_ip, IP_PROTO_TCP, payload, tcp_len);
+}
+
+static int tcp_send_segment(uint32_t dst_ip, uint16_t src_port, uint16_t dst_port,
+                            uint32_t seq, uint32_t ack, uint8_t flags,
+                            const uint8_t *data, uint16_t data_len) {
+    return tcp_send_segment_window(dst_ip, src_port, dst_port, seq, ack, flags,
+                                   TCP_DEFAULT_WINDOW, data, data_len);
 }
 
 static struct tcp_connection *tcp_find_conn(int id) {
@@ -519,6 +529,8 @@ static struct tcp_connection *tcp_alloc_conn(void) {
             tcp_connections[i].cwnd = TCP_INITIAL_CWND;
             tcp_connections[i].ssthresh = TCP_INITIAL_SSTHRESH;
             tcp_connections[i].cwnd_acked = 0;
+            tcp_connections[i].snd_wnd = TCP_DEFAULT_WINDOW;
+            tcp_connections[i].rcv_wnd = TCP_DEFAULT_WINDOW;
             return &tcp_connections[i];
         }
     }
@@ -571,17 +583,40 @@ static void tcp_congestion_on_timeout(struct tcp_connection *c) {
     c->cwnd_acked = 0;
 }
 
+static uint16_t tcp_receive_window(const struct tcp_connection *c) {
+    uint32_t room;
+    if (!c || c->rx_len >= TCP_RECV_BUFFER_SIZE) return 0;
+    room = (uint32_t)TCP_RECV_BUFFER_SIZE - c->rx_len;
+    return room > 0xffffU ? 0xffffU : (uint16_t)room;
+}
+
+static void tcp_refresh_receive_window(struct tcp_connection *c) {
+    if (!c) return;
+    c->rcv_wnd = tcp_receive_window(c);
+}
+
+static uint32_t tcp_effective_send_window(const struct tcp_connection *c) {
+    uint32_t cwnd;
+    uint32_t swnd;
+    if (!c) return 0;
+    cwnd = c->cwnd ? c->cwnd : TCP_INITIAL_CWND;
+    swnd = c->snd_wnd;
+    return cwnd < swnd ? cwnd : swnd;
+}
+
 static uint32_t tcp_bytes_in_flight(const struct tcp_connection *c) {
     if (!c || !c->unacked_used) return 0;
     return tcp_state_consume(c->unacked_flags, c->unacked_len);
 }
 
-static int tcp_congestion_can_send(struct tcp_connection *c, uint32_t consume) {
+static int tcp_window_can_send(struct tcp_connection *c, uint32_t consume) {
     uint32_t in_flight;
+    uint32_t effective;
     if (!c || !consume) return 1;
     if (c->cwnd < TCP_MSS) c->cwnd = TCP_INITIAL_CWND;
     in_flight = tcp_bytes_in_flight(c);
-    return in_flight + consume <= c->cwnd;
+    effective = tcp_effective_send_window(c);
+    return in_flight + consume <= effective;
 }
 
 static void tcp_record_unacked(struct tcp_connection *c, uint32_t seq, uint32_t ack,
@@ -619,6 +654,7 @@ static void tcp_buffer_data(struct tcp_connection *c, const uint8_t *data, uint1
     if (!len) return;
     memcpy(c->rx + c->rx_len, data, len);
     c->rx_len = (uint16_t)(c->rx_len + len);
+    tcp_refresh_receive_window(c);
 }
 
 static int tcp_send_for_conn(struct tcp_connection *c, uint8_t flags,
@@ -629,11 +665,12 @@ static int tcp_send_for_conn(struct tcp_connection *c, uint8_t flags,
     if (!c) return -1;
     consume = tcp_state_consume(flags, len);
     if (consume && c->unacked_used) return -1;
-    if (!tcp_congestion_can_send(c, consume)) return -1;
+    if (!tcp_window_can_send(c, consume)) return -1;
     if (len > TCP_RETX_BUFFER_SIZE) return -1;
     seq = c->snd_nxt;
-    ret = tcp_send_segment(c->remote_ip, c->local_port, c->remote_port,
-                           seq, c->rcv_nxt, flags, data, len);
+    tcp_refresh_receive_window(c);
+    ret = tcp_send_segment_window(c->remote_ip, c->local_port, c->remote_port,
+                                  seq, c->rcv_nxt, flags, c->rcv_wnd, data, len);
     if (ret == 0) {
         c->snd_nxt += consume;
         tcp_record_unacked(c, seq, c->rcv_nxt, flags, data, len);
@@ -677,6 +714,12 @@ int net_tcp_recv(int conn_id, uint8_t *data, uint16_t len) {
     memcpy(data, c->rx, n);
     if (n < c->rx_len) memmove(c->rx, c->rx + n, (uint16_t)(c->rx_len - n));
     c->rx_len = (uint16_t)(c->rx_len - n);
+    tcp_refresh_receive_window(c);
+    if (c->state == TCP_STATE_ESTABLISHED && !c->unacked_used) {
+        tcp_send_segment_window(c->remote_ip, c->local_port, c->remote_port,
+                                c->snd_nxt, c->rcv_nxt, TCP_FLAG_ACK,
+                                c->rcv_wnd, 0, 0);
+    }
     return n;
 }
 
@@ -720,9 +763,11 @@ void net_tick(uint32_t elapsed_ms) {
             continue;
         }
         tcp_congestion_on_timeout(c);
-        if (tcp_send_segment(c->remote_ip, c->local_port, c->remote_port,
-                             c->unacked_seq, c->unacked_ack, c->unacked_flags,
-                             c->unacked_len ? c->unacked_data : 0, c->unacked_len) == 0) {
+        tcp_refresh_receive_window(c);
+        if (tcp_send_segment_window(c->remote_ip, c->local_port, c->remote_port,
+                                    c->unacked_seq, c->unacked_ack, c->unacked_flags,
+                                    c->rcv_wnd,
+                                    c->unacked_len ? c->unacked_data : 0, c->unacked_len) == 0) {
             c->unacked_sent_ms = tcp_clock_ms;
             c->unacked_retries++;
         }
@@ -803,6 +848,7 @@ static void handle_tcp(uint32_t src_ip, const uint8_t *payload, uint16_t len) {
         return;
     }
 
+    c->snd_wnd = ntohs(tcp->window);
     if (tcp->flags & TCP_FLAG_ACK) tcp_ack_unacked(c, ack);
     if (consume) c->rcv_nxt = seq + consume;
 
