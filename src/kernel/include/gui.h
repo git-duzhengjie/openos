@@ -23,6 +23,11 @@
 #define GUI_TASKBAR_HEIGHT       32
 #define GUI_TASKBAR_ICON_BUTTON_W 40
 #define GUI_TASKBAR_START_W      GUI_TASKBAR_ICON_BUTTON_W
+#define GUI_DESKTOP_MAX_ICONS    8u
+#define GUI_DESKTOP_ICON_W       72
+#define GUI_DESKTOP_ICON_H       64
+#define GUI_DESKTOP_MENU_W       168
+#define GUI_DESKTOP_MENU_H       112
 
 #define GUI_WINDOW_FLAG_NONE      0x00000000u
 #define GUI_WINDOW_FLAG_CLOSABLE  0x00000001u
@@ -195,6 +200,23 @@ typedef struct gui_accel_info {
     uint32_t flush_rows;
 } gui_accel_info_t;
 
+typedef struct gui_desktop_icon {
+    int used;
+    gui_rect_t rect;
+    char label[32];
+    uint32_t color;
+    uint32_t action;
+} gui_desktop_icon_t;
+
+typedef struct gui_desktop_info {
+    int enabled;
+    int start_menu_open;
+    uint32_t icon_count;
+    gui_rect_t taskbar_rect;
+    gui_rect_t start_button_rect;
+    gui_rect_t start_menu_rect;
+} gui_desktop_info_t;
+
 typedef struct gui_system {
     int initialized;
     uint32_t width;
@@ -240,6 +262,14 @@ typedef struct gui_system {
     int render_clip_enabled;
     gui_rect_t render_clip_rect;
 
+    int desktop_enabled;
+    int desktop_start_menu_open;
+    gui_rect_t desktop_taskbar_rect;
+    gui_rect_t desktop_start_button_rect;
+    gui_rect_t desktop_start_menu_rect;
+    gui_desktop_icon_t desktop_icons[GUI_DESKTOP_MAX_ICONS];
+    uint32_t desktop_icon_count;
+
     gui_terminal_t terminal;
 } gui_system_t;
 
@@ -255,6 +285,7 @@ int gui_is_cursor_visible(void);
 const gui_system_t *gui_get_system(void);
 void gui_get_compositor_info(gui_compositor_info_t *info);
 void gui_get_accel_info(gui_accel_info_t *info);
+int gui_get_desktop_info(gui_desktop_info_t *info);
 int gui_accel_is_enabled(void);
 int gui_compositor_is_active(void);
 void gui_set_compositor_enabled(int enabled);

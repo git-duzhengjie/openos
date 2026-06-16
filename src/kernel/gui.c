@@ -27,6 +27,9 @@ static gui_accel_info_t g_gui_accel;
 
 #define GUI_TERMINAL_OUTPUT_QUEUE_SIZE 4096u
 #define GUI_TERMINAL_OUTPUT_DRAIN_LIMIT 128u
+#define GUI_DESKTOP_ACTION_TERMINAL 1u
+#define GUI_DESKTOP_ACTION_ABOUT    2u
+#define GUI_DESKTOP_ACTION_MENU     3u
 static volatile uint32_t g_terminal_out_head = 0;
 static volatile uint32_t g_terminal_out_tail = 0;
 static char g_terminal_out_queue[GUI_TERMINAL_OUTPUT_QUEUE_SIZE];
@@ -45,6 +48,17 @@ void gui_get_accel_info(gui_accel_info_t *info) {
     *info = g_gui_accel;
 }
 
+int gui_get_desktop_info(gui_desktop_info_t *info) {
+    if (!info) return -1;
+    info->enabled = g_gui.desktop_enabled;
+    info->start_menu_open = g_gui.desktop_start_menu_open;
+    info->icon_count = g_gui.desktop_icon_count;
+    info->taskbar_rect = g_gui.desktop_taskbar_rect;
+    info->start_button_rect = g_gui.desktop_start_button_rect;
+    info->start_menu_rect = g_gui.desktop_start_menu_rect;
+    return 0;
+}
+
 static int gui_rect_contains(const gui_rect_t *r, int x, int y);
 static int gui_rect_intersect(const gui_rect_t *a, const gui_rect_t *b, gui_rect_t *out);
 static gui_window_t *gui_top_window(void);
@@ -55,6 +69,9 @@ static void gui_demo_button(gui_widget_t *widget, void *user_data);
 static void gui_terminal_invalidate_cursor(void);
 static void gui_terminal_invalidate_body(void);
 static void gui_terminal_drain_output_queue(void);
+static void gui_desktop_init(void);
+static void gui_desktop_draw(void);
+static int gui_desktop_handle_click(int x, int y);
 static int gui_terminal_point_to_cell(int x, int y, uint32_t *col, uint32_t *row);
 static void gui_terminal_update_selection(uint32_t col, uint32_t row);
 static int gui_terminal_cell_selected(uint32_t col, uint32_t row);
@@ -1311,10 +1328,8 @@ const char *gui_terminal_get_clipboard_text(void) {
 
 __attribute__((optimize("no-jump-tables")))
 static void gui_handle_mouse_down(int x, int y) {
-    if (gui_taskbar_terminal_button_at(x, y)) {
-        serial_write("[GUI] taskbar terminal\n");
+    if (gui_desktop_handle_click(x, y)) {
         gui_set_focused_widget(0);
-        gui_terminal_open();
         return;
     }
 
@@ -1665,19 +1680,159 @@ int gui_start(uint32_t width, uint32_t height) {
     g_gui.compositor_enabled = g_gui.double_buffered;
 
     gui_terminal_init();
+    gui_desktop_init();
     gui_render();
     return 0;
 }
 
-static void gui_draw_desktop_welcome(void) {
-    int x = 92;
-    int y = 84;
+static void gui_desktop_add_icon(uint32_t index, int x, int y, const char *label, uint32_t color, uint32_t action) {
+    gui_desktop_icon_t *icon;
+    uint32_t i;
 
-    gui_draw_text(x, y, "Welcome to OpenOS", gui_rgb(235, 242, 255));
-    gui_draw_text(x, y + 32, "OpenOS desktop is ready.", gui_rgb(205, 220, 245));
-    gui_draw_text(x, y + 60, "Click TERMINAL on the taskbar", gui_rgb(205, 220, 245));
-    gui_draw_text(x, y + 84, "to open the command line tool.", gui_rgb(205, 220, 245));
-    gui_draw_text(x, y + 124, "Tip: use cursor on/off for software mouse.", gui_rgb(170, 195, 230));
+    if (index >= GUI_DESKTOP_MAX_ICONS || !label) return;
+    icon = &g_gui.desktop_icons[index];
+    memset(icon, 0, sizeof(*icon));
+    icon->used = 1;
+    icon->rect.x = x;
+    icon->rect.y = y;
+    icon->rect.w = GUI_DESKTOP_ICON_W;
+    icon->rect.h = GUI_DESKTOP_ICON_H;
+    icon->color = color;
+    icon->action = action;
+    for (i = 0; i < sizeof(icon->label) - 1 && label[i]; i++) icon->label[i] = label[i];
+    icon->label[i] = 0;
+}
+
+static void gui_desktop_init(void) {
+    uint32_t top;
+
+    g_gui.desktop_enabled = 1;
+    g_gui.desktop_start_menu_open = 0;
+    g_gui.desktop_icon_count = 2;
+
+    top = g_gui.height > GUI_TASKBAR_HEIGHT ? g_gui.height - GUI_TASKBAR_HEIGHT : 0;
+    g_gui.desktop_taskbar_rect.x = 0;
+    g_gui.desktop_taskbar_rect.y = (int)top;
+    g_gui.desktop_taskbar_rect.w = (int)g_gui.width;
+    g_gui.desktop_taskbar_rect.h = GUI_TASKBAR_HEIGHT;
+    g_gui.desktop_start_button_rect.x = 6;
+    g_gui.desktop_start_button_rect.y = (int)top + 4;
+    g_gui.desktop_start_button_rect.w = 86;
+    g_gui.desktop_start_button_rect.h = 24;
+    g_gui.desktop_start_menu_rect.x = 6;
+    g_gui.desktop_start_menu_rect.y = (int)top - GUI_DESKTOP_MENU_H - 4;
+    g_gui.desktop_start_menu_rect.w = GUI_DESKTOP_MENU_W;
+    g_gui.desktop_start_menu_rect.h = GUI_DESKTOP_MENU_H;
+
+    memset(g_gui.desktop_icons, 0, sizeof(g_gui.desktop_icons));
+    gui_desktop_add_icon(0, 28, 42, "Terminal", gui_rgb(68, 144, 245), GUI_DESKTOP_ACTION_TERMINAL);
+    gui_desktop_add_icon(1, 28, 128, "About", gui_rgb(88, 196, 128), GUI_DESKTOP_ACTION_ABOUT);
+}
+
+static void gui_desktop_draw_icon(gui_desktop_icon_t *icon) {
+    int cx;
+    int iy;
+
+    if (!icon || !icon->used) return;
+    gui_raw_fill_rect(icon->rect.x, icon->rect.y, icon->rect.w, icon->rect.h, gui_rgb(30, 45, 68));
+    gui_raw_line(icon->rect.x, icon->rect.y, icon->rect.x + icon->rect.w - 1, icon->rect.y, gui_rgb(92, 125, 170));
+    gui_raw_line(icon->rect.x, icon->rect.y, icon->rect.x, icon->rect.y + icon->rect.h - 1, gui_rgb(92, 125, 170));
+    gui_raw_line(icon->rect.x + icon->rect.w - 1, icon->rect.y, icon->rect.x + icon->rect.w - 1, icon->rect.y + icon->rect.h - 1, gui_rgb(14, 20, 32));
+    gui_raw_line(icon->rect.x, icon->rect.y + icon->rect.h - 1, icon->rect.x + icon->rect.w - 1, icon->rect.y + icon->rect.h - 1, gui_rgb(14, 20, 32));
+    cx = icon->rect.x + (icon->rect.w - 28) / 2;
+    iy = icon->rect.y + 8;
+    gui_raw_fill_rect(cx, iy, 28, 28, icon->color);
+    gui_raw_line(cx, iy, cx + 27, iy, gui_rgb(225, 235, 255));
+    gui_raw_line(cx, iy, cx, iy + 27, gui_rgb(225, 235, 255));
+    gui_raw_line(cx + 27, iy, cx + 27, iy + 27, gui_rgb(18, 25, 38));
+    gui_raw_line(cx, iy + 27, cx + 27, iy + 27, gui_rgb(18, 25, 38));
+    gui_draw_text(icon->rect.x + 6, icon->rect.y + 44, icon->label, gui_rgb(232, 240, 255));
+}
+
+static void gui_desktop_draw_start_menu(void) {
+    gui_rect_t *r = &g_gui.desktop_start_menu_rect;
+    if (!g_gui.desktop_start_menu_open) return;
+
+    gui_raw_fill_rect(r->x, r->y, r->w, r->h, gui_rgb(28, 36, 54));
+    gui_raw_line(r->x, r->y, r->x + r->w - 1, r->y, gui_rgb(112, 146, 198));
+    gui_raw_line(r->x, r->y, r->x, r->y + r->h - 1, gui_rgb(112, 146, 198));
+    gui_raw_line(r->x + r->w - 1, r->y, r->x + r->w - 1, r->y + r->h - 1, gui_rgb(10, 13, 20));
+    gui_raw_line(r->x, r->y + r->h - 1, r->x + r->w - 1, r->y + r->h - 1, gui_rgb(10, 13, 20));
+    gui_draw_text(r->x + 12, r->y + 12, "OpenOS", gui_rgb(245, 250, 255));
+    gui_raw_fill_rect(r->x + 10, r->y + 36, r->w - 20, 24, gui_rgb(46, 64, 92));
+    gui_draw_text(r->x + 18, r->y + 42, "Open Terminal", gui_rgb(232, 240, 255));
+    gui_raw_fill_rect(r->x + 10, r->y + 68, r->w - 20, 24, gui_rgb(46, 64, 92));
+    gui_draw_text(r->x + 18, r->y + 74, "About OpenOS", gui_rgb(232, 240, 255));
+}
+
+static void gui_desktop_draw(void) {
+    uint32_t i;
+
+    if (!g_gui.desktop_enabled) return;
+    gui_draw_text(116, 72, "Welcome to OpenOS", gui_rgb(235, 242, 255));
+    gui_draw_text(116, 104, "Desktop environment is ready.", gui_rgb(205, 220, 245));
+    gui_draw_text(116, 132, "Use Start or desktop icons to launch tools.", gui_rgb(170, 195, 230));
+    for (i = 0; i < g_gui.desktop_icon_count && i < GUI_DESKTOP_MAX_ICONS; i++) {
+        gui_desktop_draw_icon(&g_gui.desktop_icons[i]);
+    }
+}
+
+static void gui_desktop_run_action(uint32_t action) {
+    if (action == GUI_DESKTOP_ACTION_TERMINAL) {
+        gui_terminal_open();
+        return;
+    }
+    if (action == GUI_DESKTOP_ACTION_ABOUT) {
+        gui_demo();
+        return;
+    }
+    if (action == GUI_DESKTOP_ACTION_MENU) {
+        g_gui.desktop_start_menu_open = !g_gui.desktop_start_menu_open;
+        gui_invalidate_all();
+    }
+}
+
+static int gui_desktop_handle_click(int x, int y) {
+    uint32_t i;
+    gui_rect_t item;
+
+    if (!g_gui.desktop_enabled) return 0;
+    if (gui_rect_contains(&g_gui.desktop_start_button_rect, x, y)) {
+        gui_desktop_run_action(GUI_DESKTOP_ACTION_MENU);
+        return 1;
+    }
+    if (g_gui.desktop_start_menu_open && gui_rect_contains(&g_gui.desktop_start_menu_rect, x, y)) {
+        item.x = g_gui.desktop_start_menu_rect.x + 10;
+        item.y = g_gui.desktop_start_menu_rect.y + 36;
+        item.w = g_gui.desktop_start_menu_rect.w - 20;
+        item.h = 24;
+        if (gui_rect_contains(&item, x, y)) {
+            g_gui.desktop_start_menu_open = 0;
+            gui_desktop_run_action(GUI_DESKTOP_ACTION_TERMINAL);
+            gui_invalidate_all();
+            return 1;
+        }
+        item.y = g_gui.desktop_start_menu_rect.y + 68;
+        if (gui_rect_contains(&item, x, y)) {
+            g_gui.desktop_start_menu_open = 0;
+            gui_desktop_run_action(GUI_DESKTOP_ACTION_ABOUT);
+            gui_invalidate_all();
+            return 1;
+        }
+        return 1;
+    }
+    if (g_gui.desktop_start_menu_open) {
+        g_gui.desktop_start_menu_open = 0;
+        gui_invalidate_all();
+    }
+    for (i = 0; i < g_gui.desktop_icon_count && i < GUI_DESKTOP_MAX_ICONS; i++) {
+        gui_desktop_icon_t *icon = &g_gui.desktop_icons[i];
+        if (icon->used && gui_rect_contains(&icon->rect, x, y)) {
+            gui_desktop_run_action(icon->action);
+            return 1;
+        }
+    }
+    return 0;
 }
 
 int gui_start_desktop(void) {
@@ -2369,8 +2524,9 @@ static void gui_terminal_tick_cursor(void) {
 static void gui_render_scene(void) {
     uint32_t i;
     gui_raw_fill_rect(0, 0, (int)g_gui.width, (int)g_gui.height, g_gui.colors.desktop_bg);
-    gui_draw_desktop_welcome();
+    gui_desktop_draw();
     gui_draw_taskbar();
+    gui_desktop_draw_start_menu();
 
     for (i = 0; i < g_gui.window_count; i++) {
         uint32_t idx = g_gui.z_order[i];
