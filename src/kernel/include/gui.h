@@ -203,6 +203,7 @@ void gui_init(void);
 int gui_start(uint32_t width, uint32_t height);
 int gui_is_ready(void);
 int gui_has_focused_widget(void);
+gui_widget_t *gui_get_focused_widget(void);
 void gui_shutdown_to_text_note(void);
 void gui_set_cursor_visible(int visible);
 int gui_is_cursor_visible(void);

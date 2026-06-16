@@ -499,6 +499,27 @@ static void gui_set_focused_widget(gui_widget_t *wg) {
     gui_invalidate_all();
 }
 
+static void gui_focus_first_widget(gui_window_t *window) {
+    uint32_t i;
+    if (!window || !window->used || !window->visible || (window->flags & GUI_WINDOW_FLAG_MINIMIZED)) return;
+    for (i = 0; i < window->widget_count; i++) {
+        if (gui_widget_can_focus(&window->widgets[i])) {
+            gui_set_focused_widget(&window->widgets[i]);
+            return;
+        }
+    }
+    if (g_gui.focused_widget && g_gui.focused_widget->owner == window) gui_set_focused_widget(0);
+}
+
+static void gui_focus_active_window_default(void) {
+    gui_window_t *w = g_gui.active_window ? g_gui.active_window : gui_top_window();
+    if (!w || w == g_gui.terminal.window || (w->flags & GUI_WINDOW_FLAG_TERMINAL)) {
+        gui_set_focused_widget(0);
+        return;
+    }
+    gui_focus_first_widget(w);
+}
+
 static void gui_focus_next_widget(void) {
     gui_window_t *w;
     int start = -1;
@@ -889,12 +910,16 @@ void gui_bring_to_front(gui_window_t *window) {
 void gui_set_active_window(gui_window_t *window) {
     uint32_t i;
     for (i = 0; i < GUI_MAX_WINDOWS; i++) g_gui.windows[i].active = 0;
-    if (window && gui_window_index(window) >= 0) {
+    if (window && gui_window_index(window) >= 0 && window->visible && !(window->flags & GUI_WINDOW_FLAG_MINIMIZED)) {
         gui_bring_to_front(window);
         g_gui.active_window = window;
         g_gui.active_window->active = 1;
+        if (!g_gui.focused_widget || g_gui.focused_widget->owner != window) {
+            gui_focus_active_window_default();
+        }
     } else {
         g_gui.active_window = 0;
+        gui_set_focused_widget(0);
     }
     gui_invalidate_all();
 }
@@ -925,7 +950,12 @@ void gui_destroy_window(gui_window_t *window) {
 
     gui_refresh_window_refs();
     g_gui.active_window = gui_top_window();
-    if (g_gui.active_window) g_gui.active_window->active = 1;
+    if (g_gui.active_window) {
+        g_gui.active_window->active = 1;
+        gui_focus_active_window_default();
+    } else {
+        gui_set_focused_widget(0);
+    }
     gui_invalidate_all();
 }
 
@@ -945,7 +975,12 @@ void gui_minimize_window(gui_window_t *window) {
     if (g_gui.focused_widget && g_gui.focused_widget->owner == window) gui_set_focused_widget(0);
 
     g_gui.active_window = gui_top_window();
-    if (g_gui.active_window) g_gui.active_window->active = 1;
+    if (g_gui.active_window) {
+        g_gui.active_window->active = 1;
+        gui_focus_active_window_default();
+    } else {
+        gui_set_focused_widget(0);
+    }
 
     gui_invalidate_all();
 }
@@ -958,8 +993,29 @@ void gui_restore_window(gui_window_t *window) {
     gui_invalidate_all();
 }
 
-void gui_show_window(gui_window_t *window) { if (window) { window->visible = 1; gui_invalidate_all(); } }
-void gui_hide_window(gui_window_t *window) { if (window) { window->visible = 0; gui_invalidate_all(); } }
+void gui_show_window(gui_window_t *window) {
+    if (!window) return;
+    window->visible = 1;
+    if (!(window->flags & GUI_WINDOW_FLAG_MINIMIZED)) gui_set_active_window(window);
+    else gui_invalidate_all();
+}
+
+void gui_hide_window(gui_window_t *window) {
+    if (!window) return;
+    window->visible = 0;
+    window->active = 0;
+    if (window == g_gui.terminal.window) gui_terminal_set_input_focus(0);
+    if (g_gui.drag_window == window) g_gui.drag_window = 0;
+    if (g_gui.pressed_widget && g_gui.pressed_widget->owner == window) g_gui.pressed_widget = 0;
+    if (g_gui.hovered_widget && g_gui.hovered_widget->owner == window) g_gui.hovered_widget = 0;
+    if (g_gui.focused_widget && g_gui.focused_widget->owner == window) gui_set_focused_widget(0);
+    if (g_gui.active_window == window) {
+        g_gui.active_window = gui_top_window();
+        if (g_gui.active_window) g_gui.active_window->active = 1;
+        gui_focus_active_window_default();
+    }
+    gui_invalidate_all();
+}
 
 typedef struct gui_taskbar_layout {
     gui_rect_t bar;
@@ -1592,6 +1648,11 @@ int gui_is_ready(void) { return g_gui.initialized; }
 
 int gui_has_focused_widget(void) {
     return g_gui.initialized && g_gui.focused_widget && g_gui.focused_widget->focused;
+}
+
+gui_widget_t *gui_get_focused_widget(void) {
+    if (!g_gui.initialized || !g_gui.focused_widget || !g_gui.focused_widget->focused) return 0;
+    return g_gui.focused_widget;
 }
 
 int gui_should_capture_key_code(int key) {
