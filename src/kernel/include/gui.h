@@ -173,6 +173,17 @@ typedef struct gui_terminal {
     uint32_t clipboard_len;
 } gui_terminal_t;
 
+typedef struct gui_compositor_info {
+    int enabled;
+    int active;
+    int double_buffered;
+    uint32_t width;
+    uint32_t height;
+    uint32_t backbuffer_pixels;
+    uint32_t dirty_count;
+    int full_dirty;
+} gui_compositor_info_t;
+
 typedef struct gui_system {
     int initialized;
     uint32_t width;
@@ -209,6 +220,7 @@ typedef struct gui_system {
     uint32_t *backbuffer;
     uint32_t backbuffer_pixels;
     int double_buffered;
+    int compositor_enabled;
     gui_rect_t dirty_rects[GUI_MAX_DIRTY_RECTS];
     uint32_t dirty_count;
     int full_dirty;
@@ -230,6 +242,10 @@ void gui_set_cursor_visible(int visible);
 int gui_is_cursor_visible(void);
 
 const gui_system_t *gui_get_system(void);
+void gui_get_compositor_info(gui_compositor_info_t *info);
+int gui_compositor_is_active(void);
+void gui_set_compositor_enabled(int enabled);
+void gui_compositor_flush(void);
 void gui_print_info(void);
 void gui_render(void);
 void gui_demo(void);

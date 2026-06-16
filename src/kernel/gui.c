@@ -30,6 +30,11 @@ static volatile uint32_t g_terminal_out_head = 0;
 static volatile uint32_t g_terminal_out_tail = 0;
 static char g_terminal_out_queue[GUI_TERMINAL_OUTPUT_QUEUE_SIZE];
 
+static int gui_compositor_active(void) {
+    return g_gui.initialized && g_gui.compositor_enabled &&
+           g_gui.double_buffered && g_gui.backbuffer;
+}
+
 static int gui_rect_contains(const gui_rect_t *r, int x, int y);
 static int gui_rect_intersect(const gui_rect_t *a, const gui_rect_t *b, gui_rect_t *out);
 static gui_window_t *gui_top_window(void);
@@ -79,7 +84,7 @@ static void gui_copy_text(char *dst, const char *src, uint32_t cap) {
 static void gui_put_pixel_unclipped(int x, int y, uint32_t color) {
     if (!g_gui.initialized) return;
     if (x < 0 || y < 0 || x >= (int)g_gui.width || y >= (int)g_gui.height) return;
-    if (g_gui.double_buffered && g_gui.backbuffer) {
+    if (gui_compositor_active()) {
         g_gui.backbuffer[(uint32_t)y * g_gui.width + (uint32_t)x] = color;
     } else {
         framebuffer_put_pixel((uint32_t)x, (uint32_t)y, color);
@@ -630,7 +635,7 @@ static void gui_cursor_draw_fb(void) {
 }
 
 static void gui_cursor_present_fast(void) {
-    if (!g_gui.initialized || !g_gui.double_buffered || !g_gui.backbuffer) return;
+    if (!gui_compositor_active()) return;
     gui_cursor_restore_fb();
     gui_cursor_draw_fb();
 }
@@ -698,7 +703,7 @@ static void gui_flush_rect(const gui_rect_t *r) {
 static void gui_flush_backbuffer(void) {
     uint32_t i;
     gui_rect_t all;
-    if (!g_gui.double_buffered || !g_gui.backbuffer) return;
+    if (!gui_compositor_active()) return;
 
     if (g_gui.full_dirty) {
         all.x = 0;
@@ -1625,6 +1630,7 @@ int gui_start(uint32_t width, uint32_t height) {
         g_gui.backbuffer_pixels = g_gui.backbuffer ? pixels : 0;
     }
     g_gui.double_buffered = g_gui.backbuffer ? 1 : 0;
+    g_gui.compositor_enabled = g_gui.double_buffered;
 
     gui_terminal_init();
     gui_render();
@@ -1709,6 +1715,36 @@ int gui_is_cursor_visible(void) { return g_gui.cursor_visible; }
 
 const gui_system_t *gui_get_system(void) { return &g_gui; }
 
+void gui_get_compositor_info(gui_compositor_info_t *info) {
+    if (!info) return;
+    info->enabled = g_gui.compositor_enabled;
+    info->active = gui_compositor_active();
+    info->double_buffered = g_gui.double_buffered;
+    info->width = g_gui.width;
+    info->height = g_gui.height;
+    info->backbuffer_pixels = g_gui.backbuffer_pixels;
+    info->dirty_count = g_gui.dirty_count;
+    info->full_dirty = g_gui.full_dirty;
+}
+
+int gui_compositor_is_active(void) {
+    return gui_compositor_active();
+}
+
+void gui_set_compositor_enabled(int enabled) {
+    int next = enabled ? 1 : 0;
+    if (g_gui.compositor_enabled == next) return;
+    g_gui.compositor_enabled = next;
+    if (g_gui.initialized) gui_invalidate_all();
+}
+
+void gui_compositor_flush(void) {
+    if (!gui_compositor_active()) return;
+    gui_cursor_restore_fb();
+    gui_flush_backbuffer();
+    gui_cursor_draw_fb();
+}
+
 void gui_print_info(void) {
     serial_write("[GUI] ready="); gui_write_dec((uint32_t)g_gui.initialized);
     serial_write(" size="); gui_write_dec(g_gui.width); serial_write("x"); gui_write_dec(g_gui.height);
@@ -1718,6 +1754,7 @@ void gui_print_info(void) {
     serial_write(" active_app="); gui_write_dec(g_gui.active_app ? g_gui.active_app->id : 0);
     serial_write(" events="); gui_write_dec(g_gui.event_count);
     serial_write(" dblbuf="); gui_write_dec((uint32_t)g_gui.double_buffered);
+    serial_write(" compositor="); gui_write_dec((uint32_t)gui_compositor_active());
     serial_write(" cursor="); gui_write_dec((uint32_t)g_gui.cursor_visible);
     serial_write(" mouse="); gui_write_dec((uint32_t)g_gui.mouse_x); serial_write(","); gui_write_dec((uint32_t)g_gui.mouse_y);
     serial_write("\n");
@@ -2312,14 +2349,19 @@ void gui_render(void) {
     uint32_t dirty_count;
     gui_rect_t dirty_rects[GUI_MAX_DIRTY_RECTS];
     if (!g_gui.initialized) return;
-    if (g_gui.double_buffered && g_gui.backbuffer && !gui_has_dirty()) return;
+    if (gui_compositor_active() && !gui_has_dirty()) return;
 
     gui_cursor_restore_fb();
 
-    if (g_gui.full_dirty || !g_gui.double_buffered || !g_gui.backbuffer) {
+    if (g_gui.full_dirty || !gui_compositor_active()) {
         gui_pop_render_clip();
         gui_render_scene();
-        gui_flush_backbuffer();
+        if (gui_compositor_active()) {
+            gui_flush_backbuffer();
+        } else {
+            g_gui.full_dirty = 0;
+            g_gui.dirty_count = 0;
+        }
         gui_cursor_draw_fb();
         return;
     }
