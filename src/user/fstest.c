@@ -76,22 +76,33 @@ void _start(int argc, char **argv, char **envp)
     if (openos_close(fd) < 0)
         openos_fail(18, "[fstest] close hello failed\n");
 
+    if (openos_chmod("hello", FS_FILE | 0640) < 0)
+        openos_fail(19, "[fstest] chmod hello failed\n");
+    if (openos_chown("hello", 1000, 100) < 0)
+        openos_fail(20, "[fstest] chown hello failed\n");
+    if (openos_stat("hello", &st) < 0)
+        openos_fail(21, "[fstest] stat after chmod/chown failed\n");
+    if ((st.mode & 0777) != 0640)
+        openos_fail(22, "[fstest] chmod mode mismatch\n");
+    if (st.uid != 1000 || st.gid != 100)
+        openos_fail(23, "[fstest] chown owner mismatch\n");
+
     {
         char *child_argv[] = { "fstest", "--leak-fd-child", 0 };
         child = openos_spawn("/bin/fstest", child_argv);
     }
     if (child < 0)
-        openos_fail(19, "[fstest] spawn fd leak child failed\n");
+        openos_fail(24, "[fstest] spawn fd leak child failed\n");
     if (openos_waitpid(child, &status, 0) != child)
-        openos_fail(20, "[fstest] wait fd leak child failed\n");
+        openos_fail(25, "[fstest] wait fd leak child failed\n");
     if (!WIFEXITED(status) || WEXITSTATUS(status) != 0)
-        openos_fail(21, "[fstest] fd leak child failed\n");
+        openos_fail(26, "[fstest] fd leak child failed\n");
 
     fd = openos_open("hello", O_RDONLY, 0);
     if (fd != 0)
-        openos_fail(22, "[fstest] fd table leaked across processes\n");
+        openos_fail(27, "[fstest] fd table leaked across processes\n");
     if (openos_close(fd) < 0)
-        openos_fail(23, "[fstest] close after leak check failed\n");
+        openos_fail(28, "[fstest] close after leak check failed\n");
 
     openos_chdir("/");
     openos_write_str("[fstest] fs syscalls ok\n");

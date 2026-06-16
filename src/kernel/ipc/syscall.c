@@ -712,6 +712,8 @@ static void syscall_fill_user_stat(openos_stat_t *user_st, const inode_t *st)
     user_st->size = st->size;
     user_st->nlinks = st->nlinks;
     user_st->fs_type = st->fs_type;
+    user_st->uid = st->uid;
+    user_st->gid = st->gid;
 }
 
 #define SYS_MMAP_BASE  0x50000000u
@@ -1237,6 +1239,22 @@ uint32_t syscall_dispatch(uint32_t num,
             if (syscall_copy_user_path(path, (const char *)a) < 0)
                 return (uint32_t)-1;
             return (uint32_t)vfs_chdir(path);
+        }
+
+    case SYS_CHMOD:
+        {
+            char path[USERMEM_CSTR_MAX];
+            if (syscall_copy_user_path(path, (const char *)a) < 0)
+                return (uint32_t)-1;
+            return (uint32_t)vfs_chmod(path, (uint32_t)b);
+        }
+
+    case SYS_CHOWN:
+        {
+            char path[USERMEM_CSTR_MAX];
+            if (syscall_copy_user_path(path, (const char *)a) < 0)
+                return (uint32_t)-1;
+            return (uint32_t)vfs_chown(path, (uint32_t)b, (uint32_t)c);
         }
 
     case SYS_READDIR:

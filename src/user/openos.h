@@ -68,6 +68,8 @@
 #define SYS_GETPRIORITY   271
 #define SYS_SETPRIORITY   272
 #define SYS_NICE          273
+#define SYS_CHMOD         274
+#define SYS_CHOWN         275
 
 #define WNOHANG         1
 #define SIGKILL         9
@@ -1646,6 +1648,16 @@ static inline int openos_fstat(int fd, openos_stat_t *st)
 static inline int openos_lstat(const char *path, openos_stat_t *st)
 {
     return openos_syscall_result(openos_syscall2(SYS_LSTAT, (int)path, (int)st));
+}
+
+static inline int openos_chmod(const char *path, openos_uint32_t mode)
+{
+    return openos_syscall_result(openos_syscall2(SYS_CHMOD, (int)path, (int)mode));
+}
+
+static inline int openos_chown(const char *path, openos_uint32_t uid, openos_uint32_t gid)
+{
+    return openos_syscall_result(openos_syscall3(SYS_CHOWN, (int)path, (int)uid, (int)gid));
 }
 
 static inline int openos_readdir_path(const char *path, int index, openos_dirent_t *entry)

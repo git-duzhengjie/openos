@@ -71,6 +71,8 @@
 #define SYS_GETPRIORITY   271
 #define SYS_SETPRIORITY   272
 #define SYS_NICE          273
+#define SYS_CHMOD         274
+#define SYS_CHOWN         275
 
 typedef struct openos_stat {
     uint32_t ino;
@@ -78,6 +80,8 @@ typedef struct openos_stat {
     uint32_t size;
     uint32_t nlinks;
     uint32_t fs_type;
+    uint32_t uid;
+    uint32_t gid;
 } openos_stat_t;
 
 typedef struct openos_dirent {

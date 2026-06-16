@@ -159,7 +159,7 @@
 - [√] hard link（已新增 `/bin/ln OLD NEW`）
 - [√] symbolic link（已支持 `/bin/ln -s OLD NEW`）
 - [√] inode uid / gid 字段（已加入 `inode_t`，`vfs_chown` 可写入元数据，`openos_stat_t` 可读取）
-- [ ] chmod / chown 权限模型
+- [√] chmod / chown 权限模型（已接入 `SYS_CHMOD` / `SYS_CHOWN`、用户态 `openos_chmod` / `openos_chown`，并由 `/bin/fstest` 校验 mode/uid/gid）
 - [ ] access 权限检查
 - [ ] per-process cwd 更严格集成
 - [√] 文件描述符表标准化
