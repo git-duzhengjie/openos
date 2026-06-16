@@ -53,6 +53,8 @@ int blockdev_open(blockdev_t *dev);
 int blockdev_close(blockdev_t *dev);
 int blockdev_read_blocks(blockdev_t *dev, uint32_t lba, uint32_t count, void *buf);
 int blockdev_write_blocks(blockdev_t *dev, uint32_t lba, uint32_t count, const void *buf);
+int blockdev_flush(blockdev_t *dev);
+int blockdev_flush_all(void);
 int blockdev_ioctl(blockdev_t *dev, uint32_t request, void *arg);
 uint32_t blockdev_size_bytes(blockdev_t *dev);
 

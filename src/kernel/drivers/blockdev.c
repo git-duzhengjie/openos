@@ -12,6 +12,113 @@
 static blockdev_t blockdev_table[BLOCKDEV_MAX];
 static uint32_t blockdev_table_count = 0;
 
+#define BLOCK_CACHE_ENTRIES 64
+#define BLOCK_CACHE_SECTOR_SIZE 512
+
+typedef struct block_cache_entry {
+    uint8_t valid;
+    uint8_t dirty;
+    uint32_t age;
+    blockdev_t *dev;
+    uint32_t lba;
+    uint8_t data[BLOCK_CACHE_SECTOR_SIZE];
+} block_cache_entry_t;
+
+static block_cache_entry_t block_cache[BLOCK_CACHE_ENTRIES];
+static uint32_t block_cache_clock = 1;
+
+static int blockdev_raw_read_one(blockdev_t *dev, uint32_t lba, void *buf) {
+    if (!dev || !buf || !dev->ops || !dev->ops->read_blocks) return -1;
+    return dev->ops->read_blocks(dev, lba, 1, buf) == 1 ? 0 : -1;
+}
+
+static int blockdev_raw_write_one(blockdev_t *dev, uint32_t lba, const void *buf) {
+    if (!dev || !buf || !dev->ops || !dev->ops->write_blocks) return -1;
+    return dev->ops->write_blocks(dev, lba, 1, buf) == 1 ? 0 : -1;
+}
+
+static int block_cache_flush_entry(block_cache_entry_t *e) {
+    if (!e || !e->valid || !e->dirty) return 0;
+    if (blockdev_raw_write_one(e->dev, e->lba, e->data) < 0) return -1;
+    e->dirty = 0;
+    return 0;
+}
+
+static block_cache_entry_t *block_cache_find(blockdev_t *dev, uint32_t lba) {
+    uint32_t i;
+    for (i = 0; i < BLOCK_CACHE_ENTRIES; i++) {
+        if (block_cache[i].valid && block_cache[i].dev == dev && block_cache[i].lba == lba) {
+            block_cache[i].age = block_cache_clock++;
+            return &block_cache[i];
+        }
+    }
+    return 0;
+}
+
+static block_cache_entry_t *block_cache_alloc(blockdev_t *dev, uint32_t lba) {
+    uint32_t i;
+    uint32_t victim = 0;
+    uint32_t best_age = 0xFFFFFFFFu;
+
+    for (i = 0; i < BLOCK_CACHE_ENTRIES; i++) {
+        if (!block_cache[i].valid) {
+            victim = i;
+            best_age = 0;
+            break;
+        }
+        if (block_cache[i].age < best_age) {
+            best_age = block_cache[i].age;
+            victim = i;
+        }
+    }
+
+    if (best_age != 0 && block_cache_flush_entry(&block_cache[victim]) < 0) return 0;
+    memset(&block_cache[victim], 0, sizeof(block_cache[victim]));
+    block_cache[victim].valid = 1;
+    block_cache[victim].dev = dev;
+    block_cache[victim].lba = lba;
+    block_cache[victim].age = block_cache_clock++;
+    return &block_cache[victim];
+}
+
+static int block_cache_read_one(blockdev_t *dev, uint32_t lba, void *buf) {
+    block_cache_entry_t *e;
+
+    if (dev->sector_size != BLOCK_CACHE_SECTOR_SIZE) {
+        return dev->ops->read_blocks(dev, lba, 1, buf) == 1 ? 0 : -1;
+    }
+
+    e = block_cache_find(dev, lba);
+    if (!e) {
+        e = block_cache_alloc(dev, lba);
+        if (!e) return -1;
+        if (blockdev_raw_read_one(dev, lba, e->data) < 0) {
+            memset(e, 0, sizeof(*e));
+            return -1;
+        }
+    }
+    memcpy(buf, e->data, BLOCK_CACHE_SECTOR_SIZE);
+    return 0;
+}
+
+static int block_cache_write_one(blockdev_t *dev, uint32_t lba, const void *buf) {
+    block_cache_entry_t *e;
+
+    if (dev->sector_size != BLOCK_CACHE_SECTOR_SIZE) {
+        return dev->ops->write_blocks(dev, lba, 1, buf) == 1 ? 0 : -1;
+    }
+
+    e = block_cache_find(dev, lba);
+    if (!e) {
+        e = block_cache_alloc(dev, lba);
+        if (!e) return -1;
+    }
+    memcpy(e->data, buf, BLOCK_CACHE_SECTOR_SIZE);
+    e->dirty = 1;
+    e->age = block_cache_clock++;
+    return 0;
+}
+
 static void blockdev_copy_name(char *dst, const char *src) {
     uint32_t i = 0;
     if (!dst) return;
@@ -27,7 +134,9 @@ static void blockdev_copy_name(char *dst, const char *src) {
 
 void blockdev_init(void) {
     memset(blockdev_table, 0, sizeof(blockdev_table));
+    memset(block_cache, 0, sizeof(block_cache));
     blockdev_table_count = 0;
+    block_cache_clock = 1;
 }
 
 int blockdev_register(const char *name, uint32_t major, uint32_t minor,
@@ -63,6 +172,7 @@ int blockdev_unregister(const char *name) {
     for (i = 0; i < blockdev_table_count; i++) {
         if (strcmp(blockdev_table[i].name, name) == 0) {
             if (blockdev_table[i].ref_count != 0) return -1;
+            if (blockdev_flush(&blockdev_table[i]) < 0) return -1;
             devmgr_unregister(blockdev_table[i].name);
             if (i + 1 < blockdev_table_count) {
                 memcpy(&blockdev_table[i], &blockdev_table[blockdev_table_count - 1], sizeof(blockdev_t));
@@ -131,21 +241,62 @@ int blockdev_close(blockdev_t *dev) {
 }
 
 int blockdev_read_blocks(blockdev_t *dev, uint32_t lba, uint32_t count, void *buf) {
+    uint8_t *out = (uint8_t *)buf;
+    uint32_t i;
+
     if (!dev || !buf) return -1;
     if (!dev->ops || !dev->ops->read_blocks) return -1;
     if (count == 0) return 0;
     if (lba >= dev->sector_count) return -1;
     if (count > dev->sector_count - lba) return -1;
-    return dev->ops->read_blocks(dev, lba, count, buf);
+
+    for (i = 0; i < count; i++) {
+        if (block_cache_read_one(dev, lba + i, out + i * dev->sector_size) < 0) {
+            return i == 0 ? -1 : (int)i;
+        }
+    }
+    return (int)count;
 }
 
 int blockdev_write_blocks(blockdev_t *dev, uint32_t lba, uint32_t count, const void *buf) {
+    const uint8_t *in = (const uint8_t *)buf;
+    uint32_t i;
+
     if (!dev || !buf) return -1;
     if (!dev->ops || !dev->ops->write_blocks) return -1;
     if (count == 0) return 0;
     if (lba >= dev->sector_count) return -1;
     if (count > dev->sector_count - lba) return -1;
-    return dev->ops->write_blocks(dev, lba, count, buf);
+
+    for (i = 0; i < count; i++) {
+        if (block_cache_write_one(dev, lba + i, in + i * dev->sector_size) < 0) {
+            return i == 0 ? -1 : (int)i;
+        }
+    }
+    return (int)count;
+}
+
+int blockdev_flush(blockdev_t *dev) {
+    uint32_t i;
+    int ret = 0;
+
+    if (!dev) return -1;
+    for (i = 0; i < BLOCK_CACHE_ENTRIES; i++) {
+        if (block_cache[i].valid && block_cache[i].dev == dev) {
+            if (block_cache_flush_entry(&block_cache[i]) < 0) ret = -1;
+        }
+    }
+    return ret;
+}
+
+int blockdev_flush_all(void) {
+    uint32_t i;
+    int ret = 0;
+
+    for (i = 0; i < BLOCK_CACHE_ENTRIES; i++) {
+        if (block_cache_flush_entry(&block_cache[i]) < 0) ret = -1;
+    }
+    return ret;
 }
 
 int blockdev_ioctl(blockdev_t *dev, uint32_t request, void *arg) {
