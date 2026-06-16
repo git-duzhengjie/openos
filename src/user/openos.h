@@ -88,6 +88,7 @@
 #define SYS_RECVFROM      291
 #define SYS_NETINFO       292
 #define SYS_PING          293
+#define SYS_NETCONFIG     294
 
 #define OPENOS_AF_UNSPEC  0
 #define OPENOS_AF_INET    2
@@ -372,6 +373,11 @@ static inline int openos_netinfo(openos_netinfo_t *info)
 static inline int openos_ping(unsigned int ip)
 {
     return openos_syscall_result(openos_syscall1(SYS_PING, (int)ip));
+}
+
+static inline int openos_netconfig(unsigned int ip, unsigned int netmask, unsigned int gateway)
+{
+    return openos_syscall_result(openos_syscall3(SYS_NETCONFIG, (int)ip, (int)netmask, (int)gateway));
 }
 
 static inline void openos_thread_exit(int code);
@@ -1797,6 +1803,7 @@ static inline void openos_clearerr(openos_FILE *stream)
 #define snprintf(buf, size, fmt, ...) openos_snprintf((buf), (size), (fmt), ##__VA_ARGS__)
 #define netinfo(info)          openos_netinfo((info))
 #define ping(ip)               openos_ping((ip))
+#define netconfig(ip, mask, gw) openos_netconfig((ip), (mask), (gw))
 #define socket(domain, type, protocol) openos_socket((domain), (type), (protocol))
 #define bind(fd, addr, len)    openos_bind((fd), (addr), (len))
 #define listen(fd, backlog)    openos_listen((fd), (backlog))

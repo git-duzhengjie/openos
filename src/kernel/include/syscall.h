@@ -91,6 +91,7 @@
 #define SYS_RECVFROM      291
 #define SYS_NETINFO       292
 #define SYS_PING          293
+#define SYS_NETCONFIG     294
 
 #define OPENOS_POLLIN     0x0001
 #define OPENOS_POLLOUT    0x0004

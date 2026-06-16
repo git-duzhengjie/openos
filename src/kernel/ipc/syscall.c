@@ -1510,6 +1510,9 @@ uint32_t syscall_dispatch(uint32_t num,
     case SYS_PING:
         return (uint32_t)net_ping_ipv4((uint32_t)a);
 
+    case SYS_NETCONFIG:
+        return (uint32_t)net_config_ipv4((uint32_t)a, (uint32_t)b, (uint32_t)c);
+
     case SYS_FSYNC:
         {
             file_t *f = vfs_get_file((int)a);

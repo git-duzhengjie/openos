@@ -91,6 +91,7 @@ int net_tcp_send_syn(uint32_t dst_ip, uint16_t src_port, uint16_t dst_port);
 int net_ping_self(void);
 int net_ping_ipv4(uint32_t dst_ip);
 int net_get_diag_stats(net_diag_stats_t *stats);
+int net_config_ipv4(uint32_t ip, uint32_t netmask, uint32_t gateway);
 void net_print_info(void);
 void net_format_ipv4(uint32_t ip, char *out);
 int net_parse_ipv4(const char *text, uint32_t *out);

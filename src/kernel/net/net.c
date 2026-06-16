@@ -969,6 +969,16 @@ void net_set_default_ipv4(uint32_t ip, uint32_t netmask, uint32_t gateway) {
     default_dev->gateway = gateway;
 }
 
+int net_config_ipv4(uint32_t ip, uint32_t netmask, uint32_t gateway) {
+    if (!default_dev) return -1;
+    if (netmask == 0 || netmask == 0xffffffffU) return -1;
+    if (ip == 0 || ip == 0xffffffffU) return -1;
+    default_dev->ip = ip;
+    default_dev->netmask = netmask;
+    default_dev->gateway = gateway;
+    return 0;
+}
+
 void net_format_ipv4(uint32_t ip, char *out) {
     uint8_t p[4];
     int pos = 0;
