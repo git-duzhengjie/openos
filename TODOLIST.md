@@ -217,13 +217,13 @@
 - [√] 真实网卡接入协议栈
 - [√] DHCP
 - [√] DNS
-- [x] socket syscall
-- [x] `bind`
-- [x] `listen`
+- [√] socket syscall（已实现 SYS_SOCKET / socket fd 层 / 用户态 wrapper）
+- [√] `bind`（已实现 AF_INET 端口绑定、冲突检测和临时端口分配）
+- [√] `listen`（已接入 TCP listen 状态和 backlog 限制）
 - [x] `accept`
-- [x] `connect`
-- [x] `send`
-- [x] `recv`
+- [√] `connect`（已支持 TCP 主动打开和 UDP connected socket）
+- [√] `send`（已支持 socketpair / TCP / UDP connected socket 发送）
+- [√] `recv`（已支持 socketpair / TCP / UDP 接收队列）
 - [x] TCP 完整状态机
 - [x] TCP 重传
 - [x] TCP 拥塞控制
