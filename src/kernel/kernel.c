@@ -13,6 +13,7 @@
 #include "../fs/ramfs.h"
 #include "../fs/tmpfs.h"
 #include "../net/net.h"
+#include "../net/dhcp.h"
 #include "../net/discovery.h"
 #include "../net/sync.h"
 #include "../net/bus.h"
@@ -585,10 +586,11 @@ void kernel_main(void) {
 
     /* 初始化最�?TCP/IP 网络�?*/
     net_init();
+    dhcp_init();
     virtio_net_init();
     e1000_init();
     rtl8139_init();
-    serial_write("[OK] NET + virtio-net + e1000 + rtl8139\n");
+    serial_write("[OK] NET + DHCP + virtio-net + e1000 + rtl8139\n");
 
     /* 初始化跨端设备发现协�?*/
     discovery_init();

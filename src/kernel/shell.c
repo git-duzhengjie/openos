@@ -15,6 +15,7 @@
 #include "../fs/ramfs.h"
 #include "../fs/tmpfs.h"
 #include "../net/net.h"
+#include "../net/dhcp.h"
 #include "../net/discovery.h"
 #include "../net/sync.h"
 #include "../net/bus.h"
@@ -2549,6 +2550,7 @@ static void cmd_help(void)
     print("  shutdown        - Power off via ACPI S5 when available\n");
     print("  reboot          - Reboot via keyboard controller reset\n");
     print("  netinfo         - Show network stack information\n");
+    print("  dhcp [start|info] - Configure default network device via DHCP\n");
     print("  discovery [scan|peers|announce|bye|name <n>|caps <c>|auth|auth_secret <s>|auth_peer <id>]\n");
     print("  sync [info|items|tasks|reliable|put|del|push|push_all|offer|accept|done] - Cross-device sync/tasks\n");
     print("  bus [info|stats|subs|pub <topic> <payload>|pub_local <topic> <payload>|sub <topic>] - Message bus\n");
@@ -3056,6 +3058,24 @@ void shell_run(void)
                 else if (shell_cmd_equals(cmd, "netinfo"))
                 {
                     net_print_info();
+                }
+                else if (shell_cmd_equals(cmd, "dhcp"))
+                {
+                    if (argc < 2 || strcmp(argv[1], "info") == 0)
+                    {
+                        dhcp_print_info();
+                    }
+                    else if (strcmp(argv[1], "start") == 0)
+                    {
+                        if (dhcp_start() < 0)
+                            print_err("dhcp: start failed\n");
+                        else
+                            print("dhcp: discover sent\n");
+                    }
+                    else
+                    {
+                        print_err("usage: dhcp [start|info]\n");
+                    }
                 }
                 else if (shell_cmd_equals(cmd, "discovery"))
                 {

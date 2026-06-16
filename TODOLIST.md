@@ -215,7 +215,7 @@
 ### 13. 网络协议栈
 
 - [√] 真实网卡接入协议栈
-- [ ] DHCP
+- [√] DHCP
 - [ ] DNS
 - [ ] socket syscall
 - [ ] `bind`
