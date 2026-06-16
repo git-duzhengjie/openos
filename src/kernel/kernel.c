@@ -24,6 +24,7 @@
 #include "chardev.h"
 #include "blockdev.h"
 #include "pci.h"
+#include "acpi.h"
 #include "vga.h"
 #include "framebuffer.h"
 #include "gui.h"
@@ -536,6 +537,10 @@ void kernel_main(void) {
     chardev_init();
     chardev_register_builtin_devices();
     serial_write("[OK] CHARDEV + /dev\n");
+
+    /* 扫描 ACPI 表 */
+    acpi_init();
+    serial_write("[OK] ACPI\n");
 
     /* 扫描 PCI 总线 */
     pci_scan_all();

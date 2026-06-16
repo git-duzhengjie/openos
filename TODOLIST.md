@@ -184,7 +184,7 @@
 ### 9. 总线与基础硬件
 
 - [x] PCI 总线扫描
-- [ ] ACPI
+- [x] ACPI
 - [ ] APIC / IOAPIC
 - [ ] RTC 时钟
 - [ ] 电源管理
