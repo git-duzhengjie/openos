@@ -38,6 +38,18 @@ typedef void (*tcp_recv_func_t)(uint32_t src_ip, uint16_t src_port,
                                 uint16_t dst_port, const uint8_t *data,
                                 uint16_t len);
 
+#define NET_TCP_STATE_CLOSED       0u
+#define NET_TCP_STATE_LISTEN       1u
+#define NET_TCP_STATE_SYN_SENT     2u
+#define NET_TCP_STATE_SYN_RECEIVED 3u
+#define NET_TCP_STATE_ESTABLISHED  4u
+#define NET_TCP_STATE_FIN_WAIT_1   5u
+#define NET_TCP_STATE_FIN_WAIT_2   6u
+#define NET_TCP_STATE_CLOSE_WAIT   7u
+#define NET_TCP_STATE_CLOSING      8u
+#define NET_TCP_STATE_LAST_ACK     9u
+#define NET_TCP_STATE_TIME_WAIT    10u
+
 void net_init(void);
 int net_register_device(net_device_t *dev);
 net_device_t *net_get_default_device(void);
@@ -50,6 +62,12 @@ int net_send_udp_broadcast(uint16_t src_port, uint16_t dst_port,
                            const uint8_t *data, uint16_t len);
 int net_udp_bind(uint16_t port, udp_recv_func_t cb);
 int net_tcp_listen(uint16_t port, tcp_recv_func_t cb);
+int net_tcp_open(uint32_t local_ip, uint16_t local_port,
+                 uint32_t remote_ip, uint16_t remote_port, int active);
+int net_tcp_send(int conn_id, const uint8_t *data, uint16_t len);
+int net_tcp_recv(int conn_id, uint8_t *data, uint16_t len);
+int net_tcp_close(int conn_id);
+int net_tcp_state(int conn_id);
 int net_tcp_send_syn(uint32_t dst_ip, uint16_t src_port, uint16_t dst_port);
 int net_ping_self(void);
 void net_print_info(void);

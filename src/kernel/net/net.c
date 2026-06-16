@@ -28,12 +28,20 @@
 #define ARP_CACHE_SIZE 8
 #define UDP_BIND_SIZE 8
 #define TCP_LISTEN_SIZE 8
+#define TCP_CONN_SIZE 16
+#define TCP_RECV_BUFFER_SIZE 2048
 
-#define TCP_STATE_CLOSED      0
-#define TCP_STATE_LISTEN      1
-#define TCP_STATE_SYN_SENT    2
-#define TCP_STATE_SYN_RCVD    3
-#define TCP_STATE_ESTABLISHED 4
+#define TCP_STATE_CLOSED      NET_TCP_STATE_CLOSED
+#define TCP_STATE_LISTEN      NET_TCP_STATE_LISTEN
+#define TCP_STATE_SYN_SENT    NET_TCP_STATE_SYN_SENT
+#define TCP_STATE_SYN_RCVD    NET_TCP_STATE_SYN_RECEIVED
+#define TCP_STATE_ESTABLISHED NET_TCP_STATE_ESTABLISHED
+#define TCP_STATE_FIN_WAIT_1  NET_TCP_STATE_FIN_WAIT_1
+#define TCP_STATE_FIN_WAIT_2  NET_TCP_STATE_FIN_WAIT_2
+#define TCP_STATE_CLOSE_WAIT  NET_TCP_STATE_CLOSE_WAIT
+#define TCP_STATE_CLOSING     NET_TCP_STATE_CLOSING
+#define TCP_STATE_LAST_ACK    NET_TCP_STATE_LAST_ACK
+#define TCP_STATE_TIME_WAIT   NET_TCP_STATE_TIME_WAIT
 
 struct eth_header {
     uint8_t dst[NET_ETH_ADDR_LEN];
@@ -111,10 +119,26 @@ struct tcp_listener {
     tcp_recv_func_t cb;
 };
 
+struct tcp_connection {
+    int used;
+    int id;
+    uint8_t state;
+    uint32_t local_ip;
+    uint16_t local_port;
+    uint32_t remote_ip;
+    uint16_t remote_port;
+    uint32_t snd_nxt;
+    uint32_t rcv_nxt;
+    uint8_t rx[TCP_RECV_BUFFER_SIZE];
+    uint16_t rx_len;
+};
+
 static net_device_t *default_dev;
 static struct arp_entry arp_cache[ARP_CACHE_SIZE];
 static struct udp_binding udp_bindings[UDP_BIND_SIZE];
 static struct tcp_listener tcp_listeners[TCP_LISTEN_SIZE];
+static struct tcp_connection tcp_connections[TCP_CONN_SIZE];
+static int tcp_next_id = 1;
 static uint16_t ipv4_ident = 1;
 
 static uint16_t bswap16(uint16_t x) {
@@ -445,17 +469,148 @@ static int tcp_send_segment(uint32_t dst_ip, uint16_t src_port, uint16_t dst_por
     return net_send_ipv4(dst_ip, IP_PROTO_TCP, payload, tcp_len);
 }
 
+static struct tcp_connection *tcp_find_conn(int id) {
+    int i;
+    for (i = 0; i < TCP_CONN_SIZE; i++) {
+        if (tcp_connections[i].used && tcp_connections[i].id == id) return &tcp_connections[i];
+    }
+    return 0;
+}
+
+static struct tcp_connection *tcp_match_conn(uint32_t local_ip, uint16_t local_port,
+                                             uint32_t remote_ip, uint16_t remote_port) {
+    int i;
+    for (i = 0; i < TCP_CONN_SIZE; i++) {
+        struct tcp_connection *c = &tcp_connections[i];
+        if (c->used && c->local_port == local_port && c->remote_port == remote_port &&
+            c->remote_ip == remote_ip && (c->local_ip == 0 || c->local_ip == local_ip)) {
+            return c;
+        }
+    }
+    return 0;
+}
+
+static struct tcp_connection *tcp_alloc_conn(void) {
+    int i;
+    for (i = 0; i < TCP_CONN_SIZE; i++) {
+        if (!tcp_connections[i].used) {
+            memset(&tcp_connections[i], 0, sizeof(tcp_connections[i]));
+            tcp_connections[i].used = 1;
+            tcp_connections[i].id = tcp_next_id++;
+            if (tcp_next_id <= 0) tcp_next_id = 1;
+            return &tcp_connections[i];
+        }
+    }
+    return 0;
+}
+
+static uint32_t tcp_state_consume(uint8_t flags, uint16_t data_len) {
+    uint32_t consume = data_len;
+    if (flags & TCP_FLAG_SYN) consume++;
+    if (flags & TCP_FLAG_FIN) consume++;
+    return consume;
+}
+
+static void tcp_buffer_data(struct tcp_connection *c, const uint8_t *data, uint16_t len) {
+    uint16_t room;
+    if (!c || !data || !len) return;
+    room = (uint16_t)(TCP_RECV_BUFFER_SIZE - c->rx_len);
+    if (len > room) len = room;
+    if (!len) return;
+    memcpy(c->rx + c->rx_len, data, len);
+    c->rx_len = (uint16_t)(c->rx_len + len);
+}
+
+static int tcp_send_for_conn(struct tcp_connection *c, uint8_t flags,
+                             const uint8_t *data, uint16_t len) {
+    int ret;
+    if (!c) return -1;
+    ret = tcp_send_segment(c->remote_ip, c->local_port, c->remote_port,
+                           c->snd_nxt, c->rcv_nxt, flags, data, len);
+    if (ret == 0) c->snd_nxt += tcp_state_consume(flags, len);
+    return ret;
+}
+
+int net_tcp_open(uint32_t local_ip, uint16_t local_port,
+                 uint32_t remote_ip, uint16_t remote_port, int active) {
+    struct tcp_connection *c = tcp_alloc_conn();
+    if (!c || !local_port) return -1;
+    c->local_ip = local_ip ? local_ip : (default_dev ? default_dev->ip : 0);
+    c->local_port = local_port;
+    c->remote_ip = remote_ip;
+    c->remote_port = remote_port;
+    c->snd_nxt = 1;
+    c->rcv_nxt = 0;
+    c->state = active ? TCP_STATE_SYN_SENT : TCP_STATE_LISTEN;
+    if (active) {
+        if (!remote_ip || !remote_port || tcp_send_for_conn(c, TCP_FLAG_SYN, 0, 0) != 0) {
+            c->used = 0;
+            return -1;
+        }
+    }
+    return c->id;
+}
+
+int net_tcp_send(int conn_id, const uint8_t *data, uint16_t len) {
+    struct tcp_connection *c = tcp_find_conn(conn_id);
+    if (!c || c->state != TCP_STATE_ESTABLISHED || (!data && len)) return -1;
+    return tcp_send_for_conn(c, TCP_FLAG_ACK | (len ? TCP_FLAG_PSH : 0), data, len);
+}
+
+int net_tcp_recv(int conn_id, uint8_t *data, uint16_t len) {
+    struct tcp_connection *c = tcp_find_conn(conn_id);
+    uint16_t n;
+    if (!c || !data || !len) return -1;
+    n = c->rx_len;
+    if (n > len) n = len;
+    if (!n) return 0;
+    memcpy(data, c->rx, n);
+    if (n < c->rx_len) memmove(c->rx, c->rx + n, (uint16_t)(c->rx_len - n));
+    c->rx_len = (uint16_t)(c->rx_len - n);
+    return n;
+}
+
+int net_tcp_close(int conn_id) {
+    struct tcp_connection *c = tcp_find_conn(conn_id);
+    if (!c) return -1;
+    if (c->state == TCP_STATE_ESTABLISHED) {
+        if (tcp_send_for_conn(c, TCP_FLAG_FIN | TCP_FLAG_ACK, 0, 0) != 0) return -1;
+        c->state = TCP_STATE_FIN_WAIT_1;
+        return 0;
+    }
+    if (c->state == TCP_STATE_CLOSE_WAIT) {
+        if (tcp_send_for_conn(c, TCP_FLAG_FIN | TCP_FLAG_ACK, 0, 0) != 0) return -1;
+        c->state = TCP_STATE_LAST_ACK;
+        return 0;
+    }
+    c->state = TCP_STATE_CLOSED;
+    c->used = 0;
+    return 0;
+}
+
+int net_tcp_state(int conn_id) {
+    struct tcp_connection *c = tcp_find_conn(conn_id);
+    return c ? c->state : -1;
+}
+
 int net_tcp_send_syn(uint32_t dst_ip, uint16_t src_port, uint16_t dst_port) {
     return tcp_send_segment(dst_ip, src_port, dst_port, 1, 0, TCP_FLAG_SYN, 0, 0);
 }
 
+static void tcp_send_rst(uint32_t dst_ip, uint16_t src_port, uint16_t dst_port, uint32_t ack) {
+    tcp_send_segment(dst_ip, src_port, dst_port, 0, ack, TCP_FLAG_RST | TCP_FLAG_ACK, 0, 0);
+}
+
 static void handle_tcp(uint32_t src_ip, const uint8_t *payload, uint16_t len) {
     const struct tcp_header *tcp;
+    struct tcp_connection *c;
     uint16_t src_port;
     uint16_t dst_port;
     uint32_t seq;
+    uint32_t ack;
     uint8_t header_len;
     uint16_t data_len;
+    uint32_t consume;
     int i;
     if (len < sizeof(struct tcp_header)) return;
     tcp = (const struct tcp_header *)payload;
@@ -464,23 +619,108 @@ static void handle_tcp(uint32_t src_ip, const uint8_t *payload, uint16_t len) {
     src_port = ntohs(tcp->src_port);
     dst_port = ntohs(tcp->dst_port);
     seq = ntohl(tcp->seq);
+    ack = ntohl(tcp->ack);
     data_len = (uint16_t)(len - header_len);
+    consume = tcp_state_consume(tcp->flags, data_len);
 
-    for (i = 0; i < TCP_LISTEN_SIZE; i++) {
-        if (tcp_listeners[i].used && tcp_listeners[i].port == dst_port) {
-            if (tcp->flags & TCP_FLAG_SYN) {
+    c = tcp_match_conn(default_dev ? default_dev->ip : 0, dst_port, src_ip, src_port);
+    if (c && (tcp->flags & TCP_FLAG_RST)) {
+        c->state = TCP_STATE_CLOSED;
+        c->used = 0;
+        return;
+    }
+
+    if (!c && (tcp->flags & TCP_FLAG_SYN)) {
+        for (i = 0; i < TCP_CONN_SIZE; i++) {
+            if (tcp_connections[i].used && tcp_connections[i].state == TCP_STATE_LISTEN &&
+                tcp_connections[i].local_port == dst_port) {
+                c = &tcp_connections[i];
+                c->local_ip = default_dev ? default_dev->ip : c->local_ip;
+                c->remote_ip = src_ip;
+                c->remote_port = src_port;
+                c->snd_nxt = 100;
+                c->rcv_nxt = seq + 1;
+                if (tcp_send_for_conn(c, TCP_FLAG_SYN | TCP_FLAG_ACK, 0, 0) == 0) {
+                    c->state = TCP_STATE_SYN_RCVD;
+                }
+                return;
+            }
+        }
+        for (i = 0; i < TCP_LISTEN_SIZE; i++) {
+            if (tcp_listeners[i].used && tcp_listeners[i].port == dst_port) {
                 tcp_send_segment(src_ip, dst_port, src_port, 100, seq + 1,
                                  TCP_FLAG_SYN | TCP_FLAG_ACK, 0, 0);
                 return;
             }
-            if (data_len && tcp_listeners[i].cb) {
-                tcp_listeners[i].cb(src_ip, src_port, dst_port,
-                                    payload + header_len, data_len);
-                tcp_send_segment(src_ip, dst_port, src_port, 101, seq + data_len,
-                                 TCP_FLAG_ACK, 0, 0);
+        }
+    }
+
+    if (!c) {
+        for (i = 0; i < TCP_LISTEN_SIZE; i++) {
+            if (tcp_listeners[i].used && tcp_listeners[i].port == dst_port) {
+                if (data_len && tcp_listeners[i].cb) {
+                    tcp_listeners[i].cb(src_ip, src_port, dst_port,
+                                        payload + header_len, data_len);
+                    tcp_send_segment(src_ip, dst_port, src_port, 101, seq + data_len,
+                                     TCP_FLAG_ACK, 0, 0);
+                }
                 return;
             }
         }
+        if (!(tcp->flags & TCP_FLAG_RST)) tcp_send_rst(src_ip, dst_port, src_port, seq + consume);
+        return;
+    }
+
+    if (consume) c->rcv_nxt = seq + consume;
+
+    switch (c->state) {
+    case TCP_STATE_SYN_SENT:
+        if ((tcp->flags & (TCP_FLAG_SYN | TCP_FLAG_ACK)) == (TCP_FLAG_SYN | TCP_FLAG_ACK) && ack == c->snd_nxt) {
+            c->rcv_nxt = seq + 1;
+            tcp_send_for_conn(c, TCP_FLAG_ACK, 0, 0);
+            c->state = TCP_STATE_ESTABLISHED;
+        }
+        break;
+    case TCP_STATE_SYN_RCVD:
+        if ((tcp->flags & TCP_FLAG_ACK) && ack == c->snd_nxt) c->state = TCP_STATE_ESTABLISHED;
+        break;
+    case TCP_STATE_ESTABLISHED:
+        if (data_len) {
+            tcp_buffer_data(c, payload + header_len, data_len);
+            tcp_send_for_conn(c, TCP_FLAG_ACK, 0, 0);
+        }
+        if (tcp->flags & TCP_FLAG_FIN) {
+            tcp_send_for_conn(c, TCP_FLAG_ACK, 0, 0);
+            c->state = TCP_STATE_CLOSE_WAIT;
+        }
+        break;
+    case TCP_STATE_FIN_WAIT_1:
+        if ((tcp->flags & TCP_FLAG_ACK) && ack == c->snd_nxt) c->state = TCP_STATE_FIN_WAIT_2;
+        if (tcp->flags & TCP_FLAG_FIN) {
+            tcp_send_for_conn(c, TCP_FLAG_ACK, 0, 0);
+            c->state = (c->state == TCP_STATE_FIN_WAIT_2) ? TCP_STATE_TIME_WAIT : TCP_STATE_CLOSING;
+        }
+        break;
+    case TCP_STATE_FIN_WAIT_2:
+        if (tcp->flags & TCP_FLAG_FIN) {
+            tcp_send_for_conn(c, TCP_FLAG_ACK, 0, 0);
+            c->state = TCP_STATE_TIME_WAIT;
+        }
+        break;
+    case TCP_STATE_CLOSING:
+        if ((tcp->flags & TCP_FLAG_ACK) && ack == c->snd_nxt) c->state = TCP_STATE_TIME_WAIT;
+        break;
+    case TCP_STATE_LAST_ACK:
+        if ((tcp->flags & TCP_FLAG_ACK) && ack == c->snd_nxt) {
+            c->state = TCP_STATE_CLOSED;
+            c->used = 0;
+        }
+        break;
+    case TCP_STATE_TIME_WAIT:
+        if (tcp->flags & TCP_FLAG_FIN) tcp_send_for_conn(c, TCP_FLAG_ACK, 0, 0);
+        break;
+    default:
+        break;
     }
 }
 
@@ -638,6 +878,8 @@ void net_init(void) {
     memset(arp_cache, 0, sizeof(arp_cache));
     memset(udp_bindings, 0, sizeof(udp_bindings));
     memset(tcp_listeners, 0, sizeof(tcp_listeners));
+    memset(tcp_connections, 0, sizeof(tcp_connections));
+    tcp_next_id = 1;
     memset(&loopdev, 0, sizeof(loopdev));
     strcpy(loopdev.name, "loopnet0");
     loopdev.mac[0] = 0x02;

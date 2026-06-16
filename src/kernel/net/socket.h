@@ -44,6 +44,7 @@ typedef struct openos_socket_info {
     uint16_t local_port;
     uint32_t remote_ip;
     uint16_t remote_port;
+    int tcp_conn_id;
     int listen_backlog;
 } openos_socket_info_t;
 

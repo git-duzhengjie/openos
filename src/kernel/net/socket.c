@@ -163,6 +163,10 @@ static void socket_release_bind(uint32_t socket_id) {
 static int socket_close(file_t *f) {
     socket_file_t *sock = socket_from_file(f);
     if (sock) {
+        if (sock->info.tcp_conn_id >= 0) {
+            net_tcp_close(sock->info.tcp_conn_id);
+            sock->info.tcp_conn_id = -1;
+        }
         socket_release_bind(sock->info.id);
         sock->info.state = OPENOS_SOCKET_STATE_CLOSED;
         sock->magic = 0;
@@ -194,11 +198,19 @@ static int socket_dequeue(socket_file_t *sock, uint8_t *buf, uint32_t count) {
 
 static int socket_read(file_t *f, void *buf, uint32_t count) {
     socket_file_t *sock = socket_from_file(f);
+    if (sock && socket_type_base(sock->info.type) == OPENOS_SOCK_STREAM) {
+        if (sock->info.tcp_conn_id < 0) return -1;
+        return net_tcp_recv(sock->info.tcp_conn_id, (uint8_t *)buf, (uint16_t)count);
+    }
     return socket_dequeue(sock, (uint8_t *)buf, count);
 }
 
 static int socket_write(file_t *f, const void *buf, uint32_t count) {
-    (void)f;
+    socket_file_t *sock = socket_from_file(f);
+    if (sock && socket_type_base(sock->info.type) == OPENOS_SOCK_STREAM) {
+        if (sock->info.tcp_conn_id < 0 || !buf || count > NET_ETH_MTU) return -1;
+        return net_tcp_send(sock->info.tcp_conn_id, (const uint8_t *)buf, (uint16_t)count) == 0 ? (int)count : -1;
+    }
     (void)buf;
     (void)count;
     return -1;
@@ -217,11 +229,17 @@ static int socket_poll(file_t *f, uint32_t events) {
     if (!sock || sock->info.state == OPENOS_SOCKET_STATE_CLOSED) {
         return VFS_POLLERR | VFS_POLLHUP;
     }
-    if ((events & VFS_POLLIN) && sock->recv_count > 0) {
-        ready |= VFS_POLLIN;
-    }
-    if (events & VFS_POLLOUT) {
-        ready |= VFS_POLLOUT;
+    if (socket_type_base(sock->info.type) == OPENOS_SOCK_STREAM) {
+        int state = sock->info.tcp_conn_id >= 0 ? net_tcp_state(sock->info.tcp_conn_id) : -1;
+        if (state == NET_TCP_STATE_CLOSED || state < 0) ready |= VFS_POLLHUP;
+        if ((events & VFS_POLLOUT) && state == NET_TCP_STATE_ESTABLISHED) ready |= VFS_POLLOUT;
+    } else {
+        if ((events & VFS_POLLIN) && sock->recv_count > 0) {
+            ready |= VFS_POLLIN;
+        }
+        if (events & VFS_POLLOUT) {
+            ready |= VFS_POLLOUT;
+        }
     }
     return (int)ready;
 }
@@ -273,6 +291,7 @@ int socket_create_fd(int domain, int type, int protocol) {
     sock->info.local_port = 0;
     sock->info.remote_ip = OPENOS_INADDR_ANY;
     sock->info.remote_port = 0;
+    sock->info.tcp_conn_id = -1;
     sock->info.listen_backlog = 0;
 
     file->flags = O_RDWR;
@@ -311,6 +330,10 @@ int socket_listen_fd(int fd, int backlog) {
     }
     if (backlog > 32) {
         backlog = 32;
+    }
+    sock->info.tcp_conn_id = net_tcp_open(sock->info.local_ip, sock->info.local_port, 0, 0, 0);
+    if (sock->info.tcp_conn_id < 0) {
+        return -1;
     }
     sock->info.listen_backlog = backlog;
     sock->info.state = OPENOS_SOCKET_STATE_LISTENING;
@@ -383,6 +406,13 @@ int socket_connect_fd(int fd, const openos_sockaddr_t *addr, uint32_t addrlen) {
 
     sock->info.remote_ip = ip;
     sock->info.remote_port = port;
+    if (base_type == OPENOS_SOCK_STREAM) {
+        sock->info.tcp_conn_id = net_tcp_open(sock->info.local_ip, sock->info.local_port,
+                                             ip, port, 1);
+        if (sock->info.tcp_conn_id < 0) {
+            return -1;
+        }
+    }
     sock->info.state = OPENOS_SOCKET_STATE_CONNECTED;
     return 0;
 }
@@ -394,7 +424,16 @@ int socket_recv_fd(int fd, uint8_t *data, uint32_t len, int flags) {
     (void)flags;
     file = vfs_get_file(fd);
     sock = socket_from_file(file);
-    if (!sock || socket_type_base(sock->info.type) != OPENOS_SOCK_DGRAM) {
+    if (!sock) {
+        return -1;
+    }
+    if (socket_type_base(sock->info.type) == OPENOS_SOCK_STREAM) {
+        if (sock->info.tcp_conn_id < 0) {
+            return -1;
+        }
+        return net_tcp_recv(sock->info.tcp_conn_id, data, (uint16_t)len);
+    }
+    if (socket_type_base(sock->info.type) != OPENOS_SOCK_DGRAM) {
         return -1;
     }
     return socket_dequeue(sock, data, len);
@@ -413,6 +452,12 @@ int socket_send_fd(int fd, const uint8_t *data, uint32_t len, int flags) {
     sock = socket_from_file(file);
     if (!sock || sock->info.state != OPENOS_SOCKET_STATE_CONNECTED) {
         return -1;
+    }
+    if (socket_type_base(sock->info.type) == OPENOS_SOCK_STREAM) {
+        if (sock->info.tcp_conn_id < 0 || net_tcp_send(sock->info.tcp_conn_id, data, (uint16_t)len) < 0) {
+            return -1;
+        }
+        return (int)len;
     }
     if (socket_type_base(sock->info.type) != OPENOS_SOCK_DGRAM) {
         return -1;

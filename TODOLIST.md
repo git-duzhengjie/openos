@@ -224,7 +224,7 @@
 - [x] `connect`
 - [x] `send`
 - [x] `recv`
-- [ ] TCP 完整状态机
+- [x] TCP 完整状态机
 - [ ] TCP 重传
 - [ ] TCP 拥塞控制
 - [ ] TCP 窗口管理
