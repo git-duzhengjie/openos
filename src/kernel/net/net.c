@@ -274,16 +274,22 @@ int net_send_ipv4(uint32_t dst_ip, uint8_t protocol, const uint8_t *payload, uin
     struct ipv4_header *ip;
     uint8_t dst_mac[NET_ETH_ADDR_LEN];
     uint16_t total_len;
+    uint32_t next_hop;
 
     if (!default_dev || payload_len + sizeof(struct ipv4_header) > NET_ETH_MTU) return -1;
+    next_hop = dst_ip;
+    if (dst_ip != NET_IPV4_BROADCAST && default_dev->gateway != 0 &&
+        ((dst_ip ^ default_dev->ip) & default_dev->netmask) != 0) {
+        next_hop = default_dev->gateway;
+    }
     if (dst_ip == NET_IPV4_BROADCAST) {
         memset(dst_mac, 0xff, sizeof(dst_mac));
-    } else if (arp_lookup(dst_ip, dst_mac) != 0) {
-        if (dst_ip == default_dev->ip) {
+    } else if (arp_lookup(next_hop, dst_mac) != 0) {
+        if (next_hop == default_dev->ip) {
             copy_mac(dst_mac, default_dev->mac);
-            arp_insert(dst_ip, dst_mac);
+            arp_insert(next_hop, dst_mac);
         } else {
-            arp_send_request(dst_ip);
+            arp_send_request(next_hop);
             return -1;
         }
     }
@@ -554,6 +560,31 @@ void net_format_ipv4(uint32_t ip, char *out) {
         if (i != 3) out[pos++] = '.';
     }
     out[pos] = '\0';
+}
+
+int net_parse_ipv4(const char *text, uint32_t *out) {
+    uint32_t parts[4];
+    uint32_t part = 0;
+    uint32_t count = 0;
+    uint32_t i = 0;
+    if (!text || !out) return -1;
+    while (1) {
+        char c = text[i++];
+        if (c >= '0' && c <= '9') {
+            part = part * 10U + (uint32_t)(c - '0');
+            if (part > 255U) return -1;
+        } else if (c == '.' || c == '\0') {
+            if (count >= 4U) return -1;
+            parts[count++] = part;
+            part = 0;
+            if (c == '\0') break;
+        } else {
+            return -1;
+        }
+    }
+    if (count != 4U) return -1;
+    *out = NET_IP4(parts[0], parts[1], parts[2], parts[3]);
+    return 0;
 }
 
 void net_print_info(void) {

@@ -16,6 +16,7 @@
 #include "../fs/tmpfs.h"
 #include "../net/net.h"
 #include "../net/dhcp.h"
+#include "../net/dns.h"
 #include "../net/discovery.h"
 #include "../net/sync.h"
 #include "../net/bus.h"
@@ -2551,6 +2552,7 @@ static void cmd_help(void)
     print("  reboot          - Reboot via keyboard controller reset\n");
     print("  netinfo         - Show network stack information\n");
     print("  dhcp [start|info] - Configure default network device via DHCP\n");
+    print("  dns <name>|info|server <ip> - Query/configure DNS resolver\n");
     print("  discovery [scan|peers|announce|bye|name <n>|caps <c>|auth|auth_secret <s>|auth_peer <id>]\n");
     print("  sync [info|items|tasks|reliable|put|del|push|push_all|offer|accept|done] - Cross-device sync/tasks\n");
     print("  bus [info|stats|subs|pub <topic> <payload>|pub_local <topic> <payload>|sub <topic>] - Message bus\n");
@@ -3075,6 +3077,36 @@ void shell_run(void)
                     else
                     {
                         print_err("usage: dhcp [start|info]\n");
+                    }
+                }
+                else if (shell_cmd_equals(cmd, "dns"))
+                {
+                    if (argc < 2 || strcmp(argv[1], "info") == 0)
+                    {
+                        dns_print_info();
+                    }
+                    else if (strcmp(argv[1], "server") == 0)
+                    {
+                        if (argc < 3)
+                            print_err("usage: dns server <ip>\n");
+                        else
+                        {
+                            uint32_t server_ip;
+                            if (net_parse_ipv4(argv[2], &server_ip) < 0)
+                                print_err("dns: invalid server ip\n");
+                            else
+                            {
+                                dns_set_server(server_ip);
+                                print("dns: server updated\n");
+                            }
+                        }
+                    }
+                    else
+                    {
+                        if (dns_query_a(argv[1]) < 0)
+                            print_err("dns: query failed\n");
+                        else
+                            print("dns: query sent\n");
                     }
                 }
                 else if (shell_cmd_equals(cmd, "discovery"))

@@ -15,6 +15,7 @@
 #define DHCP_OPTION_PAD             0
 #define DHCP_OPTION_SUBNET_MASK     1
 #define DHCP_OPTION_ROUTER          3
+#define DHCP_OPTION_DNS_SERVER      6
 #define DHCP_OPTION_REQUESTED_IP    50
 #define DHCP_OPTION_LEASE_TIME      51
 #define DHCP_OPTION_MESSAGE_TYPE    53
@@ -57,6 +58,7 @@ typedef struct dhcp_client {
     uint32_t server_ip;
     uint32_t subnet_mask;
     uint32_t router;
+    uint32_t dns_server;
     uint32_t lease_time;
     uint32_t packets_rx;
     uint32_t packets_tx;
@@ -104,7 +106,7 @@ static void dhcp_put_u32_option(uint8_t *opts, uint16_t *pos, uint8_t code, uint
 static void dhcp_make_base_packet(dhcp_packet_t *pkt, uint8_t msg_type) {
     net_device_t *dev = net_get_default_device();
     uint16_t pos = 0;
-    uint8_t param_list[3] = { DHCP_OPTION_SUBNET_MASK, DHCP_OPTION_ROUTER, DHCP_OPTION_LEASE_TIME };
+    uint8_t param_list[4] = { DHCP_OPTION_SUBNET_MASK, DHCP_OPTION_ROUTER, DHCP_OPTION_DNS_SERVER, DHCP_OPTION_LEASE_TIME };
 
     memset(pkt, 0, sizeof(*pkt));
     pkt->op = DHCP_BOOTREQUEST;
@@ -137,7 +139,7 @@ static int dhcp_send_request(void) {
     dhcp_packet_t pkt;
     uint16_t pos = 0;
     uint8_t msg_type = DHCPREQUEST;
-    uint8_t param_list[3] = { DHCP_OPTION_SUBNET_MASK, DHCP_OPTION_ROUTER, DHCP_OPTION_LEASE_TIME };
+    uint8_t param_list[4] = { DHCP_OPTION_SUBNET_MASK, DHCP_OPTION_ROUTER, DHCP_OPTION_DNS_SERVER, DHCP_OPTION_LEASE_TIME };
 
     dhcp_make_base_packet(&pkt, DHCPREQUEST);
     memset(pkt.options, 0, sizeof(pkt.options));
@@ -179,6 +181,8 @@ static int dhcp_parse_options(const dhcp_packet_t *pkt, uint16_t len, uint8_t *m
             dhcp.subnet_mask = dhcp_ntohl(*(const uint32_t *)(pkt->options + i));
         } else if (code == DHCP_OPTION_ROUTER && opt_len >= 4) {
             dhcp.router = dhcp_ntohl(*(const uint32_t *)(pkt->options + i));
+        } else if (code == DHCP_OPTION_DNS_SERVER && opt_len >= 4) {
+            dhcp.dns_server = dhcp_ntohl(*(const uint32_t *)(pkt->options + i));
         } else if (code == DHCP_OPTION_LEASE_TIME && opt_len == 4) {
             dhcp.lease_time = dhcp_ntohl(*(const uint32_t *)(pkt->options + i));
         }
@@ -244,6 +248,7 @@ int dhcp_start(void) {
     dhcp.server_ip = 0;
     dhcp.subnet_mask = 0;
     dhcp.router = 0;
+    dhcp.dns_server = 0;
     dhcp.lease_time = 0;
     dev->ip = 0;
     dev->netmask = 0;
@@ -253,6 +258,10 @@ int dhcp_start(void) {
 
 dhcp_state_t dhcp_get_state(void) {
     return dhcp.state;
+}
+
+uint32_t dhcp_get_dns_server(void) {
+    return dhcp.dns_server;
 }
 
 void dhcp_print_info(void) {
@@ -268,5 +277,7 @@ void dhcp_print_info(void) {
     dhcp_print_ip(dhcp.server_ip);
     vga_write("\nrouter: ");
     dhcp_print_ip(dhcp.router);
+    vga_write("\ndns: ");
+    dhcp_print_ip(dhcp.dns_server);
     vga_write("\n");
 }

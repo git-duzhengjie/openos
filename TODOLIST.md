@@ -216,7 +216,7 @@
 
 - [√] 真实网卡接入协议栈
 - [√] DHCP
-- [ ] DNS
+- [√] DNS
 - [ ] socket syscall
 - [ ] `bind`
 - [ ] `listen`

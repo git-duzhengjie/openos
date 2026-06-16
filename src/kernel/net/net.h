@@ -54,5 +54,6 @@ int net_tcp_send_syn(uint32_t dst_ip, uint16_t src_port, uint16_t dst_port);
 int net_ping_self(void);
 void net_print_info(void);
 void net_format_ipv4(uint32_t ip, char *out);
+int net_parse_ipv4(const char *text, uint32_t *out);
 
 #endif /* OPENOS_NET_H */
