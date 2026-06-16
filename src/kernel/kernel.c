@@ -26,6 +26,7 @@
 #include "pci.h"
 #include "ata.h"
 #include "ahci.h"
+#include "virtio_blk.h"
 #include "acpi.h"
 #include "apic.h"
 #include "rtc.h"
@@ -568,7 +569,8 @@ void kernel_main(void) {
     blockdev_register_builtin_devices();
     ata_init();
     ahci_init();
-    serial_write("[OK] BLOCKDEV + ram0 + ATA + AHCI\n");
+    virtio_blk_init();
+    serial_write("[OK] BLOCKDEV + ram0 + ATA + AHCI + virtio-blk\n");
 
     /* 初始化最�?TCP/IP 网络�?*/
     net_init();

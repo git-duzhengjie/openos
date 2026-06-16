@@ -194,7 +194,7 @@
 
 - [x] IDE / ATA
 - [x] AHCI / SATA
-- [ ] virtio-blk
+- [x] virtio-blk
 
 ### 11. 网络驱动
 
