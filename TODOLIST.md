@@ -192,7 +192,7 @@
 
 ### 10. 存储驱动
 
-- [x] IDE / ATA
+- [√] IDE / ATA（已实现 legacy PIO identify/read/write、/dev 节点注册并接入启动）
 - [x] AHCI / SATA
 - [x] virtio-blk
 
