@@ -92,6 +92,11 @@ uint32_t alloc_user_stack(void)
     return alloc_user_stack_slot(0);
 }
 
+uint32_t alloc_user_stack_randomized(uint32_t slot)
+{
+    return alloc_user_stack_slot(slot);
+}
+
 void free_user_stack_slot(uint32_t slot)
 {
     uint32_t span = USER_STACK_GUARD_SIZE + USER_STACK_SIZE;

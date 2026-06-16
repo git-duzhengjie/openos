@@ -26,6 +26,7 @@ void tss_set_kernel_stack(uint32_t esp0);
 /* 分配/释放用户栈 */
 uint32_t alloc_user_stack(void);
 uint32_t alloc_user_stack_slot(uint32_t slot);
+uint32_t alloc_user_stack_randomized(uint32_t slot);
 void free_user_stack_slot(uint32_t slot);
 
 /* 测试用户态切换 */

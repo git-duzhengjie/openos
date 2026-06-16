@@ -10,6 +10,7 @@
 #include "../include/input_buffer.h"
 #include "../include/usermem.h"
 #include "../include/vmm.h"
+#include "../include/aslr.h"
 #include "../proc/process.h"
 #include "../fs/vfs.h"
 #include "../include/string.h"
@@ -987,8 +988,8 @@ static void syscall_fill_user_stat(openos_stat_t *user_st, const inode_t *st)
     user_st->gid = st->gid;
 }
 
-#define SYS_MMAP_BASE  0x50000000u
-#define SYS_MMAP_LIMIT 0x70000000u
+#define SYS_MMAP_BASE  ASLR_MMAP_BASE_MIN
+#define SYS_MMAP_LIMIT ASLR_MMAP_LIMIT
 #define SYS_MMAP_MAX_REQUEST (16u * 1024u * 1024u)
 
 static uint32_t page_align_up_u32(uint32_t value)
@@ -1038,8 +1039,8 @@ static uint32_t syscall_shm_map(uint32_t handle)
         return (uint32_t)-1;
 
     if (proc->mmap_base == 0 || proc->mmap_end < SYS_MMAP_BASE || proc->mmap_end >= SYS_MMAP_LIMIT) {
-        proc->mmap_base = SYS_MMAP_BASE;
-        proc->mmap_end = SYS_MMAP_BASE;
+        proc->mmap_base = aslr_pick_mmap_base(proc->pid);
+        proc->mmap_end = proc->mmap_base;
     }
 
     start = page_align_up_u32(proc->mmap_end);
@@ -1155,8 +1156,8 @@ static uint32_t sys_mmap_anonymous(uint32_t addr, uint32_t len, uint32_t flags)
         return (uint32_t)-1;
 
     if (proc->mmap_base == 0 || proc->mmap_end < SYS_MMAP_BASE || proc->mmap_end >= SYS_MMAP_LIMIT) {
-        proc->mmap_base = SYS_MMAP_BASE;
-        proc->mmap_end = SYS_MMAP_BASE;
+        proc->mmap_base = aslr_pick_mmap_base(proc->pid);
+        proc->mmap_end = proc->mmap_base;
     }
 
     start = page_align_up_u32(proc->mmap_end);

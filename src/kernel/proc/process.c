@@ -10,6 +10,7 @@
 #include "elf_loader.h"
 #include "vfs.h"
 #include "usermode.h"
+#include "aslr.h"
 
 #ifndef NULL
 #define NULL ((void*)0)
@@ -18,6 +19,7 @@
 /* 外部函数 (usermode.c) */
 extern uint32_t alloc_user_stack(void);
 extern uint32_t alloc_user_stack_slot(uint32_t slot);
+extern uint32_t alloc_user_stack_randomized(uint32_t slot);
 extern void switch_to_user_asm(uint32_t eip, uint32_t esp);
 
 /* ---- 进程表 ---- */
@@ -801,7 +803,7 @@ int sys_exec_env(const char *path, char *const argv[], char *const envp[]) {
         return -1;
     }
 
-    uint32_t stack_top = alloc_user_stack();
+    uint32_t stack_top = alloc_user_stack_randomized(aslr_pick_main_stack_slot(proc->pid));
     if (!stack_top) {
         serial_write("[EXEC] user stack allocation failed\n");
         vmm_load_cr3(old_cr3);
@@ -823,11 +825,13 @@ int sys_exec_env(const char *path, char *const argv[], char *const envp[]) {
     proc->cr3 = new_cr3;
     proc->owns_address_space = 1;
 
+    uint32_t randomized_brk = aslr_apply_heap_gap(load_result.brk_start, proc->pid);
     proc->code_addr = load_result.brk_start;  /* actually brk start */
-    proc->heap_start = load_result.brk_start;
-    proc->heap_end = load_result.brk_start;
-    proc->mmap_base = 0x50000000u;
+    proc->heap_start = randomized_brk;
+    proc->heap_end = randomized_brk;
+    proc->mmap_base = aslr_pick_mmap_base(proc->pid);
     proc->mmap_end = proc->mmap_base;
+    proc->next_user_stack_slot = aslr_pick_next_thread_stack_slot(proc->pid);
 
     int name_i = 0;
     for (; name_i < 31 && path[name_i]; name_i++)

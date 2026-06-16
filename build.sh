@@ -771,6 +771,11 @@ gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
     -I $SRC/include \
+    -c $SRC/aslr.c -o $BUILD/aslr.o
+
+gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
+    -I $SRC/include \
     -c $SRC/usermem.c -o $BUILD/usermem.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
@@ -908,6 +913,7 @@ ld -m elf_i386 -T $SRC/linker.ld \
     $BUILD/power.o \
     $BUILD/input_buffer.o \
     $BUILD/usermode.o \
+    $BUILD/aslr.o \
     $BUILD/usermem.o \
     $BUILD/process.o \
     $BUILD/elf_loader.o \
