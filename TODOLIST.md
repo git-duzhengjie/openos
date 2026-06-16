@@ -223,7 +223,7 @@
 - [x] `accept`
 - [x] `connect`
 - [x] `send`
-- [ ] `recv`
+- [x] `recv`
 - [ ] TCP 完整状态机
 - [ ] TCP 重传
 - [ ] TCP 拥塞控制

@@ -17,15 +17,29 @@
 #define SOCKET_MAX_BINDS 64
 #define SOCKET_EPHEMERAL_FIRST 49152u
 #define SOCKET_EPHEMERAL_LAST  65535u
+#define SOCKET_RECV_QUEUE_LEN 8
+#define SOCKET_RECV_PACKET_MAX (NET_ETH_MTU - 8u)
+
+typedef struct socket_packet {
+    uint8_t used;
+    uint32_t src_ip;
+    uint16_t src_port;
+    uint16_t len;
+    uint8_t data[SOCKET_RECV_PACKET_MAX];
+} socket_packet_t;
 
 typedef struct socket_file {
     uint32_t magic;
     openos_socket_info_t info;
+    socket_packet_t recv_queue[SOCKET_RECV_QUEUE_LEN];
+    uint32_t recv_head;
+    uint32_t recv_count;
 } socket_file_t;
 
 typedef struct socket_bind_slot {
     uint8_t used;
     uint32_t socket_id;
+    socket_file_t *sock;
     int domain;
     int type;
     uint32_t ip;
@@ -109,7 +123,7 @@ static int socket_reserve_port(socket_file_t *sock, uint32_t ip, uint16_t port) 
         uint32_t attempts = SOCKET_EPHEMERAL_LAST - SOCKET_EPHEMERAL_FIRST + 1u;
         while (attempts--) {
             uint16_t candidate = next_ephemeral_port++;
-            if (next_ephemeral_port == 0 || next_ephemeral_port > SOCKET_EPHEMERAL_LAST) {
+            if (next_ephemeral_port == 0) {
                 next_ephemeral_port = SOCKET_EPHEMERAL_FIRST;
             }
             if (!socket_port_conflicts(sock->info.domain, sock->info.type, ip, candidate)) {
@@ -126,6 +140,7 @@ static int socket_reserve_port(socket_file_t *sock, uint32_t ip, uint16_t port) 
 
     free_slot->used = 1;
     free_slot->socket_id = sock->info.id;
+    free_slot->sock = sock;
     free_slot->domain = sock->info.domain;
     free_slot->type = sock->info.type;
     free_slot->ip = ip;
@@ -155,11 +170,31 @@ static int socket_close(file_t *f) {
     return 0;
 }
 
+static int socket_dequeue(socket_file_t *sock, uint8_t *buf, uint32_t count) {
+    socket_packet_t *pkt;
+    uint32_t copy_len;
+    if (!sock || !buf || count == 0 || sock->recv_count == 0) {
+        return -1;
+    }
+    pkt = &sock->recv_queue[sock->recv_head];
+    if (!pkt->used) {
+        sock->recv_count = 0;
+        return -1;
+    }
+    copy_len = pkt->len;
+    if (copy_len > count) {
+        copy_len = count;
+    }
+    memcpy(buf, pkt->data, copy_len);
+    memset(pkt, 0, sizeof(*pkt));
+    sock->recv_head = (sock->recv_head + 1u) % SOCKET_RECV_QUEUE_LEN;
+    sock->recv_count--;
+    return (int)copy_len;
+}
+
 static int socket_read(file_t *f, void *buf, uint32_t count) {
-    (void)f;
-    (void)buf;
-    (void)count;
-    return -1;
+    socket_file_t *sock = socket_from_file(f);
+    return socket_dequeue(sock, (uint8_t *)buf, count);
 }
 
 static int socket_write(file_t *f, const void *buf, uint32_t count) {
@@ -181,6 +216,9 @@ static int socket_poll(file_t *f, uint32_t events) {
     uint32_t ready = 0;
     if (!sock || sock->info.state == OPENOS_SOCKET_STATE_CLOSED) {
         return VFS_POLLERR | VFS_POLLHUP;
+    }
+    if ((events & VFS_POLLIN) && sock->recv_count > 0) {
+        ready |= VFS_POLLIN;
     }
     if (events & VFS_POLLOUT) {
         ready |= VFS_POLLOUT;
@@ -349,6 +387,19 @@ int socket_connect_fd(int fd, const openos_sockaddr_t *addr, uint32_t addrlen) {
     return 0;
 }
 
+int socket_recv_fd(int fd, uint8_t *data, uint32_t len, int flags) {
+    file_t *file;
+    socket_file_t *sock;
+
+    (void)flags;
+    file = vfs_get_file(fd);
+    sock = socket_from_file(file);
+    if (!sock || socket_type_base(sock->info.type) != OPENOS_SOCK_DGRAM) {
+        return -1;
+    }
+    return socket_dequeue(sock, data, len);
+}
+
 int socket_send_fd(int fd, const uint8_t *data, uint32_t len, int flags) {
     file_t *file;
     socket_file_t *sock;
@@ -415,4 +466,51 @@ const openos_socket_info_t *socket_get_info(int fd) {
         return NULL;
     }
     return &sock->info;
+}
+
+
+int socket_deliver_udp(uint32_t src_ip, uint16_t src_port, uint16_t dst_port,
+                       const uint8_t *data, uint16_t len) {
+    socket_file_t *match = NULL;
+    socket_packet_t *pkt;
+    uint32_t tail;
+
+    if (!data || len == 0 || len > SOCKET_RECV_PACKET_MAX) {
+        return -1;
+    }
+    for (uint32_t i = 0; i < SOCKET_MAX_BINDS; i++) {
+        socket_bind_slot_t *slot = &bind_slots[i];
+        socket_file_t *sock;
+        if (!slot->used || slot->port != dst_port || !slot->sock) {
+            continue;
+        }
+        sock = slot->sock;
+        if (sock->magic != SOCKET_MAGIC || sock->info.state == OPENOS_SOCKET_STATE_CLOSED) {
+            continue;
+        }
+        if (socket_type_base(sock->info.type) != OPENOS_SOCK_DGRAM) {
+            continue;
+        }
+        if (sock->info.remote_port && sock->info.remote_port != src_port) {
+            continue;
+        }
+        if (sock->info.remote_ip != OPENOS_INADDR_ANY && sock->info.remote_ip != src_ip) {
+            continue;
+        }
+        match = sock;
+        break;
+    }
+    if (!match || match->recv_count >= SOCKET_RECV_QUEUE_LEN) {
+        return -1;
+    }
+    tail = (match->recv_head + match->recv_count) % SOCKET_RECV_QUEUE_LEN;
+    pkt = &match->recv_queue[tail];
+    memset(pkt, 0, sizeof(*pkt));
+    pkt->used = 1;
+    pkt->src_ip = src_ip;
+    pkt->src_port = src_port;
+    pkt->len = len;
+    memcpy(pkt->data, data, len);
+    match->recv_count++;
+    return 0;
 }

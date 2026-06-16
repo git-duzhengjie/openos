@@ -22,6 +22,7 @@
 
 #define SYSCALL_IO_CHUNK 256u
 #define SYSCALL_SEND_MAX 1472u
+#define SYSCALL_RECV_MAX 1472u
 
 #define STDIN_FILENO  0
 #define STDOUT_FILENO 1
@@ -1406,6 +1407,24 @@ uint32_t syscall_dispatch(uint32_t num,
                 return (uint32_t)-1;
             }
             ret = socket_send_fd((int)a, (const uint8_t *)kbuf, c, (int)d);
+            pmm_free_page(kbuf);
+            return (uint32_t)ret;
+        }
+
+    case SYS_RECV:
+        {
+            void *kbuf;
+            int ret;
+            if (!b || c == 0 || c > SYSCALL_RECV_MAX)
+                return (uint32_t)-1;
+            kbuf = pmm_alloc_page();
+            if (!kbuf)
+                return (uint32_t)-1;
+            ret = socket_recv_fd((int)a, (uint8_t *)kbuf, c, (int)d);
+            if (ret > 0 && copy_to_user((void *)b, kbuf, (uint32_t)ret) < 0) {
+                pmm_free_page(kbuf);
+                return (uint32_t)-1;
+            }
             pmm_free_page(kbuf);
             return (uint32_t)ret;
         }

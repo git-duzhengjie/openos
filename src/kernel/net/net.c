@@ -2,6 +2,7 @@
 #include "string.h"
 #include "vga.h"
 #include "devmgr.h"
+#include "socket.h"
 
 #define ETH_TYPE_IPV4 0x0800
 #define ETH_TYPE_ARP  0x0806
@@ -381,6 +382,10 @@ static void handle_udp(uint32_t src_ip, const uint8_t *payload, uint16_t len) {
     if (udp_len < sizeof(struct udp_header) || udp_len > len) return;
     dst_port = ntohs(udp->dst_port);
     data_len = (uint16_t)(udp_len - sizeof(struct udp_header));
+    if (socket_deliver_udp(src_ip, ntohs(udp->src_port), dst_port,
+                           payload + sizeof(struct udp_header), data_len) == 0) {
+        return;
+    }
     for (i = 0; i < UDP_BIND_SIZE; i++) {
         if (udp_bindings[i].used && udp_bindings[i].port == dst_port && udp_bindings[i].cb) {
             udp_bindings[i].cb(src_ip, ntohs(udp->src_port), dst_port,

@@ -83,6 +83,7 @@
 #define SYS_ACCEPT        286
 #define SYS_CONNECT       287
 #define SYS_SEND          288
+#define SYS_RECV          289
 
 #define OPENOS_AF_UNSPEC  0
 #define OPENOS_AF_INET    2
@@ -305,6 +306,11 @@ static inline int openos_connect(int fd, const openos_sockaddr_t *addr, unsigned
 static inline int openos_send(int fd, const void *buf, unsigned int len, int flags)
 {
     return openos_syscall_result(openos_syscall4(SYS_SEND, fd, (int)buf, (int)len, flags));
+}
+
+static inline int openos_recv(int fd, void *buf, unsigned int len, int flags)
+{
+    return openos_syscall_result(openos_syscall4(SYS_RECV, fd, (int)buf, (int)len, flags));
 }
 
 static inline int openos_syscall5(int num, int a, int b, int c, int d, int e)
