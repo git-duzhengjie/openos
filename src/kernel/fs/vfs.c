@@ -288,6 +288,7 @@ static file_ops_t vfs_chardev_ops = {
     .write = vfs_chardev_write,
     .seek = NULL,
     .truncate = NULL,
+    .fsync = NULL,
     .readdir = NULL,
 };
 
@@ -350,6 +351,11 @@ static int vfs_blockdev_seek(file_t *f, int offset, int whence) {
     return (int)new_off;
 }
 
+static int vfs_blockdev_fsync(file_t *f) {
+    if (!f || !f->inode) return -1;
+    return blockdev_flush((blockdev_t *)f->inode->fs_data);
+}
+
 static file_ops_t vfs_blockdev_ops = {
     .open = vfs_blockdev_open,
     .close = vfs_blockdev_close,
@@ -357,6 +363,7 @@ static file_ops_t vfs_blockdev_ops = {
     .write = vfs_blockdev_write,
     .seek = vfs_blockdev_seek,
     .truncate = NULL,
+    .fsync = vfs_blockdev_fsync,
     .readdir = NULL,
 };
 
@@ -1238,6 +1245,13 @@ int vfs_seek(int fd, int offset, int whence) {
     if (offset < 0 && (uint32_t)(-offset) > base) return -1;
     f->offset = offset < 0 ? base - (uint32_t)(-offset) : base + (uint32_t)offset;
     return (int)f->offset;
+}
+
+int vfs_fsync(int fd) {
+    file_t *f = vfs_get_file(fd);
+    if (!f) return -1;
+    if (f->ops && f->ops->fsync) return f->ops->fsync(f);
+    return blockdev_flush_all();
 }
 
 int vfs_stat(const char *path, inode_t *st) {

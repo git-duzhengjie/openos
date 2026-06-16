@@ -253,6 +253,14 @@ static int fat32_file_write(file_t *f, const void *buf, uint32_t count) {
     return (int)done;
 }
 
+static int fat32_fsync(file_t *f) {
+    fat32_node_t *node;
+    if (!f || !f->inode || !f->inode->fs_data) return -1;
+    node = (fat32_node_t *)f->inode->fs_data;
+    if (!node->fs || !node->fs->dev) return -1;
+    return blockdev_flush(node->fs->dev);
+}
+
 static int fat32_truncate(inode_t *inode, uint32_t size) {
     fat32_node_t *node;
 
@@ -276,6 +284,7 @@ static file_ops_t fat32_file_ops = {
     .write = fat32_file_write,
     .seek = 0,
     .truncate = fat32_truncate,
+    .fsync = fat32_fsync,
     .readdir = 0,
     .poll = 0,
 };

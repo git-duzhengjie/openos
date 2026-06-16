@@ -615,15 +615,20 @@ static int ext4_file_truncate(inode_t *inode, uint32_t size) {
     return 0;
 }
 
+static int ext4_file_fsync(file_t *f) {
+    ext4_node_t *node;
+    if (!f || !f->inode || !f->inode->fs_data) return -1;
+    node = (ext4_node_t *)f->inode->fs_data;
+    if (!node->mount || !node->mount->dev) return -1;
+    return blockdev_flush(node->mount->dev);
+}
+
 static file_ops_t ext4_file_ops = {
-    0,
-    0,
-    ext4_file_read,
-    ext4_file_write,
-    ext4_file_seek,
-    ext4_file_truncate,
-    0,
-    0
+    .read = ext4_file_read,
+    .write = ext4_file_write,
+    .seek = ext4_file_seek,
+    .truncate = ext4_file_truncate,
+    .fsync = ext4_file_fsync,
 };
 
 static ext4_node_t *ext4_node_from_inode(ext4_mount_t *m, uint32_t inode_no, const ext4_inode_disk_t *disk) {

@@ -1113,6 +1113,11 @@ static inline int openos_close(int fd)
     return openos_syscall_result(openos_syscall1(SYS_CLOSE, fd));
 }
 
+static inline int openos_fsync(int fd)
+{
+    return openos_syscall_result(openos_syscall1(SYS_FSYNC, fd));
+}
+
 static inline int openos_read(int fd, void *buf, int len)
 {
     return openos_syscall_result(openos_syscall3(SYS_READ_FD, fd, (int)buf, len));

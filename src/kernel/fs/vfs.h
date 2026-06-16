@@ -91,6 +91,7 @@ typedef int (*read_fn_t)(struct file *f, void *buf, uint32_t count);
 typedef int (*write_fn_t)(struct file *f, const void *buf, uint32_t count);
 typedef int (*seek_fn_t)(struct file *f, int offset, int whence);
 typedef int (*truncate_fn_t)(struct inode *inode, uint32_t size);
+typedef int (*fsync_fn_t)(struct file *f);
 typedef struct dentry *(*readdir_fn_t)(struct file *f);
 typedef int (*poll_fn_t)(struct file *f, uint32_t events);
 
@@ -101,6 +102,7 @@ typedef struct file_ops {
     write_fn_t    write;
     seek_fn_t     seek;
     truncate_fn_t truncate;
+    fsync_fn_t    fsync;
     readdir_fn_t  readdir;
     poll_fn_t     poll;
 } file_ops_t;
@@ -173,6 +175,7 @@ int    vfs_close(int fd);
 int    vfs_read(int fd, void *buf, uint32_t count);
 int    vfs_write(int fd, const void *buf, uint32_t count);
 int    vfs_seek(int fd, int offset, int whence);
+int    vfs_fsync(int fd);
 int    vfs_stat(const char *path, inode_t *st);
 int    vfs_truncate(const char *path, uint32_t size);
 

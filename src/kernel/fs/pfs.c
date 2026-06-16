@@ -62,6 +62,7 @@ static int pfs_read(file_t *f, void *buf, uint32_t count);
 static int pfs_write(file_t *f, const void *buf, uint32_t count);
 static int pfs_seek(file_t *f, int offset, int whence);
 static int pfs_truncate(inode_t *inode, uint32_t size);
+static int pfs_fsync(file_t *f);
 static int pfs_chmod(inode_t *inode, uint32_t mode);
 static int pfs_chown(inode_t *inode, uint32_t uid, uint32_t gid);
 
@@ -70,6 +71,7 @@ static file_ops_t pfs_file_ops = {
     .write = pfs_write,
     .seek = pfs_seek,
     .truncate = pfs_truncate,
+    .fsync = pfs_fsync,
 };
 
 static file_ops_t pfs_dir_ops = {0};
@@ -309,6 +311,16 @@ static int pfs_truncate(inode_t *inode, uint32_t size) {
     if (pfs_resize(mnt, node, size) < 0) return -1;
     inode->size = node->disk.size;
     return 0;
+}
+
+static int pfs_fsync(file_t *f) {
+    pfs_node_t *node;
+    pfs_mount_data_t *m;
+    if (!f || !f->inode || !f->inode->fs_data) return -1;
+    node = (pfs_node_t *)f->inode->fs_data;
+    m = pfs_mount_from_node(node);
+    if (!m || !m->dev) return -1;
+    return blockdev_flush(m->dev);
 }
 
 static int pfs_chmod(inode_t *inode, uint32_t mode) {

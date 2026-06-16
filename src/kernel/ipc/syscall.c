@@ -1814,25 +1814,7 @@ uint32_t syscall_dispatch(uint32_t num,
         return syscall_eventfd_destroy((uint32_t)a);
 
     case SYS_FSYNC:
-        {
-            file_t *f = vfs_get_file((int)a);
-            if (!f || !f->inode) return (uint32_t)-9; /* EBADF */
-            blockdev_t *dev = 0;
-
-            if (f->inode->fs_type == 0xEF530004u) {
-                void *node = f->inode->fs_data;
-                if (node) dev = *(blockdev_t **)((uint8_t *)node + 8);
-            } else if (f->inode->fs_type == 0x50465300u) {
-                void *node = f->inode->fs_data;
-                if (node) dev = *(blockdev_t **)((uint8_t *)node + 4);
-            } else if (f->inode->fs_type == 0x46415400u) {
-                void *node = f->inode->fs_data;
-                if (node) dev = *(blockdev_t **)((uint8_t *)node + 4);
-            }
-
-            if (!dev) return (uint32_t)-22; /* EINVAL */
-            return (uint32_t)blockdev_flush(dev);
-        }
+        return (uint32_t)vfs_fsync((int)a);
 
     case SYS_READDIR:
         {
