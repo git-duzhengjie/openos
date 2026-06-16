@@ -226,6 +226,8 @@ void proc_table_init(void) {
     }
     init->cwd[0] = '/';
     init->cwd[1] = '\0';
+    init->uid = 0;
+    init->gid = 0;
     init->pending_signals = 0;
     init->total_ticks = 0;
     next_pid = INIT_PID + 1;
@@ -265,6 +267,8 @@ process_t *proc_alloc(void) {
             /* 初始化当前工作目录为 / */
             p->cwd[0] = '/';
             p->cwd[1] = '\0';
+            p->uid = 0;
+            p->gid = 0;
             p->pending_signals = 0;
             p->alarm_deadline_ms = 0;
             p->alarm_active = 0;
@@ -291,6 +295,8 @@ void proc_free(process_t *proc) {
     proc->mmap_base = 0;
     proc->mmap_end = 0;
     proc->exit_code = 0;
+    proc->uid = 0;
+    proc->gid = 0;
     proc->pending_signals = 0;
     proc->alarm_deadline_ms = 0;
     proc->alarm_active = 0;
@@ -471,6 +477,36 @@ uint32_t proc_current_pid(void) {
     return cur ? cur->pid : 0;
 }
 
+uint32_t proc_current_uid(void) {
+    thread_t *cur = sched_get_current();
+    process_t *p = cur ? proc_find(cur->pid) : NULL;
+    return p ? p->uid : 0;
+}
+
+uint32_t proc_current_gid(void) {
+    thread_t *cur = sched_get_current();
+    process_t *p = cur ? proc_find(cur->pid) : NULL;
+    return p ? p->gid : 0;
+}
+
+int proc_set_current_uid(uint32_t uid) {
+    thread_t *cur = sched_get_current();
+    process_t *p = cur ? proc_find(cur->pid) : NULL;
+    if (!p) return -1;
+    if (p->uid != 0 && p->uid != uid) return -1;
+    p->uid = uid;
+    return 0;
+}
+
+int proc_set_current_gid(uint32_t gid) {
+    thread_t *cur = sched_get_current();
+    process_t *p = cur ? proc_find(cur->pid) : NULL;
+    if (!p) return -1;
+    if (p->uid != 0 && p->gid != gid) return -1;
+    p->gid = gid;
+    return 0;
+}
+
 process_t *proc_get_parent(uint32_t pid) {
     process_t *p = proc_find(pid);
     if (!p) return NULL;
@@ -583,6 +619,8 @@ uint32_t sys_fork(void) {
 
     child->cr3 = child_pd_phys;
     child->owns_address_space = 1;
+    child->uid = parent->uid;
+    child->gid = parent->gid;
 
     /* 创建子线程,复制父线程的栈帧 */
     void *child_stack_page = pmm_alloc_page();

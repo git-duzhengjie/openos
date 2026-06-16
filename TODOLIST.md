@@ -160,7 +160,7 @@
 - [√] symbolic link（已支持 `/bin/ln -s OLD NEW`）
 - [√] inode uid / gid 字段（已加入 `inode_t`，`vfs_chown` 可写入元数据，`openos_stat_t` 可读取）
 - [√] chmod / chown 权限模型（已接入 `SYS_CHMOD` / `SYS_CHOWN`、用户态 `openos_chmod` / `openos_chown`，并由 `/bin/fstest` 校验 mode/uid/gid）
-- [ ] access 权限检查
+- [√] access 权限检查（已接入 VFS 统一 `vfs_inode_access`，按 owner/group/other mode 检查 open/read/write/create/delete/chdir/readdir/link/rename 等路径）
 - [ ] per-process cwd 更严格集成
 - [√] 文件描述符表标准化
 - [√] `dup` / `dup2`
@@ -301,9 +301,9 @@
 ### 18. 安全模型
 
 - [ ] 用户 / 组
-- [ ] uid / gid
-- [ ] 文件权限检查
-- [ ] 进程权限
+- [√] uid / gid（已加入进程 `uid/gid` 凭据、fork 继承、`SYS_GETUID` / `SYS_SETUID` / `SYS_GETGID` / `SYS_SETGID` 和用户态封装）
+- [√] 文件权限检查（VFS 已按 `S_IRWXU/G/O` 对文件、目录、符号链接和挂载操作执行权限校验）
+- [√] 进程权限（已支持当前进程凭据查询/切换，非 root 仅允许保持自身 uid/gid，root 可切换）
 - [ ] capability
 - [ ] syscall 权限控制
 - [ ] 沙箱

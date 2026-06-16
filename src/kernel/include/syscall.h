@@ -73,6 +73,10 @@
 #define SYS_NICE          273
 #define SYS_CHMOD         274
 #define SYS_CHOWN         275
+#define SYS_GETUID        276
+#define SYS_SETUID        277
+#define SYS_GETGID        278
+#define SYS_SETGID        279
 
 typedef struct openos_stat {
     uint32_t ino;

@@ -97,6 +97,10 @@ typedef struct process {
     uint32_t fd_flags[MAX_FD]; /* fd flags, e.g. FD_CLOEXEC */
     char cwd[256];            /* 当前工作目录 (绝对路径) */
 
+    /* 凭据 */
+    uint32_t uid;             /* 用户 ID */
+    uint32_t gid;             /* 用户组 ID */
+
     /* 信号 */
     uint32_t pending_signals; /* 待处理信号掩码 */
     uint32_t alarm_deadline_ms; /* alarm 到期时间，单位 ms */
@@ -153,6 +157,10 @@ int proc_handle_pending_signals(uint32_t pid);
 int proc_set_alarm(uint32_t pid, uint32_t seconds, uint32_t now_ms);
 void proc_check_alarms(uint32_t now_ms);
 uint32_t proc_current_pid(void);
+uint32_t proc_current_uid(void);
+uint32_t proc_current_gid(void);
+int proc_set_current_uid(uint32_t uid);
+int proc_set_current_gid(uint32_t gid);
 
 /* 睡眠/唤醒 */
 void thread_sleep(uint32_t ms);

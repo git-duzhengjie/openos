@@ -1257,6 +1257,18 @@ uint32_t syscall_dispatch(uint32_t num,
             return (uint32_t)vfs_chown(path, (uint32_t)b, (uint32_t)c);
         }
 
+    case SYS_GETUID:
+        return proc_current_uid();
+
+    case SYS_SETUID:
+        return (uint32_t)proc_set_current_uid((uint32_t)a);
+
+    case SYS_GETGID:
+        return proc_current_gid();
+
+    case SYS_SETGID:
+        return (uint32_t)proc_set_current_gid((uint32_t)a);
+
     case SYS_READDIR:
         {
             char path[USERMEM_CSTR_MAX];

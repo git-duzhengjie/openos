@@ -90,6 +90,38 @@ static int is_open_read(int flags) {
     return acc == O_RDONLY || acc == O_RDWR;
 }
 
+static int vfs_inode_access(inode_t *inode, uint32_t req) {
+    if (!inode) return -1;
+
+    uint32_t uid = proc_current_uid();
+    uint32_t gid = proc_current_gid();
+    if (uid == 0) return 0;
+
+    uint32_t perm = inode->mode & S_IRWXUGO;
+    uint32_t allowed;
+    if (uid == inode->uid) {
+        allowed = (perm & S_IRWXU) >> 6;
+    } else if (gid == inode->gid) {
+        allowed = (perm & S_IRWXG) >> 3;
+    } else {
+        allowed = perm & S_IRWXO;
+    }
+
+    return ((allowed & req) == req) ? 0 : -1;
+}
+
+static int vfs_can_read(inode_t *inode) {
+    return vfs_inode_access(inode, 4);
+}
+
+static int vfs_can_write(inode_t *inode) {
+    return vfs_inode_access(inode, 2);
+}
+
+static int vfs_can_exec(inode_t *inode) {
+    return vfs_inode_access(inode, 1);
+}
+
 static void vfs_repair_memory_inode(inode_t *ip, inode_t *parent) {
     if (!ip || !vfs_is_file(ip)) return;
     if (ip->fs_type != 0 && ip->ops && ip->ops->write) return;
@@ -563,7 +595,9 @@ void vfs_init(void) {
     vfs_init_fds();
 
     root_inode = alloc_inode();
-    root_inode->mode = FS_DIR | S_IRUSR | S_IWUSR;
+    root_inode->mode = FS_DIR | S_IRWXU | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH;
+    root_inode->uid = 0;
+    root_inode->gid = 0;
     root_inode->ops = NULL;
 
     root_dentry = alloc_dentry();
@@ -587,6 +621,8 @@ dentry_t *vfs_create_node_under(dentry_t *parent, const char *name,
     inode_t *ip = alloc_inode();
     if (!ip) return NULL;
     ip->mode = mode;
+    ip->uid = proc_current_uid();
+    ip->gid = proc_current_gid();
     ip->size = size;
     ip->fs_data = fs_data;
     ip->ops = ops;
@@ -613,7 +649,7 @@ dentry_t *vfs_create_node_under(dentry_t *parent, const char *name,
 }
 
 static dentry_t *create_regular_file(dentry_t *parent, const char *name, uint32_t mode) {
-    uint32_t perm = mode & (S_IRUSR | S_IWUSR);
+    uint32_t perm = mode & S_IRWXUGO;
     if (!perm) perm = S_IRUSR | S_IWUSR;
 
     dentry_t *d = vfs_create_node_under(parent, name, FS_FILE | perm, NULL, NULL, 0);
@@ -938,6 +974,7 @@ int vfs_open(const char *path, int flags, int mode) {
         if (split_parent_path(path, parent_path, name) < 0) return -1;
         dentry_t *parent = vfs_path_lookup(parent_path);
         if (!parent || !vfs_is_dir(parent->inode)) return -1;
+        if (vfs_can_write(parent->inode) < 0 || vfs_can_exec(parent->inode) < 0) return -1;
         d = create_regular_file(parent, name, (uint32_t)mode);
         if (!d) return -1;
     }
@@ -950,8 +987,8 @@ int vfs_open(const char *path, int flags, int mode) {
     }
     if (vfs_is_dir(d->inode) && is_open_write(flags)) return -1;
 
-    if (is_open_read(flags) && !(d->inode->mode & S_IRUSR)) return -1;
-    if (is_open_write(flags) && !(d->inode->mode & S_IWUSR)) return -1;
+    if (is_open_read(flags) && vfs_can_read(d->inode) < 0) return -1;
+    if (is_open_write(flags) && vfs_can_write(d->inode) < 0) return -1;
 
     if ((flags & O_TRUNC) && is_open_write(flags)) {
         if (vfs_try_truncate_inode(d->inode, 0) < 0) return -1;
@@ -1012,6 +1049,7 @@ int vfs_read(int fd, void *buf, uint32_t count) {
     if (!f || !buf) return -1;
     if (!is_open_read((int)f->flags)) return -1;
     if (vfs_is_dir(f->inode)) return -1;
+    if (vfs_can_read(f->inode) < 0) return -1;
     if (!f->ops || !f->ops->read) return -1;
     return f->ops->read(f, buf, count);
 }
@@ -1034,6 +1072,7 @@ int vfs_write(int fd, const void *buf, uint32_t count) {
         serial_write("\n");
         return -1;
     }
+    if (vfs_can_write(f->inode) < 0) return -1;
 
     if (vfs_is_file(f->inode) && (!f->ops || !f->ops->write || f->inode->fs_type == 0)) {
         vfs_repair_memory_inode(f->inode, NULL);
@@ -1127,14 +1166,14 @@ int vfs_truncate(const char *path, uint32_t size) {
     dentry_t *d = vfs_path_lookup(path);
     if (!d || !d->inode) return -1;
     if (!vfs_is_file(d->inode)) return -1;
-    if (!(d->inode->mode & S_IWUSR)) return -1;
+    if (vfs_can_write(d->inode) < 0) return -1;
     if (!d->inode->ops || !d->inode->ops->truncate) return -1;
     return d->inode->ops->truncate(d->inode, size);
 }
 
 static int vfs_try_truncate_inode(inode_t *inode, uint32_t size) {
     if (!inode || !vfs_is_file(inode)) return -1;
-    if (!(inode->mode & S_IWUSR)) return -1;
+    if (vfs_can_write(inode) < 0) return -1;
     if (!inode->ops || !inode->ops->truncate) return -1;
     return inode->ops->truncate(inode, size);
 }
@@ -1150,6 +1189,7 @@ int vfs_mkdir(const char *path, int mode) {
     if (vfs_path_lookup(path)) return -1;
     dentry_t *parent = vfs_path_lookup(parent_path);
     if (!parent || !vfs_is_dir(parent->inode)) return -1;
+    if (vfs_can_write(parent->inode) < 0 || vfs_can_exec(parent->inode) < 0) return -1;
     return vfs_create_node_under(parent, name, FS_DIR | (uint32_t)mode, NULL, NULL, 0) ? 0 : -1;
 }
 
@@ -1161,6 +1201,7 @@ int vfs_mknod(const char *path, int mode, const char *dev_name) {
     if (vfs_path_lookup(path)) return -1;
     dentry_t *parent = vfs_path_lookup(parent_path);
     if (!parent || !vfs_is_dir(parent->inode)) return -1;
+    if (vfs_can_write(parent->inode) < 0 || vfs_can_exec(parent->inode) < 0) return -1;
 
     if ((mode & FS_BLOCK_DEVICE) == FS_BLOCK_DEVICE) {
         blockdev_t *bd = blockdev_find(dev_name);
@@ -1180,6 +1221,7 @@ int vfs_unlink(const char *path) {
     if (!d || d == root_dentry || !d->parent || !d->inode) return -1;
     if (vfs_is_dir(d->inode)) return -1;
     if (d->mount) return -1;
+    if (vfs_can_write(d->parent->inode) < 0 || vfs_can_exec(d->parent->inode) < 0) return -1;
     if (d->inode->nlinks > 0) d->inode->nlinks--;
     detach_child(d);
     free_dentry(d);
@@ -1191,6 +1233,7 @@ int vfs_rmdir(const char *path) {
     if (!d || d == root_dentry || !d->parent || !d->inode) return -1;
     if (!vfs_is_dir(d->inode)) return -1;
     if (d->mount) return -1;
+    if (vfs_can_write(d->parent->inode) < 0 || vfs_can_exec(d->parent->inode) < 0) return -1;
     if (has_children(d)) return -1;
     detach_child(d);
     free_dentry(d);
@@ -1205,6 +1248,7 @@ int vfs_chdir(const char *path) {
     if (vfs_normalize_path(path, norm, sizeof(norm)) < 0) return -1;
     dentry_t *d = vfs_path_lookup(norm);
     if (!d || !vfs_is_dir(d->inode)) return -1;
+    if (vfs_can_exec(d->inode) < 0) return -1;
 
     char *cwd = vfs_get_cwd();
     strncpy(cwd, norm, MAX_PATH - 1);
@@ -1233,6 +1277,8 @@ int vfs_rename(const char *oldpath, const char *newpath) {
     if (split_parent_path(newpath, new_parent_path, new_name) < 0) return -1;
     dentry_t *new_parent = vfs_path_lookup(new_parent_path);
     if (!new_parent || !vfs_is_dir(new_parent->inode)) return -1;
+    if (vfs_can_write(old->parent->inode) < 0 || vfs_can_exec(old->parent->inode) < 0) return -1;
+    if (vfs_can_write(new_parent->inode) < 0 || vfs_can_exec(new_parent->inode) < 0) return -1;
     if (find_child(new_parent, new_name)) return -1;
 
     detach_child(old);
@@ -1259,6 +1305,7 @@ int vfs_link(const char *oldpath, const char *newpath) {
     if (split_parent_path(newpath, parent_path, name) < 0) return -1;
     parent = vfs_path_lookup(parent_path);
     if (!parent || !vfs_is_dir(parent->inode)) return -1;
+    if (vfs_can_write(parent->inode) < 0 || vfs_can_exec(parent->inode) < 0) return -1;
     if (find_child(parent, name)) return -1;
 
     link = alloc_dentry();
@@ -1287,6 +1334,7 @@ int vfs_symlink(const char *target, const char *linkpath) {
     if (split_parent_path(linkpath, parent_path, name) < 0) return -1;
     parent = vfs_path_lookup(parent_path);
     if (!parent || !vfs_is_dir(parent->inode)) return -1;
+    if (vfs_can_write(parent->inode) < 0 || vfs_can_exec(parent->inode) < 0) return -1;
     if (find_child(parent, name)) return -1;
 
     stored = alloc_symlink_target();
@@ -1325,6 +1373,7 @@ int vfs_readlink(const char *path, char *buf, uint32_t size) {
     if (!path || !buf || size == 0) return -1;
     d = vfs_path_lookup_internal(path, 0);
     if (!d || !vfs_is_symlink(d->inode)) return -1;
+    if (vfs_can_read(d->inode) < 0) return -1;
     target = (const char *)d->inode->fs_data;
     if (!target) return -1;
     len = (uint32_t)strlen(target);
@@ -1336,6 +1385,7 @@ int vfs_readlink(const char *path, char *buf, uint32_t size) {
 int vfs_chmod(const char *path, uint32_t mode) {
     dentry_t *d = vfs_path_lookup(path);
     if (!d || !d->inode) return -1;
+    if (proc_current_uid() != 0 && proc_current_uid() != d->inode->uid) return -1;
     if (d->inode->iops && d->inode->iops->chmod)
         return d->inode->iops->chmod(d->inode, mode);
     d->inode->mode = (d->inode->mode & VFS_FILE_TYPE_MASK) | (mode & ~VFS_FILE_TYPE_MASK);
@@ -1345,6 +1395,7 @@ int vfs_chmod(const char *path, uint32_t mode) {
 int vfs_chown(const char *path, uint32_t uid, uint32_t gid) {
     dentry_t *d = vfs_path_lookup(path);
     if (!d || !d->inode) return -1;
+    if (proc_current_uid() != 0) return -1;
     if (d->inode->iops && d->inode->iops->chown)
         return d->inode->iops->chown(d->inode, uid, gid);
     d->inode->uid = uid;
@@ -1357,6 +1408,7 @@ dentry_t *vfs_readdir(const char *path, int index) {
     dentry_t *d = vfs_path_lookup(path);
     d = resolve_mount(d);
     if (!d || !vfs_is_dir(d->inode)) return NULL;
+    if (vfs_can_read(d->inode) < 0 || vfs_can_exec(d->inode) < 0) return NULL;
 
     dentry_t *c = d->child;
     int i = 0;
@@ -1376,6 +1428,7 @@ int vfs_mount(const char *path, fs_type_t *fs) {
     if (!fs) return -1;
     dentry_t *mp = vfs_path_lookup_internal(path, 0);
     if (!mp || !vfs_is_dir(mp->inode)) return -1;
+    if (proc_current_uid() != 0) return -1;
     if (mp->mount) return -1;
 
     inode_t *root = NULL;
@@ -1383,7 +1436,9 @@ int vfs_mount(const char *path, fs_type_t *fs) {
     if (!root) {
         root = alloc_inode();
         if (!root) return -1;
-        root->mode = FS_DIR | S_IRUSR | S_IWUSR;
+        root->mode = FS_DIR | S_IRWXU | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH;
+        root->uid = 0;
+        root->gid = 0;
         root->fs_type = fs->magic;
         root->fs_data = fs->data;
         if (fs->magic == TMPFS_MAGIC) {
@@ -1416,6 +1471,7 @@ int vfs_mount(const char *path, fs_type_t *fs) {
 }
 
 int vfs_umount(const char *path) {
+    if (proc_current_uid() != 0) return -1;
     dentry_t *mp = vfs_path_lookup_internal(path, 0);
     if (!mp) return -1;
 

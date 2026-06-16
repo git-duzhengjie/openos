@@ -70,6 +70,10 @@
 #define SYS_NICE          273
 #define SYS_CHMOD         274
 #define SYS_CHOWN         275
+#define SYS_GETUID        276
+#define SYS_SETUID        277
+#define SYS_GETGID        278
+#define SYS_SETGID        279
 
 #define WNOHANG         1
 #define SIGKILL         9
@@ -94,6 +98,20 @@
 #define STDOUT_FILENO   1
 #define STDERR_FILENO   2
 #define OPENOS_PATH_MAX 128
+
+#define S_IRUSR         0400
+#define S_IWUSR         0200
+#define S_IXUSR         0100
+#define S_IRGRP         0040
+#define S_IWGRP         0020
+#define S_IXGRP         0010
+#define S_IROTH         0004
+#define S_IWOTH         0002
+#define S_IXOTH         0001
+#define S_IRWXU         0700
+#define S_IRWXG         0070
+#define S_IRWXO         0007
+#define S_IRWXUGO       0777
 
 #define OPENOS_EPERM       1
 #define OPENOS_ENOENT      2
@@ -1658,6 +1676,26 @@ static inline int openos_chmod(const char *path, openos_uint32_t mode)
 static inline int openos_chown(const char *path, openos_uint32_t uid, openos_uint32_t gid)
 {
     return openos_syscall_result(openos_syscall3(SYS_CHOWN, (int)path, (int)uid, (int)gid));
+}
+
+static inline int openos_getuid(void)
+{
+    return (int)openos_syscall0(SYS_GETUID);
+}
+
+static inline int openos_setuid(openos_uint32_t uid)
+{
+    return openos_syscall_result(openos_syscall1(SYS_SETUID, (int)uid));
+}
+
+static inline int openos_getgid(void)
+{
+    return (int)openos_syscall0(SYS_GETGID);
+}
+
+static inline int openos_setgid(openos_uint32_t gid)
+{
+    return openos_syscall_result(openos_syscall1(SYS_SETGID, (int)gid));
 }
 
 static inline int openos_readdir_path(const char *path, int index, openos_dirent_t *entry)
