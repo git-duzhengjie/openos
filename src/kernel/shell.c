@@ -29,6 +29,7 @@
 #include "power.h"
 #include "pci.h"
 #include "usb.h"
+#include "sound.h"
 #include "include/io.h"
 extern int spawn_user_process(const char *path, char *const argv[]);
 extern int spawn_user_process_env(const char *path, char *const argv[], char *const envp[]);
@@ -1893,6 +1894,20 @@ static int shell_parse_job_id(const char *s, int *out)
     return 0;
 }
 
+static int shell_parse_u32(const char *s, uint32_t *out)
+{
+    uint32_t value = 0;
+    if (!s || !out || !s[0])
+        return -1;
+    for (int i = 0; s[i]; i++) {
+        if (s[i] < '0' || s[i] > '9')
+            return -1;
+        value = value * 10u + (uint32_t)(s[i] - '0');
+    }
+    *out = value;
+    return 0;
+}
+
 static void cmd_fg(int argc, char *argv[])
 {
     shell_jobs_poll();
@@ -2568,6 +2583,9 @@ static void cmd_help(void)
     print("  mouse           - Show PS/2 mouse driver status\n");
     print("  usb             - Show USB bus/controller status\n");
     print("  usb_rescan      - Rescan USB host controllers\n");
+    print("  sound           - Show sound driver status\n");
+    print("  sound_rescan    - Rescan PCI sound devices\n");
+    print("  beep [hz] [ms]  - Play PC speaker beep\n");
 }
 
 /* ---- Shell 主循�?---- */
@@ -3521,6 +3539,32 @@ void shell_run(void)
                     usb_rescan();
                     usb_print_info();
                     print("usb: rescan complete\n");
+                }
+                else if (shell_cmd_equals(cmd, "sound"))
+                {
+                    sound_print_info();
+                    print("sound: status written to serial log\n");
+                }
+                else if (shell_cmd_equals(cmd, "sound_rescan"))
+                {
+                    sound_rescan();
+                    sound_print_info();
+                    print("sound: rescan complete\n");
+                }
+                else if (shell_cmd_equals(cmd, "beep"))
+                {
+                    uint32_t hz = 880;
+                    uint32_t ms = 120;
+                    if (argc >= 2 && shell_parse_u32(argv[1], &hz) < 0) {
+                        print_err("beep: invalid frequency\n");
+                        continue;
+                    }
+                    if (argc >= 3 && shell_parse_u32(argv[2], &ms) < 0) {
+                        print_err("beep: invalid duration\n");
+                        continue;
+                    }
+                    sound_beep(hz, ms);
+                    print("beep: done\n");
                 }
                 else if (shell_cmd_equals(cmd, "pfstats"))
                 {

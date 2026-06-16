@@ -555,6 +555,11 @@ gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
     -I $SRC/include \
+    -c $SRC/drivers/sound.c -o $BUILD/sound.o
+
+gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
+    -I $SRC/include \
     -c $SRC/drivers/chardev.c -o $BUILD/chardev.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
@@ -759,6 +764,7 @@ ld -m elf_i386 -T $SRC/linker.ld \
     $BUILD/mouse.o \
     $BUILD/usb_tablet.o \
     $BUILD/usb.o \
+    $BUILD/sound.o \
     $BUILD/chardev.o \
     $BUILD/blockdev.o \
     $BUILD/ata.o \

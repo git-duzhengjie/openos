@@ -40,6 +40,7 @@
 #include "mouse.h"
 #include "usb_tablet.h"
 #include "usb.h"
+#include "sound.h"
 #include "pmm.h"
 #include "embed_hello.h"  /* 嵌入的用户程�?*/
 #include "embed_fault.h"  /* 用户异常隔离测试程序 */
@@ -570,6 +571,9 @@ void kernel_main(void) {
 
     /* 初始化 USB 通用栈：发现 USB host controller，建立 USB bus/device 模型 */
     usb_init();
+
+    /* 初始化声卡驱动：发现 PCI 音频设备并注册 PC Speaker 兜底设备 */
+    sound_init();
 
     /* 初始化块设备框架�?RAM disk */
     blockdev_init();
