@@ -21,6 +21,7 @@
 #define VGA ((volatile uint16_t *)0xB8000)
 
 #define SYSCALL_IO_CHUNK 256u
+#define SYSCALL_SEND_MAX 1472u
 
 #define STDIN_FILENO  0
 #define STDOUT_FILENO 1
@@ -1389,6 +1390,24 @@ uint32_t syscall_dispatch(uint32_t num,
             if (copy_from_user(&addr, (const void *)b, sizeof(addr)) < 0)
                 return (uint32_t)-1;
             return (uint32_t)socket_connect_fd((int)a, (const openos_sockaddr_t *)&addr, sizeof(addr));
+        }
+
+    case SYS_SEND:
+        {
+            void *kbuf;
+            int ret;
+            if (!b || c == 0 || c > SYSCALL_SEND_MAX)
+                return (uint32_t)-1;
+            kbuf = pmm_alloc_page();
+            if (!kbuf)
+                return (uint32_t)-1;
+            if (copy_from_user(kbuf, (const void *)b, c) < 0) {
+                pmm_free_page(kbuf);
+                return (uint32_t)-1;
+            }
+            ret = socket_send_fd((int)a, (const uint8_t *)kbuf, c, (int)d);
+            pmm_free_page(kbuf);
+            return (uint32_t)ret;
         }
 
     case SYS_FSYNC:

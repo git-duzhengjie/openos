@@ -82,6 +82,7 @@
 #define SYS_LISTEN        285
 #define SYS_ACCEPT        286
 #define SYS_CONNECT       287
+#define SYS_SEND          288
 
 #define OPENOS_AF_UNSPEC  0
 #define OPENOS_AF_INET    2
@@ -264,6 +265,18 @@ static inline int openos_syscall2(int num, int a, int b)
     return openos_syscall3(num, a, b, 0);
 }
 
+static inline int openos_syscall4(int num, int a, int b, int c, int d)
+{
+    int ret;
+    __asm__ volatile(
+        "int $0x80"
+        : "=a"(ret)
+        : "a"(num), "b"(a), "c"(b), "d"(c), "S"(d)
+        : "memory"
+    );
+    return ret;
+}
+
 static inline int openos_socket(int domain, int type, int protocol)
 {
     return openos_syscall_result(openos_syscall3(SYS_SOCKET, domain, type, protocol));
@@ -287,6 +300,11 @@ static inline int openos_accept(int fd, openos_sockaddr_t *addr, unsigned int *a
 static inline int openos_connect(int fd, const openos_sockaddr_t *addr, unsigned int addrlen)
 {
     return openos_syscall_result(openos_syscall3(SYS_CONNECT, fd, (int)addr, (int)addrlen));
+}
+
+static inline int openos_send(int fd, const void *buf, unsigned int len, int flags)
+{
+    return openos_syscall_result(openos_syscall4(SYS_SEND, fd, (int)buf, (int)len, flags));
 }
 
 static inline int openos_syscall5(int num, int a, int b, int c, int d, int e)

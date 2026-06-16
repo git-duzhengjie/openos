@@ -85,6 +85,7 @@
 #define SYS_LISTEN        285
 #define SYS_ACCEPT        286
 #define SYS_CONNECT       287
+#define SYS_SEND          288
 
 #define OPENOS_POLLIN     0x0001
 #define OPENOS_POLLOUT    0x0004

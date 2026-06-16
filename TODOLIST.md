@@ -222,7 +222,7 @@
 - [x] `listen`
 - [x] `accept`
 - [x] `connect`
-- [ ] `send`
+- [x] `send`
 - [ ] `recv`
 - [ ] TCP 完整状态机
 - [ ] TCP 重传

@@ -52,6 +52,7 @@ int socket_bind_fd(int fd, const openos_sockaddr_t *addr, uint32_t addrlen);
 int socket_listen_fd(int fd, int backlog);
 int socket_accept_fd(int fd, openos_sockaddr_t *addr, uint32_t *addrlen);
 int socket_connect_fd(int fd, const openos_sockaddr_t *addr, uint32_t addrlen);
+int socket_send_fd(int fd, const uint8_t *data, uint32_t len, int flags);
 const openos_socket_info_t *socket_get_info(int fd);
 
 #endif /* OPENOS_NET_SOCKET_H */

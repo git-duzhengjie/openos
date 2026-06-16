@@ -7,6 +7,7 @@
  * ============================================================ */
 
 #include "socket.h"
+#include "net.h"
 #include "../fs/vfs.h"
 #include "../include/fd.h"
 #include "../include/pmm.h"
@@ -346,6 +347,33 @@ int socket_connect_fd(int fd, const openos_sockaddr_t *addr, uint32_t addrlen) {
     sock->info.remote_port = port;
     sock->info.state = OPENOS_SOCKET_STATE_CONNECTED;
     return 0;
+}
+
+int socket_send_fd(int fd, const uint8_t *data, uint32_t len, int flags) {
+    file_t *file;
+    socket_file_t *sock;
+
+    (void)flags;
+    if (!data || len == 0 || len > (NET_ETH_MTU - 8u)) {
+        return -1;
+    }
+
+    file = vfs_get_file(fd);
+    sock = socket_from_file(file);
+    if (!sock || sock->info.state != OPENOS_SOCKET_STATE_CONNECTED) {
+        return -1;
+    }
+    if (socket_type_base(sock->info.type) != OPENOS_SOCK_DGRAM) {
+        return -1;
+    }
+    if (sock->info.local_port == 0 || sock->info.remote_port == 0) {
+        return -1;
+    }
+    if (net_send_udp(sock->info.remote_ip, sock->info.local_port,
+                     sock->info.remote_port, data, (uint16_t)len) < 0) {
+        return -1;
+    }
+    return (int)len;
 }
 
 int socket_bind_fd(int fd, const openos_sockaddr_t *addr, uint32_t addrlen) {
