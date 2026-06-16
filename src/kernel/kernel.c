@@ -27,6 +27,7 @@
 #include "ata.h"
 #include "ahci.h"
 #include "virtio_blk.h"
+#include "virtio_net.h"
 #include "acpi.h"
 #include "apic.h"
 #include "rtc.h"
@@ -574,7 +575,8 @@ void kernel_main(void) {
 
     /* 初始化最�?TCP/IP 网络�?*/
     net_init();
-    serial_write("[OK] NET\n");
+    virtio_net_init();
+    serial_write("[OK] NET + virtio-net\n");
 
     /* 初始化跨端设备发现协�?*/
     discovery_init();

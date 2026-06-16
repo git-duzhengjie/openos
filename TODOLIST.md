@@ -198,7 +198,7 @@
 
 ### 11. 网络驱动
 
-- [ ] virtio-net
+- [x] virtio-net
 - [ ] e1000
 - [ ] rtl8139
 
