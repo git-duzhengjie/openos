@@ -306,7 +306,7 @@
 - [√] 进程权限（已支持当前进程凭据查询/切换，非 root 仅允许保持自身 uid/gid，root 可切换）
 - [x] capability
 - [x] syscall 权限控制
-- [ ] 沙箱
+- [x] 沙箱
 - [ ] 内核地址保护
 - [ ] ASLR
 - [ ] NX / W^X

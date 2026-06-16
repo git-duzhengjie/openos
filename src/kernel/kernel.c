@@ -341,6 +341,13 @@
 #define OPENOS_HAS_CAP 0
 #endif
 
+#if __has_include("embed_sandbox.h")
+#include "embed_sandbox.h"  /* sandbox user command */
+#define OPENOS_HAS_SANDBOX 1
+#else
+#define OPENOS_HAS_SANDBOX 0
+#endif
+
 
 /* 外部符号 */
 extern void gdt_init(void);
@@ -1211,6 +1218,17 @@ void kernel_main(void) {
         serial_write("[OK] Installed /bin/cap user ELF\n");
     } else {
         serial_write("[WARN] Failed to install /bin/cap\n");
+    }
+#endif
+
+#if OPENOS_HAS_SANDBOX
+    fd = vfs_open("/bin/sandbox", O_CREAT | O_RDWR, 0755);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)sandbox_elf, sandbox_elf_size);
+        vfs_close(fd);
+        serial_write("[OK] Installed /bin/sandbox user ELF\n");
+    } else {
+        serial_write("[WARN] Failed to install /bin/sandbox\n");
     }
 #endif
 

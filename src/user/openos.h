@@ -106,6 +106,8 @@
 #define SYS_GETGRGID      309
 #define SYS_CAPGET       310
 #define SYS_CAPSET       311
+#define SYS_SANDBOX_GET  312
+#define SYS_SANDBOX_SET  313
 
 #define OPENOS_CAP_SETUID    (1u << 0)
 #define OPENOS_CAP_SETGID    (1u << 1)
@@ -2202,6 +2204,16 @@ static inline openos_uint32_t openos_capget(void)
 static inline int openos_capset(openos_uint32_t caps)
 {
     return openos_syscall_result(openos_syscall1(SYS_CAPSET, (int)caps));
+}
+
+static inline int openos_sandbox_get(void)
+{
+    return openos_syscall_result(openos_syscall0(SYS_SANDBOX_GET));
+}
+
+static inline int openos_sandbox_set(int enabled)
+{
+    return openos_syscall_result(openos_syscall1(SYS_SANDBOX_SET, enabled ? 1 : 0));
 }
 
 static inline int openos_poll(openos_pollfd_t *fds, openos_uint32_t nfds, openos_uint32_t timeout_ms)

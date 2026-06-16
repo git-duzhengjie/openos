@@ -1238,6 +1238,8 @@ static uint32_t syscall_return(uint32_t value)
 
 static int syscall_require_cap(uint32_t cap)
 {
+    if (proc_current_sandboxed())
+        return -1;
     if (proc_current_has_cap(cap))
         return 0;
     return -1;
@@ -1677,6 +1679,12 @@ uint32_t syscall_dispatch(uint32_t num,
         if (((uint32_t)a & ~proc_current_caps()) != 0 && syscall_require_cap(OPENOS_CAP_SYS_ADMIN) < 0)
             return (uint32_t)-1;
         return (uint32_t)proc_set_current_caps((uint32_t)a);
+
+    case SYS_SANDBOX_GET:
+        return (uint32_t)proc_current_sandboxed();
+
+    case SYS_SANDBOX_SET:
+        return (uint32_t)proc_set_current_sandbox((uint32_t)a);
 
     case SYS_POLL:
         return syscall_poll((openos_pollfd_t *)a, b, c);

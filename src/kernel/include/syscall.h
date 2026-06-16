@@ -109,6 +109,8 @@
 #define SYS_GETGRGID      309
 #define SYS_CAPGET       310
 #define SYS_CAPSET       311
+#define SYS_SANDBOX_GET  312
+#define SYS_SANDBOX_SET  313
 
 #define OPENOS_CAP_SETUID    (1u << 0)
 #define OPENOS_CAP_SETGID    (1u << 1)

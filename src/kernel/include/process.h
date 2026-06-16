@@ -109,6 +109,7 @@ typedef struct process {
     uint32_t uid;             /* 用户 ID */
     uint32_t gid;             /* 用户组 ID */
     uint32_t caps;            /* capability 位图 */
+    uint8_t sandboxed;        /* 是否启用进程沙箱 */
 
     /* 信号 */
     uint32_t pending_signals; /* 待处理信号掩码 */
@@ -170,6 +171,8 @@ uint32_t proc_current_uid(void);
 uint32_t proc_current_gid(void);
 uint32_t proc_current_caps(void);
 int proc_current_has_cap(uint32_t cap);
+int proc_current_sandboxed(void);
+int proc_set_current_sandbox(uint32_t enabled);
 int proc_set_current_caps(uint32_t caps);
 int proc_set_current_uid(uint32_t uid);
 int proc_set_current_gid(uint32_t gid);

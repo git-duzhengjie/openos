@@ -271,6 +271,7 @@ process_t *proc_alloc(void) {
             p->uid = 0;
             p->gid = 0;
             p->caps = OPENOS_CAP_ALL;
+            p->sandboxed = 0;
             p->pending_signals = 0;
             p->alarm_deadline_ms = 0;
             p->alarm_active = 0;
@@ -300,6 +301,7 @@ void proc_free(process_t *proc) {
     proc->uid = 0;
     proc->gid = 0;
     proc->caps = 0;
+    proc->sandboxed = 0;
     proc->pending_signals = 0;
     proc->alarm_deadline_ms = 0;
     proc->alarm_active = 0;
@@ -503,10 +505,32 @@ int proc_current_has_cap(uint32_t cap) {
     return (cap != 0 && (caps & cap) == cap) ? 1 : 0;
 }
 
+int proc_current_sandboxed(void) {
+    thread_t *cur = sched_get_current();
+    process_t *p = cur ? proc_find(cur->pid) : NULL;
+    return (p && p->sandboxed) ? 1 : 0;
+}
+
+int proc_set_current_sandbox(uint32_t enabled) {
+    thread_t *cur = sched_get_current();
+    process_t *p = cur ? proc_find(cur->pid) : NULL;
+    if (!p) return -1;
+    if (enabled) {
+        p->sandboxed = 1;
+        p->caps = OPENOS_CAP_BASIC;
+        return 0;
+    }
+    if (p->sandboxed)
+        return -1;
+    return 0;
+}
+
 int proc_set_current_caps(uint32_t caps) {
     thread_t *cur = sched_get_current();
     process_t *p = cur ? proc_find(cur->pid) : NULL;
     if (!p) return -1;
+    if (p->sandboxed && (caps & ~p->caps) != 0)
+        return -1;
     if ((caps & ~p->caps) != 0 && !proc_current_has_cap(OPENOS_CAP_SYS_ADMIN))
         return -1;
     p->caps = caps;
@@ -652,6 +676,7 @@ uint32_t sys_fork(void) {
     child->uid = parent->uid;
     child->gid = parent->gid;
     child->caps = parent->caps;
+    child->sandboxed = parent->sandboxed;
     if (vfs_clone_cwd_for_process(child, parent) != 0) {
         proc_free_cloned_address_space(child_pgd);
         proc_free(child);
@@ -855,6 +880,7 @@ int spawn_user_process_env(const char *path, char *const argv[], char *const env
         child->uid = parent->uid;
         child->gid = parent->gid;
         child->caps = parent->caps;
+        child->sandboxed = parent->sandboxed;
         if (vfs_clone_cwd_for_process(child, parent) != 0) {
             proc_free(child);
             return -1;
