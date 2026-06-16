@@ -24,6 +24,7 @@
 #include "gui.h"
 #include "mouse.h"
 #include "ext4.h"
+#include "../fs/pfs.h"
 #include "include/io.h"
 extern int spawn_user_process(const char *path, char *const argv[]);
 extern int spawn_user_process_env(const char *path, char *const argv[], char *const envp[]);
@@ -2519,7 +2520,9 @@ static void cmd_help(void)
     print("  export NAME=VALUE - Set shell environment variable\n");
     print("  unset NAME      - Remove shell environment variable\n");
     print("  mkext4 [dev]    - Format test EXT4 volume (default ram0)\n");
+    print("  mkpfs [dev]     - Format PFS persistent volume (default ram0)\n");
     print("  mount_ext4 [dev] [path] - Mount EXT4 volume read-only (default ram0 /mnt)\n");
+    print("  mount_pfs [dev] [path] - Mount PFS read/write volume (default ram0 /mnt)\n");
     print("  mount_tmpfs [path] - Mount tmpfs memory filesystem (default /tmp)\n");
     print("  netinfo         - Show network stack information\n");
     print("  discovery [scan|peers|announce|bye|name <n>|caps <c>|auth|auth_secret <s>|auth_peer <id>]\n");
@@ -2912,6 +2915,24 @@ void shell_run(void)
                         print_err("mount_ext4: failed\n");
                     else
                         print("mount_ext4: ok\n");
+                }
+                else if (shell_cmd_equals(cmd, "mkpfs"))
+                {
+                    const char *dev = argc > 1 ? argv[1] : "ram0";
+                    if (pfs_format(dev) < 0)
+                        print_err("mkpfs: format failed\n");
+                    else
+                        print("mkpfs: ok\n");
+                }
+                else if (shell_cmd_equals(cmd, "mount_pfs"))
+                {
+                    const char *dev = argc > 1 ? argv[1] : "ram0";
+                    const char *path = argc > 2 ? argv[2] : "/mnt";
+                    fs_type_t *fs = pfs_mount(dev);
+                    if (!fs || vfs_mount(path, fs) < 0)
+                        print_err("mount_pfs: failed\n");
+                    else
+                        print("mount_pfs: ok\n");
                 }
                 else if (shell_cmd_equals(cmd, "mount_tmpfs"))
                 {

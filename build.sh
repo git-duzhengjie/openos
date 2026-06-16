@@ -629,6 +629,11 @@ gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
+    -I $SRC/include -I $SRC/fs \
+    -c $SRC/fs/pfs.c -o $BUILD/pfs.o
+
+gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
     -I $SRC/include -I $SRC/net \
     -c $SRC/net/net.c -o $BUILD/net.o
 
@@ -699,6 +704,7 @@ ld -m elf_i386 -T $SRC/linker.ld \
     $BUILD/ramfs.o \
     $BUILD/tmpfs.o \
     $BUILD/ext4.o \
+    $BUILD/pfs.o \
     $BUILD/net.o \
     $BUILD/discovery.o \
     $BUILD/sync.o \
@@ -711,7 +717,7 @@ objcopy -O binary $BUILD/kernel.elf $BUILD/kernel.bin
 
 KERNEL_BYTES=$(stat -c%s "$BUILD/kernel.bin")
 KERNEL_SECTORS=$(( (KERNEL_BYTES + 511) / 512 ))
-BOOT_LOAD_SECTORS=1024
+BOOT_LOAD_SECTORS=1088
 if [ "$KERNEL_SECTORS" -gt "$BOOT_LOAD_SECTORS" ]; then
     echo "ERROR: kernel.bin is ${KERNEL_SECTORS} sectors, but bootloader loads only ${BOOT_LOAD_SECTORS} sectors."
     echo "Increase bootloader kernel load chunks before building the image."

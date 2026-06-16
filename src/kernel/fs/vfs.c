@@ -8,6 +8,7 @@
 #include "string.h"
 #include "ramfs.h"
 #include "tmpfs.h"
+#include "pfs.h"
 #include "chardev.h"
 #include "blockdev.h"
 #include "process.h"
@@ -125,6 +126,7 @@ static int vfs_can_exec(inode_t *inode) {
 
 static void vfs_repair_memory_inode(inode_t *ip, inode_t *parent) {
     if (!ip || !vfs_is_file(ip)) return;
+    if (ip->fs_type == PFS_MAGIC) return;
     if (ip->fs_type != 0 && ip->ops && ip->ops->write) return;
 
     serial_write("[VFS-R] repair memory inode mode=");
@@ -633,6 +635,8 @@ dentry_t *vfs_create_node_under(dentry_t *parent, const char *name,
     if (!ops && (type == FS_FILE || type == FS_DIR)) {
         if (parent->inode && parent->inode->fs_type == TMPFS_MAGIC) {
             tmpfs_setup_inode(ip, mode);
+        } else if (parent->inode && parent->inode->fs_type == PFS_MAGIC) {
+            /* PFS binds inode ops/fs_data after the persistent node is allocated. */
         } else {
             ramfs_setup_inode(ip, mode);
         }
@@ -1052,6 +1056,13 @@ int vfs_open(const char *path, int flags, int mode) {
         if (vfs_can_write(parent->inode) < 0 || vfs_can_exec(parent->inode) < 0) return -1;
         d = create_regular_file(parent, name, (uint32_t)mode);
         if (!d) return -1;
+        dentry_t *real_parent = resolve_mount(parent);
+        if (real_parent->inode && real_parent->inode->fs_type == PFS_MAGIC &&
+            pfs_bind_created_node(real_parent, d) < 0) {
+            detach_child(d);
+            free_dentry(d);
+            return -1;
+        }
     }
 
     d = resolve_mount(d);
@@ -1265,7 +1276,16 @@ int vfs_mkdir(const char *path, int mode) {
     dentry_t *parent = vfs_path_lookup(parent_path);
     if (!parent || !vfs_is_dir(parent->inode)) return -1;
     if (vfs_can_write(parent->inode) < 0 || vfs_can_exec(parent->inode) < 0) return -1;
-    return vfs_create_node_under(parent, name, FS_DIR | (uint32_t)mode, NULL, NULL, 0) ? 0 : -1;
+    dentry_t *d = vfs_create_node_under(parent, name, FS_DIR | (uint32_t)mode, NULL, NULL, 0);
+    if (!d) return -1;
+    dentry_t *real_parent = resolve_mount(parent);
+    if (real_parent->inode && real_parent->inode->fs_type == PFS_MAGIC &&
+        pfs_bind_created_node(real_parent, d) < 0) {
+        detach_child(d);
+        free_dentry(d);
+        return -1;
+    }
+    return 0;
 }
 
 int vfs_mknod(const char *path, int mode, const char *dev_name) {
@@ -1297,6 +1317,7 @@ int vfs_unlink(const char *path) {
     if (vfs_is_dir(d->inode)) return -1;
     if (d->mount) return -1;
     if (vfs_can_write(d->parent->inode) < 0 || vfs_can_exec(d->parent->inode) < 0) return -1;
+    if (d->inode->fs_type == PFS_MAGIC && pfs_remove_node(d) < 0) return -1;
     if (d->inode->nlinks > 0) d->inode->nlinks--;
     detach_child(d);
     free_dentry(d);
@@ -1310,6 +1331,7 @@ int vfs_rmdir(const char *path) {
     if (d->mount) return -1;
     if (vfs_can_write(d->parent->inode) < 0 || vfs_can_exec(d->parent->inode) < 0) return -1;
     if (has_children(d)) return -1;
+    if (d->inode->fs_type == PFS_MAGIC && pfs_remove_node(d) < 0) return -1;
     detach_child(d);
     free_dentry(d);
     return 0;
@@ -1530,6 +1552,11 @@ int vfs_mount(const char *path, fs_type_t *fs) {
     md->parent = mp->parent ? mp->parent : mp;
 
     mp->mount = md;
+    if (fs->magic == PFS_MAGIC && pfs_populate(md) < 0) {
+        mp->mount = NULL;
+        free_dentry(md);
+        return -1;
+    }
 
     mount_t *m = alloc_mount();
     if (!m) {

@@ -21,7 +21,7 @@
 - [√] 用户态切换、ELF 用户程序加载
 - [√] VFS / ramfs / tmpfs 基础能力
 - [√] RAM disk / 内置用户程序嵌入
-- [√] bootloader 内核加载上限提升到 1024 扇区（提交：`d2a2da0`）
+- [√] bootloader 内核加载上限提升到 1088 扇区（提交：本提交）
 - [√] Shell、VGA / GUI Terminal、基础输入
 - [√] 基础网络栈雏形（ARP / IPv4 / ICMP / UDP / TCP）
 - [√] `/bin/hello`、`/bin/fault`、`/bin/waittest`、`/bin/orphan`、`/bin/argtest`、`/bin/envtest`、`/bin/fstest`、`/bin/libctest`、`/bin/maintest`、`/bin/systest`、`/bin/malloctest`、`/bin/errnotest`、`/bin/pwd`、`/bin/ls`、`/bin/cat`、`/bin/echo`、`/bin/mkdir`、`/bin/touch`、`/bin/cp`、`/bin/mv`、`/bin/tee`、`/bin/head`、`/bin/tail`、`/bin/sort`、`/bin/env`、`/bin/rm`、`/bin/rmdir`、`/bin/kill`、`/bin/grep`、`/bin/wc` 基础用户程序
@@ -169,7 +169,7 @@
 
 ### 8. 持久化存储
 
-- [ ] 磁盘持久化文件系统
+- [√] 磁盘持久化文件系统（新增 PFS 格式化/挂载、目录树加载、读写/截断/权限元数据持久化）
 - [ ] FAT32
 - [ ] EXT4 读写支持
 - [ ] 文件缓存 / page cache
