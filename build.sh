@@ -116,6 +116,16 @@ if [ -f $USR/futextest.c ]; then
     echo "  Embedded: futextest.elf"
 fi
 
+if [ -f $USR/nicetest.c ]; then
+    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+        -fno-stack-protector -fno-builtin \
+        -I $SRC/include \
+        -c $USR/nicetest.c -o $BUILD/nicetest.o
+    ld -m elf_i386 -T $USR/user.ld -o $BUILD/nicetest.elf $BUILD/nicetest.o
+    python3 _embed_elf.py $BUILD/nicetest.elf $SRC/include/embed_nicetest.h nicetest_elf
+    echo "  Embedded: nicetest.elf"
+fi
+
 if [ -f $USR/isotest.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \

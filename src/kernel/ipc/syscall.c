@@ -76,6 +76,69 @@ static syscall_sem_t syscall_sems[SYSCALL_MAX_SEMAPHORES];
 static syscall_cond_t syscall_conds[SYSCALL_MAX_CONDS];
 static syscall_futex_waiter_t syscall_futex_waiters[SYSCALL_MAX_FUTEX_WAITERS];
 
+#define NICE_MIN (-20)
+#define NICE_MAX 19
+#define NICE_ERROR (-1000)
+
+static int priority_to_nice(uint32_t priority)
+{
+    if (priority >= PRIORITY_IDLE) return NICE_MAX;
+    if (priority == PRIORITY_REALTIME) return NICE_MIN;
+    return (int)((priority * 39u) / PRIORITY_IDLE) + NICE_MIN;
+}
+
+static uint32_t nice_to_priority(int nice_value)
+{
+    int clamped = nice_value;
+    if (clamped < NICE_MIN) clamped = NICE_MIN;
+    if (clamped > NICE_MAX) clamped = NICE_MAX;
+    return (uint32_t)(((clamped - NICE_MIN) * PRIORITY_IDLE + 19) / 39);
+}
+
+static thread_t *syscall_find_thread(uint32_t pid)
+{
+    thread_t *current = sched_get_current();
+    process_t *proc;
+
+    if (pid == 0 || (current && pid == current->pid))
+        return current;
+
+    proc = proc_find(pid);
+    if (!proc || !proc->threads)
+        return NULL;
+    return proc->threads;
+}
+
+static uint32_t syscall_getpriority(uint32_t pid)
+{
+    thread_t *thread = syscall_find_thread(pid);
+    if (!thread)
+        return (uint32_t)NICE_ERROR;
+    return (uint32_t)priority_to_nice(thread->priority);
+}
+
+static uint32_t syscall_setpriority(uint32_t pid, int nice_value)
+{
+    thread_t *thread = syscall_find_thread(pid);
+    if (!thread)
+        return (uint32_t)-1;
+    return (sched_set_thread_priority(thread, nice_to_priority(nice_value)) == 0) ? 0u : (uint32_t)-1;
+}
+
+static uint32_t syscall_nice(int inc)
+{
+    thread_t *current = sched_get_current();
+    int next_nice;
+    if (!current)
+        return (uint32_t)NICE_ERROR;
+    next_nice = priority_to_nice(current->priority) + inc;
+    if (next_nice < NICE_MIN) next_nice = NICE_MIN;
+    if (next_nice > NICE_MAX) next_nice = NICE_MAX;
+    if (sched_set_thread_priority(current, nice_to_priority(next_nice)) < 0)
+        return (uint32_t)-1;
+    return (uint32_t)next_nice;
+}
+
 static syscall_mutex_t *syscall_mutex_from_handle(uint32_t handle)
 {
     if (handle == 0 || handle > SYSCALL_MAX_MUTEXES)
@@ -900,6 +963,12 @@ uint32_t syscall_dispatch(uint32_t num,
         return syscall_futex_wait(a, b);
     case SYS_FUTEX_WAKE:
         return syscall_futex_wake(a, b);
+    case SYS_GETPRIORITY:
+        return syscall_getpriority(a);
+    case SYS_SETPRIORITY:
+        return syscall_setpriority(a, (int)b);
+    case SYS_NICE:
+        return syscall_nice((int)a);
 
     case SYS_FORK:
         return sys_fork();

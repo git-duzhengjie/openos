@@ -68,6 +68,9 @@
 #define SYS_COND_DESTROY  268
 #define SYS_FUTEX_WAIT    269
 #define SYS_FUTEX_WAKE    270
+#define SYS_GETPRIORITY   271
+#define SYS_SETPRIORITY   272
+#define SYS_NICE          273
 
 typedef struct openos_stat {
     uint32_t ino;

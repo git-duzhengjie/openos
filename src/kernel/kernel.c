@@ -79,6 +79,12 @@
 #else
 #define OPENOS_HAS_FUTEXTEST 0
 #endif
+#if __has_include("embed_nicetest.h")
+#include "embed_nicetest.h"  /* priority/nice 回归测试程序 */
+#define OPENOS_HAS_NICETEST 1
+#else
+#define OPENOS_HAS_NICETEST 0
+#endif
 #if __has_include("embed_exit42.h")
 #include "embed_exit42.h"  /* exit status 回归测试程序 */
 #define OPENOS_HAS_EXIT42 1
@@ -684,6 +690,17 @@ void kernel_main(void) {
         serial_write("[OK] Installed /bin/futextest user ELF\n");
     } else {
         serial_write("[WARN] Failed to install /bin/futextest\n");
+    }
+#endif
+
+#if OPENOS_HAS_NICETEST
+    fd = vfs_open("/bin/nicetest", O_CREAT | O_RDWR, 0755);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)nicetest_elf, nicetest_elf_size);
+        vfs_close(fd);
+        serial_write("[OK] Installed /bin/nicetest user ELF\n");
+    } else {
+        serial_write("[WARN] Failed to install /bin/nicetest\n");
     }
 #endif
 

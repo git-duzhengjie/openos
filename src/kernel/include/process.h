@@ -176,6 +176,7 @@ thread_t *sched_get_current(void);
 int sched_need_resched(void);
 void sched_set_need_resched(int need);
 void sched_ensure_not_running_cr3(uint32_t cr3);
+int sched_set_thread_priority(thread_t *thread, uint32_t priority);
 void sched_tick(void);
 uint32_t sched_time_ms(void);
 

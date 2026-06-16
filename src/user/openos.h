@@ -65,6 +65,9 @@
 #define SYS_COND_DESTROY  268
 #define SYS_FUTEX_WAIT    269
 #define SYS_FUTEX_WAKE    270
+#define SYS_GETPRIORITY   271
+#define SYS_SETPRIORITY   272
+#define SYS_NICE          273
 
 #define WNOHANG         1
 #define SIGKILL         9
@@ -396,6 +399,29 @@ static inline int openos_futex_wait(volatile unsigned int *uaddr, unsigned int e
 static inline int openos_futex_wake(volatile unsigned int *uaddr, unsigned int max_wake)
 {
     return openos_syscall_result(openos_syscall2(SYS_FUTEX_WAKE, (int)uaddr, (int)max_wake));
+}
+
+static inline int openos_getpriority(int pid)
+{
+    int ret = openos_syscall1(SYS_GETPRIORITY, pid);
+    if (ret == -1000)
+        return openos_syscall_result(-1);
+    openos_clear_errno();
+    return ret;
+}
+
+static inline int openos_setpriority(int pid, int nice_value)
+{
+    return openos_syscall_result(openos_syscall2(SYS_SETPRIORITY, pid, nice_value));
+}
+
+static inline int openos_nice(int inc)
+{
+    int ret = openos_syscall1(SYS_NICE, inc);
+    if (ret == -1000)
+        return openos_syscall_result(-1);
+    openos_clear_errno();
+    return ret;
 }
 
 static inline void openos_exit(int code)

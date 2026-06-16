@@ -131,6 +131,34 @@ void sched_set_need_resched(int need) {
     sched.need_resched = need;
 }
 
+int sched_set_thread_priority(thread_t *thread, uint32_t priority) {
+    if (!thread || priority > PRIORITY_IDLE) return -1;
+
+    uint32_t saved_eflags;
+    __asm__ volatile("pushfl; pop %0; cli" : "=r"(saved_eflags) :: "memory");
+
+    uint32_t old_priority = thread->priority;
+    if (old_priority == priority) {
+        __asm__ volatile("push %0; popfl" :: "r"(saved_eflags) : "memory");
+        return 0;
+    }
+
+    if (thread->state == PROC_READY) {
+        remove_from_queue(thread);
+        thread->priority = priority;
+        enqueue(thread);
+    } else {
+        thread->priority = priority;
+    }
+
+    if (thread == sched.current && priority > old_priority) {
+        sched.need_resched = 1;
+    }
+
+    __asm__ volatile("push %0; popfl" :: "r"(saved_eflags) : "memory");
+    return 0;
+}
+
 void sched_start(void) {
     thread_t *first = pick_next();
     if (!first) {
