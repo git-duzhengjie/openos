@@ -8,6 +8,7 @@
 #include "../include/vmm.h"
 #include "../net/sync.h"
 #include "../net/bus.h"
+#include "../net/net.h"
 
 #ifndef NULL
 #define NULL ((void*)0)
@@ -237,6 +238,7 @@ uint32_t sched_time_ms(void) {
 void sched_tick(void) {
     sync_tick(1);
     bus_reliable_tick(1);
+    net_tick(1);
     sched.time_ms++;
     proc_check_alarms(sched.time_ms);
     proc_wake_sleepers(sched.time_ms);

@@ -30,6 +30,9 @@
 #define TCP_LISTEN_SIZE 8
 #define TCP_CONN_SIZE 16
 #define TCP_RECV_BUFFER_SIZE 2048
+#define TCP_RETX_BUFFER_SIZE 536
+#define TCP_RETX_TIMEOUT_MS 500u
+#define TCP_RETX_MAX_RETRIES 5u
 
 #define TCP_STATE_CLOSED      NET_TCP_STATE_CLOSED
 #define TCP_STATE_LISTEN      NET_TCP_STATE_LISTEN
@@ -131,6 +134,14 @@ struct tcp_connection {
     uint32_t rcv_nxt;
     uint8_t rx[TCP_RECV_BUFFER_SIZE];
     uint16_t rx_len;
+    int unacked_used;
+    uint32_t unacked_seq;
+    uint32_t unacked_ack;
+    uint16_t unacked_len;
+    uint8_t unacked_flags;
+    uint32_t unacked_sent_ms;
+    uint8_t unacked_retries;
+    uint8_t unacked_data[TCP_RETX_BUFFER_SIZE];
 };
 
 static net_device_t *default_dev;
@@ -140,6 +151,7 @@ static struct tcp_listener tcp_listeners[TCP_LISTEN_SIZE];
 static struct tcp_connection tcp_connections[TCP_CONN_SIZE];
 static int tcp_next_id = 1;
 static uint16_t ipv4_ident = 1;
+static uint32_t tcp_clock_ms;
 
 static uint16_t bswap16(uint16_t x) {
     return (uint16_t)((x << 8) | (x >> 8));
@@ -511,6 +523,40 @@ static uint32_t tcp_state_consume(uint8_t flags, uint16_t data_len) {
     return consume;
 }
 
+static int tcp_seq_acked(uint32_t ack, uint32_t seq, uint32_t consume) {
+    uint32_t end = seq + consume;
+    return ((int32_t)(ack - end)) >= 0;
+}
+
+static void tcp_clear_unacked(struct tcp_connection *c) {
+    if (!c) return;
+    c->unacked_used = 0;
+    c->unacked_len = 0;
+    c->unacked_retries = 0;
+}
+
+static void tcp_record_unacked(struct tcp_connection *c, uint32_t seq, uint32_t ack,
+                               uint8_t flags, const uint8_t *data, uint16_t len) {
+    if (!c) return;
+    if (tcp_state_consume(flags, len) == 0) return;
+    if (len > TCP_RETX_BUFFER_SIZE) return;
+    c->unacked_used = 1;
+    c->unacked_seq = seq;
+    c->unacked_ack = ack;
+    c->unacked_flags = flags;
+    c->unacked_len = len;
+    c->unacked_sent_ms = tcp_clock_ms;
+    c->unacked_retries = 0;
+    if (len && data) memcpy(c->unacked_data, data, len);
+}
+
+static void tcp_ack_unacked(struct tcp_connection *c, uint32_t ack) {
+    uint32_t consume;
+    if (!c || !c->unacked_used) return;
+    consume = tcp_state_consume(c->unacked_flags, c->unacked_len);
+    if (tcp_seq_acked(ack, c->unacked_seq, consume)) tcp_clear_unacked(c);
+}
+
 static void tcp_buffer_data(struct tcp_connection *c, const uint8_t *data, uint16_t len) {
     uint16_t room;
     if (!c || !data || !len) return;
@@ -524,10 +570,19 @@ static void tcp_buffer_data(struct tcp_connection *c, const uint8_t *data, uint1
 static int tcp_send_for_conn(struct tcp_connection *c, uint8_t flags,
                              const uint8_t *data, uint16_t len) {
     int ret;
+    uint32_t seq;
+    uint32_t consume;
     if (!c) return -1;
+    consume = tcp_state_consume(flags, len);
+    if (consume && c->unacked_used) return -1;
+    if (len > TCP_RETX_BUFFER_SIZE) return -1;
+    seq = c->snd_nxt;
     ret = tcp_send_segment(c->remote_ip, c->local_port, c->remote_port,
-                           c->snd_nxt, c->rcv_nxt, flags, data, len);
-    if (ret == 0) c->snd_nxt += tcp_state_consume(flags, len);
+                           seq, c->rcv_nxt, flags, data, len);
+    if (ret == 0) {
+        c->snd_nxt += consume;
+        tcp_record_unacked(c, seq, c->rcv_nxt, flags, data, len);
+    }
     return ret;
 }
 
@@ -595,6 +650,27 @@ int net_tcp_state(int conn_id) {
 
 int net_tcp_send_syn(uint32_t dst_ip, uint16_t src_port, uint16_t dst_port) {
     return tcp_send_segment(dst_ip, src_port, dst_port, 1, 0, TCP_FLAG_SYN, 0, 0);
+}
+
+void net_tick(uint32_t elapsed_ms) {
+    int i;
+    tcp_clock_ms += elapsed_ms;
+    for (i = 0; i < TCP_CONN_SIZE; i++) {
+        struct tcp_connection *c = &tcp_connections[i];
+        if (!c->used || !c->unacked_used) continue;
+        if ((uint32_t)(tcp_clock_ms - c->unacked_sent_ms) < TCP_RETX_TIMEOUT_MS) continue;
+        if (c->unacked_retries >= TCP_RETX_MAX_RETRIES) {
+            c->state = TCP_STATE_CLOSED;
+            c->used = 0;
+            continue;
+        }
+        if (tcp_send_segment(c->remote_ip, c->local_port, c->remote_port,
+                             c->unacked_seq, c->unacked_ack, c->unacked_flags,
+                             c->unacked_len ? c->unacked_data : 0, c->unacked_len) == 0) {
+            c->unacked_sent_ms = tcp_clock_ms;
+            c->unacked_retries++;
+        }
+    }
 }
 
 static void tcp_send_rst(uint32_t dst_ip, uint16_t src_port, uint16_t dst_port, uint32_t ack) {
@@ -671,6 +747,7 @@ static void handle_tcp(uint32_t src_ip, const uint8_t *payload, uint16_t len) {
         return;
     }
 
+    if (tcp->flags & TCP_FLAG_ACK) tcp_ack_unacked(c, ack);
     if (consume) c->rcv_nxt = seq + consume;
 
     switch (c->state) {

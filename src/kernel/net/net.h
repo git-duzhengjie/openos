@@ -68,6 +68,7 @@ int net_tcp_send(int conn_id, const uint8_t *data, uint16_t len);
 int net_tcp_recv(int conn_id, uint8_t *data, uint16_t len);
 int net_tcp_close(int conn_id);
 int net_tcp_state(int conn_id);
+void net_tick(uint32_t elapsed_ms);
 int net_tcp_send_syn(uint32_t dst_ip, uint16_t src_port, uint16_t dst_port);
 int net_ping_self(void);
 void net_print_info(void);
