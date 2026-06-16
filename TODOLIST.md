@@ -175,7 +175,7 @@
 - [√] 文件缓存 / page cache（块级缓存支持命中统计、脏块回写、按设备/全局失效接口）
 - [√] `fsync`（新增 VFS fsync、文件系统/块设备回调和用户态 openos_fsync 包装）
 - [√] MBR / GPT 分区表
-- [x] 块设备缓存层 (已包含在 page cache 实现)
+- [√] 块设备缓存层（已实现 blockdev 统一缓存：命中统计、脏块回写、flush/invalidate）
 
 ---
 
