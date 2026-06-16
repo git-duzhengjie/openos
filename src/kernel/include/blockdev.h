@@ -39,6 +39,18 @@ typedef struct blockdev {
     void *private_data;
 } blockdev_t;
 
+typedef struct blockdev_cache_stats {
+    uint32_t entries;
+    uint32_t valid_entries;
+    uint32_t dirty_entries;
+    uint32_t read_hits;
+    uint32_t read_misses;
+    uint32_t write_hits;
+    uint32_t write_misses;
+    uint32_t evictions;
+    uint32_t flushes;
+} blockdev_cache_stats_t;
+
 void blockdev_init(void);
 int blockdev_register(const char *name, uint32_t major, uint32_t minor,
                       uint32_t sector_size, uint32_t sector_count,
@@ -55,6 +67,10 @@ int blockdev_read_blocks(blockdev_t *dev, uint32_t lba, uint32_t count, void *bu
 int blockdev_write_blocks(blockdev_t *dev, uint32_t lba, uint32_t count, const void *buf);
 int blockdev_flush(blockdev_t *dev);
 int blockdev_flush_all(void);
+int blockdev_invalidate(blockdev_t *dev);
+int blockdev_invalidate_all(void);
+void blockdev_cache_get_stats(blockdev_cache_stats_t *stats);
+void blockdev_cache_reset_stats(void);
 int blockdev_ioctl(blockdev_t *dev, uint32_t request, void *arg);
 uint32_t blockdev_size_bytes(blockdev_t *dev);
 

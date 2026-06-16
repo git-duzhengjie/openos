@@ -26,6 +26,7 @@ typedef struct block_cache_entry {
 
 static block_cache_entry_t block_cache[BLOCK_CACHE_ENTRIES];
 static uint32_t block_cache_clock = 1;
+static blockdev_cache_stats_t block_cache_stats;
 
 static int blockdev_raw_read_one(blockdev_t *dev, uint32_t lba, void *buf) {
     if (!dev || !buf || !dev->ops || !dev->ops->read_blocks) return -1;
@@ -41,6 +42,7 @@ static int block_cache_flush_entry(block_cache_entry_t *e) {
     if (!e || !e->valid || !e->dirty) return 0;
     if (blockdev_raw_write_one(e->dev, e->lba, e->data) < 0) return -1;
     e->dirty = 0;
+    block_cache_stats.flushes++;
     return 0;
 }
 
@@ -72,7 +74,10 @@ static block_cache_entry_t *block_cache_alloc(blockdev_t *dev, uint32_t lba) {
         }
     }
 
-    if (best_age != 0 && block_cache_flush_entry(&block_cache[victim]) < 0) return 0;
+    if (best_age != 0) {
+        if (block_cache_flush_entry(&block_cache[victim]) < 0) return 0;
+        block_cache_stats.evictions++;
+    }
     memset(&block_cache[victim], 0, sizeof(block_cache[victim]));
     block_cache[victim].valid = 1;
     block_cache[victim].dev = dev;
@@ -89,7 +94,10 @@ static int block_cache_read_one(blockdev_t *dev, uint32_t lba, void *buf) {
     }
 
     e = block_cache_find(dev, lba);
-    if (!e) {
+    if (e) {
+        block_cache_stats.read_hits++;
+    } else {
+        block_cache_stats.read_misses++;
         e = block_cache_alloc(dev, lba);
         if (!e) return -1;
         if (blockdev_raw_read_one(dev, lba, e->data) < 0) {
@@ -109,7 +117,10 @@ static int block_cache_write_one(blockdev_t *dev, uint32_t lba, const void *buf)
     }
 
     e = block_cache_find(dev, lba);
-    if (!e) {
+    if (e) {
+        block_cache_stats.write_hits++;
+    } else {
+        block_cache_stats.write_misses++;
         e = block_cache_alloc(dev, lba);
         if (!e) return -1;
     }
@@ -135,6 +146,7 @@ static void blockdev_copy_name(char *dst, const char *src) {
 void blockdev_init(void) {
     memset(blockdev_table, 0, sizeof(blockdev_table));
     memset(block_cache, 0, sizeof(block_cache));
+    memset(&block_cache_stats, 0, sizeof(block_cache_stats));
     blockdev_table_count = 0;
     block_cache_clock = 1;
 }
@@ -297,6 +309,45 @@ int blockdev_flush_all(void) {
         if (block_cache_flush_entry(&block_cache[i]) < 0) ret = -1;
     }
     return ret;
+}
+
+int blockdev_invalidate(blockdev_t *dev) {
+    uint32_t i;
+
+    if (!dev) return -1;
+    if (blockdev_flush(dev) < 0) return -1;
+    for (i = 0; i < BLOCK_CACHE_ENTRIES; i++) {
+        if (block_cache[i].valid && block_cache[i].dev == dev) {
+            memset(&block_cache[i], 0, sizeof(block_cache[i]));
+        }
+    }
+    return 0;
+}
+
+int blockdev_invalidate_all(void) {
+    if (blockdev_flush_all() < 0) return -1;
+    memset(block_cache, 0, sizeof(block_cache));
+    return 0;
+}
+
+void blockdev_cache_get_stats(blockdev_cache_stats_t *stats) {
+    uint32_t i;
+
+    if (!stats) return;
+    *stats = block_cache_stats;
+    stats->entries = BLOCK_CACHE_ENTRIES;
+    stats->valid_entries = 0;
+    stats->dirty_entries = 0;
+    for (i = 0; i < BLOCK_CACHE_ENTRIES; i++) {
+        if (block_cache[i].valid) {
+            stats->valid_entries++;
+            if (block_cache[i].dirty) stats->dirty_entries++;
+        }
+    }
+}
+
+void blockdev_cache_reset_stats(void) {
+    memset(&block_cache_stats, 0, sizeof(block_cache_stats));
 }
 
 int blockdev_ioctl(blockdev_t *dev, uint32_t request, void *arg) {
