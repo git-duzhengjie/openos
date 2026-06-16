@@ -175,7 +175,7 @@
 - [x] 文件缓存 / page cache
 - [x] `fsync`
 - [x] MBR / GPT 分区表
-- [ ] 块设备缓存层
+- [x] 块设备缓存层 (已包含在 page cache 实现)
 
 ---
 
