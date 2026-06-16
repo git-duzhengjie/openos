@@ -34,6 +34,8 @@ static int gui_rect_contains(const gui_rect_t *r, int x, int y);
 static int gui_rect_intersect(const gui_rect_t *a, const gui_rect_t *b, gui_rect_t *out);
 static gui_window_t *gui_top_window(void);
 static void gui_set_hovered_widget(gui_widget_t *wg);
+static gui_app_t *gui_app_for_window(gui_window_t *window);
+static void gui_refresh_active_app(void);
 static void gui_demo_button(gui_widget_t *widget, void *user_data);
 static void gui_terminal_invalidate_cursor(void);
 static void gui_terminal_invalidate_body(void);
@@ -905,6 +907,7 @@ void gui_bring_to_front(gui_window_t *window) {
     }
     g_gui.z_order[g_gui.window_count - 1] = (uint32_t)idx;
     g_gui.active_window = window;
+    gui_refresh_active_app();
 }
 
 void gui_set_active_window(gui_window_t *window) {
@@ -921,6 +924,7 @@ void gui_set_active_window(gui_window_t *window) {
         g_gui.active_window = 0;
         gui_set_focused_widget(0);
     }
+    gui_refresh_active_app();
     gui_invalidate_all();
 }
 
@@ -946,6 +950,12 @@ void gui_destroy_window(gui_window_t *window) {
     if (g_gui.pressed_widget && g_gui.pressed_widget->owner == window) g_gui.pressed_widget = 0;
     if (g_gui.hovered_widget && g_gui.hovered_widget->owner == window) g_gui.hovered_widget = 0;
     if (g_gui.focused_widget && g_gui.focused_widget->owner == window) g_gui.focused_widget = 0;
+    if (window->owner_app) {
+        gui_app_t *app = window->owner_app;
+        if (app->window_count > 0) app->window_count--;
+        if (app->main_window == window) app->main_window = 0;
+        if (app->window_count == 0) app->running = 0;
+    }
     memset(window, 0, sizeof(gui_window_t));
 
     gui_refresh_window_refs();
@@ -982,6 +992,7 @@ void gui_minimize_window(gui_window_t *window) {
         gui_set_focused_widget(0);
     }
 
+    gui_refresh_active_app();
     gui_invalidate_all();
 }
 
@@ -1547,6 +1558,7 @@ void gui_init(void) {
     g_gui.colors.accent = gui_rgb(70, 145, 255);
     g_gui.next_window_id = 1;
     g_gui.next_widget_id = 1;
+    g_gui.next_app_id = 1;
     g_gui.mouse_x = 512;
     g_gui.mouse_y = 384;
     /* Default on shows the OpenOS software cursor inside the GUI.
@@ -1701,7 +1713,9 @@ void gui_print_info(void) {
     serial_write("[GUI] ready="); gui_write_dec((uint32_t)g_gui.initialized);
     serial_write(" size="); gui_write_dec(g_gui.width); serial_write("x"); gui_write_dec(g_gui.height);
     serial_write(" windows="); gui_write_dec(g_gui.window_count);
+    serial_write(" apps="); gui_write_dec(g_gui.next_app_id > 1 ? g_gui.next_app_id - 1 : 0);
     serial_write(" active="); gui_write_dec(g_gui.active_window ? g_gui.active_window->id : 0);
+    serial_write(" active_app="); gui_write_dec(g_gui.active_app ? g_gui.active_app->id : 0);
     serial_write(" events="); gui_write_dec(g_gui.event_count);
     serial_write(" dblbuf="); gui_write_dec((uint32_t)g_gui.double_buffered);
     serial_write(" cursor="); gui_write_dec((uint32_t)g_gui.cursor_visible);
@@ -1709,8 +1723,87 @@ void gui_print_info(void) {
     serial_write("\n");
 }
 
+gui_app_t *gui_register_app(const char *name, const char *title, gui_app_entry_t entry, void *user_data) {
+    uint32_t i;
+    gui_app_t *app;
+    if (!entry) return 0;
+    for (i = 0; i < GUI_MAX_APPS; i++) {
+        if (!g_gui.apps[i].used) break;
+    }
+    if (i >= GUI_MAX_APPS) return 0;
+    app = &g_gui.apps[i];
+    memset(app, 0, sizeof(gui_app_t));
+    app->used = 1;
+    app->id = g_gui.next_app_id++;
+    gui_copy_text(app->name, name ? name : "app", sizeof(app->name));
+    gui_copy_text(app->title, title ? title : app->name, sizeof(app->title));
+    app->entry = entry;
+    app->user_data = user_data;
+    return app;
+}
+
+int gui_start_app(gui_app_t *app) {
+    gui_app_t *prev;
+    int rc;
+    if (!app || !app->used || !app->entry) return -1;
+    if (app->running) return 0;
+    prev = g_gui.launching_app;
+    g_gui.launching_app = app;
+    app->running = 1;
+    app->window_count = 0;
+    app->main_window = 0;
+    rc = app->entry(app, app->user_data);
+    g_gui.launching_app = prev;
+    if (rc < 0 || app->window_count == 0) {
+        gui_exit_app(app);
+        return rc < 0 ? rc : -1;
+    }
+    g_gui.active_app = app;
+    return 0;
+}
+
+void gui_exit_app(gui_app_t *app) {
+    uint32_t i;
+    if (!app || !app->used) return;
+    for (i = 0; i < GUI_MAX_WINDOWS; i++) {
+        if (g_gui.windows[i].used && g_gui.windows[i].owner_app == app) {
+            gui_destroy_window(&g_gui.windows[i]);
+        }
+    }
+    app->running = 0;
+    app->main_window = 0;
+    app->window_count = 0;
+    if (g_gui.active_app == app) g_gui.active_app = 0;
+    gui_refresh_active_app();
+}
+
+gui_app_t *gui_get_active_app(void) { return g_gui.active_app; }
+
+gui_app_t *gui_get_window_app(gui_window_t *window) { return gui_app_for_window(window); }
+
+static gui_app_t *gui_app_for_window(gui_window_t *window) {
+    return (window && window->used) ? window->owner_app : 0;
+}
+
+static void gui_refresh_active_app(void) {
+    g_gui.active_app = gui_app_for_window(g_gui.active_window);
+}
+
+gui_window_t *gui_create_app_window(gui_app_t *app, int x, int y, int w, int h, const char *title) {
+    gui_app_t *prev;
+    gui_window_t *win;
+    if (!app || !app->used) return 0;
+    prev = g_gui.launching_app;
+    g_gui.launching_app = app;
+    win = gui_create_window(x, y, w, h, title ? title : app->title);
+    g_gui.launching_app = prev;
+    if (win) win->owner_app = app;
+    return win;
+}
+
 gui_window_t *gui_create_window(int x, int y, int w, int h, const char *title) {
     gui_window_t *win;
+    gui_app_t *owner;
     uint32_t idx;
     if (g_gui.window_count >= GUI_MAX_WINDOWS) return 0;
     for (idx = 0; idx < GUI_MAX_WINDOWS; idx++) {
@@ -1726,6 +1819,12 @@ gui_window_t *gui_create_window(int x, int y, int w, int h, const char *title) {
     win->bg_color = g_gui.colors.window_bg;
     win->flags = GUI_WINDOW_FLAG_CLOSABLE | GUI_WINDOW_FLAG_MINIMIZABLE;
     win->visible = 1;
+    owner = g_gui.launching_app;
+    if (owner && owner->used) {
+        win->owner_app = owner;
+        owner->window_count++;
+        if (!owner->main_window) owner->main_window = win;
+    }
     g_gui.z_order[g_gui.window_count++] = idx;
     gui_set_active_window(win);
     return win;
@@ -2258,11 +2357,11 @@ static void gui_demo_button(gui_widget_t *widget, void *user_data) {
     gui_terminal_write("\n[GUI] button clicked\n> ");
 }
 
-void gui_demo(void) {
+static int gui_demo_app_entry(gui_app_t *app, void *user_data) {
     gui_window_t *w1;
     gui_window_t *w2;
-    if (!g_gui.initialized) return;
-    w1 = gui_create_window(70, 70, 380, 230, "OpenOS Control Center");
+    (void)user_data;
+    w1 = gui_create_app_window(app, 70, 70, 380, 230, "OpenOS Control Center");
     if (w1) {
         gui_add_label(w1, 18, 22, 300, 18, "Welcome to OpenOS GUI");
         gui_add_panel(w1, 18, 52, 335, 48, gui_rgb(210, 225, 245));
@@ -2271,13 +2370,21 @@ void gui_demo(void) {
         gui_add_button(w1, 18, 150, 120, 28, "Click", gui_demo_button, 0);
         gui_add_button(w1, 150, 150, 120, 28, "Minimize", gui_demo_button, 0);
     }
-    w2 = gui_create_window(500, 120, 330, 170, "About OpenOS");
+    w2 = gui_create_app_window(app, 500, 120, 330, 170, "About OpenOS");
     if (w2) {
         gui_add_label(w2, 18, 24, 260, 18, "openos GUI framework MVP");
         gui_add_label(w2, 18, 48, 260, 18, "Framebuffer + windows + events");
         gui_add_button(w2, 18, 90, 100, 28, "OK", gui_demo_button, 0);
     }
-    gui_terminal_write("\n[GUI] demo windows created\n> ");
+    gui_terminal_write("\n[GUI] demo app started\n> ");
+    return (w1 || w2) ? 0 : -1;
+}
+
+void gui_demo(void) {
+    gui_app_t *app;
+    if (!g_gui.initialized) return;
+    app = gui_register_app("demo", "OpenOS Demo", gui_demo_app_entry, 0);
+    if (app) gui_start_app(app);
     gui_render();
 }
 

@@ -8,7 +8,9 @@
 #include "types.h"
 
 #define GUI_MAX_WINDOWS          16u
+#define GUI_MAX_APPS             16u
 #define GUI_MAX_WIDGETS_PER_WIN  16u
+#define GUI_APP_NAME_LEN         32u
 #define GUI_TITLE_HEIGHT         22
 #define GUI_BORDER_SIZE          2
 #define GUI_CHAR_W               8
@@ -83,8 +85,10 @@ typedef enum gui_event_type {
 
 typedef struct gui_window gui_window_t;
 typedef struct gui_widget gui_widget_t;
+typedef struct gui_app gui_app_t;
 
 typedef void (*gui_widget_callback_t)(gui_widget_t *widget, void *user_data);
+typedef int (*gui_app_entry_t)(gui_app_t *app, void *user_data);
 
 typedef struct gui_event {
     gui_event_type_t type;
@@ -128,8 +132,21 @@ struct gui_window {
     int dragging;
     int drag_offset_x;
     int drag_offset_y;
+    gui_app_t *owner_app;
     gui_widget_t widgets[GUI_MAX_WIDGETS_PER_WIN];
     uint32_t widget_count;
+};
+
+struct gui_app {
+    uint32_t id;
+    int used;
+    int running;
+    char name[GUI_APP_NAME_LEN];
+    char title[64];
+    gui_app_entry_t entry;
+    void *user_data;
+    gui_window_t *main_window;
+    uint32_t window_count;
 };
 
 typedef struct gui_terminal {
@@ -164,6 +181,9 @@ typedef struct gui_system {
     gui_window_t windows[GUI_MAX_WINDOWS];
     uint32_t z_order[GUI_MAX_WINDOWS];
     uint32_t window_count;
+    gui_app_t apps[GUI_MAX_APPS];
+    gui_app_t *active_app;
+    gui_app_t *launching_app;
     gui_window_t *active_window;
     gui_window_t *drag_window;
     gui_widget_t *pressed_widget;
@@ -171,6 +191,7 @@ typedef struct gui_system {
     gui_widget_t *focused_widget;
     uint32_t next_window_id;
     uint32_t next_widget_id;
+    uint32_t next_app_id;
 
     gui_event_t events[GUI_EVENT_QUEUE_SIZE];
     uint32_t event_head;
@@ -215,6 +236,12 @@ void gui_demo(void);
 int gui_start_desktop(void);
 void gui_poll(void);
 
+gui_app_t *gui_register_app(const char *name, const char *title, gui_app_entry_t entry, void *user_data);
+int gui_start_app(gui_app_t *app);
+void gui_exit_app(gui_app_t *app);
+gui_app_t *gui_get_active_app(void);
+gui_app_t *gui_get_window_app(gui_window_t *window);
+gui_window_t *gui_create_app_window(gui_app_t *app, int x, int y, int w, int h, const char *title);
 gui_window_t *gui_create_window(int x, int y, int w, int h, const char *title);
 void gui_destroy_window(gui_window_t *window);
 void gui_show_window(gui_window_t *window);
