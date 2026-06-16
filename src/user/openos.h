@@ -94,6 +94,9 @@
 #define SYS_MQ_SEND       297
 #define SYS_MQ_RECV       298
 #define SYS_MQ_DESTROY    299
+#define SYS_SHM_CREATE    300
+#define SYS_SHM_MAP       301
+#define SYS_SHM_DESTROY   302
 
 #define OPENOS_AF_UNSPEC  0
 #define OPENOS_AF_INET    2
@@ -264,6 +267,7 @@ typedef int openos_mutex_t;
 typedef int openos_sem_t;
 typedef int openos_cond_t;
 typedef int openos_mq_t;
+typedef int openos_shm_t;
 typedef void (*openos_thread_start_t)(void *);
 
 typedef struct openos_stat {
@@ -640,6 +644,34 @@ static inline int openos_mq_destroy(openos_mq_t *mq)
     if (!mq || *mq <= 0) return -1;
     ret = openos_syscall_result(openos_syscall1(SYS_MQ_DESTROY, *mq));
     if (ret == 0) *mq = 0;
+    return ret;
+}
+
+static inline int openos_shm_create(openos_shm_t *shm)
+{
+    int handle;
+    if (!shm) return -1;
+    handle = openos_syscall_result(openos_syscall0(SYS_SHM_CREATE));
+    if (handle < 0) return handle;
+    *shm = handle;
+    return 0;
+}
+
+static inline void *openos_shm_map(openos_shm_t *shm)
+{
+    int addr;
+    if (!shm || *shm <= 0) return (void *)-1;
+    addr = openos_syscall_result(openos_syscall1(SYS_SHM_MAP, *shm));
+    if (addr < 0) return (void *)-1;
+    return (void *)addr;
+}
+
+static inline int openos_shm_destroy(openos_shm_t *shm)
+{
+    int ret;
+    if (!shm || *shm <= 0) return -1;
+    ret = openos_syscall_result(openos_syscall1(SYS_SHM_DESTROY, *shm));
+    if (ret == 0) *shm = 0;
     return ret;
 }
 

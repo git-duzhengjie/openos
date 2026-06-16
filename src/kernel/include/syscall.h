@@ -97,6 +97,9 @@
 #define SYS_MQ_SEND       297
 #define SYS_MQ_RECV       298
 #define SYS_MQ_DESTROY    299
+#define SYS_SHM_CREATE    300
+#define SYS_SHM_MAP       301
+#define SYS_SHM_DESTROY   302
 
 #define OPENOS_POLLIN     0x0001
 #define OPENOS_POLLOUT    0x0004

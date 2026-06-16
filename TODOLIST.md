@@ -237,7 +237,7 @@
 
 - [√] pipe（已实现 VFS 匿名管道、`SYS_PIPE`、shell pipeline，并由 `/bin/systest` 覆盖）
 - [x] message queue
-- [ ] shared memory
+- [x] shared memory
 - [ ] eventfd 类机制
 - [ ] socketpair
 - [ ] 用户态服务进程通信模型

@@ -124,6 +124,14 @@ if [ -f $USR/mqtest.c ]; then
     echo "  Built: mqtest.elf"
 fi
 
+if [ -f $USR/shmtest.c ]; then
+    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+        -fno-stack-protector -fno-builtin \
+        -c $USR/shmtest.c -o $BUILD/shmtest.o
+    ld -m elf_i386 -T $USR/user.ld -o $BUILD/shmtest.elf $BUILD/shmtest.o
+    echo "  Built: shmtest.elf"
+fi
+
 if [ -f $USR/nicetest.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \

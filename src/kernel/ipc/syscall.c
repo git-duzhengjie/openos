@@ -36,6 +36,7 @@
 #define SYSCALL_MAX_MQUEUES 4u
 #define MQ_MAX_MESSAGES 4u
 #define MQ_MAX_MESSAGE_SIZE 64u
+#define SYSCALL_MAX_SHM_SEGMENTS 8u
 
 #define MUTEX_UNUSED 0u
 #define MUTEX_READY  1u
@@ -46,6 +47,8 @@
 #define FUTEX_WAIT_ACTIVE 1u
 #define MQ_UNUSED 0u
 #define MQ_READY  1u
+#define SHM_UNUSED 0u
+#define SHM_READY  1u
 
 #define MUTEX_WAIT_QUEUE_LIMIT 32u
 #define SEM_WAIT_QUEUE_LIMIT   32u
@@ -93,11 +96,17 @@ typedef struct syscall_mq {
     uint32_t count;
 } syscall_mq_t;
 
+typedef struct syscall_shm_segment {
+    uint8_t used;
+    uint32_t phys;
+} syscall_shm_segment_t;
+
 static syscall_mutex_t syscall_mutexes[SYSCALL_MAX_MUTEXES];
 static syscall_sem_t syscall_sems[SYSCALL_MAX_SEMAPHORES];
 static syscall_cond_t syscall_conds[SYSCALL_MAX_CONDS];
 static syscall_futex_waiter_t syscall_futex_waiters[SYSCALL_MAX_FUTEX_WAITERS];
 static syscall_mq_t syscall_mqueues[SYSCALL_MAX_MQUEUES];
+static syscall_shm_segment_t syscall_shm_segments[SYSCALL_MAX_SHM_SEGMENTS];
 
 #define NICE_MIN (-20)
 #define NICE_MAX 19
@@ -888,6 +897,73 @@ static uint32_t page_align_up_u32(uint32_t value)
     return (value + PAGE_SIZE - 1u) & ~(PAGE_SIZE - 1u);
 }
 
+static syscall_shm_segment_t *syscall_shm_from_handle(uint32_t handle)
+{
+    if (handle == 0 || handle > SYSCALL_MAX_SHM_SEGMENTS)
+        return NULL;
+    if (syscall_shm_segments[handle - 1].used != SHM_READY)
+        return NULL;
+    return &syscall_shm_segments[handle - 1];
+}
+
+static uint32_t syscall_shm_create(void)
+{
+    void *phys;
+
+    for (uint32_t i = 0; i < SYSCALL_MAX_SHM_SEGMENTS; i++) {
+        if (syscall_shm_segments[i].used == SHM_READY)
+            continue;
+        phys = pmm_alloc_page();
+        if (!phys)
+            return (uint32_t)-1;
+        memset((void *)phys, 0, PAGE_SIZE);
+        syscall_shm_segments[i].used = SHM_READY;
+        syscall_shm_segments[i].phys = (uint32_t)phys;
+        return i + 1;
+    }
+
+    return (uint32_t)-1;
+}
+
+static uint32_t syscall_shm_map(uint32_t handle)
+{
+    syscall_shm_segment_t *seg = syscall_shm_from_handle(handle);
+    process_t *proc;
+    uint32_t start;
+
+    if (!seg || !seg->phys)
+        return (uint32_t)-1;
+
+    proc = proc_find(proc_current_pid());
+    if (!proc)
+        return (uint32_t)-1;
+
+    if (proc->mmap_base == 0 || proc->mmap_end < SYS_MMAP_BASE || proc->mmap_end >= SYS_MMAP_LIMIT) {
+        proc->mmap_base = SYS_MMAP_BASE;
+        proc->mmap_end = SYS_MMAP_BASE;
+    }
+
+    start = page_align_up_u32(proc->mmap_end);
+    if (start < SYS_MMAP_BASE || start > SYS_MMAP_LIMIT || PAGE_SIZE > (SYS_MMAP_LIMIT - start))
+        return (uint32_t)-1;
+
+    pmm_ref_page((void *)seg->phys);
+    vmm_map_page(start, seg->phys, VMM_USER);
+    proc->mmap_end = start + PAGE_SIZE;
+    return start;
+}
+
+static uint32_t syscall_shm_destroy(uint32_t handle)
+{
+    syscall_shm_segment_t *seg = syscall_shm_from_handle(handle);
+
+    if (!seg || !seg->phys)
+        return (uint32_t)-1;
+    pmm_free_page((void *)seg->phys);
+    memset(seg, 0, sizeof(*seg));
+    return 0;
+}
+
 static void sys_munmap_range(uint32_t addr, uint32_t len)
 {
     uint32_t end = addr + len;
@@ -1638,6 +1714,15 @@ uint32_t syscall_dispatch(uint32_t num,
 
     case SYS_MQ_DESTROY:
         return syscall_mq_destroy((uint32_t)a);
+
+    case SYS_SHM_CREATE:
+        return syscall_shm_create();
+
+    case SYS_SHM_MAP:
+        return syscall_shm_map((uint32_t)a);
+
+    case SYS_SHM_DESTROY:
+        return syscall_shm_destroy((uint32_t)a);
 
     case SYS_FSYNC:
         {
