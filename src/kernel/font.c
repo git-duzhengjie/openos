@@ -172,9 +172,56 @@ static int font_rect_contains(const font_rect_t *rect, int x, int y) {
     return x >= rect->x && y >= rect->y && x < rect->x + rect->w && y < rect->y + rect->h;
 }
 
-static uint32_t font_advance_for_char(const font_renderer_t *r, char ch) {
-    if (ch == '\t') return (uint32_t)r->width * FONT_DEFAULT_TAB_SPACES;
-    return (uint32_t)r->width;
+int font_decode_utf8(const char **text, uint32_t *codepoint) {
+    const uint8_t *s;
+    uint32_t cp;
+    if (!text || !*text || !codepoint) return 0;
+    s = (const uint8_t *)(*text);
+    if (s[0] == 0) return 0;
+    if (s[0] < 0x80u) {
+        *codepoint = s[0];
+        *text += 1;
+        return 1;
+    }
+    if ((s[0] & 0xE0u) == 0xC0u && (s[1] & 0xC0u) == 0x80u) {
+        cp = ((uint32_t)(s[0] & 0x1Fu) << 6) | (uint32_t)(s[1] & 0x3Fu);
+        if (cp >= 0x80u) {
+            *codepoint = cp;
+            *text += 2;
+            return 1;
+        }
+    } else if ((s[0] & 0xF0u) == 0xE0u &&
+               (s[1] & 0xC0u) == 0x80u && (s[2] & 0xC0u) == 0x80u) {
+        cp = ((uint32_t)(s[0] & 0x0Fu) << 12) |
+             ((uint32_t)(s[1] & 0x3Fu) << 6) | (uint32_t)(s[2] & 0x3Fu);
+        if (cp >= 0x800u && !(cp >= 0xD800u && cp <= 0xDFFFu)) {
+            *codepoint = cp;
+            *text += 3;
+            return 1;
+        }
+    } else if ((s[0] & 0xF8u) == 0xF0u &&
+               (s[1] & 0xC0u) == 0x80u && (s[2] & 0xC0u) == 0x80u &&
+               (s[3] & 0xC0u) == 0x80u) {
+        cp = ((uint32_t)(s[0] & 0x07u) << 18) |
+             ((uint32_t)(s[1] & 0x3Fu) << 12) |
+             ((uint32_t)(s[2] & 0x3Fu) << 6) | (uint32_t)(s[3] & 0x3Fu);
+        if (cp >= 0x10000u && cp <= 0x10FFFFu) {
+            *codepoint = cp;
+            *text += 4;
+            return 1;
+        }
+    }
+    *codepoint = 0xFFFDu;
+    *text += 1;
+    return 1;
+}
+
+uint32_t font_measure_codepoint_width(const font_renderer_t *renderer, uint32_t codepoint) {
+    const font_renderer_t *r = font_resolve_renderer(renderer);
+    if (!r) return 0;
+    if (codepoint == '\t') return (uint32_t)r->width * FONT_DEFAULT_TAB_SPACES;
+    if (codepoint < 0x80u) return (uint32_t)r->width;
+    return FONT_UNICODE_WIDTH;
 }
 
 uint8_t font_get_glyph_row(const font_renderer_t *renderer, char ch, int row) {
@@ -185,8 +232,10 @@ uint8_t font_get_glyph_row(const font_renderer_t *renderer, char ch, int row) {
 
 uint32_t font_get_line_height(const font_renderer_t *renderer) {
     const font_renderer_t *r = font_resolve_renderer(renderer);
+    uint32_t glyph_height;
     if (!r) return 0;
-    return (uint32_t)r->height + FONT_DEFAULT_LINE_GAP;
+    glyph_height = (r->height < FONT_UNICODE_HEIGHT) ? FONT_UNICODE_HEIGHT : r->height;
+    return glyph_height + FONT_DEFAULT_LINE_GAP;
 }
 
 uint32_t font_measure_text_width(const font_renderer_t *renderer, const char *text) {
@@ -195,13 +244,14 @@ uint32_t font_measure_text_width(const font_renderer_t *renderer, const char *te
     uint32_t line_width = 0;
     if (!r || !text) return 0;
     while (*text) {
-        if (*text == '\n') {
+        uint32_t cp;
+        if (!font_decode_utf8(&text, &cp)) break;
+        if (cp == '\n') {
             if (line_width > max_width) max_width = line_width;
             line_width = 0;
         } else {
-            line_width += font_advance_for_char(r, *text);
+            line_width += font_measure_codepoint_width(r, cp);
         }
-        text++;
     }
     if (line_width > max_width) max_width = line_width;
     return max_width;
@@ -261,6 +311,30 @@ void font_draw_char(const font_renderer_t *renderer, font_put_pixel_fn put_pixel
     font_draw_char_clipped(renderer, put_pixel, ctx, 0, x, y, ch, color);
 }
 
+void font_draw_codepoint_clipped(const font_renderer_t *renderer, font_put_pixel_fn put_pixel, void *ctx,
+                                 const font_rect_t *clip, int x, int y, uint32_t codepoint, uint32_t color) {
+    const font_renderer_t *r = font_resolve_renderer(renderer);
+    int row, col;
+    if (!r || !put_pixel) return;
+    if (codepoint < 0x80u) {
+        font_draw_char_clipped(r, put_pixel, ctx, clip, x, y, (char)codepoint, color);
+        return;
+    }
+
+    /* Minimal Unicode fallback glyph: 16x16 boxed marker with codepoint-derived texture. */
+    for (row = 0; row < FONT_UNICODE_HEIGHT; row++) {
+        for (col = 0; col < FONT_UNICODE_WIDTH; col++) {
+            int px = x + col;
+            int py = y + row;
+            uint32_t bit = ((uint32_t)(row * 13 + col * 7) ^ codepoint ^ (codepoint >> 8)) & 7u;
+            int border = (row == 0 || row == FONT_UNICODE_HEIGHT - 1 || col == 0 || col == FONT_UNICODE_WIDTH - 1);
+            int diagonal = (col == row || col == FONT_UNICODE_WIDTH - 1 - row);
+            if (!border && !diagonal && bit != 0) continue;
+            if (font_rect_contains(clip, px, py)) put_pixel(ctx, px, py, color);
+        }
+    }
+}
+
 void font_draw_text_clipped(const font_renderer_t *renderer, font_put_pixel_fn put_pixel, void *ctx,
                             const font_rect_t *clip, int x, int y, const char *text, uint32_t color) {
     const font_renderer_t *r = font_resolve_renderer(renderer);
@@ -269,16 +343,17 @@ void font_draw_text_clipped(const font_renderer_t *renderer, font_put_pixel_fn p
     if (!r || !put_pixel || !text) return;
 
     while (*text) {
-        if (*text == '\n') {
+        uint32_t cp;
+        if (!font_decode_utf8(&text, &cp)) break;
+        if (cp == '\n') {
             cy += (int)font_get_line_height(r);
             cx = x;
-        } else if (*text == '\t') {
-            cx += (int)font_advance_for_char(r, *text);
+        } else if (cp == '\t') {
+            cx += (int)font_measure_codepoint_width(r, cp);
         } else {
-            font_draw_char_clipped(r, put_pixel, ctx, clip, cx, cy, *text, color);
-            cx += (int)font_advance_for_char(r, *text);
+            font_draw_codepoint_clipped(r, put_pixel, ctx, clip, cx, cy, cp, color);
+            cx += (int)font_measure_codepoint_width(r, cp);
         }
-        text++;
     }
 }
 
