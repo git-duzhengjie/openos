@@ -33,6 +33,9 @@
 #define TCP_RETX_BUFFER_SIZE 536
 #define TCP_RETX_TIMEOUT_MS 500u
 #define TCP_RETX_MAX_RETRIES 5u
+#define TCP_MSS TCP_RETX_BUFFER_SIZE
+#define TCP_INITIAL_CWND TCP_MSS
+#define TCP_INITIAL_SSTHRESH (TCP_MSS * 4u)
 
 #define TCP_STATE_CLOSED      NET_TCP_STATE_CLOSED
 #define TCP_STATE_LISTEN      NET_TCP_STATE_LISTEN
@@ -141,6 +144,9 @@ struct tcp_connection {
     uint8_t unacked_flags;
     uint32_t unacked_sent_ms;
     uint8_t unacked_retries;
+    uint32_t cwnd;
+    uint32_t ssthresh;
+    uint32_t cwnd_acked;
     uint8_t unacked_data[TCP_RETX_BUFFER_SIZE];
 };
 
@@ -510,6 +516,9 @@ static struct tcp_connection *tcp_alloc_conn(void) {
             tcp_connections[i].used = 1;
             tcp_connections[i].id = tcp_next_id++;
             if (tcp_next_id <= 0) tcp_next_id = 1;
+            tcp_connections[i].cwnd = TCP_INITIAL_CWND;
+            tcp_connections[i].ssthresh = TCP_INITIAL_SSTHRESH;
+            tcp_connections[i].cwnd_acked = 0;
             return &tcp_connections[i];
         }
     }
@@ -535,6 +544,46 @@ static void tcp_clear_unacked(struct tcp_connection *c) {
     c->unacked_retries = 0;
 }
 
+static uint32_t tcp_max_u32(uint32_t a, uint32_t b) {
+    return a > b ? a : b;
+}
+
+static void tcp_congestion_on_ack(struct tcp_connection *c, uint32_t acked) {
+    if (!c || !acked) return;
+    if (c->cwnd < TCP_MSS) c->cwnd = TCP_INITIAL_CWND;
+    if (c->ssthresh < TCP_MSS) c->ssthresh = TCP_INITIAL_SSTHRESH;
+    if (c->cwnd < c->ssthresh) {
+        c->cwnd += TCP_MSS;
+    } else {
+        c->cwnd_acked += acked;
+        if (c->cwnd_acked >= c->cwnd) {
+            c->cwnd += TCP_MSS;
+            c->cwnd_acked = 0;
+        }
+    }
+}
+
+static void tcp_congestion_on_timeout(struct tcp_connection *c) {
+    if (!c) return;
+    if (c->cwnd < TCP_MSS) c->cwnd = TCP_INITIAL_CWND;
+    c->ssthresh = tcp_max_u32(c->cwnd / 2u, TCP_MSS * 2u);
+    c->cwnd = TCP_INITIAL_CWND;
+    c->cwnd_acked = 0;
+}
+
+static uint32_t tcp_bytes_in_flight(const struct tcp_connection *c) {
+    if (!c || !c->unacked_used) return 0;
+    return tcp_state_consume(c->unacked_flags, c->unacked_len);
+}
+
+static int tcp_congestion_can_send(struct tcp_connection *c, uint32_t consume) {
+    uint32_t in_flight;
+    if (!c || !consume) return 1;
+    if (c->cwnd < TCP_MSS) c->cwnd = TCP_INITIAL_CWND;
+    in_flight = tcp_bytes_in_flight(c);
+    return in_flight + consume <= c->cwnd;
+}
+
 static void tcp_record_unacked(struct tcp_connection *c, uint32_t seq, uint32_t ack,
                                uint8_t flags, const uint8_t *data, uint16_t len) {
     if (!c) return;
@@ -550,11 +599,16 @@ static void tcp_record_unacked(struct tcp_connection *c, uint32_t seq, uint32_t 
     if (len && data) memcpy(c->unacked_data, data, len);
 }
 
-static void tcp_ack_unacked(struct tcp_connection *c, uint32_t ack) {
+static int tcp_ack_unacked(struct tcp_connection *c, uint32_t ack) {
     uint32_t consume;
-    if (!c || !c->unacked_used) return;
+    if (!c || !c->unacked_used) return 0;
     consume = tcp_state_consume(c->unacked_flags, c->unacked_len);
-    if (tcp_seq_acked(ack, c->unacked_seq, consume)) tcp_clear_unacked(c);
+    if (tcp_seq_acked(ack, c->unacked_seq, consume)) {
+        tcp_congestion_on_ack(c, consume);
+        tcp_clear_unacked(c);
+        return 1;
+    }
+    return 0;
 }
 
 static void tcp_buffer_data(struct tcp_connection *c, const uint8_t *data, uint16_t len) {
@@ -575,6 +629,7 @@ static int tcp_send_for_conn(struct tcp_connection *c, uint8_t flags,
     if (!c) return -1;
     consume = tcp_state_consume(flags, len);
     if (consume && c->unacked_used) return -1;
+    if (!tcp_congestion_can_send(c, consume)) return -1;
     if (len > TCP_RETX_BUFFER_SIZE) return -1;
     seq = c->snd_nxt;
     ret = tcp_send_segment(c->remote_ip, c->local_port, c->remote_port,
@@ -664,6 +719,7 @@ void net_tick(uint32_t elapsed_ms) {
             c->used = 0;
             continue;
         }
+        tcp_congestion_on_timeout(c);
         if (tcp_send_segment(c->remote_ip, c->local_port, c->remote_port,
                              c->unacked_seq, c->unacked_ack, c->unacked_flags,
                              c->unacked_len ? c->unacked_data : 0, c->unacked_len) == 0) {

@@ -226,7 +226,7 @@
 - [x] `recv`
 - [x] TCP 完整状态机
 - [x] TCP 重传
-- [ ] TCP 拥塞控制
+- [x] TCP 拥塞控制
 - [ ] TCP 窗口管理
 - [ ] UDP 用户态接口
 - [ ] ping / ifconfig / netstat 等工具
