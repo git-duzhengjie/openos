@@ -1582,6 +1582,18 @@ uint32_t syscall_dispatch(uint32_t num,
     case SYS_SOCKET:
         return (uint32_t)socket_create_fd((int)a, (int)b, (int)c);
 
+    case SYS_SOCKETPAIR:
+        {
+            int sv[2];
+            if (!d)
+                return (uint32_t)-1;
+            if (socketpair_create_fds((int)a, (int)b, (int)c, sv) < 0)
+                return (uint32_t)-1;
+            if (copy_to_user((void *)d, sv, sizeof(sv)) < 0)
+                return (uint32_t)-1;
+            return 0;
+        }
+
     case SYS_BIND:
         {
             openos_sockaddr_in_t addr;

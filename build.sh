@@ -140,6 +140,14 @@ if [ -f $USR/eventfdtest.c ]; then
     echo "  Built: eventfdtest.elf"
 fi
 
+if [ -f $USR/socketpairtest.c ]; then
+    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+        -fno-stack-protector -fno-builtin \
+        -c $USR/socketpairtest.c -o $BUILD/socketpairtest.o
+    ld -m elf_i386 -T $USR/user.ld -o $BUILD/socketpairtest.elf $BUILD/socketpairtest.o
+    echo "  Built: socketpairtest.elf"
+fi
+
 if [ -f $USR/nicetest.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \

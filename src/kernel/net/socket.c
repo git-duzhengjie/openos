@@ -19,6 +19,7 @@
 #define SOCKET_EPHEMERAL_LAST  65535u
 #define SOCKET_RECV_QUEUE_LEN 8
 #define SOCKET_RECV_PACKET_MAX (NET_ETH_MTU - 8u)
+#define SOCKET_FLAG_PAIR 0x1u
 
 typedef struct socket_packet {
     uint8_t used;
@@ -34,6 +35,8 @@ typedef struct socket_file {
     socket_packet_t recv_queue[SOCKET_RECV_QUEUE_LEN];
     uint32_t recv_head;
     uint32_t recv_count;
+    uint32_t flags;
+    struct socket_file *peer;
 } socket_file_t;
 
 typedef struct socket_bind_slot {
@@ -168,6 +171,9 @@ static int socket_close(file_t *f) {
             sock->info.tcp_conn_id = -1;
         }
         socket_release_bind(sock->info.id);
+        if ((sock->flags & SOCKET_FLAG_PAIR) && sock->peer) {
+            sock->peer->peer = NULL;
+        }
         sock->info.state = OPENOS_SOCKET_STATE_CLOSED;
         sock->magic = 0;
     }
@@ -207,8 +213,32 @@ static int socket_dequeue(socket_file_t *sock, uint8_t *buf, uint32_t count) {
     return socket_dequeue_from(sock, buf, count, NULL, NULL);
 }
 
+static int socket_enqueue_packet(socket_file_t *sock, uint32_t src_ip, uint16_t src_port,
+                                const uint8_t *data, uint16_t len) {
+    socket_packet_t *pkt;
+    uint32_t tail;
+
+    if (!sock || !data || len == 0 || len > SOCKET_RECV_PACKET_MAX ||
+        sock->recv_count >= SOCKET_RECV_QUEUE_LEN) {
+        return -1;
+    }
+    tail = (sock->recv_head + sock->recv_count) % SOCKET_RECV_QUEUE_LEN;
+    pkt = &sock->recv_queue[tail];
+    memset(pkt, 0, sizeof(*pkt));
+    pkt->used = 1;
+    pkt->src_ip = src_ip;
+    pkt->src_port = src_port;
+    pkt->len = len;
+    memcpy(pkt->data, data, len);
+    sock->recv_count++;
+    return 0;
+}
+
 static int socket_read(file_t *f, void *buf, uint32_t count) {
     socket_file_t *sock = socket_from_file(f);
+    if (sock && (sock->flags & SOCKET_FLAG_PAIR)) {
+        return socket_dequeue(sock, (uint8_t *)buf, count);
+    }
     if (sock && socket_type_base(sock->info.type) == OPENOS_SOCK_STREAM) {
         if (sock->info.tcp_conn_id < 0) return -1;
         return net_tcp_recv(sock->info.tcp_conn_id, (uint8_t *)buf, (uint16_t)count);
@@ -218,6 +248,15 @@ static int socket_read(file_t *f, void *buf, uint32_t count) {
 
 static int socket_write(file_t *f, const void *buf, uint32_t count) {
     socket_file_t *sock = socket_from_file(f);
+    if (sock && (sock->flags & SOCKET_FLAG_PAIR)) {
+        if (!buf || count == 0 || count > SOCKET_RECV_PACKET_MAX || !sock->peer ||
+            sock->peer->magic != SOCKET_MAGIC ||
+            socket_enqueue_packet(sock->peer, OPENOS_INADDR_ANY, 0,
+                                  (const uint8_t *)buf, (uint16_t)count) < 0) {
+            return -1;
+        }
+        return (int)count;
+    }
     if (sock && socket_type_base(sock->info.type) == OPENOS_SOCK_STREAM) {
         if (sock->info.tcp_conn_id < 0 || !buf || count > NET_ETH_MTU) return -1;
         return net_tcp_send(sock->info.tcp_conn_id, (const uint8_t *)buf, (uint16_t)count) == 0 ? (int)count : -1;
@@ -240,7 +279,11 @@ static int socket_poll(file_t *f, uint32_t events) {
     if (!sock || sock->info.state == OPENOS_SOCKET_STATE_CLOSED) {
         return VFS_POLLERR | VFS_POLLHUP;
     }
-    if (socket_type_base(sock->info.type) == OPENOS_SOCK_STREAM) {
+    if (sock->flags & SOCKET_FLAG_PAIR) {
+        if ((events & VFS_POLLIN) && sock->recv_count > 0) ready |= VFS_POLLIN;
+        if ((events & VFS_POLLOUT) && sock->peer && sock->peer->magic == SOCKET_MAGIC) ready |= VFS_POLLOUT;
+        if (!sock->peer || sock->peer->magic != SOCKET_MAGIC) ready |= VFS_POLLHUP;
+    } else if (socket_type_base(sock->info.type) == OPENOS_SOCK_STREAM) {
         int state = sock->info.tcp_conn_id >= 0 ? net_tcp_state(sock->info.tcp_conn_id) : -1;
         if (state == NET_TCP_STATE_CLOSED || state < 0) ready |= VFS_POLLHUP;
         if ((events & VFS_POLLOUT) && state == NET_TCP_STATE_ESTABLISHED) ready |= VFS_POLLOUT;
@@ -265,6 +308,36 @@ static file_ops_t socket_file_ops = {
     .readdir = NULL,
     .poll = socket_poll,
 };
+
+static int socket_init_file_fd(int fd, socket_file_t *sock) {
+    file_t *file = (file_t *)pmm_alloc_page();
+    if (!file) {
+        return -1;
+    }
+    memset(file, 0, sizeof(file_t));
+    file->flags = O_RDWR;
+    file->offset = 0;
+    file->ref_count = 1;
+    file->fs_data = sock;
+    file->ops = &socket_file_ops;
+    if (vfs_put_file(fd, file) < 0) {
+        return -1;
+    }
+    return 0;
+}
+
+static void socket_init_info(socket_file_t *sock, int domain, int type, int protocol) {
+    memset(sock, 0, sizeof(*sock));
+    sock->magic = SOCKET_MAGIC;
+    sock->info.id = next_socket_id++;
+    sock->info.domain = domain;
+    sock->info.type = type;
+    sock->info.protocol = protocol;
+    sock->info.state = OPENOS_SOCKET_STATE_CREATED;
+    sock->info.local_ip = OPENOS_INADDR_ANY;
+    sock->info.remote_ip = OPENOS_INADDR_ANY;
+    sock->info.tcp_conn_id = -1;
+}
 
 int socket_create_fd(int domain, int type, int protocol) {
     int fd;
@@ -316,6 +389,58 @@ int socket_create_fd(int domain, int type, int protocol) {
         return -1;
     }
     return fd;
+}
+
+int socketpair_create_fds(int domain, int type, int protocol, int sv[2]) {
+    int fd0;
+    int fd1;
+    socket_file_t *a;
+    socket_file_t *b;
+    int base_type = socket_type_base(type);
+
+    if (!sv || socket_validate_args(domain, type, protocol) < 0) {
+        return -1;
+    }
+    if (domain != OPENOS_AF_UNSPEC && domain != OPENOS_AF_INET) {
+        return -1;
+    }
+    if (base_type != OPENOS_SOCK_STREAM && base_type != OPENOS_SOCK_DGRAM) {
+        return -1;
+    }
+
+    fd0 = vfs_alloc_fd();
+    fd1 = vfs_alloc_fd();
+    if (fd0 < 0 || fd1 < 0 || fd0 == fd1) {
+        if (fd0 >= 0) vfs_put_file(fd0, NULL);
+        if (fd1 >= 0) vfs_put_file(fd1, NULL);
+        return -1;
+    }
+
+    a = (socket_file_t *)pmm_alloc_page();
+    b = (socket_file_t *)pmm_alloc_page();
+    if (!a || !b) {
+        if (fd0 >= 0) vfs_put_file(fd0, NULL);
+        if (fd1 >= 0) vfs_put_file(fd1, NULL);
+        return -1;
+    }
+    socket_init_info(a, domain, type, protocol);
+    socket_init_info(b, domain, type, protocol);
+    a->flags = SOCKET_FLAG_PAIR;
+    b->flags = SOCKET_FLAG_PAIR;
+    a->peer = b;
+    b->peer = a;
+    a->info.state = OPENOS_SOCKET_STATE_CONNECTED;
+    b->info.state = OPENOS_SOCKET_STATE_CONNECTED;
+
+    if (socket_init_file_fd(fd0, a) < 0 || socket_init_file_fd(fd1, b) < 0) {
+        vfs_put_file(fd0, NULL);
+        vfs_put_file(fd1, NULL);
+        return -1;
+    }
+
+    sv[0] = fd0;
+    sv[1] = fd1;
+    return 0;
 }
 
 int socket_listen_fd(int fd, int backlog) {
@@ -438,6 +563,9 @@ int socket_recv_fd(int fd, uint8_t *data, uint32_t len, int flags) {
     if (!sock) {
         return -1;
     }
+    if (sock->flags & SOCKET_FLAG_PAIR) {
+        return socket_dequeue(sock, data, len);
+    }
     if (socket_type_base(sock->info.type) == OPENOS_SOCK_STREAM) {
         if (sock->info.tcp_conn_id < 0) {
             return -1;
@@ -463,6 +591,13 @@ int socket_send_fd(int fd, const uint8_t *data, uint32_t len, int flags) {
     sock = socket_from_file(file);
     if (!sock || sock->info.state != OPENOS_SOCKET_STATE_CONNECTED) {
         return -1;
+    }
+    if (sock->flags & SOCKET_FLAG_PAIR) {
+        if (!sock->peer || sock->peer->magic != SOCKET_MAGIC ||
+            socket_enqueue_packet(sock->peer, OPENOS_INADDR_ANY, 0, data, (uint16_t)len) < 0) {
+            return -1;
+        }
+        return (int)len;
     }
     if (socket_type_base(sock->info.type) == OPENOS_SOCK_STREAM) {
         if (sock->info.tcp_conn_id < 0 || net_tcp_send(sock->info.tcp_conn_id, data, (uint16_t)len) < 0) {
@@ -599,9 +734,6 @@ const openos_socket_info_t *socket_get_info(int fd) {
 int socket_deliver_udp(uint32_t src_ip, uint16_t src_port, uint16_t dst_port,
                        const uint8_t *data, uint16_t len) {
     socket_file_t *match = NULL;
-    socket_packet_t *pkt;
-    uint32_t tail;
-
     if (!data || len == 0 || len > SOCKET_RECV_PACKET_MAX) {
         return -1;
     }
@@ -627,17 +759,5 @@ int socket_deliver_udp(uint32_t src_ip, uint16_t src_port, uint16_t dst_port,
         match = sock;
         break;
     }
-    if (!match || match->recv_count >= SOCKET_RECV_QUEUE_LEN) {
-        return -1;
-    }
-    tail = (match->recv_head + match->recv_count) % SOCKET_RECV_QUEUE_LEN;
-    pkt = &match->recv_queue[tail];
-    memset(pkt, 0, sizeof(*pkt));
-    pkt->used = 1;
-    pkt->src_ip = src_ip;
-    pkt->src_port = src_port;
-    pkt->len = len;
-    memcpy(pkt->data, data, len);
-    match->recv_count++;
-    return 0;
+    return socket_enqueue_packet(match, src_ip, src_port, data, len);
 }

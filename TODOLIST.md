@@ -239,7 +239,7 @@
 - [x] message queue
 - [x] shared memory
 - [x] eventfd 类机制
-- [ ] socketpair
+- [x] socketpair
 - [ ] 用户态服务进程通信模型
 - [ ] 微内核式服务消息机制
 

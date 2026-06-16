@@ -49,6 +49,7 @@ typedef struct openos_socket_info {
 } openos_socket_info_t;
 
 int socket_create_fd(int domain, int type, int protocol);
+int socketpair_create_fds(int domain, int type, int protocol, int sv[2]);
 int socket_bind_fd(int fd, const openos_sockaddr_t *addr, uint32_t addrlen);
 int socket_listen_fd(int fd, int backlog);
 int socket_accept_fd(int fd, openos_sockaddr_t *addr, uint32_t *addrlen);

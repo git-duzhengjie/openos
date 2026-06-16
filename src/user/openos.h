@@ -101,6 +101,7 @@
 #define SYS_EVENTFD_WRITE  304
 #define SYS_EVENTFD_READ   305
 #define SYS_EVENTFD_DESTROY 306
+#define SYS_SOCKETPAIR    307
 
 #define OPENOS_AF_UNSPEC  0
 #define OPENOS_AF_INET    2
@@ -340,6 +341,12 @@ static inline int openos_syscall4(int num, int a, int b, int c, int d)
 static inline int openos_socket(int domain, int type, int protocol)
 {
     return openos_syscall_result(openos_syscall3(SYS_SOCKET, domain, type, protocol));
+}
+
+static inline int openos_socketpair(int domain, int type, int protocol, int sv[2])
+{
+    if (!sv) return -1;
+    return openos_syscall_result(openos_syscall4(SYS_SOCKETPAIR, domain, type, protocol, (int)sv));
 }
 
 static inline int openos_bind(int fd, const openos_sockaddr_t *addr, unsigned int addrlen)
@@ -1937,6 +1944,7 @@ static inline void openos_clearerr(openos_FILE *stream)
 #define netconfig(ip, mask, gw) openos_netconfig((ip), (mask), (gw))
 #define firewall(op, index, rule) openos_firewall((op), (index), (rule))
 #define socket(domain, type, protocol) openos_socket((domain), (type), (protocol))
+#define socketpair(domain, type, protocol, sv) openos_socketpair((domain), (type), (protocol), (sv))
 #define bind(fd, addr, len)    openos_bind((fd), (addr), (len))
 #define listen(fd, backlog)    openos_listen((fd), (backlog))
 #define accept(fd, addr, len)  openos_accept((fd), (addr), (len))
