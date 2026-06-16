@@ -14,6 +14,7 @@
 #include "../fs/vfs.h"
 #include "../include/string.h"
 #include "../include/blockdev.h"
+#include "../net/socket.h"
 #include <stddef.h>  /* NULL */
 
 /* VGA */
@@ -1344,6 +1345,9 @@ uint32_t syscall_dispatch(uint32_t num,
 
     case SYS_SELECT:
         return syscall_select(a, (uint32_t *)b, (uint32_t *)c, (uint32_t *)d, e);
+
+    case SYS_SOCKET:
+        return (uint32_t)socket_create_fd((int)a, (int)b, (int)c);
 
     case SYS_FSYNC:
         {

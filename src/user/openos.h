@@ -77,6 +77,13 @@
 #define SYS_POLL          280
 #define SYS_SELECT        281
 #define SYS_FSYNC         282
+#define SYS_SOCKET        283
+
+#define OPENOS_AF_UNSPEC  0
+#define OPENOS_AF_INET    2
+#define OPENOS_SOCK_STREAM 1
+#define OPENOS_SOCK_DGRAM  2
+#define OPENOS_SOCK_RAW    3
 
 #define OPENOS_POLLIN     0x0001
 #define OPENOS_POLLOUT    0x0004
@@ -233,6 +240,11 @@ static inline int openos_syscall1(int num, int a)
 static inline int openos_syscall2(int num, int a, int b)
 {
     return openos_syscall3(num, a, b, 0);
+}
+
+static inline int openos_socket(int domain, int type, int protocol)
+{
+    return openos_syscall_result(openos_syscall3(SYS_SOCKET, domain, type, protocol));
 }
 
 static inline int openos_syscall5(int num, int a, int b, int c, int d, int e)
