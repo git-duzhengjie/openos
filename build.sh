@@ -580,6 +580,11 @@ gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
     -I $SRC/include \
+    -c $SRC/drivers/e1000.c -o $BUILD/e1000.o
+
+gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
+    -I $SRC/include \
     -c $SRC/drivers/pci.c -o $BUILD/pci.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
@@ -749,6 +754,7 @@ ld -m elf_i386 -T $SRC/linker.ld \
     $BUILD/ahci.o \
     $BUILD/virtio_blk.o \
     $BUILD/virtio_net.o \
+    $BUILD/e1000.o \
     $BUILD/pci.o \
     $BUILD/acpi.o \
     $BUILD/apic.o \
