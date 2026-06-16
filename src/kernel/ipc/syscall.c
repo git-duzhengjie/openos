@@ -1653,6 +1653,12 @@ uint32_t syscall_dispatch(uint32_t num,
     case SYS_GETGRGID:
         return (uint32_t)syscall_getgrgid((uint32_t)a, (openos_group_t *)b);
 
+    case SYS_CAPGET:
+        return proc_current_caps();
+
+    case SYS_CAPSET:
+        return (uint32_t)proc_set_current_caps((uint32_t)a);
+
     case SYS_POLL:
         return syscall_poll((openos_pollfd_t *)a, b, c);
 

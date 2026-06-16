@@ -334,6 +334,13 @@
 #define OPENOS_HAS_GROUPS 0
 #endif
 
+#if __has_include("embed_cap.h")
+#include "embed_cap.h"  /* cap user command */
+#define OPENOS_HAS_CAP 1
+#else
+#define OPENOS_HAS_CAP 0
+#endif
+
 
 /* 外部符号 */
 extern void gdt_init(void);
@@ -1193,6 +1200,17 @@ void kernel_main(void) {
         serial_write("[OK] Installed /bin/groups user ELF\n");
     } else {
         serial_write("[WARN] Failed to install /bin/groups\n");
+    }
+#endif
+
+#if OPENOS_HAS_CAP
+    fd = vfs_open("/bin/cap", O_CREAT | O_RDWR, 0755);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)cap_elf, cap_elf_size);
+        vfs_close(fd);
+        serial_write("[OK] Installed /bin/cap user ELF\n");
+    } else {
+        serial_write("[WARN] Failed to install /bin/cap\n");
     }
 #endif
 

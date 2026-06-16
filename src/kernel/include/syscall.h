@@ -107,6 +107,16 @@
 #define SYS_SOCKETPAIR    307
 #define SYS_GETPWUID      308
 #define SYS_GETGRGID      309
+#define SYS_CAPGET       310
+#define SYS_CAPSET       311
+
+#define OPENOS_CAP_SETUID    (1u << 0)
+#define OPENOS_CAP_SETGID    (1u << 1)
+#define OPENOS_CAP_NET_ADMIN (1u << 2)
+#define OPENOS_CAP_SYS_ADMIN (1u << 3)
+#define OPENOS_CAP_KILL      (1u << 4)
+#define OPENOS_CAP_ALL       0xffffffffu
+#define OPENOS_CAP_BASIC     0u
 
 #define OPENOS_POLLIN     0x0001
 #define OPENOS_POLLOUT    0x0004

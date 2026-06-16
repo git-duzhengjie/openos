@@ -104,6 +104,16 @@
 #define SYS_SOCKETPAIR    307
 #define SYS_GETPWUID      308
 #define SYS_GETGRGID      309
+#define SYS_CAPGET       310
+#define SYS_CAPSET       311
+
+#define OPENOS_CAP_SETUID    (1u << 0)
+#define OPENOS_CAP_SETGID    (1u << 1)
+#define OPENOS_CAP_NET_ADMIN (1u << 2)
+#define OPENOS_CAP_SYS_ADMIN (1u << 3)
+#define OPENOS_CAP_KILL      (1u << 4)
+#define OPENOS_CAP_ALL       0xffffffffu
+#define OPENOS_CAP_BASIC     0u
 
 #define OPENOS_AF_UNSPEC  0
 #define OPENOS_AF_INET    2
@@ -2182,6 +2192,16 @@ static inline int openos_getpwuid(openos_uint32_t uid, openos_user_t *user)
 static inline int openos_getgrgid(openos_uint32_t gid, openos_group_t *group)
 {
     return openos_syscall_result(openos_syscall2(SYS_GETGRGID, (int)gid, (int)group));
+}
+
+static inline openos_uint32_t openos_capget(void)
+{
+    return openos_syscall0(SYS_CAPGET);
+}
+
+static inline int openos_capset(openos_uint32_t caps)
+{
+    return openos_syscall_result(openos_syscall1(SYS_CAPSET, (int)caps));
 }
 
 static inline int openos_poll(openos_pollfd_t *fds, openos_uint32_t nfds, openos_uint32_t timeout_ms)

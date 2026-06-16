@@ -228,6 +228,7 @@ void proc_table_init(void) {
     init->cwd[1] = '\0';
     init->uid = 0;
     init->gid = 0;
+    init->caps = OPENOS_CAP_ALL;
     init->pending_signals = 0;
     init->total_ticks = 0;
     next_pid = INIT_PID + 1;
@@ -269,6 +270,7 @@ process_t *proc_alloc(void) {
             p->cwd[1] = '\0';
             p->uid = 0;
             p->gid = 0;
+            p->caps = OPENOS_CAP_ALL;
             p->pending_signals = 0;
             p->alarm_deadline_ms = 0;
             p->alarm_active = 0;
@@ -297,6 +299,7 @@ void proc_free(process_t *proc) {
     proc->exit_code = 0;
     proc->uid = 0;
     proc->gid = 0;
+    proc->caps = 0;
     proc->pending_signals = 0;
     proc->alarm_deadline_ms = 0;
     proc->alarm_active = 0;
@@ -489,12 +492,39 @@ uint32_t proc_current_gid(void) {
     return p ? p->gid : 0;
 }
 
-int proc_set_current_uid(uint32_t uid) {
+uint32_t proc_current_caps(void) {
+    thread_t *cur = sched_get_current();
+    process_t *p = cur ? proc_find(cur->pid) : NULL;
+    return p ? p->caps : OPENOS_CAP_ALL;
+}
+
+int proc_current_has_cap(uint32_t cap) {
+    uint32_t caps = proc_current_caps();
+    return (cap != 0 && (caps & cap) == cap) ? 1 : 0;
+}
+
+int proc_set_current_caps(uint32_t caps) {
     thread_t *cur = sched_get_current();
     process_t *p = cur ? proc_find(cur->pid) : NULL;
     if (!p) return -1;
-    if (p->uid != 0 && p->uid != uid) return -1;
+    if ((caps & ~p->caps) != 0 && !proc_current_has_cap(OPENOS_CAP_SYS_ADMIN))
+        return -1;
+    p->caps = caps;
+    return 0;
+}
+
+int proc_set_current_uid(uint32_t uid) {
+    thread_t *cur = sched_get_current();
+    process_t *p = cur ? proc_find(cur->pid) : NULL;
+    uint32_t old_uid;
+    if (!p) return -1;
+    if (p->uid != uid && !proc_current_has_cap(OPENOS_CAP_SETUID)) return -1;
+    old_uid = p->uid;
     p->uid = uid;
+    if (uid == 0)
+        p->caps = OPENOS_CAP_ALL;
+    else if (old_uid == 0)
+        p->caps = OPENOS_CAP_BASIC;
     return 0;
 }
 
@@ -502,7 +532,7 @@ int proc_set_current_gid(uint32_t gid) {
     thread_t *cur = sched_get_current();
     process_t *p = cur ? proc_find(cur->pid) : NULL;
     if (!p) return -1;
-    if (p->uid != 0 && p->gid != gid) return -1;
+    if (p->gid != gid && !proc_current_has_cap(OPENOS_CAP_SETGID)) return -1;
     p->gid = gid;
     return 0;
 }
@@ -621,6 +651,7 @@ uint32_t sys_fork(void) {
     child->owns_address_space = 1;
     child->uid = parent->uid;
     child->gid = parent->gid;
+    child->caps = parent->caps;
     if (vfs_clone_cwd_for_process(child, parent) != 0) {
         proc_free_cloned_address_space(child_pgd);
         proc_free(child);
@@ -823,6 +854,7 @@ int spawn_user_process_env(const char *path, char *const argv[], char *const env
     if (parent) {
         child->uid = parent->uid;
         child->gid = parent->gid;
+        child->caps = parent->caps;
         if (vfs_clone_cwd_for_process(child, parent) != 0) {
             proc_free(child);
             return -1;

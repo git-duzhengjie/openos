@@ -34,6 +34,14 @@ typedef enum {
 #define OPENOS_SIGTERM 15
 #define OPENOS_SIGNAL_MAX 31
 
+#define OPENOS_CAP_SETUID    (1u << 0)
+#define OPENOS_CAP_SETGID    (1u << 1)
+#define OPENOS_CAP_NET_ADMIN (1u << 2)
+#define OPENOS_CAP_SYS_ADMIN (1u << 3)
+#define OPENOS_CAP_KILL      (1u << 4)
+#define OPENOS_CAP_ALL       0xffffffffu
+#define OPENOS_CAP_BASIC     0u
+
 /* ============================================================
  * 线程控制块 (TCB)
  * ============================================================ */
@@ -100,6 +108,7 @@ typedef struct process {
     /* 凭据 */
     uint32_t uid;             /* 用户 ID */
     uint32_t gid;             /* 用户组 ID */
+    uint32_t caps;            /* capability 位图 */
 
     /* 信号 */
     uint32_t pending_signals; /* 待处理信号掩码 */
@@ -159,6 +168,9 @@ void proc_check_alarms(uint32_t now_ms);
 uint32_t proc_current_pid(void);
 uint32_t proc_current_uid(void);
 uint32_t proc_current_gid(void);
+uint32_t proc_current_caps(void);
+int proc_current_has_cap(uint32_t cap);
+int proc_set_current_caps(uint32_t caps);
 int proc_set_current_uid(uint32_t uid);
 int proc_set_current_gid(uint32_t gid);
 

@@ -543,7 +543,7 @@ if [ -f $USR/sbrktest.c ]; then
     echo "  Embedded: sbrktest.elf"
 fi
 
-for app in ping ifconfig netstat id groups; do
+for app in ping ifconfig netstat id groups cap; do
     if [ -f $USR/$app.c ]; then
         gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
             -fno-stack-protector -fno-builtin \
