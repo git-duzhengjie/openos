@@ -47,121 +47,124 @@
 #include "pmm.h"
 #include "embed_hello.h"  /* 嵌入的用户程�?*/
 #include "embed_fault.h"  /* 用户异常隔离测试程序 */
-#if __has_include("embed_isotest.h")
+#ifndef OPENOS_EMBED_TESTS
+#define OPENOS_EMBED_TESTS 0
+#endif
+#if OPENOS_EMBED_TESTS && __has_include("embed_isotest.h")
 #include "embed_isotest.h"  /* 用户/内核内存隔离回归测试程序 */
 #define OPENOS_HAS_ISOTEST 1
 #else
 #define OPENOS_HAS_ISOTEST 0
 #endif
-#if __has_include("embed_waittest.h")
+#if OPENOS_EMBED_TESTS && __has_include("embed_waittest.h")
 #include "embed_waittest.h"  /* spawn/waitpid 回归测试程序 */
 #define OPENOS_HAS_WAITTEST 1
 #else
 #define OPENOS_HAS_WAITTEST 0
 #endif
-#if __has_include("embed_forktest.h")
+#if OPENOS_EMBED_TESTS && __has_include("embed_forktest.h")
 #include "embed_forktest.h"  /* fork/address-space 回归测试程序 */
 #define OPENOS_HAS_FORKTEST 1
 #else
 #define OPENOS_HAS_FORKTEST 0
 #endif
-#if __has_include("embed_threadtest.h")
+#if OPENOS_EMBED_TESTS && __has_include("embed_threadtest.h")
 #include "embed_threadtest.h"  /* user thread API 回归测试程序 */
 #define OPENOS_HAS_THREADTEST 1
 #else
 #define OPENOS_HAS_THREADTEST 0
 #endif
-#if __has_include("embed_mutextest.h")
+#if OPENOS_EMBED_TESTS && __has_include("embed_mutextest.h")
 #include "embed_mutextest.h"  /* mutex 回归测试程序 */
 #define OPENOS_HAS_MUTEXTEST 1
 #else
 #define OPENOS_HAS_MUTEXTEST 0
 #endif
-#if __has_include("embed_semtest.h")
+#if OPENOS_EMBED_TESTS && __has_include("embed_semtest.h")
 #include "embed_semtest.h"  /* semaphore 回归测试程序 */
 #define OPENOS_HAS_SEMTEST 1
 #else
 #define OPENOS_HAS_SEMTEST 0
 #endif
-#if __has_include("embed_condtest.h")
+#if OPENOS_EMBED_TESTS && __has_include("embed_condtest.h")
 #include "embed_condtest.h"  /* condition variable 回归测试程序 */
 #define OPENOS_HAS_CONDTEST 1
 #else
 #define OPENOS_HAS_CONDTEST 0
 #endif
-#if __has_include("embed_futextest.h")
+#if OPENOS_EMBED_TESTS && __has_include("embed_futextest.h")
 #include "embed_futextest.h"  /* futex 回归测试程序 */
 #define OPENOS_HAS_FUTEXTEST 1
 #else
 #define OPENOS_HAS_FUTEXTEST 0
 #endif
-#if __has_include("embed_nicetest.h")
+#if OPENOS_EMBED_TESTS && __has_include("embed_nicetest.h")
 #include "embed_nicetest.h"  /* priority/nice 回归测试程序 */
 #define OPENOS_HAS_NICETEST 1
 #else
 #define OPENOS_HAS_NICETEST 0
 #endif
-#if __has_include("embed_exit42.h")
+#if OPENOS_EMBED_TESTS && __has_include("embed_exit42.h")
 #include "embed_exit42.h"  /* exit status 回归测试程序 */
 #define OPENOS_HAS_EXIT42 1
 #else
 #define OPENOS_HAS_EXIT42 0
 #endif
-#if __has_include("embed_orphan.h")
+#if OPENOS_EMBED_TESTS && __has_include("embed_orphan.h")
 #include "embed_orphan.h"  /* orphan reparent 回归测试程序 */
 #define OPENOS_HAS_ORPHAN 1
 #else
 #define OPENOS_HAS_ORPHAN 0
 #endif
-#if __has_include("embed_argtest.h")
+#if OPENOS_EMBED_TESTS && __has_include("embed_argtest.h")
 #include "embed_argtest.h"  /* argv 回归测试程序 */
 #define OPENOS_HAS_ARGTEST 1
 #else
 #define OPENOS_HAS_ARGTEST 0
 #endif
-#if __has_include("embed_envtest.h")
+#if OPENOS_EMBED_TESTS && __has_include("embed_envtest.h")
 #include "embed_envtest.h"  /* envp 回归测试程序 */
 #define OPENOS_HAS_ENVTEST 1
 #else
 #define OPENOS_HAS_ENVTEST 0
 #endif
-#if __has_include("embed_libctest.h")
+#if OPENOS_EMBED_TESTS && __has_include("embed_libctest.h")
 #include "embed_libctest.h"  /* libc subset 回归测试程序 */
 #define OPENOS_HAS_LIBCTEST 1
 #else
 #define OPENOS_HAS_LIBCTEST 0
 #endif
-#if __has_include("embed_maintest.h")
+#if OPENOS_EMBED_TESTS && __has_include("embed_maintest.h")
 #include "embed_maintest.h"  /* crt0/main 回归测试程序 */
 #define OPENOS_HAS_MAINTEST 1
 #else
 #define OPENOS_HAS_MAINTEST 0
 #endif
-#if __has_include("embed_systest.h")
+#if OPENOS_EMBED_TESTS && __has_include("embed_systest.h")
 #include "embed_systest.h"  /* syscall wrapper 回归测试程序 */
 #define OPENOS_HAS_SYSTEST 1
 #else
 #define OPENOS_HAS_SYSTEST 0
 #endif
-#if __has_include("embed_malloctest.h")
+#if OPENOS_EMBED_TESTS && __has_include("embed_malloctest.h")
 #include "embed_malloctest.h"  /* userspace heap 回归测试程序 */
 #define OPENOS_HAS_MALLOCTEST 1
 #else
 #define OPENOS_HAS_MALLOCTEST 0
 #endif
-#if __has_include("embed_errnotest.h")
+#if OPENOS_EMBED_TESTS && __has_include("embed_errnotest.h")
 #include "embed_errnotest.h"  /* userspace errno 回归测试程序 */
 #define OPENOS_HAS_ERRNOTEST 1
 #else
 #define OPENOS_HAS_ERRNOTEST 0
 #endif
-#if __has_include("embed_stdiotest.h")
+#if OPENOS_EMBED_TESTS && __has_include("embed_stdiotest.h")
 #include "embed_stdiotest.h"  /* userspace stdio regression test */
 #define OPENOS_HAS_STDIOTEST 1
 #else
 #define OPENOS_HAS_STDIOTEST 0
 #endif
-#if __has_include("embed_fstest.h")
+#if OPENOS_EMBED_TESTS && __has_include("embed_fstest.h")
 #include "embed_fstest.h"  /* filesystem syscall 回归测试程序 */
 #define OPENOS_HAS_FSTEST 1
 #else
@@ -284,21 +287,21 @@
 #define OPENOS_HAS_KILL 0
 #endif
 
-#if __has_include("embed_alarmtest.h")
+#if OPENOS_EMBED_TESTS && __has_include("embed_alarmtest.h")
 #include "embed_alarmtest.h"  /* alarmtest user command */
 #define OPENOS_HAS_ALARMTEST 1
 #else
 #define OPENOS_HAS_ALARMTEST 0
 #endif
 
-#if __has_include("embed_mmaptest.h")
+#if OPENOS_EMBED_TESTS && __has_include("embed_mmaptest.h")
 #include "embed_mmaptest.h"  /* mmaptest user command */
 #define OPENOS_HAS_MMAPTEST 1
 #else
 #define OPENOS_HAS_MMAPTEST 0
 #endif
 
-#if __has_include("embed_sbrktest.h")
+#if OPENOS_EMBED_TESTS && __has_include("embed_sbrktest.h")
 #include "embed_sbrktest.h"  /* sbrktest user command */
 #define OPENOS_HAS_SBRKTEST 1
 #else
@@ -530,14 +533,14 @@ static int kernel_start_init_thread(void) {
 void kernel_main(void) {
     serial_init();
     serial_write("\n[OpenOS] Phase 2.5 - Preemptive Scheduler\n");
-    
+
     /* 初始化硬�?*/
     pmm_init((uint32_t)__kernel_end);
     serial_write("[OK] PMM\n");
-    
+
     gdt_init();
     serial_write("[OK] GDT\n");
-    
+
     /* 初始化所有段寄存�?(防止 FS/GS 为无效�? */
     __asm__ volatile (
         "movw $0x10, %%ax\n\t"
@@ -547,23 +550,23 @@ void kernel_main(void) {
         "movw %%ax, %%gs\n\t"
         : : : "ax"
     );
-    
+
     /* 初始化并加载 TSS (修复 invalid tss type) */
     extern uint32_t kernel_stack_top[];
     tss_init((uint32_t)kernel_stack_top);
     extern void tss_flush(void);
     tss_flush();
     serial_write("[OK] TSS\n");
-    
+
     idt_init();
     serial_write("[OK] IDT\n");
-    
+
     vmm_init();
     serial_write("[OK] VMM\n");
-    
+
     heap_init();
     serial_write("[OK] HEAP\n");
-    
+
     /* 初始化键盘驱�?*/
     keyboard_init();
 
@@ -572,7 +575,7 @@ void kernel_main(void) {
 
     /* 初始化 QEMU USB Tablet 绝对坐标鼠标；失败时自动回退 PS/2 */
     usb_tablet_init();
-    
+
     /* 初始化VGA控制�?*/
     vga_init();
 
@@ -581,20 +584,20 @@ void kernel_main(void) {
 
     /* 初始化窗口管理器/GUI 对象池；默认不切图形模式 */
     window_manager_init();
-    
+
     /* 测试系统调用接口 (int 0x80) */
     serial_write("[TEST] Testing syscall interface (int 0x80)...\n");
     serial_write("[TEST] Calling SYS_GETPID...\n");
-    
+
     /* 调用系统调用：SYS_GETPID (EAX=20) */
     uint32_t pid = 0;
     asm volatile("int $0x80" : "=a"(pid) : "a"(SYS_GETPID));
-    
+
     serial_write("[TEST] SYS_GETPID returned: ");
     serial_write_hex(pid);
     serial_write("\n");
     serial_write("[TEST] Syscall test done\n");
-    
+
     /* 初始化进程表 */
     proc_table_init();
     serial_write("[OK] PROC TABLE\n");
@@ -1269,20 +1272,20 @@ void kernel_main(void) {
 
     /* 初始化调度器 */
     sched_init();
-    
+
     /* 启动定时器（调度器已初始化） */
     pit_start();
-    
+
     /* Do not enable interrupts here.
      * sched_start() must enter the first thread through iret, and the
      * thread's initial EFLAGS (IF=1) will enable interrupts safely.
      * If sti runs too early, timer ISR may save the bootstrap stack into
      * idle->kernel_esp and later context switches can restore a bad stack.
      */
-    
+
     /* 测试用户态切换已通过 Phase 2 验证，不再自动测�?*/
     /* test_user_mode_switch(); */
-    
+
     /* Start PID1 init/reaper; init owns desktop/shell startup and orphan cleanup. */
     if (kernel_start_init_thread() != 0) {
         serial_write("[INIT] Failed to start init; falling back to shell thread.\n");
@@ -1306,26 +1309,26 @@ void kernel_main(void) {
         if (et) sched_add_thread(et);
     }
     */
-    
+
     /* 创建测试线程 - 暂时注释掉，避免输出干扰
     uint32_t stack_a = (uint32_t)pmm_alloc_page() + 4096;
     uint32_t stack_b = (uint32_t)pmm_alloc_page() + 4096;
-    
+
     thread_t *ta = thread_create(1, "test_a", (uint32_t)test_proc_a, stack_a);
     thread_t *tb = thread_create(1, "test_b", (uint32_t)test_proc_b, stack_b);
-    
+
     if (ta) { sched_add_thread(ta); }
     if (tb) { sched_add_thread(tb);
     */
-    
+
     /* 启动调度 - sti �?iret 自动完成，不提前开�?*/
     serial_write("[KERNEL] Starting scheduler and enabling interrupts...\n");
-    
+
     sched_start();
-    
+
     /* sched_start 不应该返�?*/
     serial_write("[ERR] sched_start returned!\n");
-    
+
     for (;;) {
         __asm__ volatile("hlt");
     }

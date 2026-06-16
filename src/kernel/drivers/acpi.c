@@ -3,6 +3,7 @@
  * ============================================================ */
 #include "../include/acpi.h"
 #include "../include/serial.h"
+#include "../include/vmm.h"
 
 #define ACPI_EBDA_SEG_PTR ((const uint16_t *)0x0000040Eu)
 #define ACPI_BIOS_ROM_START 0x000E0000u
@@ -51,6 +52,19 @@ static uint8_t acpi_checksum(const uint8_t *ptr, uint32_t len) {
     return sum;
 }
 
+static void acpi_identity_map(uint32_t addr, uint32_t size) {
+    uint32_t start;
+    uint32_t end;
+
+    if (addr == 0 || size == 0) return;
+
+    start = addr & PAGE_MASK;
+    end = (addr + size + PAGE_SIZE - 1u) & PAGE_MASK;
+    if (end <= start) return;
+
+    vmm_map_range(start, start, end - start, VMM_RW);
+}
+
 static const acpi_rsdp_v1_t *acpi_validate_rsdp(uint32_t addr) {
     const acpi_rsdp_v1_t *rsdp = (const acpi_rsdp_v1_t *)addr;
     const acpi_rsdp_v2_t *rsdp2;
@@ -94,11 +108,15 @@ const acpi_rsdp_info_t *acpi_get_rsdp_info(void) {
     return &g_acpi_info;
 }
 
-static const acpi_table_header_t *acpi_validate_table(uint32_t addr) {
+const acpi_table_header_t *acpi_map_table(uint32_t addr) {
     const acpi_table_header_t *hdr;
     if (addr == 0) return 0;
+
+    acpi_identity_map(addr, sizeof(acpi_table_header_t));
     hdr = (const acpi_table_header_t *)addr;
     if (hdr->length < sizeof(acpi_table_header_t)) return 0;
+
+    acpi_identity_map(addr, hdr->length);
     if (acpi_checksum((const uint8_t *)hdr, hdr->length) != 0) return 0;
     return hdr;
 }
@@ -112,7 +130,7 @@ static const acpi_table_header_t *acpi_find_in_rsdt(const acpi_table_header_t *r
     count = (rsdt->length - sizeof(acpi_table_header_t)) / sizeof(uint32_t);
     entries = (const uint32_t *)((const uint8_t *)rsdt + sizeof(acpi_table_header_t));
     for (i = 0; i < count; i++) {
-        const acpi_table_header_t *hdr = acpi_validate_table(entries[i]);
+        const acpi_table_header_t *hdr = acpi_map_table(entries[i]);
         if (hdr && acpi_memcmp(hdr->signature, signature, 4) == 0) return hdr;
     }
     return 0;
@@ -127,7 +145,7 @@ static const acpi_table_header_t *acpi_find_in_xsdt(const acpi_table_header_t *x
     count = (xsdt->length - sizeof(acpi_table_header_t)) / sizeof(uint64_t);
     entries = (const uint64_t *)((const uint8_t *)xsdt + sizeof(acpi_table_header_t));
     for (i = 0; i < count; i++) {
-        const acpi_table_header_t *hdr = acpi_validate_table(acpi_phys32_from64(entries[i]));
+        const acpi_table_header_t *hdr = acpi_map_table(acpi_phys32_from64(entries[i]));
         if (hdr && acpi_memcmp(hdr->signature, signature, 4) == 0) return hdr;
     }
     return 0;
@@ -137,10 +155,10 @@ const acpi_table_header_t *acpi_find_table(const char signature[4]) {
     const acpi_table_header_t *table = 0;
     if (!g_acpi_info.found) return 0;
     if (g_acpi_info.xsdt_addr != 0) {
-        table = acpi_find_in_xsdt(acpi_validate_table(acpi_phys32_from64(g_acpi_info.xsdt_addr)), signature);
+        table = acpi_find_in_xsdt(acpi_map_table(acpi_phys32_from64(g_acpi_info.xsdt_addr)), signature);
         if (table) return table;
     }
-    return acpi_find_in_rsdt(acpi_validate_table(g_acpi_info.rsdt_addr), signature);
+    return acpi_find_in_rsdt(acpi_map_table(g_acpi_info.rsdt_addr), signature);
 }
 
 void acpi_init(void) {

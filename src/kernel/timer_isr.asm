@@ -4,7 +4,7 @@
 
 [bits 32]
 
-%define T_KERNEL_ESP  36
+%define T_KERNEL_ESP  72
 
 section .text
 
@@ -17,8 +17,8 @@ timer_isr_entry:
     ; 保存所有寄存器
     pushad
     push ds
-    push fs
     push es
+    push fs
     push gs
     
     mov ax, 0x10
@@ -51,8 +51,8 @@ timer_isr_entry:
     
     ; 恢复寄存器
     pop gs
-    pop es
     pop fs
+    pop es
     pop ds
     popad
     

@@ -4,6 +4,7 @@
 #include "../include/apic.h"
 #include "../include/acpi.h"
 #include "../include/serial.h"
+#include "../include/vmm.h"
 
 #define APIC_BASE_MSR 0x1Bu
 #define APIC_BASE_ENABLE 0x800u
@@ -35,6 +36,11 @@ typedef struct acpi_madt_ioapic {
 } __attribute__((packed)) acpi_madt_ioapic_t;
 
 static apic_info_t g_apic_info;
+
+static void apic_map_mmio(uint32_t addr) {
+    if (addr == 0) return;
+    vmm_map_range(addr & PAGE_MASK, addr & PAGE_MASK, PAGE_SIZE, VMM_RW);
+}
 
 static void apic_cpuid(uint32_t leaf, uint32_t *eax, uint32_t *ebx,
                        uint32_t *ecx, uint32_t *edx) {
@@ -215,10 +221,12 @@ void apic_init(void) {
         apic_base_msr = apic_read_msr(APIC_BASE_MSR);
         g_apic_info.lapic_base = (uint32_t)(apic_base_msr & 0xFFFFF000u);
         g_apic_info.lapic_enabled = (apic_base_msr & APIC_BASE_ENABLE) ? 1u : 0u;
+        apic_map_mmio(g_apic_info.lapic_base);
     }
 
     madt = (const acpi_madt_t *)acpi_find_table("APIC");
     apic_parse_madt(madt);
+    apic_map_mmio(g_apic_info.first_ioapic_addr);
 
     serial_write("[APIC] CPUID=");
     serial_write_hex(g_apic_info.cpuid_apic);

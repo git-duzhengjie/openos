@@ -30,7 +30,7 @@ extern uint8_t __kernel_end;
  * PIC (可编程中断控制器) 操作
  * ============================================================ */
 
-/* 
+/*
  * 重新映射PIC
  * 将IRQ 0-15映射到中断号32-47
  * 避免与CPU异常(0-31)冲突
@@ -64,7 +64,7 @@ static void pic_remap(int offset1, int offset2) {
 static void pit_init(void) {
 	/* 计算分频值: PIT频率 1193182 Hz / 目标频率 */
 	uint32_t divisor = 1193182 / 100;  /* 约100Hz */
-	
+
 	/* 发送控制字:
 	 * 二进制: 00110110
 	 * - 通道0 (00)
@@ -73,11 +73,11 @@ static void pit_init(void) {
 	 * - 二进制计数 (0)
 	 */
 	outb(0x43, 0x36);
-	
+
 	/* 发送分频值 (先低字节后高字节) */
 	outb(0x40, (uint8_t)(divisor & 0xFF));
 	outb(0x40, (uint8_t)((divisor >> 8) & 0xFF));
-	
+
 	/* 确认写入 - 读取状态 */
 	uint8_t status = inb(0x61);
 	(void)status;  /* 避免未使用警告 */
@@ -542,7 +542,7 @@ void idt_init(void) {
 	/* 设置IRQ门 (32-47) */
 	/* INT 32 使用专用定时器处理函数 */
 	idt_set_gate(32, (uint32_t)timer_isr_entry, 0x08, 0x8E);
-	
+
 	/* 其他IRQ */
 	idt_set_gate(33, (uint32_t)irq1, 0x08, 0x8E);
 	idt_set_gate(34, (uint32_t)irq2, 0x08, 0x8E);
@@ -565,7 +565,7 @@ void idt_init(void) {
 
 	/* 加载IDT */
 	__asm__ volatile ("lidt %0" : : "m"(idt_ptr));
-	
+
 	/* 注意：不在这里开启中断，由 kernel.c 在 sched_init() 后开启 */
 }
 

@@ -30,6 +30,7 @@ typedef struct acpi_table_header {
 
 void acpi_init(void);
 const acpi_rsdp_info_t *acpi_get_rsdp_info(void);
+const acpi_table_header_t *acpi_map_table(uint32_t addr);
 const acpi_table_header_t *acpi_find_table(const char signature[4]);
 
 #endif /* ACPI_H */

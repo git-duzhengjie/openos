@@ -643,6 +643,9 @@ static int blockdev_scan_gpt(blockdev_t *parent, int first_part_index) {
     uint8_t sector[BLOCK_CACHE_SECTOR_SIZE];
     gpt_header_t *hdr;
     uint32_t i;
+    uint32_t entry_size;
+    uint32_t entry_sector;
+    uint32_t entry_off = 0;
     int part_index = first_part_index;
 
     if (!parent || parent->sector_size != BLOCK_CACHE_SECTOR_SIZE) return first_part_index;
@@ -652,29 +655,46 @@ static int blockdev_scan_gpt(blockdev_t *parent, int first_part_index) {
     hdr = (gpt_header_t *)sector;
     if (memcmp(hdr->signature, "EFI PART", 8) != 0) return first_part_index;
     if (hdr->sizeof_partition_entry < sizeof(gpt_entry_min_t)) return first_part_index;
+    if (hdr->sizeof_partition_entry > parent->sector_size) return first_part_index;
     if (hdr->partition_entry_lba == 0 || hdr->partition_entry_lba > 0xFFFFFFFFull) return first_part_index;
+
+    entry_size = hdr->sizeof_partition_entry;
+    entry_sector = (uint32_t)hdr->partition_entry_lba;
 
     serial_write("[BLOCKDEV] scanning GPT partitions\n");
     for (i = 0; i < hdr->num_partition_entries && part_index < BLOCKDEV_MAX; i++) {
-        uint64_t byte_off = (uint64_t)i * hdr->sizeof_partition_entry;
-        uint32_t entry_sector = (uint32_t)hdr->partition_entry_lba + (uint32_t)(byte_off / parent->sector_size);
-        uint32_t entry_off = (uint32_t)(byte_off % parent->sector_size);
         gpt_entry_min_t *entry;
         uint64_t count64;
+        uint32_t sector_space;
+        uint32_t advance_remain;
 
         if (entry_sector >= parent->sector_count) break;
-        if (entry_off + sizeof(gpt_entry_min_t) > parent->sector_size) continue;
+        if (entry_off + sizeof(gpt_entry_min_t) > parent->sector_size) goto advance_entry;
         if (blockdev_read_blocks(parent, entry_sector, 1, sector) != 1) break;
 
         entry = (gpt_entry_min_t *)(sector + entry_off);
-        if (gpt_guid_is_zero(entry->type_guid)) continue;
-        if (entry->last_lba < entry->first_lba) continue;
-        if (entry->first_lba > 0xFFFFFFFFull || entry->last_lba > 0xFFFFFFFFull) continue;
+        if (gpt_guid_is_zero(entry->type_guid)) goto advance_entry;
+        if (entry->last_lba < entry->first_lba) goto advance_entry;
+        if (entry->first_lba > 0xFFFFFFFFull || entry->last_lba > 0xFFFFFFFFull) goto advance_entry;
 
         count64 = entry->last_lba - entry->first_lba + 1;
-        if (count64 == 0 || count64 > 0xFFFFFFFFull) continue;
-        if (partition_register_child(parent, part_index, (uint32_t)entry->first_lba, (uint32_t)count64) == 0) {
+        if (count64 != 0 && count64 <= 0xFFFFFFFFull &&
+            partition_register_child(parent, part_index, (uint32_t)entry->first_lba, (uint32_t)count64) == 0) {
             part_index++;
+        }
+
+advance_entry:
+        sector_space = parent->sector_size - entry_off;
+        if (entry_size < sector_space) {
+            entry_off += entry_size;
+        } else {
+            advance_remain = entry_size - sector_space;
+            entry_sector++;
+            while (advance_remain >= parent->sector_size) {
+                advance_remain -= parent->sector_size;
+                entry_sector++;
+            }
+            entry_off = advance_remain;
         }
     }
     return part_index;

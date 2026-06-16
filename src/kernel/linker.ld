@@ -53,6 +53,10 @@ SECTIONS
         *(COMMON)
         *(.bss*)
         *(.gnu.linkonce.b*)
+        . = ALIGN(16);
+        kernel_stack_bottom = .;
+        . += 16K;
+        kernel_stack_top = .;
         . = ALIGN(4096);
         __bss_end = .;
     }
@@ -60,9 +64,7 @@ SECTIONS
     /* 结束地址 (调试用) */
     __kernel_end = .;
 
-    /* 低端内存栈顶。必须高于内核镜像，且低于 EBDA/显存区域。 */
-    kernel_stack_top = 0x9F000;
-
-    ASSERT(__kernel_image_end <= 0x9E000, "kernel image overlaps low-memory stack guard")
-    ASSERT(kernel_stack_top <= 0x9F000, "kernel stack top exceeds safe low memory")
+    /* 低端加载镜像仍不能进入 VGA/ROM 保留区域。启动栈位于高端 .bss。 */
+    ASSERT(__kernel_image_end <= 0xA0000, "kernel image overlaps VGA reserved memory")
+    ASSERT(kernel_stack_bottom >= 0x100000, "kernel stack below high-memory area")
 }

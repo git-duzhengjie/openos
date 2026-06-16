@@ -150,8 +150,9 @@ void power_init(void) {
     g_power_info.dsdt_addr = dsdt_addr;
 
     if (dsdt_addr != 0) {
-        const acpi_table_header_t *dsdt = (const acpi_table_header_t *)dsdt_addr;
-        if (memcmp(dsdt->signature, "DSDT", 4) == 0 && dsdt->length > sizeof(acpi_table_header_t)) {
+        const acpi_table_header_t *dsdt = acpi_map_table(dsdt_addr);
+        if (dsdt && memcmp(dsdt->signature, "DSDT", 4) == 0 &&
+            dsdt->length > sizeof(acpi_table_header_t)) {
             const uint8_t *aml = (const uint8_t *)dsdt + sizeof(acpi_table_header_t);
             uint32_t aml_len = dsdt->length - (uint32_t)sizeof(acpi_table_header_t);
             g_power_info.s5_available = (uint8_t)power_find_s5(aml, aml_len,

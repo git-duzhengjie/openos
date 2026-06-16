@@ -176,21 +176,21 @@ syscall_common_stub:
     ; ESP+8   = 用户 EIP
     ; ESP+12  = 用户 CS
     ; ESP+16  = 用户 EFLAGS
-    
+
     ; 保存用户寄存器
     pusha                    ; 保存 EAX, ECX, EDX, EBX, ESP, EBP, ESI, EDI
     push ds
     push es
     push fs
     push gs
-    
+
     ; 设置内核数据段
     mov ax, 0x10            ; 内核数据段选择子
     mov ds, ax
     mov es, ax
     mov fs, ax
     mov gs, ax
-    
+
     ; 此时栈布局：
     ; ESP+0   = GS
     ; ESP+4   = FS
@@ -209,7 +209,7 @@ syscall_common_stub:
     ; ESP+56  = 用户 EIP
     ; ESP+60  = 用户 CS
     ; ESP+64  = 用户 EFLAGS
-    
+
     ; 提取参数
     mov eax, [esp + 44]     ; EAX = 系统调用号
     mov ebx, [esp + 32]     ; EBX = arg1
@@ -217,7 +217,7 @@ syscall_common_stub:
     mov edx, [esp + 36]     ; EDX = arg3
     mov esi, [esp + 20]     ; ESI = arg4
     mov edi, [esp + 16]     ; EDI = arg5
-    
+
     ; 调用 syscall_dispatch(num, a, b, c, d, e)
     ; C calling convention: 参数从右到左压栈
     push edi                 ; arg5 = e
@@ -226,15 +226,15 @@ syscall_common_stub:
     push ecx                 ; arg2 = b
     push ebx                 ; arg1 = a
     push eax                 ; num
-    
+
     call syscall_dispatch
     add esp, 24             ; 清理栈 (6 args * 4 bytes)
-    
+
     ; 返回值在 EAX 中，需要保存到栈中保存的用户 EAX 位置
     ; 注意：add esp, 24 之后，ESP 恢复到 pusha 之前的位置
     ; 所以 [esp + 44] 仍然是保存的用户 EAX
     mov [esp + 44], eax     ; 修改保存的 EAX 值
-    
+
     ; 恢复寄存器
     pop gs
     pop fs
@@ -242,7 +242,7 @@ syscall_common_stub:
     pop ds
     popa                     ; 恢复 EAX, ECX, EDX, EBX, ESP, EBP, ESI, EDI
                               ; 此时 EAX = 系统调用返回值
-    
+
     add esp, 8              ; 清理错误码和中断号
     ; Do not sti here. iret restores the user EFLAGS.IF saved by the CPU.
     iret                     ; 返回用户态

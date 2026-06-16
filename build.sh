@@ -35,6 +35,13 @@ nasm -f elf32 $SRC/switch_to_user.asm -o $BUILD/switch_to_user.o
 # 编译用户程序并嵌入内�?
 echo "[2.5] Building user program..."
 USR=src/user
+OPENOS_EMBED_TESTS=${OPENOS_EMBED_TESTS:-0}
+TEST_EMBED_HEADERS="isotest waittest forktest threadtest mutextest semtest condtest futextest nicetest exit42 orphan argtest envtest libctest maintest systest malloctest errnotest stdiotest fstest alarmtest mmaptest sbrktest"
+if [ "$OPENOS_EMBED_TESTS" != "1" ]; then
+    for app in $TEST_EMBED_HEADERS; do
+        rm -f "$SRC/include/embed_${app}.h"
+    done
+fi
 if [ -f $USR/hello.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \
@@ -53,7 +60,7 @@ if [ -f $USR/fault.c ]; then
     echo "  Embedded: fault.elf"
 fi
 
-if [ -f $USR/waittest.c ]; then
+if [ "$OPENOS_EMBED_TESTS" = "1" ] && [ -f $USR/waittest.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \
         -c $USR/waittest.c -o $BUILD/waittest.o
@@ -62,7 +69,7 @@ if [ -f $USR/waittest.c ]; then
     echo "  Embedded: waittest.elf"
 fi
 
-if [ -f $USR/forktest.c ]; then
+if [ "$OPENOS_EMBED_TESTS" = "1" ] && [ -f $USR/forktest.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \
         -c $USR/forktest.c -o $BUILD/forktest.o
@@ -71,7 +78,7 @@ if [ -f $USR/forktest.c ]; then
     echo "  Embedded: forktest.elf"
 fi
 
-if [ -f $USR/threadtest.c ]; then
+if [ "$OPENOS_EMBED_TESTS" = "1" ] && [ -f $USR/threadtest.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \
         -c $USR/threadtest.c -o $BUILD/threadtest.o
@@ -80,7 +87,7 @@ if [ -f $USR/threadtest.c ]; then
     echo "  Embedded: threadtest.elf"
 fi
 
-if [ -f $USR/mutextest.c ]; then
+if [ "$OPENOS_EMBED_TESTS" = "1" ] && [ -f $USR/mutextest.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \
         -c $USR/mutextest.c -o $BUILD/mutextest.o
@@ -89,7 +96,7 @@ if [ -f $USR/mutextest.c ]; then
     echo "  Embedded: mutextest.elf"
 fi
 
-if [ -f $USR/semtest.c ]; then
+if [ "$OPENOS_EMBED_TESTS" = "1" ] && [ -f $USR/semtest.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \
         -c $USR/semtest.c -o $BUILD/semtest.o
@@ -98,7 +105,7 @@ if [ -f $USR/semtest.c ]; then
     echo "  Embedded: semtest.elf"
 fi
 
-if [ -f $USR/condtest.c ]; then
+if [ "$OPENOS_EMBED_TESTS" = "1" ] && [ -f $USR/condtest.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \
         -c $USR/condtest.c -o $BUILD/condtest.o
@@ -107,7 +114,7 @@ if [ -f $USR/condtest.c ]; then
     echo "  Embedded: condtest.elf"
 fi
 
-if [ -f $USR/futextest.c ]; then
+if [ "$OPENOS_EMBED_TESTS" = "1" ] && [ -f $USR/futextest.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \
         -c $USR/futextest.c -o $BUILD/futextest.o
@@ -164,7 +171,7 @@ if [ -f $USR/micromsgtest.c ]; then
     echo "  Built: micromsgtest.elf"
 fi
 
-if [ -f $USR/nicetest.c ]; then
+if [ "$OPENOS_EMBED_TESTS" = "1" ] && [ -f $USR/nicetest.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \
         -I $SRC/include \
@@ -174,7 +181,7 @@ if [ -f $USR/nicetest.c ]; then
     echo "  Embedded: nicetest.elf"
 fi
 
-if [ -f $USR/isotest.c ]; then
+if [ "$OPENOS_EMBED_TESTS" = "1" ] && [ -f $USR/isotest.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \
         -c $USR/isotest.c -o $BUILD/isotest.o
@@ -183,7 +190,7 @@ if [ -f $USR/isotest.c ]; then
     echo "  Embedded: isotest.elf"
 fi
 
-if [ -f $USR/exit42.c ]; then
+if [ "$OPENOS_EMBED_TESTS" = "1" ] && [ -f $USR/exit42.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \
         -I $SRC/include \
@@ -193,7 +200,7 @@ if [ -f $USR/exit42.c ]; then
     echo "  Embedded: exit42.elf"
 fi
 
-if [ -f $USR/orphan.c ]; then
+if [ "$OPENOS_EMBED_TESTS" = "1" ] && [ -f $USR/orphan.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \
         -I $SRC/include \
@@ -203,7 +210,7 @@ if [ -f $USR/orphan.c ]; then
     echo "  Embedded: orphan.elf"
 fi
 
-if [ -f $USR/envtest.c ]; then
+if [ "$OPENOS_EMBED_TESTS" = "1" ] && [ -f $USR/envtest.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \
         -I $SRC/include \
@@ -213,7 +220,7 @@ if [ -f $USR/envtest.c ]; then
     echo "  Embedded: envtest.elf"
 fi
 
-if [ -f $USR/argtest.c ]; then
+if [ "$OPENOS_EMBED_TESTS" = "1" ] && [ -f $USR/argtest.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \
         -I $SRC/include \
@@ -223,7 +230,7 @@ if [ -f $USR/argtest.c ]; then
     echo "  Embedded: argtest.elf"
 fi
 
-if [ -f $USR/libctest.c ]; then
+if [ "$OPENOS_EMBED_TESTS" = "1" ] && [ -f $USR/libctest.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \
         -I $SRC/include \
@@ -233,7 +240,7 @@ if [ -f $USR/libctest.c ]; then
     echo "  Embedded: libctest.elf"
 fi
 
-if [ -f $USR/maintest.c ]; then
+if [ "$OPENOS_EMBED_TESTS" = "1" ] && [ -f $USR/maintest.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \
         -I $SRC/include \
@@ -247,7 +254,7 @@ if [ -f $USR/maintest.c ]; then
     echo "  Embedded: maintest.elf"
 fi
 
-if [ -f $USR/systest.c ]; then
+if [ "$OPENOS_EMBED_TESTS" = "1" ] && [ -f $USR/systest.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \
         -I $SRC/include \
@@ -261,7 +268,7 @@ if [ -f $USR/systest.c ]; then
     echo "  Embedded: systest.elf"
 fi
 
-if [ -f $USR/malloctest.c ]; then
+if [ "$OPENOS_EMBED_TESTS" = "1" ] && [ -f $USR/malloctest.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \
         -I $SRC/include \
@@ -275,7 +282,7 @@ if [ -f $USR/malloctest.c ]; then
     echo "  Embedded: malloctest.elf"
 fi
 
-if [ -f $USR/errnotest.c ]; then
+if [ "$OPENOS_EMBED_TESTS" = "1" ] && [ -f $USR/errnotest.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \
         -I $SRC/include \
@@ -289,7 +296,7 @@ if [ -f $USR/errnotest.c ]; then
     echo "  Embedded: errnotest.elf"
 fi
 
-if [ -f $USR/stdiotest.c ]; then
+if [ "$OPENOS_EMBED_TESTS" = "1" ] && [ -f $USR/stdiotest.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \
         -I $SRC/include \
@@ -303,7 +310,7 @@ if [ -f $USR/stdiotest.c ]; then
     echo "  Embedded: stdiotest.elf"
 fi
 
-if [ -f $USR/fstest.c ]; then
+if [ "$OPENOS_EMBED_TESTS" = "1" ] && [ -f $USR/fstest.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \
         -I $SRC/include \
@@ -514,7 +521,7 @@ if [ -f $USR/kill.c ]; then
     echo "  Embedded: kill.elf"
 fi
 
-if [ -f $USR/alarmtest.c ]; then
+if [ "$OPENOS_EMBED_TESTS" = "1" ] && [ -f $USR/alarmtest.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \
         -I $SRC/include \
@@ -524,7 +531,7 @@ if [ -f $USR/alarmtest.c ]; then
     echo "  Embedded: alarmtest.elf"
 fi
 
-if [ -f $USR/mmaptest.c ]; then
+if [ "$OPENOS_EMBED_TESTS" = "1" ] && [ -f $USR/mmaptest.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \
         -I $SRC/include \
@@ -534,7 +541,7 @@ if [ -f $USR/mmaptest.c ]; then
     echo "  Embedded: mmaptest.elf"
 fi
 
-if [ -f $USR/sbrktest.c ]; then
+if [ "$OPENOS_EMBED_TESTS" = "1" ] && [ -f $USR/sbrktest.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \
         -I $SRC/include \
