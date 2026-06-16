@@ -54,6 +54,15 @@ int input_has_data(void) {
     return has;
 }
 
+void input_flush(void) {
+    uint32_t flags = input_irq_save();
+    head = 0;
+    tail = 0;
+    count = 0;
+    eof_pending = 0;
+    input_irq_restore(flags);
+}
+
 void input_mark_eof(void) {
     uint32_t flags = input_irq_save();
     eof_pending = 1;

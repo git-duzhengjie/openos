@@ -13,6 +13,7 @@
 #include "serial.h"
 #include "string.h"
 #include "heap.h"
+#include "input_buffer.h"
 
 static void gui_desktop_run_action(uint32_t action);
 
@@ -2470,6 +2471,7 @@ void gui_terminal_open(void) {
         return;
     }
 
+    input_flush();
     g_gui.terminal.enabled = 1;
     g_gui.terminal.input_focused = 1;
     g_gui.terminal.cursor_visible = 1;

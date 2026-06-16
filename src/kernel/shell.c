@@ -2606,6 +2606,7 @@ void shell_run(void)
     print("\n=== openos shell ===\n");
     print("Type 'help' for commands\n\n");
 
+    input_flush();
     cmd_buf[0] = '\0';
     cmd_pos = 0;
     cmd_cursor = 0;
@@ -2744,6 +2745,10 @@ void shell_run(void)
         if (c == '\r' || c == '\n')
         {
             cmd_buf[cmd_pos] = '\0';
+            if (!from_script && cmd_pos == 0 && gui_terminal_is_active()) {
+                input_flush();
+                continue;
+            }
             if (!from_script)
                 print("\n");
             if (!from_script) {

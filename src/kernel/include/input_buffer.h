@@ -17,6 +17,9 @@ char input_getc(void);
 /* 缓冲区是否有数据 */
 int input_has_data(void);
 
+/* 清空所有待处理输入字符和 EOF 标记 */
+void input_flush(void);
+
 /* 标记/消费一次输入 EOF（Ctrl+D） */
 void input_mark_eof(void);
 int input_consume_eof(void);
