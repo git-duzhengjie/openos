@@ -229,7 +229,14 @@ gui_widget_t *gui_add_label(gui_window_t *window, int x, int y, int w, int h, co
 gui_widget_t *gui_add_button(gui_window_t *window, int x, int y, int w, int h, const char *text, gui_widget_callback_t cb, void *user_data);
 gui_widget_t *gui_add_panel(gui_window_t *window, int x, int y, int w, int h, uint32_t color);
 gui_widget_t *gui_add_textbox(gui_window_t *window, int x, int y, int w, int h, const char *text);
+gui_widget_t *gui_find_widget(gui_window_t *window, uint32_t id);
 void gui_widget_set_enabled(gui_widget_t *widget, int enabled);
+void gui_widget_set_visible(gui_widget_t *widget, int visible);
+void gui_widget_set_text(gui_widget_t *widget, const char *text);
+const char *gui_widget_get_text(const gui_widget_t *widget);
+void gui_widget_set_colors(gui_widget_t *widget, uint32_t bg_color, uint32_t fg_color);
+void gui_widget_set_on_click(gui_widget_t *widget, gui_widget_callback_t cb, void *user_data);
+void gui_widget_focus(gui_widget_t *widget);
 
 void gui_event_push(gui_event_t event);
 int gui_event_pop(gui_event_t *event);

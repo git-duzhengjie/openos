@@ -1400,9 +1400,8 @@ void gui_process_events(void) {
         } else if (ev.type == GUI_EVENT_BUTTON_CLICK) {
             if (ev.widget && gui_widget_is_clickable(ev.widget)) {
                 serial_write("[GUI] button clicked\n");
-                /* 涓嶅仛浠绘剰 on_click 闂存帴璋冪敤锛屽彧瀵圭櫧鍚嶅崟鍥炶皟鍋氱洿鎺ヨ皟鐢紝閬垮厤璺抽銆?*/
-                if (ev.widget->on_click == gui_demo_button) {
-                    gui_demo_button(ev.widget, ev.widget->user_data);
+                if (ev.widget->on_click) {
+                    ev.widget->on_click(ev.widget, ev.widget->user_data);
                 }
             }
         } else if (ev.type == GUI_EVENT_WINDOW_CLOSE) {
@@ -1689,6 +1688,21 @@ gui_widget_t *gui_add_textbox(gui_window_t *window, int x, int y, int w, int h, 
     return wg;
 }
 
+static void gui_widget_invalidate(gui_widget_t *widget) {
+    if (!widget || !widget->owner) return;
+    gui_invalidate_rect(widget->owner->rect.x, widget->owner->rect.y,
+                        widget->owner->rect.w, widget->owner->rect.h);
+}
+
+gui_widget_t *gui_find_widget(gui_window_t *window, uint32_t id) {
+    uint32_t i;
+    if (!window || !window->used || id == 0) return 0;
+    for (i = 0; i < window->widget_count; i++) {
+        if (window->widgets[i].id == id) return &window->widgets[i];
+    }
+    return 0;
+}
+
 void gui_widget_set_enabled(gui_widget_t *widget, int enabled) {
     if (!widget) return;
     widget->enabled = enabled ? 1 : 0;
@@ -1699,7 +1713,50 @@ void gui_widget_set_enabled(gui_widget_t *widget, int enabled) {
         if (g_gui.hovered_widget == widget) g_gui.hovered_widget = 0;
         if (g_gui.focused_widget == widget) gui_set_focused_widget(0);
     }
-    if (widget->owner) gui_invalidate_rect(widget->owner->rect.x, widget->owner->rect.y, widget->owner->rect.w, widget->owner->rect.h);
+    gui_widget_invalidate(widget);
+}
+
+void gui_widget_set_visible(gui_widget_t *widget, int visible) {
+    if (!widget) return;
+    widget->visible = visible ? 1 : 0;
+    if (!widget->visible) {
+        widget->pressed = 0;
+        widget->hovered = 0;
+        if (g_gui.pressed_widget == widget) g_gui.pressed_widget = 0;
+        if (g_gui.hovered_widget == widget) g_gui.hovered_widget = 0;
+        if (g_gui.focused_widget == widget) gui_set_focused_widget(0);
+    }
+    gui_widget_invalidate(widget);
+}
+
+void gui_widget_set_text(gui_widget_t *widget, const char *text) {
+    uint32_t len;
+    if (!widget) return;
+    gui_copy_text(widget->text, text ? text : "", sizeof(widget->text));
+    len = (uint32_t)strlen(widget->text);
+    if (widget->cursor > len || widget->type != GUI_WIDGET_TEXTBOX) widget->cursor = len;
+    gui_widget_invalidate(widget);
+}
+
+const char *gui_widget_get_text(const gui_widget_t *widget) {
+    return widget ? widget->text : "";
+}
+
+void gui_widget_set_colors(gui_widget_t *widget, uint32_t bg_color, uint32_t fg_color) {
+    if (!widget) return;
+    widget->bg_color = bg_color;
+    widget->fg_color = fg_color;
+    gui_widget_invalidate(widget);
+}
+
+void gui_widget_set_on_click(gui_widget_t *widget, gui_widget_callback_t cb, void *user_data) {
+    if (!widget) return;
+    widget->on_click = cb;
+    widget->user_data = user_data;
+}
+
+void gui_widget_focus(gui_widget_t *widget) {
+    gui_set_focused_widget(widget);
 }
 
 void gui_terminal_clear(void) {
