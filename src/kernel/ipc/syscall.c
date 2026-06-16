@@ -1236,6 +1236,13 @@ static uint32_t syscall_return(uint32_t value)
     return value;
 }
 
+static int syscall_require_cap(uint32_t cap)
+{
+    if (proc_current_has_cap(cap))
+        return 0;
+    return -1;
+}
+
 /* ============================================================
  * 系统调用分发
  * ============================================================ */
@@ -1419,6 +1426,8 @@ uint32_t syscall_dispatch(uint32_t num,
         }
 
     case SYS_KILL:
+        if (syscall_require_cap(OPENOS_CAP_KILL) < 0)
+            return (uint32_t)-1;
         return syscall_return((uint32_t)sys_kill((int)a, (int)b));
 
     case SYS_ALARM:
@@ -1622,6 +1631,8 @@ uint32_t syscall_dispatch(uint32_t num,
     case SYS_CHMOD:
         {
             char path[USERMEM_CSTR_MAX];
+            if (syscall_require_cap(OPENOS_CAP_SYS_ADMIN) < 0)
+                return (uint32_t)-1;
             if (syscall_copy_user_path(path, (const char *)a) < 0)
                 return (uint32_t)-1;
             return (uint32_t)vfs_chmod(path, (uint32_t)b);
@@ -1630,6 +1641,8 @@ uint32_t syscall_dispatch(uint32_t num,
     case SYS_CHOWN:
         {
             char path[USERMEM_CSTR_MAX];
+            if (syscall_require_cap(OPENOS_CAP_SYS_ADMIN) < 0)
+                return (uint32_t)-1;
             if (syscall_copy_user_path(path, (const char *)a) < 0)
                 return (uint32_t)-1;
             return (uint32_t)vfs_chown(path, (uint32_t)b, (uint32_t)c);
@@ -1639,12 +1652,16 @@ uint32_t syscall_dispatch(uint32_t num,
         return proc_current_uid();
 
     case SYS_SETUID:
+        if (a != proc_current_uid() && syscall_require_cap(OPENOS_CAP_SETUID) < 0)
+            return (uint32_t)-1;
         return (uint32_t)proc_set_current_uid((uint32_t)a);
 
     case SYS_GETGID:
         return proc_current_gid();
 
     case SYS_SETGID:
+        if (a != proc_current_gid() && syscall_require_cap(OPENOS_CAP_SETGID) < 0)
+            return (uint32_t)-1;
         return (uint32_t)proc_set_current_gid((uint32_t)a);
 
     case SYS_GETPWUID:
@@ -1657,6 +1674,8 @@ uint32_t syscall_dispatch(uint32_t num,
         return proc_current_caps();
 
     case SYS_CAPSET:
+        if (((uint32_t)a & ~proc_current_caps()) != 0 && syscall_require_cap(OPENOS_CAP_SYS_ADMIN) < 0)
+            return (uint32_t)-1;
         return (uint32_t)proc_set_current_caps((uint32_t)a);
 
     case SYS_POLL:
@@ -1666,11 +1685,15 @@ uint32_t syscall_dispatch(uint32_t num,
         return syscall_select(a, (uint32_t *)b, (uint32_t *)c, (uint32_t *)d, e);
 
     case SYS_SOCKET:
+        if (syscall_require_cap(OPENOS_CAP_NET_ADMIN) < 0)
+            return (uint32_t)-1;
         return (uint32_t)socket_create_fd((int)a, (int)b, (int)c);
 
     case SYS_SOCKETPAIR:
         {
             int sv[2];
+            if (syscall_require_cap(OPENOS_CAP_NET_ADMIN) < 0)
+                return (uint32_t)-1;
             if (!d)
                 return (uint32_t)-1;
             if (socketpair_create_fds((int)a, (int)b, (int)c, sv) < 0)
@@ -1836,9 +1859,13 @@ uint32_t syscall_dispatch(uint32_t num,
         }
 
     case SYS_PING:
+        if (syscall_require_cap(OPENOS_CAP_NET_ADMIN) < 0)
+            return (uint32_t)-1;
         return (uint32_t)net_ping_ipv4((uint32_t)a);
 
     case SYS_NETCONFIG:
+        if (syscall_require_cap(OPENOS_CAP_NET_ADMIN) < 0)
+            return (uint32_t)-1;
         return (uint32_t)net_config_ipv4((uint32_t)a, (uint32_t)b, (uint32_t)c);
 
     case SYS_FIREWALL:
@@ -1850,7 +1877,7 @@ uint32_t syscall_dispatch(uint32_t num,
                 if (copy_to_user((void *)c, &rule, sizeof(rule)) < 0) return (uint32_t)-1;
                 return 0;
             }
-            if (proc_current_uid() != 0) return (uint32_t)-1;
+            if (syscall_require_cap(OPENOS_CAP_NET_ADMIN) < 0) return (uint32_t)-1;
             if ((uint32_t)a == NET_FW_OP_ADD) {
                 if (!c) return (uint32_t)-1;
                 if (copy_from_user(&rule, (const void *)c, sizeof(rule)) < 0) return (uint32_t)-1;
