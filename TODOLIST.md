@@ -186,7 +186,7 @@
 - [x] PCI 总线扫描
 - [x] ACPI
 - [x] APIC / IOAPIC
-- [ ] RTC 时钟
+- [x] RTC 时钟
 - [ ] 电源管理
 - [ ] 热插拔支持
 

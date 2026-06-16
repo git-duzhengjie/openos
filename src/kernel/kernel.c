@@ -26,6 +26,7 @@
 #include "pci.h"
 #include "acpi.h"
 #include "apic.h"
+#include "rtc.h"
 #include "vga.h"
 #include "framebuffer.h"
 #include "gui.h"
@@ -546,6 +547,10 @@ void kernel_main(void) {
     /* 探测 APIC / IOAPIC */
     apic_init();
     serial_write("[OK] APIC\n");
+
+    /* 读取 RTC 启动时间 */
+    rtc_init();
+    serial_write("[OK] RTC\n");
 
     /* 扫描 PCI 总线 */
     pci_scan_all();
