@@ -231,7 +231,7 @@
 - [√] UDP 用户态接口（已实现 sendto/recvfrom syscall、用户态 wrapper、DGRAM 发送和接收队列投递）
 - [√] ping / ifconfig / netstat 等工具（已提供用户态命令、构建接入和内核 /bin 嵌入安装）
 - [√] 网络配置管理（已支持 DHCP 获取配置、SYS_NETCONFIG 静态配置、ifconfig 查看/设置 IP/掩码/网关）
-- [x] 防火墙 / 权限控制
+- [√] 防火墙 / 权限控制（已实现内核规则表、SYS_FIREWALL、协议/端口过滤、用户态 firewall 工具和 /bin 嵌入）
 
 ### 14. IPC
 

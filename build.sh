@@ -561,7 +561,8 @@ if [ -f $USR/firewall.c ]; then
         -I $SRC/include \
         -c $USR/firewall.c -o $BUILD/firewall.o
     ld -m elf_i386 -T $USR/user.ld -o $BUILD/firewall.elf $BUILD/firewall.o
-    echo "  Built: firewall.elf"
+    python3 _embed_elf.py $BUILD/firewall.elf $SRC/include/embed_firewall.h firewall_elf
+    echo "  Embedded: firewall.elf"
 fi
 
 echo "[3/5] Compiling kernel C files..."

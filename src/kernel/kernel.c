@@ -320,6 +320,13 @@
 #define OPENOS_HAS_NETSTAT 0
 #endif
 
+#if __has_include("embed_firewall.h")
+#include "embed_firewall.h"  /* firewall user command */
+#define OPENOS_HAS_FIREWALL 1
+#else
+#define OPENOS_HAS_FIREWALL 0
+#endif
+
 #if __has_include("embed_id.h")
 #include "embed_id.h"  /* id user command */
 #define OPENOS_HAS_ID 1
@@ -1185,6 +1192,17 @@ void kernel_main(void) {
         serial_write("[OK] Installed /bin/netstat user ELF\n");
     } else {
         serial_write("[WARN] Failed to install /bin/netstat\n");
+    }
+#endif
+
+#if OPENOS_HAS_FIREWALL
+    fd = vfs_open("/bin/firewall", O_CREAT | O_RDWR, 0755);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)firewall_elf, firewall_elf_size);
+        vfs_close(fd);
+        serial_write("[OK] Installed /bin/firewall user ELF\n");
+    } else {
+        serial_write("[WARN] Failed to install /bin/firewall\n");
     }
 #endif
 
