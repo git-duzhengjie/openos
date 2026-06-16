@@ -571,6 +571,28 @@ static int ext4_file_seek(file_t *file, int offset, int whence) {
     return (int)next;
 }
 
+static int ext4_zero_range(ext4_node_t *node, uint32_t from, uint32_t to) {
+    uint8_t block[EXT4_MAX_BLOCK_SIZE];
+    uint32_t block_size;
+
+    if (!node || !node->mount || from > to) return -1;
+    block_size = node->mount->block_size;
+    while (from < to) {
+        uint32_t logical = from / block_size;
+        uint32_t in_block = from % block_size;
+        uint32_t chunk = block_size - in_block;
+        uint64_t phys;
+
+        if (chunk > to - from) chunk = to - from;
+        if (ext4_inode_logical_to_phys(node, logical, &phys) < 0) return -1;
+        if (ext4_read_block(node->mount, phys, block) < 0) return -1;
+        memset(block + in_block, 0, chunk);
+        if (ext4_write_block(node->mount, phys, block) < 0) return -1;
+        from += chunk;
+    }
+    return 0;
+}
+
 static int ext4_file_truncate(inode_t *inode, uint32_t size) {
     ext4_node_t *node;
     uint32_t block_size;
@@ -586,6 +608,7 @@ static int ext4_file_truncate(inode_t *inode, uint32_t size) {
     old_blocks = (uint32_t)ext4_div_u64_u32(node->size + block_size - 1u, block_size, NULL);
     new_blocks = (size + block_size - 1u) / block_size;
     if (new_blocks > old_blocks) return -1;
+    if (size > node->size && ext4_zero_range(node, (uint32_t)node->size, size) < 0) return -1;
 
     if (ext4_write_inode_size(node, size) < 0) return -1;
     inode->size = size;
