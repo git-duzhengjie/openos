@@ -634,6 +634,11 @@ gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
+    -I $SRC/include -I $SRC/fs \
+    -c $SRC/fs/fat32.c -o $BUILD/fat32.o
+
+gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
     -I $SRC/include -I $SRC/net \
     -c $SRC/net/net.c -o $BUILD/net.o
 
@@ -705,6 +710,7 @@ ld -m elf_i386 -T $SRC/linker.ld \
     $BUILD/tmpfs.o \
     $BUILD/ext4.o \
     $BUILD/pfs.o \
+    $BUILD/fat32.o \
     $BUILD/net.o \
     $BUILD/discovery.o \
     $BUILD/sync.o \

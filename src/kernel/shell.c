@@ -25,6 +25,7 @@
 #include "mouse.h"
 #include "ext4.h"
 #include "../fs/pfs.h"
+#include "../fs/fat32.h"
 #include "include/io.h"
 extern int spawn_user_process(const char *path, char *const argv[]);
 extern int spawn_user_process_env(const char *path, char *const argv[], char *const envp[]);
@@ -2521,8 +2522,10 @@ static void cmd_help(void)
     print("  unset NAME      - Remove shell environment variable\n");
     print("  mkext4 [dev]    - Format test EXT4 volume (default ram0)\n");
     print("  mkpfs [dev]     - Format PFS persistent volume (default ram0)\n");
+    print("  mkfat32 [dev]   - Format demo FAT32 volume (default ram0)\n");
     print("  mount_ext4 [dev] [path] - Mount EXT4 volume read-only (default ram0 /mnt)\n");
     print("  mount_pfs [dev] [path] - Mount PFS read/write volume (default ram0 /mnt)\n");
+    print("  mount_fat32 [dev] [path] - Mount FAT32 volume read-only (default ram0 /mnt)\n");
     print("  mount_tmpfs [path] - Mount tmpfs memory filesystem (default /tmp)\n");
     print("  netinfo         - Show network stack information\n");
     print("  discovery [scan|peers|announce|bye|name <n>|caps <c>|auth|auth_secret <s>|auth_peer <id>]\n");
@@ -2933,6 +2936,23 @@ void shell_run(void)
                         print_err("mount_pfs: failed\n");
                     else
                         print("mount_pfs: ok\n");
+                }
+                else if (shell_cmd_equals(cmd, "mkfat32"))
+                {
+                    const char *dev = argc > 1 ? argv[1] : "ram0";
+                    if (fat32_format_demo(dev) < 0)
+                        print_err("mkfat32: format failed\n");
+                    else
+                        print("mkfat32: ok\n");
+                }
+                else if (shell_cmd_equals(cmd, "mount_fat32"))
+                {
+                    const char *dev = argc > 1 ? argv[1] : "ram0";
+                    const char *path = argc > 2 ? argv[2] : "/mnt";
+                    if (fat32_mount(path, dev) < 0)
+                        print_err("mount_fat32: failed\n");
+                    else
+                        print("mount_fat32: ok\n");
                 }
                 else if (shell_cmd_equals(cmd, "mount_tmpfs"))
                 {
