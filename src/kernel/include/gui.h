@@ -222,6 +222,8 @@ void gui_minimize_window(gui_window_t *window);
 void gui_restore_window(gui_window_t *window);
 void gui_set_active_window(gui_window_t *window);
 void gui_bring_to_front(gui_window_t *window);
+gui_window_t *gui_get_window_at(int x, int y);
+void gui_cycle_windows(void);
 
 gui_widget_t *gui_add_label(gui_window_t *window, int x, int y, int w, int h, const char *text);
 gui_widget_t *gui_add_button(gui_window_t *window, int x, int y, int w, int h, const char *text, gui_widget_callback_t cb, void *user_data);

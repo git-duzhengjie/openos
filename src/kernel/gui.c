@@ -1,4 +1,4 @@
-﻿/* ============================================================
+/* ============================================================
  * openos - Minimal GUI / Window System
  *
  * 鏀寔锛欸UI 缁堢銆丳S/2 榧犳爣鍏夋爣銆佷簨浠堕槦鍒椼€佹寜閽偣鍑伙拷?
@@ -34,7 +34,6 @@ static int gui_rect_contains(const gui_rect_t *r, int x, int y);
 static int gui_rect_intersect(const gui_rect_t *a, const gui_rect_t *b, gui_rect_t *out);
 static gui_window_t *gui_top_window(void);
 static void gui_set_hovered_widget(gui_widget_t *wg);
-static int gui_handle_window_control_at(int x, int y);
 static void gui_demo_button(gui_widget_t *widget, void *user_data);
 static void gui_terminal_invalidate_cursor(void);
 static void gui_terminal_invalidate_body(void);
@@ -73,15 +72,6 @@ static void gui_copy_text(char *dst, const char *src, uint32_t cap) {
         i++;
     }
     dst[i] = '\0';
-}
-
-static uint32_t gui_bounded_strlen(const char *text, uint32_t max_len) {
-    uint32_t len = 0;
-    if (!text) return 0;
-    while (len < max_len && text[len]) {
-        len++;
-    }
-    return len;
 }
 
 static void gui_put_pixel_unclipped(int x, int y, uint32_t color) {
@@ -431,6 +421,23 @@ static gui_window_t *gui_window_at(int x, int y) {
     return 0;
 }
 
+gui_window_t *gui_get_window_at(int x, int y) { return gui_window_at(x, y); }
+
+void gui_cycle_windows(void) {
+    uint32_t i;
+    if (!g_gui.window_count) return;
+    for (i = 0; i < g_gui.window_count; i++) {
+        uint32_t idx = g_gui.z_order[g_gui.window_count - 1 - i];
+        gui_window_t *w;
+        if (idx >= GUI_MAX_WINDOWS) continue;
+        w = &g_gui.windows[idx];
+        if (w != g_gui.active_window && w->used && w->visible && !(w->flags & GUI_WINDOW_FLAG_MINIMIZED)) {
+            gui_set_active_window(w);
+            return;
+        }
+    }
+}
+
 static gui_widget_t *gui_widget_at(gui_window_t *w, int sx, int sy) {
     uint32_t i;
     if (!w) return 0;
@@ -474,42 +481,6 @@ static gui_widget_t *gui_widget_at_screen(int x, int y) {
     gui_window_t *w = gui_window_at(x, y);
     if (!w) return 0;
     return gui_widget_at(w, x - w->rect.x - GUI_BORDER_SIZE, y - w->rect.y - GUI_TITLE_HEIGHT);
-}
-
-static int gui_handle_window_control_at(int x, int y) {
-    gui_window_t *w = gui_window_at(x, y);
-    gui_rect_t r;
-    if (!w) return 0;
-
-    r = gui_close_rect(w);
-    if ((w->flags & GUI_WINDOW_FLAG_CLOSABLE) && gui_rect_contains(&r, x, y)) {
-        serial_write("[GUI] direct window close\n");
-        if (g_gui.focused_widget && g_gui.focused_widget->owner == w) {
-            g_gui.focused_widget->focused = 0;
-            g_gui.focused_widget = 0;
-        }
-        if (g_gui.drag_window == w) g_gui.drag_window = 0;
-        if (g_gui.pressed_widget && g_gui.pressed_widget->owner == w) g_gui.pressed_widget = 0;
-        if (g_gui.hovered_widget && g_gui.hovered_widget->owner == w) g_gui.hovered_widget = 0;
-        gui_destroy_window(w);
-        return 1;
-    }
-
-    r = gui_min_rect(w);
-    if ((w->flags & GUI_WINDOW_FLAG_MINIMIZABLE) && gui_rect_contains(&r, x, y)) {
-        serial_write("[GUI] direct window minimize\n");
-        if (g_gui.focused_widget && g_gui.focused_widget->owner == w) {
-            g_gui.focused_widget->focused = 0;
-            g_gui.focused_widget = 0;
-        }
-        if (g_gui.drag_window == w) g_gui.drag_window = 0;
-        if (g_gui.pressed_widget && g_gui.pressed_widget->owner == w) g_gui.pressed_widget = 0;
-        if (g_gui.hovered_widget && g_gui.hovered_widget->owner == w) g_gui.hovered_widget = 0;
-        gui_minimize_window(w);
-        return 1;
-    }
-
-    return 0;
 }
 
 static void gui_set_focused_widget(gui_widget_t *wg) {
@@ -596,20 +567,6 @@ static void gui_textbox_on_key(gui_widget_t *wg, int key) {
         changed = 0;
     }
     if (changed && wg->owner) gui_invalidate_rect(wg->owner->rect.x, wg->owner->rect.y, wg->owner->rect.w, wg->owner->rect.h);
-}
-
-static void gui_draw_cursor(void) {
-    int x = g_gui.mouse_x;
-    int y = g_gui.mouse_y;
-    uint32_t c = gui_rgb(255, 255, 255);
-    uint32_t b = gui_rgb(0, 0, 0);
-    gui_raw_line(x, y, x, y + 15, b);
-    gui_raw_line(x, y, x + 10, y + 10, b);
-    gui_raw_line(x, y + 15, x + 4, y + 11, b);
-    gui_raw_line(x + 4, y + 11, x + 10, y + 10, b);
-    gui_raw_line(x + 1, y + 2, x + 1, y + 12, c);
-    gui_raw_line(x + 1, y + 2, x + 8, y + 9, c);
-    gui_raw_line(x + 2, y + 12, x + 4, y + 10, c);
 }
 
 static void gui_cursor_restore_fb(void) {
