@@ -232,6 +232,7 @@ int socket_create_fd(int domain, int type, int protocol) {
     sock->info.state = OPENOS_SOCKET_STATE_CREATED;
     sock->info.local_ip = OPENOS_INADDR_ANY;
     sock->info.local_port = 0;
+    sock->info.listen_backlog = 0;
 
     file->flags = O_RDWR;
     file->offset = 0;
@@ -244,6 +245,35 @@ int socket_create_fd(int domain, int type, int protocol) {
         return -1;
     }
     return fd;
+}
+
+int socket_listen_fd(int fd, int backlog) {
+    file_t *file;
+    socket_file_t *sock;
+
+    file = vfs_get_file(fd);
+    sock = socket_from_file(file);
+    if (!sock || sock->info.state != OPENOS_SOCKET_STATE_BOUND) {
+        return -1;
+    }
+    if (sock->info.domain != OPENOS_AF_INET) {
+        return -1;
+    }
+    if (socket_type_base(sock->info.type) != OPENOS_SOCK_STREAM) {
+        return -1;
+    }
+    if (backlog < 0) {
+        return -1;
+    }
+    if (backlog == 0) {
+        backlog = 1;
+    }
+    if (backlog > 32) {
+        backlog = 32;
+    }
+    sock->info.listen_backlog = backlog;
+    sock->info.state = OPENOS_SOCKET_STATE_LISTENING;
+    return 0;
 }
 
 int socket_bind_fd(int fd, const openos_sockaddr_t *addr, uint32_t addrlen) {

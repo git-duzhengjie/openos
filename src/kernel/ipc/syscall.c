@@ -1359,6 +1359,9 @@ uint32_t syscall_dispatch(uint32_t num,
             return (uint32_t)socket_bind_fd((int)a, (const openos_sockaddr_t *)&addr, sizeof(addr));
         }
 
+    case SYS_LISTEN:
+        return (uint32_t)socket_listen_fd((int)a, (int)b);
+
     case SYS_FSYNC:
         {
             file_t *f = vfs_get_file((int)a);

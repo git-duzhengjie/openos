@@ -219,7 +219,7 @@
 - [√] DNS
 - [x] socket syscall
 - [x] `bind`
-- [ ] `listen`
+- [x] `listen`
 - [ ] `accept`
 - [ ] `connect`
 - [ ] `send`

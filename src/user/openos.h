@@ -79,6 +79,7 @@
 #define SYS_FSYNC         282
 #define SYS_SOCKET        283
 #define SYS_BIND          284
+#define SYS_LISTEN        285
 
 #define OPENOS_AF_UNSPEC  0
 #define OPENOS_AF_INET    2
@@ -269,6 +270,11 @@ static inline int openos_socket(int domain, int type, int protocol)
 static inline int openos_bind(int fd, const openos_sockaddr_t *addr, unsigned int addrlen)
 {
     return openos_syscall_result(openos_syscall3(SYS_BIND, fd, (int)addr, (int)addrlen));
+}
+
+static inline int openos_listen(int fd, int backlog)
+{
+    return openos_syscall_result(openos_syscall2(SYS_LISTEN, fd, backlog));
 }
 
 static inline int openos_syscall5(int num, int a, int b, int c, int d, int e)
