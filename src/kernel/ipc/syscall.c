@@ -13,6 +13,7 @@
 #include "../proc/process.h"
 #include "../fs/vfs.h"
 #include "../include/string.h"
+#include "../include/blockdev.h"
 #include <stddef.h>  /* NULL */
 
 /* VGA */
@@ -1343,6 +1344,27 @@ uint32_t syscall_dispatch(uint32_t num,
 
     case SYS_SELECT:
         return syscall_select(a, (uint32_t *)b, (uint32_t *)c, (uint32_t *)d, e);
+
+    case SYS_FSYNC:
+        {
+            file_t *f = vfs_get_file((int)a);
+            if (!f || !f->inode) return (uint32_t)-9; /* EBADF */
+            blockdev_t *dev = 0;
+
+            if (f->inode->fs_type == 0xEF530004u) {
+                void *node = f->inode->fs_data;
+                if (node) dev = *(blockdev_t **)((uint8_t *)node + 8);
+            } else if (f->inode->fs_type == 0x50465300u) {
+                void *node = f->inode->fs_data;
+                if (node) dev = *(blockdev_t **)((uint8_t *)node + 4);
+            } else if (f->inode->fs_type == 0x46415400u) {
+                void *node = f->inode->fs_data;
+                if (node) dev = *(blockdev_t **)((uint8_t *)node + 4);
+            }
+
+            if (!dev) return (uint32_t)-22; /* EINVAL */
+            return (uint32_t)blockdev_flush(dev);
+        }
 
     case SYS_READDIR:
         {

@@ -173,7 +173,7 @@
 - [x] FAT32
 - [x] EXT4 读写支持
 - [x] 文件缓存 / page cache
-- [ ] `fsync`
+- [x] `fsync`
 - [ ] MBR / GPT 分区表
 - [ ] 块设备缓存层
 

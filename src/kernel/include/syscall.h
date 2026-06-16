@@ -79,6 +79,7 @@
 #define SYS_SETGID        279
 #define SYS_POLL          280
 #define SYS_SELECT        281
+#define SYS_FSYNC         282
 
 #define OPENOS_POLLIN     0x0001
 #define OPENOS_POLLOUT    0x0004
