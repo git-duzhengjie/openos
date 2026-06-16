@@ -276,6 +276,29 @@ int socket_listen_fd(int fd, int backlog) {
     return 0;
 }
 
+int socket_accept_fd(int fd, openos_sockaddr_t *addr, uint32_t *addrlen) {
+    file_t *file;
+    socket_file_t *sock;
+
+    file = vfs_get_file(fd);
+    sock = socket_from_file(file);
+    if (!sock || sock->info.state != OPENOS_SOCKET_STATE_LISTENING) {
+        return -1;
+    }
+    if (socket_type_base(sock->info.type) != OPENOS_SOCK_STREAM) {
+        return -1;
+    }
+    if (addr && addrlen) {
+        if (*addrlen < sizeof(openos_sockaddr_in_t)) {
+            return -1;
+        }
+        *addrlen = sizeof(openos_sockaddr_in_t);
+        memset(addr, 0, sizeof(openos_sockaddr_in_t));
+        ((openos_sockaddr_in_t *)addr)->sin_family = OPENOS_AF_INET;
+    }
+    return -1;
+}
+
 int socket_bind_fd(int fd, const openos_sockaddr_t *addr, uint32_t addrlen) {
     file_t *file;
     socket_file_t *sock;

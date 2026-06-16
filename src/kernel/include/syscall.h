@@ -83,6 +83,7 @@
 #define SYS_SOCKET        283
 #define SYS_BIND          284
 #define SYS_LISTEN        285
+#define SYS_ACCEPT        286
 
 #define OPENOS_POLLIN     0x0001
 #define OPENOS_POLLOUT    0x0004

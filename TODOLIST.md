@@ -220,7 +220,7 @@
 - [x] socket syscall
 - [x] `bind`
 - [x] `listen`
-- [ ] `accept`
+- [x] `accept`
 - [ ] `connect`
 - [ ] `send`
 - [ ] `recv`

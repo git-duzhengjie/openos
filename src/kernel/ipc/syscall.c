@@ -1362,6 +1362,25 @@ uint32_t syscall_dispatch(uint32_t num,
     case SYS_LISTEN:
         return (uint32_t)socket_listen_fd((int)a, (int)b);
 
+    case SYS_ACCEPT:
+        {
+            openos_sockaddr_in_t addr;
+            uint32_t addrlen = 0;
+            int ret;
+            if ((b && !c) || (!b && c))
+                return (uint32_t)-1;
+            if (c && copy_from_user(&addrlen, (const void *)c, sizeof(addrlen)) < 0)
+                return (uint32_t)-1;
+            ret = socket_accept_fd((int)a, b ? (openos_sockaddr_t *)&addr : 0, c ? &addrlen : 0);
+            if (ret < 0)
+                return (uint32_t)ret;
+            if (b && copy_to_user((void *)b, &addr, sizeof(addr)) < 0)
+                return (uint32_t)-1;
+            if (c && copy_to_user((void *)c, &addrlen, sizeof(addrlen)) < 0)
+                return (uint32_t)-1;
+            return (uint32_t)ret;
+        }
+
     case SYS_FSYNC:
         {
             file_t *f = vfs_get_file((int)a);

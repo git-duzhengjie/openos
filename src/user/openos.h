@@ -80,6 +80,7 @@
 #define SYS_SOCKET        283
 #define SYS_BIND          284
 #define SYS_LISTEN        285
+#define SYS_ACCEPT        286
 
 #define OPENOS_AF_UNSPEC  0
 #define OPENOS_AF_INET    2
@@ -275,6 +276,11 @@ static inline int openos_bind(int fd, const openos_sockaddr_t *addr, unsigned in
 static inline int openos_listen(int fd, int backlog)
 {
     return openos_syscall_result(openos_syscall2(SYS_LISTEN, fd, backlog));
+}
+
+static inline int openos_accept(int fd, openos_sockaddr_t *addr, unsigned int *addrlen)
+{
+    return openos_syscall_result(openos_syscall3(SYS_ACCEPT, fd, (int)addr, (int)addrlen));
 }
 
 static inline int openos_syscall5(int num, int a, int b, int c, int d, int e)
