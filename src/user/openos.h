@@ -278,6 +278,19 @@ typedef struct openos_service_channel {
     int client_fd;
     int server_fd;
 } openos_service_channel_t;
+
+#define OPENOS_SERVICE_PAYLOAD_MAX 64
+#define OPENOS_SERVICE_STATUS_OK 0
+#define OPENOS_SERVICE_STATUS_ERROR 1
+
+typedef struct openos_service_message {
+    unsigned int service;
+    unsigned int opcode;
+    unsigned int seq;
+    unsigned int status;
+    unsigned int length;
+    unsigned char payload[OPENOS_SERVICE_PAYLOAD_MAX];
+} openos_service_message_t;
 typedef void (*openos_thread_start_t)(void *);
 
 typedef struct openos_stat {
@@ -1175,6 +1188,67 @@ static inline int openos_service_reply(openos_service_channel_t *channel, const 
     if (!channel || channel->server_fd < 0 || !reply || reply_len <= 0)
         return -1;
     return openos_write_fd(channel->server_fd, reply, reply_len);
+}
+
+static inline void openos_service_message_init(openos_service_message_t *msg,
+                                               unsigned int service,
+                                               unsigned int opcode,
+                                               unsigned int seq,
+                                               const void *payload,
+                                               unsigned int length)
+{
+    if (!msg) return;
+    openos_memset(msg, 0, sizeof(*msg));
+    msg->service = service;
+    msg->opcode = opcode;
+    msg->seq = seq;
+    msg->status = OPENOS_SERVICE_STATUS_OK;
+    if (payload && length > 0) {
+        if (length > OPENOS_SERVICE_PAYLOAD_MAX)
+            length = OPENOS_SERVICE_PAYLOAD_MAX;
+        openos_memcpy(msg->payload, payload, (int)length);
+        msg->length = length;
+    }
+}
+
+static inline int openos_service_send_message(int fd, const openos_service_message_t *msg)
+{
+    if (fd < 0 || !msg) return -1;
+    return openos_write_fd(fd, msg, sizeof(*msg)) == (int)sizeof(*msg) ? 0 : -1;
+}
+
+static inline int openos_service_recv_message(int fd, openos_service_message_t *msg)
+{
+    if (fd < 0 || !msg) return -1;
+    return openos_read(fd, msg, sizeof(*msg)) == (int)sizeof(*msg) ? 0 : -1;
+}
+
+static inline int openos_service_request(openos_service_channel_t *channel,
+                                         openos_service_message_t *request,
+                                         openos_service_message_t *reply)
+{
+    if (!channel || !request || !reply || channel->client_fd < 0) return -1;
+    if (openos_service_send_message(channel->client_fd, request) != 0)
+        return -1;
+    if (openos_service_recv_message(channel->client_fd, reply) != 0)
+        return -1;
+    if (reply->seq != request->seq || reply->service != request->service)
+        return -1;
+    return reply->status == OPENOS_SERVICE_STATUS_OK ? 0 : -1;
+}
+
+static inline int openos_service_receive_request(openos_service_channel_t *channel,
+                                                 openos_service_message_t *request)
+{
+    if (!channel || !request || channel->server_fd < 0) return -1;
+    return openos_service_recv_message(channel->server_fd, request);
+}
+
+static inline int openos_service_send_reply(openos_service_channel_t *channel,
+                                            const openos_service_message_t *reply)
+{
+    if (!channel || !reply || channel->server_fd < 0) return -1;
+    return openos_service_send_message(channel->server_fd, reply);
 }
 
 static inline int openos_dup(int oldfd)

@@ -156,6 +156,14 @@ if [ -f $USR/servicetest.c ]; then
     echo "  Built: servicetest.elf"
 fi
 
+if [ -f $USR/micromsgtest.c ]; then
+    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+        -fno-stack-protector -fno-builtin \
+        -c $USR/micromsgtest.c -o $BUILD/micromsgtest.o
+    ld -m elf_i386 -T $USR/user.ld -o $BUILD/micromsgtest.elf $BUILD/micromsgtest.o
+    echo "  Built: micromsgtest.elf"
+fi
+
 if [ -f $USR/nicetest.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \
