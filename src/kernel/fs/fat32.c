@@ -384,6 +384,18 @@ static fat32_fs_t *fat32_alloc_mount(void) {
     return 0;
 }
 
+static void fat32_release_mount(fat32_fs_t *fs) {
+    uint32_t i;
+    if (!fs) return;
+    for (i = 0; i < sizeof(g_fat32_mounts) / sizeof(g_fat32_mounts[0]); i++) {
+        if (&g_fat32_mounts[i] == fs) {
+            memset(fs, 0, sizeof(*fs));
+            g_fat32_mount_used[i] = 0;
+            return;
+        }
+    }
+}
+
 int fat32_mount(const char *path, const char *dev_name) {
     blockdev_t *dev;
     fat32_fs_t *fs;
@@ -391,12 +403,38 @@ int fat32_mount(const char *path, const char *dev_name) {
     fat32_node_t *root_node;
 
     if (!path || !dev_name) return -1;
+    serial_write("[FAT32] mount begin\n");
+
     dev = blockdev_find(dev_name);
-    if (!dev) return -1;
+    if (!dev) {
+        serial_write("[FAT32] block device not found\n");
+        return -1;
+    }
+    if (dev->sector_size != FAT32_SECTOR_SIZE) {
+        serial_write("[FAT32] only 512-byte sector devices are supported\n");
+        return -1;
+    }
+
+    mp = vfs_path_lookup(path);
+    if (!mp) {
+        if (vfs_mkdir(path, 0755) < 0) {
+            serial_write("[FAT32] create mount dir failed\n");
+            return -1;
+        }
+        mp = vfs_path_lookup(path);
+    }
+    if (!mp) return -1;
+
     fs = fat32_alloc_mount();
     if (!fs) return -1;
+    if (blockdev_open(dev) < 0) {
+        fat32_release_mount(fs);
+        return -1;
+    }
     if (fat32_probe(fs, dev) < 0) {
-        fs->dev = 0;
+        serial_write("[FAT32] invalid FAT32 volume\n");
+        blockdev_close(dev);
+        fat32_release_mount(fs);
         return -1;
     }
 
@@ -408,19 +446,35 @@ int fat32_mount(const char *path, const char *dev_name) {
     fs->vfs_fs.unlink = fat32_fs_unlink;
     fs->vfs_fs.data = fs;
 
-    if (vfs_mount(path, &fs->vfs_fs) < 0) return -1;
+    if (vfs_mount(path, &fs->vfs_fs) < 0) {
+        blockdev_close(dev);
+        fat32_release_mount(fs);
+        return -1;
+    }
     mp = vfs_path_lookup(path);
-    if (!mp || !mp->mount) return -1;
+    if (!mp || !mp->mount) {
+        blockdev_close(dev);
+        fat32_release_mount(fs);
+        return -1;
+    }
     fs->mount_root = mp->mount;
     root_node = fat32_alloc_node(fs, fs->root_cluster, 0, 1);
-    if (!root_node) return -1;
+    if (!root_node) {
+        blockdev_close(dev);
+        fat32_release_mount(fs);
+        return -1;
+    }
     fs->mount_root->inode->fs_data = root_node;
     fs->mount_root->inode->fs_type = FAT32_MAGIC;
     fs->mount_root->inode->mode = FS_DIR | S_IRUSR | S_IXUSR | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH;
     fs->mount_root->inode->uid = 0;
     fs->mount_root->inode->gid = 0;
 
-    if (fat32_load_dir(fs, fs->mount_root, fs->root_cluster, 0) < 0) return -1;
+    if (fat32_load_dir(fs, fs->mount_root, fs->root_cluster, 0) < 0) {
+        blockdev_close(dev);
+        fat32_release_mount(fs);
+        return -1;
+    }
     serial_write("[FAT32] mounted ");
     serial_write(dev_name);
     serial_write(" at ");
