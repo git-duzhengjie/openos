@@ -136,6 +136,12 @@ elf_load_result_t elf_load(int fd) {
         serial_write_hex(ph->p_flags);
         serial_write("\n");
 
+        if ((ph->p_flags & PF_W) && (ph->p_flags & PF_X)) {
+            serial_write("[ELF] Rejecting RWX load segment\n");
+            pmm_free_page((void *)phdrs);
+            return result;
+        }
+
         /* 检查段大小和地址范围 */
         if (ph->p_memsz < ph->p_filesz || ph->p_memsz == 0) {
             serial_write("[ELF] Invalid segment size\n");

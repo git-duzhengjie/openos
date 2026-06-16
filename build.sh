@@ -20,6 +20,7 @@ if [ "${1:-}" = "clean" ]; then
 fi
 
 mkdir -p $BUILD
+rm -f $BUILD/*.elf
 
 echo "[1/5] Assembling boot.asm..."
 nasm -f bin $SRC/../boot/boot.asm -o $BUILD/boot.bin
@@ -586,6 +587,22 @@ if [ -f $USR/firewall.c ]; then
     python3 _embed_elf.py $BUILD/firewall.elf $SRC/include/embed_firewall.h firewall_elf
     echo "  Embedded: firewall.elf"
 fi
+
+check_user_elf_wx() {
+    local elf="$1"
+    readelf -l "$elf" | awk '
+        /LOAD/ && $0 ~ /RWE/ { bad=1 }
+        END { exit bad ? 1 : 0 }
+    '
+}
+
+for elf in $BUILD/*.elf; do
+    [ -f "$elf" ] || continue
+    if ! check_user_elf_wx "$elf"; then
+        echo "[ERROR] W^X violation: RWX LOAD segment in $elf" >&2
+        exit 1
+    fi
+done
 
 echo "[3/5] Compiling kernel C files..."
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
