@@ -7,9 +7,10 @@
 
 #include <stdint.h>
 #include "types.h"
+#include "usermode.h"
 
-#define USERMEM_PTR_MIN   0x00100000u
-#define USERMEM_PTR_MAX   0xC0000000u
+#define USERMEM_PTR_MIN   USER_SPACE_START
+#define USERMEM_PTR_MAX   USER_SPACE_END
 #define USERMEM_CSTR_MAX  4096u
 
 #define USERMEM_READ      0

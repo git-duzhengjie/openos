@@ -8,6 +8,7 @@
 #include "../include/vmm.h"
 #include "../include/pmm.h"
 #include "../include/serial.h"
+#include "../include/usermode.h"
 
 #ifndef NULL
 #define NULL ((void*)0)
@@ -306,8 +307,8 @@ uint32_t vmm_create_user_address_space(void) {
         pd[i] = kernel_pgd[i];
     }
 
-    /* User program space starts at 0x40000000. Keep user PDEs private. */
-    for (int i = 256; i < 1023; i++) {
+    /* Keep user-space PDEs private while preserving kernel supervisor mappings. */
+    for (uint32_t i = USER_SPACE_START >> 22; i < (USER_SPACE_END >> 22); i++) {
         pd[i] = 0;
     }
 

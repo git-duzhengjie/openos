@@ -11,6 +11,7 @@
 #include "serial.h"
 #include "vfs.h"
 #include "process.h"
+#include "usermode.h"
 #include <stddef.h>
 #include <string.h>
 
@@ -18,8 +19,8 @@
 #define NULL ((void*)0)
 #endif
 
-#define ELF_USER_MIN 0x00100000u
-#define ELF_USER_MAX 0x10000000u
+#define ELF_USER_MIN USER_SPACE_START
+#define ELF_USER_MAX USER_SPACE_END
 #define ELF_MAX_PHNUM 64u
 
 /* ============================================================

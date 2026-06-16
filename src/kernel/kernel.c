@@ -146,6 +146,12 @@
 #else
 #define OPENOS_HAS_SYSTEST 0
 #endif
+#if OPENOS_EMBED_TESTS && __has_include("embed_kaddrtest.h")
+#include "embed_kaddrtest.h"  /* kernel address protection 回归测试程序 */
+#define OPENOS_HAS_KADDRTEST 1
+#else
+#define OPENOS_HAS_KADDRTEST 0
+#endif
 #if OPENOS_EMBED_TESTS && __has_include("embed_malloctest.h")
 #include "embed_malloctest.h"  /* userspace heap 回归测试程序 */
 #define OPENOS_HAS_MALLOCTEST 1
@@ -893,6 +899,17 @@ void kernel_main(void) {
         serial_write("[OK] Installed /bin/systest user ELF\n");
     } else {
         serial_write("[WARN] Failed to install /bin/systest\n");
+    }
+#endif
+
+#if OPENOS_HAS_KADDRTEST
+    fd = vfs_open("/bin/kaddrtest", O_CREAT | O_RDWR, 0755);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)kaddrtest_elf, kaddrtest_elf_size);
+        vfs_close(fd);
+        serial_write("[OK] Installed /bin/kaddrtest user ELF\n");
+    } else {
+        serial_write("[WARN] Failed to install /bin/kaddrtest\n");
     }
 #endif
 

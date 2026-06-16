@@ -36,7 +36,7 @@ nasm -f elf32 $SRC/switch_to_user.asm -o $BUILD/switch_to_user.o
 echo "[2.5] Building user program..."
 USR=src/user
 OPENOS_EMBED_TESTS=${OPENOS_EMBED_TESTS:-0}
-TEST_EMBED_HEADERS="isotest waittest forktest threadtest mutextest semtest condtest futextest nicetest exit42 orphan argtest envtest libctest maintest systest malloctest errnotest stdiotest fstest alarmtest mmaptest sbrktest"
+TEST_EMBED_HEADERS="isotest waittest forktest threadtest mutextest semtest condtest futextest nicetest exit42 orphan argtest envtest libctest maintest systest kaddrtest malloctest errnotest stdiotest fstest alarmtest mmaptest sbrktest"
 if [ "$OPENOS_EMBED_TESTS" != "1" ]; then
     for app in $TEST_EMBED_HEADERS; do
         rm -f "$SRC/include/embed_${app}.h"
@@ -266,6 +266,20 @@ if [ "$OPENOS_EMBED_TESTS" = "1" ] && [ -f $USR/systest.c ]; then
     ld -m elf_i386 -T $USR/user.ld -o $BUILD/systest.elf $BUILD/crt0.o $BUILD/systest.o
     python3 _embed_elf.py $BUILD/systest.elf $SRC/include/embed_systest.h systest_elf
     echo "  Embedded: systest.elf"
+fi
+
+if [ "$OPENOS_EMBED_TESTS" = "1" ] && [ -f $USR/kaddrtest.c ]; then
+    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+        -fno-stack-protector -fno-builtin \
+        -I $SRC/include \
+        -c $USR/crt0.c -o $BUILD/crt0.o
+    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+        -fno-stack-protector -fno-builtin \
+        -I $SRC/include \
+        -c $USR/kaddrtest.c -o $BUILD/kaddrtest.o
+    ld -m elf_i386 -T $USR/user.ld -o $BUILD/kaddrtest.elf $BUILD/crt0.o $BUILD/kaddrtest.o
+    python3 _embed_elf.py $BUILD/kaddrtest.elf $SRC/include/embed_kaddrtest.h kaddrtest_elf
+    echo "  Embedded: kaddrtest.elf"
 fi
 
 if [ "$OPENOS_EMBED_TESTS" = "1" ] && [ -f $USR/malloctest.c ]; then

@@ -7,6 +7,9 @@
 
 #include <stdint.h>
 
+#define USER_SPACE_START      0x40000000u
+#define USER_SPACE_END        0xC0000000u
+
 /* 用户栈布局: 最底部一页不映射作为 guard page */
 #define USER_STACK_SIZE        8192u       /* 可用用户栈 8KB */
 #define USER_STACK_GUARD_SIZE  4096u
