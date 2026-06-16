@@ -1454,6 +1454,13 @@ static void gui_handle_mouse_down(int x, int y) {
         return;
     }
 
+    if (gui_taskbar_terminal_button_at(x, y)) {
+        serial_write("[GUI] taskbar terminal button\n");
+        gui_set_focused_widget(0);
+        gui_terminal_open();
+        return;
+    }
+
     gui_window_t *tw = gui_taskbar_window_at(x, y);
     if (tw) {
         if (tw == g_gui.terminal.window || (tw->flags & GUI_WINDOW_FLAG_TERMINAL)) {
