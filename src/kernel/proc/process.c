@@ -621,6 +621,11 @@ uint32_t sys_fork(void) {
     child->owns_address_space = 1;
     child->uid = parent->uid;
     child->gid = parent->gid;
+    if (vfs_clone_cwd_for_process(child, parent) != 0) {
+        proc_free_cloned_address_space(child_pgd);
+        proc_free(child);
+        return (uint32_t)-1;
+    }
 
     /* 创建子线程,复制父线程的栈帧 */
     void *child_stack_page = pmm_alloc_page();
@@ -815,8 +820,18 @@ int spawn_user_process_env(const char *path, char *const argv[], char *const env
     child->cr3 = vmm_get_cr3();
 
     process_t *parent = cur ? proc_find(cur->pid) : NULL;
-    if (parent)
-        vfs_clone_fds_for_process(child, parent);
+    if (parent) {
+        child->uid = parent->uid;
+        child->gid = parent->gid;
+        if (vfs_clone_cwd_for_process(child, parent) != 0) {
+            proc_free(child);
+            return -1;
+        }
+        if (vfs_clone_fds_for_process(child, parent) != 0) {
+            proc_free(child);
+            return -1;
+        }
+    }
 
     int i = 0;
     for (; i < 31 && path[i]; i++)

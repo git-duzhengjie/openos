@@ -863,6 +863,24 @@ int vfs_dup2(int oldfd, int newfd) {
     return newfd;
 }
 
+int vfs_clone_cwd_for_process(void *dst_proc, void *src_proc) {
+    if (!dst_proc || !src_proc)
+        return -1;
+
+    process_t *dst = (process_t *)dst_proc;
+    process_t *src = (process_t *)src_proc;
+    char normalized[MAX_PATH];
+
+    if (vfs_normalize_path(src->cwd[0] ? src->cwd : "/", normalized, sizeof(normalized)) < 0)
+        return -1;
+    if (!vfs_path_lookup(normalized))
+        return -1;
+
+    strncpy(dst->cwd, normalized, sizeof(dst->cwd) - 1);
+    dst->cwd[sizeof(dst->cwd) - 1] = 0;
+    return 0;
+}
+
 int vfs_clone_fds_for_process(void *dst_proc, void *src_proc) {
     if (!dst_proc || !src_proc)
         return -1;

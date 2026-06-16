@@ -161,7 +161,7 @@
 - [√] inode uid / gid 字段（已加入 `inode_t`，`vfs_chown` 可写入元数据，`openos_stat_t` 可读取）
 - [√] chmod / chown 权限模型（已接入 `SYS_CHMOD` / `SYS_CHOWN`、用户态 `openos_chmod` / `openos_chown`，并由 `/bin/fstest` 校验 mode/uid/gid）
 - [√] access 权限检查（已接入 VFS 统一 `vfs_inode_access`，按 owner/group/other mode 检查 open/read/write/create/delete/chdir/readdir/link/rename 等路径）
-- [ ] per-process cwd 更严格集成
+- [√] per-process cwd 更严格集成
 - [√] 文件描述符表标准化
 - [√] `dup` / `dup2`
 - [√] pipe（已实现 VFS 匿名管道、`SYS_PIPE`、shell pipeline，并由 `/bin/systest` 覆盖）
