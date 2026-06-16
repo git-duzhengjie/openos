@@ -89,6 +89,7 @@
 #define SYS_NETINFO       292
 #define SYS_PING          293
 #define SYS_NETCONFIG     294
+#define SYS_FIREWALL      295
 
 #define OPENOS_AF_UNSPEC  0
 #define OPENOS_AF_INET    2
@@ -126,6 +127,27 @@ typedef struct openos_netinfo {
     unsigned int icmp_echo_requests;
     unsigned int icmp_echo_replies;
 } openos_netinfo_t;
+
+#define OPENOS_FW_OP_GET    0u
+#define OPENOS_FW_OP_ADD    1u
+#define OPENOS_FW_OP_DELETE 2u
+#define OPENOS_FW_OP_CLEAR  3u
+
+#define OPENOS_FW_ACTION_ALLOW 0u
+#define OPENOS_FW_ACTION_DENY  1u
+
+#define OPENOS_FW_PROTO_ANY  0u
+#define OPENOS_FW_PROTO_ICMP 1u
+#define OPENOS_FW_PROTO_TCP  6u
+#define OPENOS_FW_PROTO_UDP  17u
+
+typedef struct openos_firewall_rule {
+    unsigned int used;
+    unsigned int action;
+    unsigned int protocol;
+    unsigned int port;
+    unsigned int hits;
+} openos_firewall_rule_t;
 
 static inline unsigned short openos_htons(unsigned short v)
 {
@@ -378,6 +400,11 @@ static inline int openos_ping(unsigned int ip)
 static inline int openos_netconfig(unsigned int ip, unsigned int netmask, unsigned int gateway)
 {
     return openos_syscall_result(openos_syscall3(SYS_NETCONFIG, (int)ip, (int)netmask, (int)gateway));
+}
+
+static inline int openos_firewall(unsigned int op, unsigned int index, openos_firewall_rule_t *rule)
+{
+    return openos_syscall_result(openos_syscall3(SYS_FIREWALL, (int)op, (int)index, (int)rule));
 }
 
 static inline void openos_thread_exit(int code);
@@ -1804,6 +1831,7 @@ static inline void openos_clearerr(openos_FILE *stream)
 #define netinfo(info)          openos_netinfo((info))
 #define ping(ip)               openos_ping((ip))
 #define netconfig(ip, mask, gw) openos_netconfig((ip), (mask), (gw))
+#define firewall(op, index, rule) openos_firewall((op), (index), (rule))
 #define socket(domain, type, protocol) openos_socket((domain), (type), (protocol))
 #define bind(fd, addr, len)    openos_bind((fd), (addr), (len))
 #define listen(fd, backlog)    openos_listen((fd), (backlog))

@@ -32,6 +32,26 @@ typedef struct net_diag_stats {
     uint32_t icmp_echo_replies;
 } net_diag_stats_t;
 
+#define NET_FIREWALL_RULES 16u
+#define NET_FW_OP_GET    0u
+#define NET_FW_OP_ADD    1u
+#define NET_FW_OP_DELETE 2u
+#define NET_FW_OP_CLEAR  3u
+#define NET_FW_ACTION_ALLOW 0u
+#define NET_FW_ACTION_DENY  1u
+#define NET_FW_PROTO_ANY  0u
+#define NET_FW_PROTO_ICMP 1u
+#define NET_FW_PROTO_TCP  6u
+#define NET_FW_PROTO_UDP  17u
+
+typedef struct net_firewall_rule {
+    uint32_t used;
+    uint32_t action;
+    uint32_t protocol;
+    uint32_t port;
+    uint32_t hits;
+} net_firewall_rule_t;
+
 typedef int (*net_tx_func_t)(net_device_t *dev, const uint8_t *frame, uint16_t len);
 
 struct net_device {
@@ -92,6 +112,10 @@ int net_ping_self(void);
 int net_ping_ipv4(uint32_t dst_ip);
 int net_get_diag_stats(net_diag_stats_t *stats);
 int net_config_ipv4(uint32_t ip, uint32_t netmask, uint32_t gateway);
+int net_firewall_get(uint32_t index, net_firewall_rule_t *rule);
+int net_firewall_add(const net_firewall_rule_t *rule);
+int net_firewall_delete(uint32_t index);
+void net_firewall_clear(void);
 void net_print_info(void);
 void net_format_ipv4(uint32_t ip, char *out);
 int net_parse_ipv4(const char *text, uint32_t *out);

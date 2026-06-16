@@ -498,6 +498,15 @@ for app in ping ifconfig netstat; do
     fi
 done
 
+if [ -f $USR/firewall.c ]; then
+    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+        -fno-stack-protector -fno-builtin \
+        -I $SRC/include \
+        -c $USR/firewall.c -o $BUILD/firewall.o
+    ld -m elf_i386 -T $USR/user.ld -o $BUILD/firewall.elf $BUILD/firewall.o
+    echo "  Built: firewall.elf"
+fi
+
 echo "[3/5] Compiling kernel C files..."
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \

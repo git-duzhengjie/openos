@@ -156,6 +156,7 @@ struct tcp_connection {
 static net_device_t *default_dev;
 static uint32_t icmp_echo_requests;
 static uint32_t icmp_echo_replies;
+static net_firewall_rule_t firewall_rules[NET_FIREWALL_RULES];
 static struct arp_entry arp_cache[ARP_CACHE_SIZE];
 static struct udp_binding udp_bindings[UDP_BIND_SIZE];
 static struct tcp_listener tcp_listeners[TCP_LISTEN_SIZE];
@@ -420,6 +421,63 @@ int net_send_udp_broadcast(uint16_t src_port, uint16_t dst_port,
     return net_send_udp(NET_IPV4_BROADCAST, src_port, dst_port, data, len);
 }
 
+static int firewall_protocol_valid(uint32_t protocol) {
+    return protocol == NET_FW_PROTO_ANY || protocol == NET_FW_PROTO_ICMP ||
+           protocol == NET_FW_PROTO_TCP || protocol == NET_FW_PROTO_UDP;
+}
+
+static int firewall_action_valid(uint32_t action) {
+    return action == NET_FW_ACTION_ALLOW || action == NET_FW_ACTION_DENY;
+}
+
+static int firewall_allows(uint8_t protocol, uint16_t dst_port) {
+    uint32_t i;
+    for (i = 0; i < NET_FIREWALL_RULES; i++) {
+        net_firewall_rule_t *r = &firewall_rules[i];
+        if (!r->used) continue;
+        if (r->protocol != NET_FW_PROTO_ANY && r->protocol != protocol) continue;
+        if (r->port != 0 && r->port != dst_port) continue;
+        r->hits++;
+        return r->action != NET_FW_ACTION_DENY;
+    }
+    return 1;
+}
+
+int net_firewall_get(uint32_t index, net_firewall_rule_t *rule) {
+    if (!rule || index >= NET_FIREWALL_RULES) return -1;
+    *rule = firewall_rules[index];
+    return 0;
+}
+
+int net_firewall_add(const net_firewall_rule_t *rule) {
+    uint32_t i;
+    if (!rule || !firewall_protocol_valid(rule->protocol) ||
+        !firewall_action_valid(rule->action) || rule->port > 65535U) {
+        return -1;
+    }
+    for (i = 0; i < NET_FIREWALL_RULES; i++) {
+        if (!firewall_rules[i].used) {
+            firewall_rules[i].used = 1;
+            firewall_rules[i].action = rule->action;
+            firewall_rules[i].protocol = rule->protocol;
+            firewall_rules[i].port = rule->port;
+            firewall_rules[i].hits = 0;
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
+int net_firewall_delete(uint32_t index) {
+    if (index >= NET_FIREWALL_RULES) return -1;
+    memset(&firewall_rules[index], 0, sizeof(firewall_rules[index]));
+    return 0;
+}
+
+void net_firewall_clear(void) {
+    memset(firewall_rules, 0, sizeof(firewall_rules));
+}
+
 static void handle_udp(uint32_t src_ip, const uint8_t *payload, uint16_t len) {
     const struct udp_header *udp;
     uint16_t dst_port;
@@ -432,6 +490,7 @@ static void handle_udp(uint32_t src_ip, const uint8_t *payload, uint16_t len) {
     if (udp_len < sizeof(struct udp_header) || udp_len > len) return;
     dst_port = ntohs(udp->dst_port);
     data_len = (uint16_t)(udp_len - sizeof(struct udp_header));
+    if (!firewall_allows(IP_PROTO_UDP, dst_port)) return;
     if (socket_deliver_udp(src_ip, ntohs(udp->src_port), dst_port,
                            payload + sizeof(struct udp_header), data_len) == 0) {
         return;
@@ -800,6 +859,7 @@ static void handle_tcp(uint32_t src_ip, const uint8_t *payload, uint16_t len) {
     if (header_len < sizeof(struct tcp_header) || header_len > len) return;
     src_port = ntohs(tcp->src_port);
     dst_port = ntohs(tcp->dst_port);
+    if (!firewall_allows(IP_PROTO_TCP, dst_port)) return;
     seq = ntohl(tcp->seq);
     ack = ntohl(tcp->ack);
     data_len = (uint16_t)(len - header_len);
@@ -930,7 +990,7 @@ static void handle_ipv4(net_device_t *dev, const uint8_t *data, uint16_t len) {
     payload = data + ihl;
     payload_len = (uint16_t)(total_len - ihl);
 
-    if (ip->protocol == IP_PROTO_ICMP) handle_icmp(src, payload, payload_len);
+    if (ip->protocol == IP_PROTO_ICMP && firewall_allows(IP_PROTO_ICMP, 0)) handle_icmp(src, payload, payload_len);
     else if (ip->protocol == IP_PROTO_UDP) handle_udp(src, payload, payload_len);
     else if (ip->protocol == IP_PROTO_TCP) handle_tcp(src, payload, payload_len);
 }

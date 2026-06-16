@@ -1513,6 +1513,31 @@ uint32_t syscall_dispatch(uint32_t num,
     case SYS_NETCONFIG:
         return (uint32_t)net_config_ipv4((uint32_t)a, (uint32_t)b, (uint32_t)c);
 
+    case SYS_FIREWALL:
+        {
+            net_firewall_rule_t rule;
+            if ((uint32_t)a == NET_FW_OP_GET) {
+                if (!c) return (uint32_t)-1;
+                if (net_firewall_get((uint32_t)b, &rule) < 0) return (uint32_t)-1;
+                if (copy_to_user((void *)c, &rule, sizeof(rule)) < 0) return (uint32_t)-1;
+                return 0;
+            }
+            if (proc_current_uid() != 0) return (uint32_t)-1;
+            if ((uint32_t)a == NET_FW_OP_ADD) {
+                if (!c) return (uint32_t)-1;
+                if (copy_from_user(&rule, (const void *)c, sizeof(rule)) < 0) return (uint32_t)-1;
+                return (uint32_t)net_firewall_add(&rule);
+            }
+            if ((uint32_t)a == NET_FW_OP_DELETE) {
+                return (uint32_t)net_firewall_delete((uint32_t)b);
+            }
+            if ((uint32_t)a == NET_FW_OP_CLEAR) {
+                net_firewall_clear();
+                return 0;
+            }
+            return (uint32_t)-1;
+        }
+
     case SYS_FSYNC:
         {
             file_t *f = vfs_get_file((int)a);
