@@ -26,6 +26,7 @@
 #include "ext4.h"
 #include "../fs/pfs.h"
 #include "../fs/fat32.h"
+#include "power.h"
 #include "include/io.h"
 extern int spawn_user_process(const char *path, char *const argv[]);
 extern int spawn_user_process_env(const char *path, char *const argv[], char *const envp[]);
@@ -2527,6 +2528,9 @@ static void cmd_help(void)
     print("  mount_pfs [dev] [path] - Mount PFS read/write volume (default ram0 /mnt)\n");
     print("  mount_fat32 [dev] [path] - Mount FAT32 volume read-only (default ram0 /mnt)\n");
     print("  mount_tmpfs [path] - Mount tmpfs memory filesystem (default /tmp)\n");
+    print("  power           - Show ACPI power management status\n");
+    print("  shutdown        - Power off via ACPI S5 when available\n");
+    print("  reboot          - Reboot via keyboard controller reset\n");
     print("  netinfo         - Show network stack information\n");
     print("  discovery [scan|peers|announce|bye|name <n>|caps <c>|auth|auth_secret <s>|auth_peer <id>]\n");
     print("  sync [info|items|tasks|reliable|put|del|push|push_all|offer|accept|done] - Cross-device sync/tasks\n");
@@ -2961,6 +2965,30 @@ void shell_run(void)
                         print_err("mount_tmpfs: failed\n");
                     else
                         print("mount_tmpfs: ok\n");
+                }
+                else if (shell_cmd_equals(cmd, "power"))
+                {
+                    const power_info_t *info = power_get_info();
+                    print("power: acpi=");
+                    print(info->acpi_available ? "yes" : "no");
+                    print(" s5=");
+                    print(info->s5_available ? "yes" : "no");
+                    print(" pm1a=");
+                    shell_print_hex32(info->pm1a_cnt_blk);
+                    print(" slp_typa=");
+                    shell_print_hex32(info->slp_typa);
+                    print("\n");
+                }
+                else if (shell_cmd_equals(cmd, "shutdown"))
+                {
+                    print("shutdown: requesting ACPI S5 power off\n");
+                    if (power_shutdown() < 0)
+                        print_err("shutdown: ACPI S5 is unavailable\n");
+                }
+                else if (shell_cmd_equals(cmd, "reboot"))
+                {
+                    print("reboot: requesting reset\n");
+                    power_reboot();
                 }
                 else if (shell_cmd_equals(cmd, "write"))
                 {

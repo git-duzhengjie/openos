@@ -580,6 +580,11 @@ gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
     -I $SRC/include \
+    -c $SRC/drivers/power.c -o $BUILD/power.o
+
+gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
+    -I $SRC/include \
     -c $SRC/drivers/input_buffer.c -o $BUILD/input_buffer.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
@@ -724,6 +729,7 @@ ld -m elf_i386 -T $SRC/linker.ld \
     $BUILD/acpi.o \
     $BUILD/apic.o \
     $BUILD/rtc.o \
+    $BUILD/power.o \
     $BUILD/input_buffer.o \
     $BUILD/usermode.o \
     $BUILD/usermem.o \
