@@ -7,6 +7,11 @@
 
 #define APIC_BASE_MSR 0x1Bu
 #define APIC_BASE_ENABLE 0x800u
+#define LAPIC_REG_EOI 0xB0u
+#define IOAPIC_REGSEL 0x00u
+#define IOAPIC_WINDOW 0x10u
+#define IOAPIC_REDIR_BASE 0x10u
+#define IOAPIC_REDIR_MASKED (1u << 16)
 #define MADT_ENTRY_LAPIC 0u
 #define MADT_ENTRY_IOAPIC 1u
 
@@ -79,6 +84,107 @@ static void apic_parse_madt(const acpi_madt_t *madt) {
 
 const apic_info_t *apic_get_info(void) {
     return &g_apic_info;
+}
+
+uint32_t lapic_read(uint32_t reg) {
+    volatile uint32_t *lapic;
+
+    if (!g_apic_info.lapic_base) {
+        return 0;
+    }
+
+    lapic = (volatile uint32_t *)(g_apic_info.lapic_base + reg);
+    return *lapic;
+}
+
+void lapic_write(uint32_t reg, uint32_t value) {
+    volatile uint32_t *lapic;
+
+    if (!g_apic_info.lapic_base) {
+        return;
+    }
+
+    lapic = (volatile uint32_t *)(g_apic_info.lapic_base + reg);
+    *lapic = value;
+}
+
+void lapic_eoi(void) {
+    if (g_apic_info.lapic_enabled) {
+        lapic_write(LAPIC_REG_EOI, 0);
+    }
+}
+
+uint32_t ioapic_read(uint32_t reg) {
+    volatile uint32_t *select;
+    volatile uint32_t *window;
+
+    if (!g_apic_info.first_ioapic_addr) {
+        return 0;
+    }
+
+    select = (volatile uint32_t *)(g_apic_info.first_ioapic_addr + IOAPIC_REGSEL);
+    window = (volatile uint32_t *)(g_apic_info.first_ioapic_addr + IOAPIC_WINDOW);
+    *select = reg;
+    return *window;
+}
+
+void ioapic_write(uint32_t reg, uint32_t value) {
+    volatile uint32_t *select;
+    volatile uint32_t *window;
+
+    if (!g_apic_info.first_ioapic_addr) {
+        return;
+    }
+
+    select = (volatile uint32_t *)(g_apic_info.first_ioapic_addr + IOAPIC_REGSEL);
+    window = (volatile uint32_t *)(g_apic_info.first_ioapic_addr + IOAPIC_WINDOW);
+    *select = reg;
+    *window = value;
+}
+
+int ioapic_set_irq_redirect(uint8_t irq, uint8_t vector, uint8_t dest_apic_id, uint32_t flags) {
+    uint32_t index;
+    uint32_t low;
+    uint32_t high;
+
+    if (!g_apic_info.first_ioapic_addr || irq >= 24u) {
+        return -1;
+    }
+
+    index = IOAPIC_REDIR_BASE + ((uint32_t)irq * 2u);
+    low = ((uint32_t)vector & 0xFFu) | (flags & 0x0000FF00u);
+    high = ((uint32_t)dest_apic_id) << 24;
+    ioapic_write(index + 1u, high);
+    ioapic_write(index, low);
+    return 0;
+}
+
+int ioapic_mask_irq(uint8_t irq) {
+    uint32_t index;
+    uint32_t low;
+
+    if (!g_apic_info.first_ioapic_addr || irq >= 24u) {
+        return -1;
+    }
+
+    index = IOAPIC_REDIR_BASE + ((uint32_t)irq * 2u);
+    low = ioapic_read(index);
+    ioapic_write(index, low | IOAPIC_REDIR_MASKED);
+    return 0;
+}
+
+int ioapic_unmask_irq(uint8_t irq) {
+    uint32_t index;
+    uint32_t low;
+
+    if (!g_apic_info.first_ioapic_addr || irq >= 24u) {
+        return -1;
+    }
+
+    index = IOAPIC_REDIR_BASE + ((uint32_t)irq * 2u);
+    low = ioapic_read(index);
+    ioapic_write(index, low & ~IOAPIC_REDIR_MASKED);
+    return 0;
 }
 
 void apic_init(void) {
