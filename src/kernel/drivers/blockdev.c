@@ -446,5 +446,57 @@ void blockdev_register_builtin_devices(void) {
         return;
     }
 
+    /* MBR partition scan */
+    typedef struct mbr_part_entry {
+        uint8_t boot_flag;
+        uint8_t chs_start[3];
+        uint8_t type;
+        uint8_t chs_end[3];
+        uint32_t lba_start;
+        uint32_t sector_count;
+    } __attribute__((packed)) mbr_part_entry_t;
+
+    typedef struct mbr_boot_sector {
+        uint8_t boot_code[446];
+        mbr_part_entry_t partitions[4];
+        uint16_t signature;
+    } __attribute__((packed)) mbr_boot_sector_t;
+
+    mbr_boot_sector_t mbr;
+    if (blockdev_read_blocks(&blockdev_table[0], 0, 1, &mbr) == 1 && mbr.signature == 0xAA55) {
+        int part_index = 1;
+        int i;
+
+        serial_write("[BLOCKDEV] scanning MBR partitions\n");
+        for (i = 0; i < 4; i++) {
+            if (mbr.partitions[i].type == 0 || mbr.partitions[i].sector_count == 0) continue;
+
+            char dev_name[32];
+            char dev_path[32];
+            dev_name[0] = 'r'; dev_name[1] = 'a'; dev_name[2] = 'm'; dev_name[3] = '0'; dev_name[4] = 'p'; dev_name[5] = '0' + part_index; dev_name[6] = 0;
+            dev_path[0] = '/'; dev_path[1] = 'd'; dev_path[2] = 'e'; dev_path[3] = 'v'; dev_path[4] = '/'; memcpy(dev_path + 5, dev_name, 7);
+
+            serial_write("[BLOCKDEV] found partition ");
+            serial_write(dev_name);
+            serial_write(" LBA: 0x");
+            serial_write_hex(mbr.partitions[i].lba_start);
+            serial_write(" sectors: 0x");
+            serial_write_hex(mbr.partitions[i].sector_count);
+            serial_write("\n");
+
+            blockdev_t *parent = &blockdev_table[0];
+            static blockdev_ops_t part_ops;
+            memcpy(&part_ops, parent->ops, sizeof(part_ops));
+
+            if (blockdev_register(dev_name, 1, part_index,
+                                  parent->sector_size,
+                                  mbr.partitions[i].sector_count,
+                                  &part_ops, parent->private_data) < 0) continue;
+
+            if (vfs_mknod(dev_path, FS_BLOCK_DEVICE | 0666, dev_name) < 0) continue;
+            part_index++;
+        }
+    }
+
     serial_write("[OK] block devices registered\n");
 }
