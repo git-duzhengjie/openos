@@ -1,4 +1,5 @@
 #include "sync.h"
+#include "account.h"
 #include "net.h"
 #include "discovery.h"
 #include "bus.h"
@@ -85,6 +86,17 @@ static int is_safe_text(const char *s) {
         if (c < 32 || c > 126) return 0;
     }
     return 1;
+}
+
+static int make_prefixed_key(char *out, uint32_t out_size, const char *prefix, const char *name) {
+    uint32_t pos = 0;
+    if (!out || out_size == 0 || !prefix || !name || !name[0]) return -1;
+    if (!is_safe_text(name)) return -1;
+    out[0] = '\0';
+    append_str(out, out_size, &pos, prefix);
+    append_str(out, out_size, &pos, name);
+    if (pos + 1 >= out_size) return -1;
+    return 0;
 }
 
 static const char *task_state_name(sync_task_state_t state) {
@@ -199,9 +211,21 @@ static int send_packet(const char *type, const char *key, const char *value,
     char msg[SYNC_PACKET_MAX];
     char local_id[DISCOVERY_DEVICE_ID_MAX];
     char msg_id[SYNC_MSG_ID_MAX];
+    char sealed_value[SYNC_ITEM_VALUE_MAX * 2 + 8];
+    char sealed_title[SYNC_TASK_TEXT_MAX * 2 + 8];
+    char sealed_payload[SYNC_TASK_TEXT_MAX * 2 + 8];
+    char sealed_result[SYNC_TASK_TEXT_MAX * 2 + 8];
+    const char *wire_value = value;
+    const char *wire_title = title;
+    const char *wire_payload = payload;
+    const char *wire_result = result;
     uint32_t pos = 0;
     uint16_t len;
     if (!sync_ready || !type) return -1;
+    if (value && account_encrypt_field(value, sealed_value, sizeof(sealed_value)) == 0) wire_value = sealed_value;
+    if (title && account_encrypt_field(title, sealed_title, sizeof(sealed_title)) == 0) wire_title = sealed_title;
+    if (payload && account_encrypt_field(payload, sealed_payload, sizeof(sealed_payload)) == 0) wire_payload = sealed_payload;
+    if (result && account_encrypt_field(result, sealed_result, sizeof(sealed_result)) == 0) wire_result = sealed_result;
     discovery_get_local_device_id(local_id, sizeof(local_id));
     make_msg_id(msg_id, sizeof(msg_id));
     append_str(msg, sizeof(msg), &pos, SYNC_PROTO "\n");
@@ -223,15 +247,18 @@ static int send_packet(const char *type, const char *key, const char *value,
 }
 
 static void apply_put(const char *from, const char *key, const char *value, uint32_t version) {
+    char plain_value[SYNC_ITEM_VALUE_MAX];
     int slot;
     if (!key || !key[0] || !value || !is_safe_text(key) || !is_safe_text(value)) return;
+    if (account_decrypt_field(value, plain_value, sizeof(plain_value)) < 0)
+        safe_copy(plain_value, sizeof(plain_value), "<e2e-decrypt-failed>");
     slot = find_item_slot(key);
     if (slot < 0) return;
     if (items[slot].used && version <= items[slot].version) return;
     memset(&items[slot], 0, sizeof(items[slot]));
     items[slot].used = 1;
     safe_copy(items[slot].key, sizeof(items[slot].key), key);
-    safe_copy(items[slot].value, sizeof(items[slot].value), value);
+    safe_copy(items[slot].value, sizeof(items[slot].value), plain_value);
     safe_copy(items[slot].owner, sizeof(items[slot].owner), from);
     items[slot].version = version;
     items[slot].updated_at = sync_time;
@@ -249,8 +276,16 @@ static void apply_del(const char *key, uint32_t version) {
 static void apply_task_offer(const char *from, const char *task_id, const char *title,
                              const char *payload, const char *target) {
     char local_id[DISCOVERY_DEVICE_ID_MAX];
+    char plain_title[SYNC_TASK_TEXT_MAX];
+    char plain_payload[SYNC_TASK_TEXT_MAX];
     int slot;
     if (!task_id || !task_id[0] || !title || !is_safe_text(task_id) || !is_safe_text(title)) return;
+    if (account_decrypt_field(title, plain_title, sizeof(plain_title)) < 0)
+        safe_copy(plain_title, sizeof(plain_title), "<e2e-decrypt-failed>");
+    if (payload && payload[0] && account_decrypt_field(payload, plain_payload, sizeof(plain_payload)) < 0)
+        safe_copy(plain_payload, sizeof(plain_payload), "<e2e-decrypt-failed>");
+    else
+        safe_copy(plain_payload, sizeof(plain_payload), payload);
     discovery_get_local_device_id(local_id, sizeof(local_id));
     if (target && target[0] && strcmp(target, local_id) != 0) return;
     slot = find_task_slot(task_id);
@@ -259,8 +294,8 @@ static void apply_task_offer(const char *from, const char *task_id, const char *
     memset(&tasks[slot], 0, sizeof(tasks[slot]));
     tasks[slot].used = 1;
     safe_copy(tasks[slot].task_id, sizeof(tasks[slot].task_id), task_id);
-    safe_copy(tasks[slot].title, sizeof(tasks[slot].title), title);
-    safe_copy(tasks[slot].payload, sizeof(tasks[slot].payload), payload);
+    safe_copy(tasks[slot].title, sizeof(tasks[slot].title), plain_title);
+    safe_copy(tasks[slot].payload, sizeof(tasks[slot].payload), plain_payload);
     safe_copy(tasks[slot].owner, sizeof(tasks[slot].owner), from);
     safe_copy(tasks[slot].assignee, sizeof(tasks[slot].assignee), target && target[0] ? target : local_id);
     tasks[slot].state = SYNC_TASK_OFFERED;
@@ -279,12 +314,17 @@ static void apply_task_accept(const char *from, const char *task_id) {
 }
 
 static void apply_task_done(const char *from, const char *task_id, const char *result) {
+    char plain_result[SYNC_TASK_TEXT_MAX];
     int slot;
     if (!task_id || !task_id[0]) return;
+    if (result && result[0] && account_decrypt_field(result, plain_result, sizeof(plain_result)) < 0)
+        safe_copy(plain_result, sizeof(plain_result), "<e2e-decrypt-failed>");
+    else
+        safe_copy(plain_result, sizeof(plain_result), result);
     slot = find_task_slot(task_id);
     if (slot < 0 || !tasks[slot].used) return;
     safe_copy(tasks[slot].assignee, sizeof(tasks[slot].assignee), from);
-    safe_copy(tasks[slot].result, sizeof(tasks[slot].result), result);
+    safe_copy(tasks[slot].result, sizeof(tasks[slot].result), plain_result);
     tasks[slot].state = SYNC_TASK_DONE;
     tasks[slot].updated_at = sync_time;
 }
@@ -380,6 +420,31 @@ int sync_delete(const char *key) {
     version = local_version_counter++;
     apply_del(key, version);
     return send_packet(SYNC_MSG_DEL, key, 0, 0, 0, 0, 0, 0, version, SYNC_TASK_EMPTY);
+}
+
+int sync_file_put(const char *path, const char *content) {
+    char key[SYNC_ITEM_KEY_MAX];
+    if (!content || !is_safe_text(content)) return -1;
+    if (make_prefixed_key(key, sizeof(key), "file:", path) < 0) return -1;
+    return sync_put(key, content);
+}
+
+int sync_file_delete(const char *path) {
+    char key[SYNC_ITEM_KEY_MAX];
+    if (make_prefixed_key(key, sizeof(key), "file:", path) < 0) return -1;
+    return sync_delete(key);
+}
+
+int sync_clipboard_set(const char *text) {
+    if (!text || !is_safe_text(text)) return -1;
+    return sync_put("clip:default", text);
+}
+
+int sync_message_send(const char *channel, const char *message) {
+    char key[SYNC_ITEM_KEY_MAX];
+    if (!message || !is_safe_text(message)) return -1;
+    if (make_prefixed_key(key, sizeof(key), "msg:", channel) < 0) return -1;
+    return sync_put(key, message);
 }
 
 int sync_broadcast_key(const char *key) {

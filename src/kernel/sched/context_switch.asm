@@ -11,7 +11,7 @@ section .text
 global context_switch
 
 ; void context_switch(thread_t *from, thread_t *to)
-; thread_t.kernel_esp 偏移 = 72
+; thread_t.kernel_sp 偏移 = 72
 context_switch:
     ; 保存通用寄存器和段寄存器，匹配 timer_isr/thread_create 栈帧
     pushad
@@ -25,11 +25,11 @@ context_switch:
     mov ebx, [esp + 52]     ; from
     mov ecx, [esp + 56]     ; to
 
-    ; 保存 ESP 到 from->kernel_esp
+    ; 保存 ESP 到 from->kernel_sp
     mov [ebx + 72], esp
 
     ; 切换到 to 的栈
-    mov esp, [ecx + 72]     ; esp = to->kernel_esp
+    mov esp, [ecx + 72]     ; esp = to->kernel_sp
 
     ; 恢复段寄存器和通用寄存器，匹配 timer_isr pop 顺序
     pop gs

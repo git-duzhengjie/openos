@@ -10,6 +10,7 @@
 #include "include/pmm.h"
 #include "include/vmm.h"
 #include "include/string.h"
+#include "include/panic.h"
 #include "serial.h"
 
 /* IDT表 (256个条目) */
@@ -373,8 +374,15 @@ static void idt_page_fault_handler(registers_t *regs)
 
 	pf_stats.kernel_fault++;
 	terminal_write("\nKernel Page Fault\n");
-	serial_write("System Halted.\n");
-	__asm__ volatile ("cli; hlt");
+	panic_frame_t frame = {
+		.arch = "i386",
+		.reason = "page fault",
+		.regs = regs,
+		.fault_addr = fault_addr,
+		.has_fault_addr = 1,
+		.pid = cur ? cur->pid : 0,
+	};
+	panic_log_and_halt(&frame);
 }
 
 /*
@@ -445,8 +453,16 @@ void isr_handler(registers_t *regs) {
 
 		/* 严重内核错误，停止系统 */
 		if (regs->int_no < 8 || regs->int_no == 14) {
-			serial_write("System Halted.\n");
-			__asm__ volatile ("cli; hlt");
+			thread_t *cur = sched_get_current();
+			panic_frame_t frame = {
+				.arch = "i386",
+				.reason = (regs->int_no < 32) ? exception_messages[regs->int_no] : "unhandled interrupt",
+				.regs = regs,
+				.fault_addr = 0,
+				.has_fault_addr = 0,
+				.pid = cur ? cur->pid : 0,
+			};
+			panic_log_and_halt(&frame);
 		}
 	}
 }

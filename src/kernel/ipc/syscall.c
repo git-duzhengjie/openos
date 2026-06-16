@@ -15,6 +15,7 @@
 #include "../fs/vfs.h"
 #include "../include/string.h"
 #include "../include/blockdev.h"
+#include "../include/ai.h"
 #include "../net/socket.h"
 #include "../net/net.h"
 #include <stddef.h>  /* NULL */
@@ -852,6 +853,45 @@ static uint32_t syscall_read_user_buffer(int fd, void *user_buf, uint32_t count)
 static int syscall_copy_user_path(char *dst, const char *user_path)
 {
     return strncpy_from_user(dst, user_path, USERMEM_CSTR_MAX);
+}
+
+static uint32_t sys_ai_request(uint32_t user_req_ptr)
+{
+    openos_ai_request_t user_req;
+    ai_request_t request;
+    ai_response_t response;
+    char prompt[AI_PROMPT_MAX];
+    uint32_t n;
+    int status;
+
+    if (!user_req_ptr)
+        return (uint32_t)AI_STATUS_INVALID_ARGUMENT;
+    if (copy_from_user(&user_req, (const void *)user_req_ptr, sizeof(user_req)) < 0)
+        return (uint32_t)AI_STATUS_INVALID_ARGUMENT;
+    if (!user_req.prompt || !user_req.response || user_req.response_len == 0)
+        return (uint32_t)AI_STATUS_INVALID_ARGUMENT;
+    if (strncpy_from_user(prompt, user_req.prompt, sizeof(prompt)) < 0)
+        return (uint32_t)AI_STATUS_INVALID_ARGUMENT;
+
+    memset(&request, 0, sizeof(request));
+    memset(&response, 0, sizeof(response));
+    request.task_type = AI_TASK_CHAT;
+    request.backend_preference = ai_get_default_backend();
+    request.prompt = prompt;
+    request.max_tokens = user_req.response_len;
+    request.flags = user_req.flags;
+
+    status = ai_generate(&request, &response);
+    if (status < 0)
+        return (uint32_t)status;
+
+    n = (uint32_t)strlen(response.text) + 1;
+    if (n > user_req.response_len)
+        return (uint32_t)AI_STATUS_BUFFER_TOO_SMALL;
+    if (copy_to_user(user_req.response, response.text, n) < 0)
+        return (uint32_t)AI_STATUS_INVALID_ARGUMENT;
+
+    return n - 1;
 }
 
 static uint32_t syscall_poll(openos_pollfd_t *user_fds, uint32_t nfds, uint32_t timeout_ms)
@@ -1975,6 +2015,9 @@ uint32_t syscall_dispatch(uint32_t num,
                 return (uint32_t)-1;
             return 1;
         }
+
+    case SYS_AI_REQUEST:
+        return sys_ai_request((uint32_t)a);
 
     default:
         return 0xFFFFFFFF;

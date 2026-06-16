@@ -15,6 +15,12 @@
 #endif
 
 #define SCHED_QUEUE_COUNT 8u
+#define THREAD_KERNEL_SP_OFFSET 72u
+#define OPENOS_STATIC_ASSERT_CONCAT_(a, b) a##b
+#define OPENOS_STATIC_ASSERT_CONCAT(a, b) OPENOS_STATIC_ASSERT_CONCAT_(a, b)
+#define OPENOS_STATIC_ASSERT(cond) typedef char OPENOS_STATIC_ASSERT_CONCAT(openos_static_assert_, __LINE__)[(cond) ? 1 : -1]
+
+OPENOS_STATIC_ASSERT((uint32_t)&(((thread_t *)0)->kernel_sp) == THREAD_KERNEL_SP_OFFSET);
 
 void idle_entry(void) { while (1) { __asm__ volatile("hlt"); } }
 
@@ -227,7 +233,7 @@ void sched_start(void) {
         "pop %%ds\n"
         "popa\n"
         "iret\n"
-        : : "r"(first->kernel_esp)
+        : : "r"(first->kernel_sp)
     );
 }
 
@@ -329,8 +335,8 @@ void sched_yield(void) {
      * The whole scheduler state update must run with interrupts disabled.
      * Otherwise timer_isr may save the current ESP into the wrong thread after
      * sched.current has been changed but before this function switches stacks. */
-    uint32_t *prev_kernel_esp_slot = &prev->kernel_esp;
-    uint32_t next_kernel_esp = next->kernel_esp;
+    uint32_t *prev_kernel_sp_slot = &prev->kernel_sp;
+    uint32_t next_kernel_sp = next->kernel_sp;
     uint32_t resume_eflags = saved_eflags | 0x200;
 
     __asm__ volatile(
@@ -342,8 +348,8 @@ void sched_yield(void) {
         "push %%es\n"
         "push %%fs\n"
         "push %%gs\n"
-        "mov %%esp, (%0)\n"  /* save prev->kernel_esp */
-        "mov %1, %%esp\n"    /* switch to next->kernel_esp */
+        "mov %%esp, (%0)\n"  /* save prev->kernel_sp */
+        "mov %1, %%esp\n"    /* switch to next->kernel_sp */
         "pop %%gs\n"
         "pop %%fs\n"
         "pop %%es\n"
@@ -352,7 +358,7 @@ void sched_yield(void) {
         "iret\n"
         "1:\n"
         :
-        : "r"(prev_kernel_esp_slot), "r"(next_kernel_esp), "r"(resume_eflags)
+        : "r"(prev_kernel_sp_slot), "r"(next_kernel_sp), "r"(resume_eflags)
         : "memory"
     );
 
@@ -409,8 +415,8 @@ thread_t *thread_create_sized(uint32_t pid, const char *name, uint32_t entry, ui
     *(--sp) = 0x10;       /* FS */
     *(--sp) = 0x10;       /* GS */
 
-    t->kernel_esp = (uint32_t)sp;
-    t->kernel_eip = entry;
+    t->kernel_sp = (uint32_t)sp;
+    t->kernel_ip = entry;
     t->kernel_stack = (uint32_t)stack_base;
     t->kernel_stack_top = stack_top;
     return t;

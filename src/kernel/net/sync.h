@@ -44,6 +44,10 @@ typedef struct sync_task {
 void sync_init(void);
 int sync_put(const char *key, const char *value);
 int sync_delete(const char *key);
+int sync_file_put(const char *path, const char *content);
+int sync_file_delete(const char *path);
+int sync_clipboard_set(const char *text);
+int sync_message_send(const char *channel, const char *message);
 int sync_broadcast_key(const char *key);
 int sync_broadcast_all(void);
 int sync_task_offer(const char *task_id, const char *title, const char *payload, const char *target_device_id);

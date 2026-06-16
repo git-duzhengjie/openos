@@ -8,16 +8,169 @@ else
     cd /e/openos
 fi
 
-echo "===== Building openos Phase 2 ====="
-
 BUILD=target
 SRC=src/kernel
+BUILD_ARCH="${ARCH:-i386}"
+
+usage() {
+    echo "Usage: ARCH=i386|x86_64 ./build.sh [clean|test]"
+    echo "       ./build.sh [i386|x86_64] [clean|test]"
+}
+
+case "${1:-}" in
+    test)
+        exec bash tests/run_unit_tests.sh
+        ;;
+    i386|x86_64)
+        BUILD_ARCH="$1"
+        shift
+        ;;
+    ""|clean)
+        ;;
+    -h|--help|help)
+        usage
+        exit 0
+        ;;
+    *)
+        echo "Unsupported architecture or command: $1" >&2
+        usage >&2
+        exit 1
+        ;;
+esac
+
+if [ "${1:-}" = "test" ]; then
+    exec bash tests/run_unit_tests.sh
+fi
+
+case "$BUILD_ARCH" in
+    i386|x86_64)
+        ;;
+    *)
+        echo "Unsupported ARCH=$BUILD_ARCH" >&2
+        usage >&2
+        exit 1
+        ;;
+esac
 
 if [ "${1:-}" = "clean" ]; then
-    echo "Cleaning build artifacts..."
+    echo "Cleaning build artifacts for $BUILD_ARCH..."
     rm -rf "$BUILD"
     exit 0
 fi
+
+if [ -n "${1:-}" ]; then
+    echo "Unsupported command: $1" >&2
+    usage >&2
+    exit 1
+fi
+
+if [ "$BUILD_ARCH" = "x86_64" ]; then
+    echo "===== Building openos Phase 2 (x86_64 kernel + hello64 regression) ====="
+    ARCH64_SRC=src/arch/x86_64
+    ARCH64_BUILD="$BUILD/x86_64"
+    ARCH64_USER_BUILD="$ARCH64_BUILD/user"
+    ARCH64_BOOT_BUILD="$ARCH64_BUILD/boot"
+    ARCH64_BIN_BUILD="$ARCH64_BUILD/bin"
+    ARCH64_CFLAGS="-m64 -mcmodel=kernel -mno-red-zone -ffreestanding -nostdlib -Wall -Wextra -O2 -fno-pic -fno-pie -fno-PIE -fno-stack-protector -fno-builtin -I$ARCH64_SRC/include"
+    ARCH64_ASFLAGS="-m64 -mcmodel=kernel -mno-red-zone -fno-pic -fno-pie -fno-PIE -I$ARCH64_SRC/include"
+    ARCH64_USER_CFLAGS="-m64 -ffreestanding -nostdlib -Wall -Wextra -O2 -fno-pic -fno-pie -fno-PIE -fno-stack-protector -fno-builtin -I$ARCH64_SRC/user"
+    ARCH64_USER_ASFLAGS="-m64 -fno-pic -fno-pie -fno-PIE -I$ARCH64_SRC/user"
+    ARCH64_LDFLAGS="-m elf_x86_64 -T $ARCH64_SRC/linker64.ld -nostdlib"
+    ARCH64_USER_LDFLAGS="-m elf_x86_64 -T $ARCH64_SRC/user/user64.ld -nostdlib"
+    ARCH64_UEFI_CFLAGS="-m64 -ffreestanding -fshort-wchar -mno-red-zone -Wall -Wextra -O2 -fno-pic -fno-pie -fno-PIE -fno-stack-protector -fno-builtin -I$ARCH64_SRC/include"
+    ARCH64_UEFI_ASFLAGS="-m64 -fno-pic -fno-pie -fno-PIE"
+    ARCH64_UEFI_LDFLAGS="-m elf_x86_64 -T $ARCH64_SRC/boot/uefi64.ld -nostdlib"
+
+    mkdir -p "$ARCH64_BUILD" "$ARCH64_USER_BUILD" "$ARCH64_BOOT_BUILD" "$ARCH64_BIN_BUILD"
+    rm -f "$ARCH64_BUILD"/*.o "$ARCH64_BUILD"/*.elf "$ARCH64_USER_BUILD"/*.o "$ARCH64_BOOT_BUILD"/*.o "$ARCH64_BOOT_BUILD"/*.elf "$ARCH64_BOOT_BUILD"/*.EFI "$ARCH64_BOOT_BUILD"/*.efi "$ARCH64_BIN_BUILD"/*.elf
+
+    echo "[1/4] Compiling x86_64 C files..."
+    for cfile in \
+        kernel/kernel64.c \
+        kernel/gdt64.c \
+        kernel/tss64.c \
+        kernel/idt64.c \
+        kernel/sched64.c \
+        kernel/syscall64.c \
+        kernel/compat32.c \
+        kernel/pmm64.c \
+        kernel/vmm64.c \
+        kernel/heap64.c \
+        kernel/elf64_loader.c \
+        kernel/usermode64.c \
+        kernel/early_console64.c; do
+        obj="$ARCH64_BUILD/$(basename "${cfile%.c}").o"
+        gcc $ARCH64_CFLAGS -c "$ARCH64_SRC/$cfile" -o "$obj"
+    done
+
+    echo "[2/4] Assembling x86_64 entry files..."
+    for sfile in \
+        kernel/entry64.S \
+        kernel/isr64.S \
+        kernel/context_switch64.S \
+        kernel/syscall_int80_compat64.S \
+        kernel/syscall_sysret64.S \
+        kernel/usermode64.S; do
+        base="$(basename "${sfile%.S}")"
+        if [ "$base" = "usermode64" ]; then
+            obj="$ARCH64_BUILD/usermode64_asm.o"
+        else
+            obj="$ARCH64_BUILD/$base.o"
+        fi
+        gcc $ARCH64_ASFLAGS -c "$ARCH64_SRC/$sfile" -o "$obj"
+    done
+
+    echo "[3/4] Linking x86_64 kernel..."
+    ld $ARCH64_LDFLAGS -o "$ARCH64_BUILD/kernel64.elf" \
+        "$ARCH64_BUILD/entry64.o" \
+        "$ARCH64_BUILD/kernel64.o" \
+        "$ARCH64_BUILD/gdt64.o" \
+        "$ARCH64_BUILD/tss64.o" \
+        "$ARCH64_BUILD/idt64.o" \
+        "$ARCH64_BUILD/isr64.o" \
+        "$ARCH64_BUILD/sched64.o" \
+        "$ARCH64_BUILD/context_switch64.o" \
+        "$ARCH64_BUILD/syscall64.o" \
+        "$ARCH64_BUILD/compat32.o" \
+        "$ARCH64_BUILD/syscall_int80_compat64.o" \
+        "$ARCH64_BUILD/syscall_sysret64.o" \
+        "$ARCH64_BUILD/pmm64.o" \
+        "$ARCH64_BUILD/vmm64.o" \
+        "$ARCH64_BUILD/heap64.o" \
+        "$ARCH64_BUILD/elf64_loader.o" \
+        "$ARCH64_BUILD/usermode64.o" \
+        "$ARCH64_BUILD/usermode64_asm.o" \
+        "$ARCH64_BUILD/early_console64.o"
+
+    echo "[4/4] Building x86_64 /bin/hello64 regression ELF..."
+    gcc $ARCH64_USER_CFLAGS -c "$ARCH64_SRC/user/crt0.c" -o "$ARCH64_USER_BUILD/crt0.o"
+    gcc $ARCH64_USER_CFLAGS -c "$ARCH64_SRC/user/hello64.c" -o "$ARCH64_USER_BUILD/hello64.o"
+    gcc $ARCH64_USER_ASFLAGS -c "$ARCH64_SRC/user/crt0.S" -o "$ARCH64_USER_BUILD/start.o"
+    ld $ARCH64_USER_LDFLAGS -o "$ARCH64_BIN_BUILD/hello64.elf" \
+        "$ARCH64_USER_BUILD/start.o" \
+        "$ARCH64_USER_BUILD/crt0.o" \
+        "$ARCH64_USER_BUILD/hello64.o"
+    readelf -h "$ARCH64_BIN_BUILD/hello64.elf" | grep -q 'Class:.*ELF64'
+    readelf -h "$ARCH64_BIN_BUILD/hello64.elf" | grep -q 'Machine:.*X86-64'
+    nm "$ARCH64_BIN_BUILD/hello64.elf" | grep -q ' openos64_main$'
+
+    echo "[UEFI] Building x86_64 BOOTX64.EFI skeleton..."
+    gcc $ARCH64_UEFI_CFLAGS -c "$ARCH64_SRC/boot/uefi64.c" -o "$ARCH64_BOOT_BUILD/uefi64.o"
+    gcc $ARCH64_UEFI_ASFLAGS -c "$ARCH64_SRC/boot/uefi64_crt0.S" -o "$ARCH64_BOOT_BUILD/uefi64_crt0.o"
+    ld $ARCH64_UEFI_LDFLAGS -o "$ARCH64_BOOT_BUILD/uefi64_loader.elf" \
+        "$ARCH64_BOOT_BUILD/uefi64_crt0.o" \
+        "$ARCH64_BOOT_BUILD/uefi64.o"
+    objcopy -O pei-x86-64 --subsystem=10 "$ARCH64_BOOT_BUILD/uefi64_loader.elf" "$ARCH64_BOOT_BUILD/BOOTX64.EFI"
+    objdump -f "$ARCH64_BOOT_BUILD/BOOTX64.EFI" | grep -q 'pei-x86-64'
+
+    echo "x86_64 Build Successful!"
+    echo "Output: $ARCH64_BUILD/kernel64.elf"
+    echo "Regression: $ARCH64_BIN_BUILD/hello64.elf"
+    echo "UEFI: $ARCH64_BOOT_BUILD/BOOTX64.EFI"
+    exit 0
+fi
+
+echo "===== Building openos Phase 2 (i386) ====="
 
 mkdir -p $BUILD
 rm -f $BUILD/*.elf
@@ -386,6 +539,16 @@ if [ -f $USR/echo.c ]; then
     echo "  Embedded: echo.elf"
 fi
 
+if [ -f $USR/ai.c ]; then
+    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+        -fno-stack-protector -fno-builtin \
+        -I $SRC/include \
+        -c $USR/ai.c -o $BUILD/ai.o
+    ld -m elf_i386 -T $USR/user.ld -o $BUILD/ai.elf $BUILD/ai.o
+    python3 _embed_elf.py $BUILD/ai.elf $SRC/include/embed_ai.h ai_elf
+    echo "  Embedded: ai.elf"
+fi
+
 if [ -f $USR/grep.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \
@@ -643,12 +806,22 @@ gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
     -I $SRC/include \
+    -c $SRC/smp.c -o $BUILD/smp.o
+
+gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
+    -I $SRC/include \
     -c $SRC/ipc/syscall.c -o $BUILD/syscall.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
     -I $SRC/include \
     -c $SRC/serial.c -o $BUILD/serial.o
+
+gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
+    -I $SRC/include \
+    -c $SRC/panic.c -o $BUILD/panic.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
@@ -868,6 +1041,11 @@ gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
     -I $SRC/include -I $SRC/net \
+    -c $SRC/net/account.c -o $BUILD/account.o
+
+gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
+    -I $SRC/include -I $SRC/net \
     -c $SRC/net/bus.c -o $BUILD/bus.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
@@ -901,8 +1079,10 @@ ld -m elf_i386 -T $SRC/linker.ld \
     $BUILD/vmm.o \
     $BUILD/heap.o \
     $BUILD/scheduler.o \
+    $BUILD/smp.o \
     $BUILD/syscall.o \
     $BUILD/serial.o \
+    $BUILD/panic.o \
     $BUILD/vga.o \
     $BUILD/framebuffer.o \
     $BUILD/gui.o \
@@ -946,6 +1126,7 @@ ld -m elf_i386 -T $SRC/linker.ld \
     $BUILD/dns.o \
     $BUILD/discovery.o \
     $BUILD/sync.o \
+    $BUILD/account.o \
     $BUILD/bus.o \
     $BUILD/devmgr.o \
     $BUILD/ai.o \

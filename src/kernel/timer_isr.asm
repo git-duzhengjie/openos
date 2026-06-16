@@ -4,7 +4,7 @@
 
 [bits 32]
 
-%define T_KERNEL_ESP  72
+%define T_KERNEL_SP  72
 
 section .text
 
@@ -27,12 +27,12 @@ timer_isr_entry:
     mov es, ax
     mov gs, ax
     
-    ; 在调度前保存当前线程的 kernel_esp
+    ; 在调度前保存当前线程的 kernel_sp
     ; (必须在 timer_schedule_handler 之前，因为 handler 会修改 sched.current)
     call sched_get_current
     test eax, eax
     jz .skip_save
-    mov [eax + T_KERNEL_ESP], esp
+    mov [eax + T_KERNEL_SP], esp
 .skip_save:
     
     call sched_tick
@@ -42,7 +42,7 @@ timer_isr_entry:
     jz .no_switch
     
     ; 切换到新线程栈
-    mov esp, [eax + T_KERNEL_ESP]
+    mov esp, [eax + T_KERNEL_SP]
     
 .no_switch:
     ; 发送 EOI

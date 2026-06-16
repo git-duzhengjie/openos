@@ -3,47 +3,55 @@
 ; 功能：BIOS 引导，进入32位保护模式，加载内核
 ; ============================================================
 
-[bits 16]                    ; 16位实模式
-[org 0x7c00]                 ; BIOS加载地址
+[bits 16]
+[org 0x7c00]
 
 ; ----------------------------------------------------------
 ; 第一阶段：实模式启动
 ; ----------------------------------------------------------
 start:
-    cli                      ; 关闭中断
+    cli
     xor ax, ax
     mov ds, ax
     mov es, ax
     mov ss, ax
-    mov sp, 0x7c00           ; 设置栈指针
-    sti                      ; 开启中断
+    mov sp, 0x7c00
+    sti
+    mov [boot_drive], dl
 
-    ; 打印启动信息 (实模式)
     mov si, boot_msg
     call print_string
 
-    ; 加载内核到内存
+    call check_int13_extensions
+
     mov si, loading_msg
     call print_string
 
     ; 从磁盘读取内核 (LBA模式)
     ; 每次读取 64 扇区 = 32KB，共读取 19 次 = 1216 扇区 = 608KB。
-    ; 当前 kernel.bin 已超过旧版 1088 扇区加载上限，因此必须覆盖完整内核，
-    ; 否则 .rodata/字符串常量等后半段内容不会进入内存。
-    ; 最高加载到约 0xA0000；链接脚本保证实际镜像低于 0x9E000，
-    ; 为保护模式栈顶 0x9F000 保留至少 4KB 守卫空间。
-    mov word [dap + 2], 0x40     ; sectors per chunk
-    mov word [dap + 4], 0x8000   ; first buffer offset: 0000:8000
-    mov word [dap + 6], 0x0000   ; first buffer segment
-    mov dword [dap + 8], 1       ; first kernel LBA
+    ; 保存 BIOS 启动盘号，每块失败自动复位磁盘并重试。
+    mov word [dap + 2], 0x40
+    mov word [dap + 4], 0x8000
+    mov word [dap + 6], 0x0000
+    mov dword [dap + 8], 1
     mov dword [dap + 12], 0
     mov cx, 19
 .load_kernel_chunk:
     push cx
+    mov di, 3
+.read_retry:
     mov ah, 0x42
+    mov dl, [boot_drive]
     mov si, dap
     int 0x13
-    jc disk_error
+    jnc .read_ok
+    xor ah, ah
+    mov dl, [boot_drive]
+    int 0x13
+    dec di
+    jnz .read_retry
+    jmp disk_error
+.read_ok:
     mov al, '.'
     call print_char
 
@@ -68,7 +76,7 @@ start:
 
     ; 进入保护模式
     cli
-    lgdt [gdt_desc]          ; 加载GDT
+    lgdt [gdt_desc]
 
     ; 开启A20地址线
     in al, 0x92
@@ -76,21 +84,35 @@ start:
     out 0x92, al
 
     mov eax, cr0
-    or eax, 0x01             ; 设置PE位
+    or eax, 0x01
     mov cr0, eax
 
-    ; 跳转到32位代码
     jmp 0x08:protected_mode
+
+; ----------------------------------------------------------
+; 子程序：检查 BIOS 扩展读盘支持
+; ----------------------------------------------------------
+check_int13_extensions:
+    mov ah, 0x41
+    mov bx, 0x55aa
+    mov dl, [boot_drive]
+    int 0x13
+    jc disk_error
+    cmp bx, 0xaa55
+    jne disk_error
+    test cx, 1
+    jz disk_error
+    ret
 
 ; ----------------------------------------------------------
 ; 子程序：打印字符串 (实模式)
 ; ----------------------------------------------------------
 print_string:
-    lodsb                    ; 加载字符到al
+    lodsb
     or al, al
     jz .done
     mov ah, 0x0e
-    int 0x10                 ; BIOS中断 - 显示字符
+    int 0x10
     jmp print_string
 .done:
     ret
@@ -112,54 +134,53 @@ disk_error:
 ; ----------------------------------------------------------
 ; 数据
 ; ----------------------------------------------------------
-boot_msg    db 'openos v0.1 - Starting...', 0x0d, 0x0a, 0
-loading_msg db 'Loading kernel...', 0x0d, 0x0a, 0
-ok_msg      db 'OK!', 0x0d, 0x0a, 0
-error_msg   db 'ERROR: Disk read failed!', 0x0d, 0x0a, 0
+boot_drive  db 0
+boot_msg    db 'openos boot', 0x0d, 0x0a, 0
+loading_msg db 'load kernel', 0x0d, 0x0a, 0
+ok_msg      db ' ok', 0x0d, 0x0a, 0
+error_msg   db 'disk err', 0x0d, 0x0a, 0
 
 ; 磁盘地址包 (DAP)
 dap:
-    db 0x10                  ; DAP大小
-    db 0                     ; 保留
-    dw 0x40                  ; 扇区数 (64 扇区 = 32KB)
-    dw 0x8000                ; 缓冲区偏移
-    dw 0                     ; 缓冲区段
-    dq 1                     ; 起始LBA扇区
+    db 0x10
+    db 0
+    dw 0x40
+    dw 0x8000
+    dw 0
+    dq 1
 
 ; ----------------------------------------------------------
 ; GDT (全局描述符表)
 ; ----------------------------------------------------------
 gdt_start:
-    ; null描述符
     dq 0
 
     ; 代码段描述符 (ring 0)
-    dw 0xffff                ; limit low
-    dw 0                     ; base low
-    db 0                     ; base middle
-    db 0x9a                  ; access: present, ring0, code, executable, readable
-    db 0xcf                  ; flags: 4KB granularity, 32-bit
-    db 0                     ; base high
+    dw 0xffff
+    dw 0
+    db 0
+    db 0x9a
+    db 0xcf
+    db 0
 
     ; 数据段描述符 (ring 0)
-    dw 0xffff                ; limit low
-    dw 0                     ; base low
-    db 0                     ; base middle
-    db 0x92                  ; access: present, ring0, data, writable
-    db 0xcf                  ; flags: 4KB granularity, 32-bit
-    db 0                     ; base high
+    dw 0xffff
+    dw 0
+    db 0
+    db 0x92
+    db 0xcf
+    db 0
 gdt_end:
 
 gdt_desc:
-    dw gdt_end - gdt_start - 1   ; limit
-    dd gdt_start                 ; base
+    dw gdt_end - gdt_start - 1
+    dd gdt_start
 
 ; ----------------------------------------------------------
 ; 32位保护模式代码
 ; ----------------------------------------------------------
 [bits 32]
 protected_mode:
-    ; 设置数据段
     mov ax, 0x10
     mov ds, ax
     mov es, ax
@@ -175,4 +196,4 @@ protected_mode:
 ; 填充到512字节 (主引导记录)
 ; ----------------------------------------------------------
 times 510-($-$$) db 0
-dw 0xaa55                    ; 引导签名
+dw 0xaa55

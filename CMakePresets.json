@@ -1,0 +1,69 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 16,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "ninja-i386",
+      "displayName": "Ninja i386 image",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/target/cmake/ninja-i386",
+      "cacheVariables": {
+        "OPENOS_DEFAULT_ARCH": "i386"
+      }
+    },
+    {
+      "name": "ninja-x86_64",
+      "displayName": "Ninja x86_64 skeleton",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/target/cmake/ninja-x86_64",
+      "cacheVariables": {
+        "OPENOS_DEFAULT_ARCH": "x86_64"
+      }
+    },
+    {
+      "name": "unix-makefiles-i386",
+      "displayName": "Unix Makefiles i386 image",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/target/cmake/make-i386",
+      "cacheVariables": {
+        "OPENOS_DEFAULT_ARCH": "i386"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "image",
+      "configurePreset": "ninja-i386",
+      "targets": ["openos-image"]
+    },
+    {
+      "name": "i386",
+      "configurePreset": "ninja-i386",
+      "targets": ["openos-i386"]
+    },
+    {
+      "name": "x86_64",
+      "configurePreset": "ninja-x86_64",
+      "targets": ["openos-x86_64"]
+    },
+    {
+      "name": "bootloader-check",
+      "configurePreset": "ninja-i386",
+      "targets": ["openos-bootloader-check"]
+    },
+    {
+      "name": "arch-syntax-check",
+      "configurePreset": "ninja-i386",
+      "targets": ["openos-arch-syntax-check"]
+    },
+    {
+      "name": "clean",
+      "configurePreset": "ninja-i386",
+      "targets": ["openos-clean"]
+    }
+  ]
+}

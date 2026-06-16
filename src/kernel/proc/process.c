@@ -703,7 +703,7 @@ uint32_t sys_fork(void) {
         dst_stack[i] = src_stack[i];
 
     thread_t *child_thread = thread_create(child->pid, child->name,
-                                           cur->kernel_eip, child_stack);
+                                           cur->kernel_ip, child_stack);
     if (!child_thread) {
         pmm_free_page(child_stack_page);
         proc_free_cloned_address_space(child_pgd);
@@ -714,11 +714,11 @@ uint32_t sys_fork(void) {
     /* 子线程的栈帧从父线程复制,但 EAX=0 (fork 返回 0) */
     /* 栈帧偏移: GS FS ES DS EDI ESI EBP ESP_skip EBX EDX ECX EAX EIP CS EFLAGS */
     /* EAX 是第 12 个 DWORD (从栈顶往下) */
-    uint32_t *child_sp = (uint32_t *)child_thread->kernel_esp;
-    /* 从 kernel_esp 往下找 EAX 的位置:
+    uint32_t *child_sp = (uint32_t *)child_thread->kernel_sp;
+    /* 从 kernel_sp 往下找 EAX 的位置:
      * push GS, FS, ES, DS = 4
      * pusha: EDI, ESI, EBP, ESP(skip), EBX, EDX, ECX, EAX = 8
-     * 共 12 个 DWORD,EAX 在 kernel_esp[8] 位置 (0-indexed: GS=0,FS=1,ES=2,DS=3,EDI=4,ESI=5,EBP=6,ESP=7,EBX=8,EDX=9,ECX=10,EAX=11)
+     * 共 12 个 DWORD,EAX 在 kernel_sp[8] 位置 (0-indexed: GS=0,FS=1,ES=2,DS=3,EDI=4,ESI=5,EBP=6,ESP=7,EBX=8,EDX=9,ECX=10,EAX=11)
      */
     child_sp[8] = 0;  /* EBX */
     child_sp[10] = 0; /* ECX */

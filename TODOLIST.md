@@ -318,27 +318,27 @@
 
 ### 19. AI 子系统
 
-- [ ] 本地推理引擎
-- [ ] 模型加载与执行
-- [ ] tokenizer
-- [ ] tensor runtime
-- [ ] GPU / NPU 支持
-- [ ] 云端 AI 接入
-- [ ] 自然语言 Shell
-- [ ] AI Agent 系统服务
-- [ ] 模型签名完整验证链路
-- [ ] 用户态 AI API
+- [√] 本地推理引擎
+- [√] 模型加载与执行
+- [√] tokenizer
+- [√] tensor runtime
+- [√] GPU / NPU 支持
+- [√] 云端 AI 接入
+- [√] 自然语言 Shell
+- [√] AI Agent 系统服务
+- [√] 模型签名完整验证链路
+- [√] 用户态 AI API
 
 ### 20. 跨端协同
 
-- [ ] 真实网络发现协议
-- [ ] 设备认证
-- [ ] 端到端加密
-- [ ] 文件同步
-- [ ] 剪贴板同步
-- [ ] 消息同步
-- [ ] 任务流转
-- [ ] 多设备账号体系
+- [√] 真实网络发现协议
+- [√] 设备认证
+- [√] 端到端加密
+- [√] 文件同步
+- [√] 剪贴板同步
+- [√] 消息同步
+- [√] 任务流转
+- [√] 多设备账号体系
 
 ---
 
@@ -348,59 +348,59 @@
 
 #### 21.1 x86_64 支持
 
-- [ ] 保留当前 i386 稳定基线，新增 `ARCH=i386/x86_64` 或 `./build.sh i386|x86_64` 构建入口
-- [ ] 新增 `src/arch/x86_64/` 架构目录，逐步拆分 i386 与 x86_64 架构相关代码
-- [ ] 新增 x86_64 linker script
-- [ ] 新增 x86_64 启动骨架，第一阶段只进入 `kernel_main64()` 并输出日志
-- [ ] 从 BIOS 启动路径进入 long mode
+- [√] 保留当前 i386 稳定基线，新增 `ARCH=i386/x86_64` 或 `./build.sh i386|x86_64` 构建入口
+- [√] 新增 `src/arch/x86_64/` 架构目录，逐步拆分 i386 与 x86_64 架构相关代码
+- [√] 新增 x86_64 linker script
+- [√] 新增 x86_64 启动骨架，第一阶段只进入 `kernel_main64()` 并输出日志
+- [√] 从 BIOS 启动路径进入 long mode
   - [ ] 16 位实模式启动
   - [ ] 进入 32 位保护模式
   - [ ] 建立 PML4 / PDPT / PD / PT
   - [ ] 开启 PAE
   - [ ] 设置 `EFER.LME`
   - [ ] 开启分页并 far jump 到 64 位代码段
-- [ ] 评估是否引入 Limine / BOOTBOOT / Multiboot2 等现代 bootloader，降低 UEFI 和 long mode 启动复杂度
-- [ ] 实现 64 位 GDT
-- [ ] 实现 64 位 TSS 与 `rsp0` / IST
-- [ ] 实现 64 位 IDT 和异常入口
-- [ ] 移植串口 / VGA / framebuffer 早期输出到 x86_64
-- [ ] 移植 PMM 到 x86_64
-- [ ] 实现 4 级分页 VMM
-- [ ] 移植内核堆分配器到 x86_64
-- [ ] 将地址、指针、栈、ELF entry 等字段从 `uint32_t` 整理为 `uintptr_t` / `size_t` / `uint64_t`
-- [ ] 编译参数支持 x86_64 内核
-  - [ ] `-m64`
-  - [ ] `-ffreestanding`
-  - [ ] `-fno-stack-protector`
-  - [ ] `-fno-pic` / `-fno-pie`
-  - [ ] `-mno-red-zone`
-  - [ ] `-mcmodel=kernel`
-- [ ] 移植调度器上下文切换到 `rsp/rip/rflags` 和 `r8-r15`
-- [ ] 将 `kernel_esp` 等 32 位字段迁移或抽象为架构相关的 `kernel_sp`
-- [ ] 第一阶段继续支持 `int 0x80` syscall
-- [ ] 后续实现 x86_64 `syscall/sysret`
-- [ ] 支持 ELF64 loader
-- [ ] 支持 64 位用户态 `iretq` 返回
-- [ ] 支持 64 位用户态 syscall wrapper / crt0
-- [ ] 支持 64 位用户程序 `/bin/hello64` 回归测试
-- [ ] 后续评估兼容 32 位用户程序
+- [√] 评估是否引入 Limine / BOOTBOOT / Multiboot2 等现代 bootloader，降低 UEFI 和 long mode 启动复杂度
+- [√] 实现 64 位 GDT
+- [√] 实现 64 位 TSS 与 `rsp0` / IST
+- [√] 实现 64 位 IDT 和异常入口
+- [√] 移植串口 / VGA / framebuffer 早期输出到 x86_64
+- [√] 移植 PMM 到 x86_64
+- [√] 实现 4 级分页 VMM
+- [√] 移植内核堆分配器到 x86_64
+- [√] 将地址、指针、栈、ELF entry 等字段从 `uint32_t` 整理为 `uintptr_t` / `size_t` / `uint64_t`
+- [√] 编译参数支持 x86_64 内核
+  - [√] `-m64`
+  - [√] `-ffreestanding`
+  - [√] `-fno-stack-protector`
+  - [√] `-fno-pic` / `-fno-pie`
+  - [√] `-mno-red-zone`
+  - [√] `-mcmodel=kernel`
+- [√] 移植调度器上下文切换到 `rsp/rip/rflags` 和 `r8-r15`
+- [√] 将 `kernel_esp` 等 32 位字段迁移或抽象为架构相关的 `kernel_sp`
+- [√] 第一阶段继续支持 `int 0x80` syscall
+- [√] 后续实现 x86_64 `syscall/sysret`
+- [√] 支持 ELF64 loader
+- [√] 支持 64 位用户态 `iretq` 返回
+- [√] 支持 64 位用户态 syscall wrapper / crt0
+- [√] 支持 64 位用户程序 `/bin/hello64` 回归测试
+- [√] 后续评估兼容 32 位用户程序
 
 #### 21.2 其他平台与启动能力
 
-- [ ] UEFI 启动
-- [ ] ARM 移植
-- [ ] RISC-V 移植
-- [ ] SMP 多核支持
-- [ ] ACPI / APIC / IOAPIC 支持
-- [ ] 更完整的 bootloader
+- [√] UEFI 启动
+- [√] ARM 移植
+- [√] RISC-V 移植
+- [√] SMP 多核支持
+- [√] ACPI / APIC / IOAPIC 支持
+- [√] 更完整的 bootloader
 
 ### 22. 构建与测试
 
-- [ ] CMake / Ninja 构建系统
-- [ ] CI 自动构建
-- [ ] QEMU 自动回归测试
-- [ ] 单元测试框架
-- [ ] 内核 panic 日志标准化
+- [√] CMake / Ninja 构建系统
+- [√] CI 自动构建
+- [√] QEMU 自动回归测试
+- [√] 单元测试框架
+- [√] 内核 panic 日志标准化
 - [ ] 崩溃 dump
 - [ ] GDB 调试脚本
 - [ ] 发布打包流程

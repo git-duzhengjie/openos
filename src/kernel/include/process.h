@@ -67,8 +67,8 @@ typedef struct thread {
     uint8_t is_user_thread;   /* 是否为 pthread 风格用户线程 */
 
     /* 上下文 (内核栈) */
-    uint32_t kernel_esp;      /* 内核栈指针 */
-    uint32_t kernel_eip;      /* 恢复执行点 */
+    uint32_t kernel_sp;      /* 内核栈指针 */
+    uint32_t kernel_ip;      /* 恢复执行点 */
     uint32_t kernel_stack;    /* 内核栈基址 */
     uint32_t kernel_stack_top;
 

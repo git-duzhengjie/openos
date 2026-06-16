@@ -108,6 +108,7 @@
 #define SYS_CAPSET       311
 #define SYS_SANDBOX_GET  312
 #define SYS_SANDBOX_SET  313
+#define SYS_AI_REQUEST   314
 
 #define OPENOS_CAP_SETUID    (1u << 0)
 #define OPENOS_CAP_SETGID    (1u << 1)
@@ -166,6 +167,13 @@ typedef struct openos_group {
     unsigned int gid;
     char name[32];
 } openos_group_t;
+
+typedef struct openos_ai_request {
+    const char *prompt;
+    char *response;
+    unsigned int response_len;
+    unsigned int flags;
+} openos_ai_request_t;
 
 #define OPENOS_FW_OP_GET    0u
 #define OPENOS_FW_OP_ADD    1u
@@ -2290,6 +2298,22 @@ static inline void openos_fail(int code, const char *msg)
 {
     openos_write_str(msg);
     openos_exit(code);
+}
+
+static inline int openos_ai_request(const char *prompt, char *response, unsigned int response_len)
+{
+    openos_ai_request_t req;
+
+    if (!prompt || !response || response_len == 0) {
+        openos_set_errno(OPENOS_EINVAL);
+        return -1;
+    }
+
+    req.prompt = prompt;
+    req.response = response;
+    req.response_len = response_len;
+    req.flags = 0;
+    return openos_syscall_result(openos_syscall1(SYS_AI_REQUEST, (int)&req));
 }
 
 

@@ -111,6 +111,7 @@
 #define SYS_CAPSET       311
 #define SYS_SANDBOX_GET  312
 #define SYS_SANDBOX_SET  313
+#define SYS_AI_REQUEST   314
 
 #define OPENOS_CAP_SETUID    (1u << 0)
 #define OPENOS_CAP_SETGID    (1u << 1)
@@ -130,6 +131,13 @@ typedef struct openos_pollfd {
     short events;
     short revents;
 } openos_pollfd_t;
+
+typedef struct openos_ai_request {
+    const char *prompt;
+    char *response;
+    uint32_t response_len;
+    uint32_t flags;
+} openos_ai_request_t;
 
 typedef struct openos_stat {
     uint32_t ino;

@@ -20,6 +20,7 @@
 #include "../net/discovery.h"
 #include "../net/sync.h"
 #include "../net/bus.h"
+#include "../net/account.h"
 #include "ai.h"
 #include "devmgr.h"
 #include "framebuffer.h"
@@ -293,6 +294,8 @@ static const char *builtin_commands[] = {
     "ping_self",
     "ai_info",
     "ai_ask",
+    "ask",
+    "ai",
     "ai_backend",
     "ai_models",
     "ai_model_load",
@@ -300,6 +303,7 @@ static const char *builtin_commands[] = {
     "ai_repo",
     "ai_trust",
     "ai_ed25519",
+    "ai_agent",
     "ai_model_register",
     "ai_model_scan",
     "jobs",
@@ -2559,6 +2563,8 @@ static void cmd_help(void)
     print("  ping_self       - Send ICMP echo to loopback network device\n");
     print("  ai_info         - Show AI engine status\n");
     print("  ai_ask <text>   - Ask AI engine with current backend\n");
+    print("  ask <text>      - Natural language shell assistant\n");
+    print("  ai <text>       - Alias of ask for natural language input\n");
     print("  ai_backend [local|cloud|hybrid] - Show or set AI backend\n");
     print("  ai_models       - List AI models\n");
     print("  ai_model_load <name> - Load and select AI model\n");
@@ -2566,6 +2572,7 @@ static void cmd_help(void)
     print("  ai_repo [path]  - Show or set AI model repository\n");
     print("  ai_trust [path|load <keyfile>] - Show/set trust root or load trusted key\n");
     print("  ai_ed25519 [selftest|verify_sha256 <pub> <sha256> <sig>] - Test/verify Ed25519\n");
+    print("  ai_agent [status|start|stop|run <text>] - AI agent service\n");
     print("  ai_model_register <manifest> - Register model manifest\n");
     print("  ai_model_scan   - Scan repository and register manifests\n");
     print("  devices         - List registered kernel devices\n");
@@ -3252,6 +3259,38 @@ void shell_run(void)
                         print_err("usage: sync [info|items|tasks|reliable|put <k> <v>|del <k>|push <k>|push_all|offer <id> <title> <payload> [target]|accept <id>|done <id> <result>]\n");
                     }
                 }
+                else if (shell_cmd_equals(cmd, "account"))
+                {
+                    if (argc < 2 || shell_cmd_equals(argv[1], "info"))
+                    {
+                        account_print_info();
+                    }
+                    else if (shell_cmd_equals(argv[1], "set"))
+                    {
+                        if (argc < 5 || account_configure(argv[2], argv[3], argv[4]) < 0)
+                            print_err("usage: account set <id> <name> <pairing-code>\n");
+                        else
+                            print("account: configured and E2E key updated\n");
+                    }
+                    else if (shell_cmd_equals(argv[1], "pair"))
+                    {
+                        if (argc < 3 || account_set_pairing_code(argv[2]) < 0)
+                            print_err("usage: account pair <pairing-code>\n");
+                        else
+                            print("account: pairing code updated\n");
+                    }
+                    else if (shell_cmd_equals(argv[1], "rotate"))
+                    {
+                        if (account_rotate_key() < 0)
+                            print_err("account: rotate failed\n");
+                        else
+                            print("account: E2E key rotated\n");
+                    }
+                    else
+                    {
+                        print_err("usage: account [info|set <id> <name> <code>|pair <code>|rotate]\n");
+                    }
+                }
                 else if (shell_cmd_equals(cmd, "bus"))
                 {
                     if (argc < 2 || strcmp(argv[1], "info") == 0)
@@ -3326,11 +3365,11 @@ void shell_run(void)
                         }
                     }
                 }
-                else if (shell_cmd_equals(cmd, "ai_ask"))
+                else if (shell_cmd_equals(cmd, "ai_ask") || shell_cmd_equals(cmd, "ask") || shell_cmd_equals(cmd, "ai"))
                 {
                     if (argc < 2)
                     {
-                        print_err("ai_ask: missing prompt\n");
+                        print_err("ask: missing prompt\n");
                     }
                     else
                     {
@@ -3359,7 +3398,7 @@ void shell_run(void)
 
                         if (ai_generate(&request, &response) < 0)
                         {
-                            print_err("ai_ask: failed\n");
+                            print_err("ask: failed\n");
                         }
                         else
                         {
@@ -3480,6 +3519,84 @@ void shell_run(void)
                     else
                     {
                         print_err("usage: ai_ed25519 [selftest|verify_sha256 <public_key_hex> <sha256_hex> <signature_hex>]\n");
+                    }
+                }
+                else if (shell_cmd_equals(cmd, "ai_agent"))
+                {
+                    if (argc < 2 || strcmp(argv[1], "status") == 0)
+                    {
+                        ai_print_agent();
+                    }
+                    else if (strcmp(argv[1], "start") == 0)
+                    {
+                        if (ai_agent_start() < 0)
+                            print_err("ai_agent: start failed\n");
+                        else
+                            print("ai_agent: started\n");
+                    }
+                    else if (strcmp(argv[1], "stop") == 0)
+                    {
+                        if (ai_agent_stop() < 0)
+                            print_err("ai_agent: stop failed\n");
+                        else
+                            print("ai_agent: stopped\n");
+                    }
+                    else if (strcmp(argv[1], "run") == 0)
+                    {
+                        char prompt[AI_PROMPT_MAX];
+                        int pos = 0;
+                        int i;
+                        uint32_t task_id = 0;
+                        int status;
+                        const ai_agent_task_t *task;
+
+                        if (argc < 3)
+                        {
+                            print_err("usage: ai_agent run <text>\n");
+                        }
+                        else
+                        {
+                            prompt[0] = '\0';
+                            for (i = 2; i < argc; i++)
+                            {
+                                int j = 0;
+                                if (i > 2 && pos < AI_PROMPT_MAX - 1)
+                                    prompt[pos++] = ' ';
+                                while (argv[i][j] && pos < AI_PROMPT_MAX - 1)
+                                    prompt[pos++] = argv[i][j++];
+                            }
+                            prompt[pos] = '\0';
+
+                            if (!ai_agent_is_running())
+                                ai_agent_start();
+
+                            status = ai_agent_submit(prompt, &task_id);
+                            if (status < 0)
+                            {
+                                print_err("ai_agent: submit failed\n");
+                            }
+                            else
+                            {
+                                status = ai_agent_step();
+                                task = ai_agent_task_get(task_id);
+                                if (status < 0 || !task)
+                                {
+                                    print_err("ai_agent: run failed\n");
+                                }
+                                else
+                                {
+                                    print("ai_agent task ");
+                                    shell_print_dec((int)task_id);
+                                    print(": ");
+                                    print(task->response.text);
+                                    print("\n");
+                                }
+                            }
+                        }
+                    }
+                    else
+                    {
+                        print_err("usage: ai_agent [status|start|stop|run <text>]\n");
                     }
                 }
                 else if (shell_cmd_equals(cmd, "ai_model_register"))

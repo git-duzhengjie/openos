@@ -3,6 +3,19 @@
 #include "string.h"
 #include "../fs/vfs.h"
 
+#define AI_LOCAL_TOKEN_MAX 32
+#define AI_LOCAL_TOKEN_TEXT_MAX 24
+#define AI_LOCAL_TENSOR_DIMS 8
+
+#define AI_LOCAL_DIM_TOKENS 0
+#define AI_LOCAL_DIM_WORD_CHARS 1
+#define AI_LOCAL_DIM_SYSTEM 2
+#define AI_LOCAL_DIM_CODE 3
+#define AI_LOCAL_DIM_SUMMARY 4
+#define AI_LOCAL_DIM_QUESTION 5
+#define AI_LOCAL_DIM_PATH 6
+#define AI_LOCAL_DIM_CONTEXT_LIMIT 7
+
 #ifndef NULL
 #define NULL ((void *)0)
 #endif
@@ -22,7 +35,40 @@ static uint32_t g_ai_ed25519_positive_vectors = 0;
 static uint32_t g_ai_ed25519_negative_vectors = 0;
 static int g_ai_ed25519_selftest_last_status = AI_STATUS_UNSUPPORTED;
 static uint32_t g_ai_ed25519_malformed_vectors = 0;
+static ai_accel_device_info_t g_ai_accel_devices[AI_MAX_ACCEL_DEVICES];
+static uint32_t g_ai_accel_count = 0;
+static int g_ai_current_accel = -1;
+static ai_cloud_provider_info_t g_ai_cloud_providers[AI_MAX_CLOUD_PROVIDERS];
+static uint32_t g_ai_cloud_provider_count = 0;
+static int g_ai_current_cloud_provider = -1;
+static ai_agent_state_t g_ai_agent_state = AI_AGENT_STOPPED;
+static ai_agent_task_t g_ai_agent_tasks[AI_MAX_AGENT_TASKS];
+static uint32_t g_ai_agent_submitted = 0;
+static uint32_t g_ai_agent_completed = 0;
+static uint32_t g_ai_agent_next_task_id = 1;
 
+
+static void ai_serial_write_dec(uint32_t value)
+{
+    char buf[12];
+    int pos = 0;
+    int i;
+
+    if (value == 0)
+    {
+        serial_putc('0');
+        return;
+    }
+
+    while (value > 0 && pos < (int)(sizeof(buf) - 1))
+    {
+        buf[pos++] = (char)('0' + (value % 10));
+        value /= 10;
+    }
+
+    for (i = pos - 1; i >= 0; i--)
+        serial_putc(buf[i]);
+}
 
 static void ai_copy(char *dst, const char *src, uint32_t max_len)
 {
@@ -71,6 +117,152 @@ static uint32_t ai_estimate_tokens(const char *text)
 
     len = (uint32_t)strlen(text);
     return (len / 4) + 1;
+}
+
+static int ai_streq(const char *a, const char *b)
+{
+    if (!a || !b)
+        return 0;
+    return strcmp(a, b) == 0;
+}
+
+static void ai_accel_reset(void)
+{
+    uint32_t i;
+
+    for (i = 0; i < AI_MAX_ACCEL_DEVICES; i++)
+    {
+        g_ai_accel_devices[i].name[0] = '\0';
+        g_ai_accel_devices[i].type = AI_ACCEL_CPU;
+        g_ai_accel_devices[i].available = 0;
+        g_ai_accel_devices[i].builtin = 0;
+        g_ai_accel_devices[i].memory_kb = 0;
+        g_ai_accel_devices[i].max_tensor_dims = 0;
+        g_ai_accel_devices[i].preferred = 0;
+    }
+
+    g_ai_accel_count = 0;
+    g_ai_current_accel = -1;
+}
+
+static int ai_accel_find_index(const char *name)
+{
+    uint32_t i;
+
+    if (!name)
+        return -1;
+
+    for (i = 0; i < g_ai_accel_count; i++)
+    {
+        if (ai_streq(g_ai_accel_devices[i].name, name))
+            return (int)i;
+    }
+
+    return -1;
+}
+
+static void ai_accel_init_builtin(void)
+{
+    ai_accel_device_info_t cpu;
+
+    ai_accel_reset();
+
+    cpu.name[0] = '\0';
+    ai_copy(cpu.name, "cpu-tensor-runtime", AI_ACCEL_NAME_MAX);
+    cpu.type = AI_ACCEL_CPU;
+    cpu.available = 1;
+    cpu.builtin = 1;
+    cpu.memory_kb = 0;
+    cpu.max_tensor_dims = AI_LOCAL_TENSOR_DIMS;
+    cpu.preferred = 1;
+
+    ai_accel_register(&cpu);
+}
+
+static void ai_cloud_provider_reset(void)
+{
+    uint32_t i;
+
+    for (i = 0; i < AI_MAX_CLOUD_PROVIDERS; i++)
+    {
+        g_ai_cloud_providers[i].name[0] = '\0';
+        g_ai_cloud_providers[i].endpoint[0] = '\0';
+        g_ai_cloud_providers[i].api_key_ref[0] = '\0';
+        g_ai_cloud_providers[i].enabled = 0;
+        g_ai_cloud_providers[i].require_tls = 1;
+        g_ai_cloud_providers[i].builtin = 0;
+    }
+
+    g_ai_cloud_provider_count = 0;
+    g_ai_current_cloud_provider = -1;
+}
+
+static int ai_cloud_provider_find_index(const char *name)
+{
+    uint32_t i;
+
+    if (!name)
+        return -1;
+
+    for (i = 0; i < g_ai_cloud_provider_count; i++)
+    {
+        if (ai_streq(g_ai_cloud_providers[i].name, name))
+            return (int)i;
+    }
+
+    return -1;
+}
+
+static void ai_cloud_provider_init_builtin(void)
+{
+    ai_cloud_provider_reset();
+}
+
+static void ai_agent_reset(void)
+{
+    uint32_t i;
+
+    g_ai_agent_state = AI_AGENT_STOPPED;
+    g_ai_agent_submitted = 0;
+    g_ai_agent_completed = 0;
+    g_ai_agent_next_task_id = 1;
+
+    for (i = 0; i < AI_MAX_AGENT_TASKS; i++)
+    {
+        g_ai_agent_tasks[i].id = 0;
+        g_ai_agent_tasks[i].prompt[0] = '\0';
+        memset(&g_ai_agent_tasks[i].response, 0, sizeof(ai_response_t));
+        g_ai_agent_tasks[i].pending = 0;
+        g_ai_agent_tasks[i].completed = 0;
+        g_ai_agent_tasks[i].status = AI_STATUS_OK;
+    }
+}
+
+static int ai_agent_pending_count(void)
+{
+    uint32_t i;
+    uint32_t count = 0;
+
+    for (i = 0; i < AI_MAX_AGENT_TASKS; i++)
+    {
+        if (g_ai_agent_tasks[i].pending)
+            count++;
+    }
+
+    return (int)count;
+}
+
+static ai_agent_task_t *ai_agent_find_task(uint32_t task_id)
+{
+    uint32_t i;
+
+    for (i = 0; i < AI_MAX_AGENT_TASKS; i++)
+    {
+        if (g_ai_agent_tasks[i].id == task_id)
+            return &g_ai_agent_tasks[i];
+    }
+
+    return NULL;
 }
 
 
@@ -2102,6 +2294,33 @@ static int ai_model_verify_security(const ai_model_info_t *model, const char *so
     return AI_STATUS_OK;
 }
 
+static void ai_model_update_security_state(ai_model_info_t *model, const char *source)
+{
+    int status;
+
+    if (!model)
+        return;
+
+    status = ai_model_verify_security(model, source);
+    model->security_checked = 1;
+    model->security_status = status;
+}
+
+static const char *ai_model_security_state_name(const ai_model_info_t *model)
+{
+    if (!model || !model->security_checked)
+        return "unchecked";
+    if (model->security_status < 0)
+        return "failed";
+    if (model->signature[0])
+        return "signed";
+    if (model->sha256[0])
+        return "hash-verified";
+    if (model->builtin)
+        return "builtin";
+    return "unsigned";
+}
+
 static int ai_manifest_set_field(ai_model_info_t *model, const char *key, const char *value, const char *source, uint32_t line_no)
 {
     ai_backend_type_t backend;
@@ -2223,6 +2442,259 @@ static const ai_model_info_t *ai_select_model(ai_backend_type_t backend, const c
         return &g_models[g_current_model[backend_idx]];
 
     return NULL;
+}
+
+const char *ai_accel_type_name(ai_accel_type_t type)
+{
+    switch (type)
+    {
+    case AI_ACCEL_CPU:
+        return "cpu";
+    case AI_ACCEL_GPU:
+        return "gpu";
+    case AI_ACCEL_NPU:
+        return "npu";
+    default:
+        return "unknown";
+    }
+}
+
+int ai_accel_register(const ai_accel_device_info_t *device)
+{
+    int idx;
+    uint32_t slot;
+
+    if (!device || !device->name[0] || device->max_tensor_dims == 0)
+        return AI_STATUS_INVALID_ARGUMENT;
+
+    if (device->type != AI_ACCEL_CPU && device->type != AI_ACCEL_GPU && device->type != AI_ACCEL_NPU)
+        return AI_STATUS_INVALID_ARGUMENT;
+
+    idx = ai_accel_find_index(device->name);
+    if (idx >= 0)
+        slot = (uint32_t)idx;
+    else
+    {
+        if (g_ai_accel_count >= AI_MAX_ACCEL_DEVICES)
+            return AI_STATUS_NO_SPACE;
+        slot = g_ai_accel_count++;
+    }
+
+    g_ai_accel_devices[slot] = *device;
+    if (!g_ai_accel_devices[slot].available)
+        g_ai_accel_devices[slot].preferred = 0;
+
+    if (g_ai_current_accel < 0 || g_ai_accel_devices[slot].preferred)
+    {
+        if (g_ai_accel_devices[slot].available)
+            g_ai_current_accel = (int)slot;
+    }
+
+    return AI_STATUS_OK;
+}
+
+int ai_accel_count(void)
+{
+    return (int)g_ai_accel_count;
+}
+
+const ai_accel_device_info_t *ai_accel_get(uint32_t index)
+{
+    if (index >= g_ai_accel_count)
+        return NULL;
+    return &g_ai_accel_devices[index];
+}
+
+const ai_accel_device_info_t *ai_accel_current(void)
+{
+    if (g_ai_current_accel < 0 || (uint32_t)g_ai_current_accel >= g_ai_accel_count)
+        return NULL;
+    return &g_ai_accel_devices[g_ai_current_accel];
+}
+
+int ai_accel_select(const char *name)
+{
+    int idx;
+
+    idx = ai_accel_find_index(name);
+    if (idx < 0)
+        return AI_STATUS_NOT_FOUND;
+    if (!g_ai_accel_devices[idx].available)
+        return AI_STATUS_BACKEND_UNAVAILABLE;
+
+    g_ai_current_accel = idx;
+    return AI_STATUS_OK;
+}
+
+int ai_cloud_provider_register(const ai_cloud_provider_info_t *provider)
+{
+    int idx;
+    uint32_t slot;
+
+    if (!provider || !provider->name[0] || !provider->endpoint[0])
+        return AI_STATUS_INVALID_ARGUMENT;
+
+    idx = ai_cloud_provider_find_index(provider->name);
+    if (idx >= 0)
+        slot = (uint32_t)idx;
+    else
+    {
+        if (g_ai_cloud_provider_count >= AI_MAX_CLOUD_PROVIDERS)
+            return AI_STATUS_NO_SPACE;
+        slot = g_ai_cloud_provider_count++;
+    }
+
+    g_ai_cloud_providers[slot] = *provider;
+    if (g_ai_current_cloud_provider < 0 && provider->enabled)
+        g_ai_current_cloud_provider = (int)slot;
+
+    return AI_STATUS_OK;
+}
+
+int ai_cloud_provider_count(void)
+{
+    return (int)g_ai_cloud_provider_count;
+}
+
+const ai_cloud_provider_info_t *ai_cloud_provider_get(uint32_t index)
+{
+    if (index >= g_ai_cloud_provider_count)
+        return NULL;
+    return &g_ai_cloud_providers[index];
+}
+
+const ai_cloud_provider_info_t *ai_cloud_provider_current(void)
+{
+    if (g_ai_current_cloud_provider < 0 ||
+        (uint32_t)g_ai_current_cloud_provider >= g_ai_cloud_provider_count)
+        return NULL;
+    return &g_ai_cloud_providers[g_ai_current_cloud_provider];
+}
+
+int ai_cloud_provider_select(const char *name)
+{
+    int idx;
+
+    idx = ai_cloud_provider_find_index(name);
+    if (idx < 0)
+        return AI_STATUS_NOT_FOUND;
+    if (!g_ai_cloud_providers[idx].enabled)
+        return AI_STATUS_BACKEND_UNAVAILABLE;
+
+    g_ai_current_cloud_provider = idx;
+    return AI_STATUS_OK;
+}
+
+int ai_agent_start(void)
+{
+    if (!g_ai_initialized)
+        return AI_STATUS_NOT_INITIALIZED;
+    g_ai_agent_state = AI_AGENT_RUNNING;
+    return AI_STATUS_OK;
+}
+
+int ai_agent_stop(void)
+{
+    if (!g_ai_initialized)
+        return AI_STATUS_NOT_INITIALIZED;
+    g_ai_agent_state = AI_AGENT_STOPPED;
+    return AI_STATUS_OK;
+}
+
+int ai_agent_is_running(void)
+{
+    return g_ai_agent_state == AI_AGENT_RUNNING;
+}
+
+int ai_agent_submit(const char *prompt, uint32_t *task_id)
+{
+    uint32_t i;
+    ai_agent_task_t *slot = NULL;
+
+    if (!g_ai_initialized)
+        return AI_STATUS_NOT_INITIALIZED;
+    if (!prompt || !prompt[0])
+        return AI_STATUS_INVALID_ARGUMENT;
+
+    for (i = 0; i < AI_MAX_AGENT_TASKS; i++)
+    {
+        if (!g_ai_agent_tasks[i].pending && !g_ai_agent_tasks[i].completed)
+        {
+            slot = &g_ai_agent_tasks[i];
+            break;
+        }
+    }
+
+    if (!slot)
+        return AI_STATUS_NO_SPACE;
+
+    slot->id = g_ai_agent_next_task_id++;
+    ai_copy(slot->prompt, prompt, AI_PROMPT_MAX);
+    memset(&slot->response, 0, sizeof(ai_response_t));
+    slot->pending = 1;
+    slot->completed = 0;
+    slot->status = AI_STATUS_OK;
+    g_ai_agent_submitted++;
+
+    if (task_id)
+        *task_id = slot->id;
+
+    return AI_STATUS_OK;
+}
+
+int ai_agent_step(void)
+{
+    uint32_t i;
+    ai_request_t request;
+    ai_agent_task_t *task = NULL;
+
+    if (!g_ai_initialized)
+        return AI_STATUS_NOT_INITIALIZED;
+    if (g_ai_agent_state != AI_AGENT_RUNNING)
+        return AI_STATUS_BACKEND_UNAVAILABLE;
+
+    for (i = 0; i < AI_MAX_AGENT_TASKS; i++)
+    {
+        if (g_ai_agent_tasks[i].pending)
+        {
+            task = &g_ai_agent_tasks[i];
+            break;
+        }
+    }
+
+    if (!task)
+        return AI_STATUS_NOT_FOUND;
+
+    memset(&request, 0, sizeof(request));
+    request.task_type = AI_TASK_SYSTEM_HELP;
+    request.backend_preference = g_default_backend;
+    request.prompt = task->prompt;
+    request.system_prompt = "You are an OpenOS AI agent service.";
+    request.max_tokens = AI_RESPONSE_MAX;
+
+    task->status = ai_generate(&request, &task->response);
+    task->pending = 0;
+    task->completed = 1;
+    g_ai_agent_completed++;
+    return task->status;
+}
+
+int ai_agent_status(ai_agent_status_t *status)
+{
+    if (!status)
+        return AI_STATUS_INVALID_ARGUMENT;
+
+    status->state = g_ai_agent_state;
+    status->submitted = g_ai_agent_submitted;
+    status->completed = g_ai_agent_completed;
+    status->pending = (uint32_t)ai_agent_pending_count();
+    status->last_task_id = g_ai_agent_next_task_id > 1 ? g_ai_agent_next_task_id - 1 : 0;
+    return AI_STATUS_OK;
+}
+
+const ai_agent_task_t *ai_agent_task_get(uint32_t task_id)
+{
+    return ai_agent_find_task(task_id);
 }
 
 int ai_trust_key_count(void)
@@ -2383,6 +2855,319 @@ static void ai_register_builtin_models(void)
     ai_model_register(&model);
 }
 
+typedef struct ai_local_token {
+    char text[AI_LOCAL_TOKEN_TEXT_MAX];
+    uint32_t len;
+    uint32_t hash;
+} ai_local_token_t;
+
+typedef struct ai_tensor_i32 {
+    int32_t data[AI_LOCAL_TENSOR_DIMS];
+    uint32_t dims;
+} ai_tensor_i32_t;
+
+typedef struct ai_local_runtime_state {
+    ai_local_token_t tokens[AI_LOCAL_TOKEN_MAX];
+    uint32_t token_count;
+    ai_tensor_i32_t features;
+    ai_task_type_t task;
+    const ai_model_info_t *model;
+    uint32_t prompt_tokens;
+    uint32_t output_budget;
+} ai_local_runtime_state_t;
+
+static char ai_ascii_lower(char c)
+{
+    if (c >= 'A' && c <= 'Z')
+        return (char)(c - 'A' + 'a');
+    return c;
+}
+
+static uint32_t ai_token_hash(const char *text)
+{
+    uint32_t hash = 2166136261U;
+
+    if (!text)
+        return 0;
+
+    while (*text)
+    {
+        hash ^= (uint32_t)(uint8_t)ai_ascii_lower(*text);
+        hash *= 16777619U;
+        text++;
+    }
+
+    return hash;
+}
+
+static int ai_token_char(char c)
+{
+    if (c >= 'a' && c <= 'z')
+        return 1;
+    if (c >= 'A' && c <= 'Z')
+        return 1;
+    if (c >= '0' && c <= '9')
+        return 1;
+    return c == '_' || c == '-' || c == '/' || c == '.';
+}
+
+static uint32_t ai_local_tokenize(const char *text, ai_local_token_t *tokens, uint32_t max_tokens)
+{
+    uint32_t count = 0;
+    uint32_t pos;
+
+    if (!text || !tokens || max_tokens == 0)
+        return 0;
+
+    while (*text && count < max_tokens)
+    {
+        while (*text && !ai_token_char(*text))
+            text++;
+        if (!*text)
+            break;
+
+        pos = 0;
+        while (*text && ai_token_char(*text))
+        {
+            if (pos + 1 < AI_LOCAL_TOKEN_TEXT_MAX)
+                tokens[count].text[pos++] = ai_ascii_lower(*text);
+            text++;
+        }
+        tokens[count].text[pos] = '\0';
+        tokens[count].len = pos;
+        tokens[count].hash = ai_token_hash(tokens[count].text);
+        count++;
+    }
+
+    return count;
+}
+
+static int ai_token_equals(const ai_local_token_t *token, const char *keyword)
+{
+    if (!token || !keyword)
+        return 0;
+    return token->hash == ai_token_hash(keyword) && strcmp(token->text, keyword) == 0;
+}
+
+static int ai_tokens_have(const ai_local_runtime_state_t *state, const char *keyword)
+{
+    uint32_t i;
+
+    if (!state || !keyword)
+        return 0;
+
+    for (i = 0; i < state->token_count; i++)
+    {
+        if (ai_token_equals(&state->tokens[i], keyword))
+            return 1;
+    }
+
+    return 0;
+}
+
+static int ai_prompt_has_char(const char *prompt, char c)
+{
+    if (!prompt)
+        return 0;
+    while (*prompt)
+    {
+        if (*prompt == c)
+            return 1;
+        prompt++;
+    }
+    return 0;
+}
+
+static int ai_model_format_supported(ai_backend_type_t backend, const char *format)
+{
+    if (!format || !format[0])
+        return 0;
+
+    if (backend == AI_BACKEND_LOCAL)
+        return strcmp(format, "stub") == 0 || strcmp(format, "rule") == 0 ||
+               strcmp(format, "tiny") == 0 || strcmp(format, "gguf") == 0;
+    if (backend == AI_BACKEND_CLOUD)
+        return strcmp(format, "api") == 0 || strcmp(format, "stub") == 0;
+    if (backend == AI_BACKEND_HYBRID)
+        return strcmp(format, "stub") == 0 || strcmp(format, "rule") == 0 ||
+               strcmp(format, "api") == 0 || strcmp(format, "gguf") == 0;
+
+    return 0;
+}
+
+static void ai_append_u32(char *dst, uint32_t value, uint32_t max_len)
+{
+    char buf[11];
+    uint32_t i = 0;
+
+    if (value == 0)
+    {
+        ai_append(dst, "0", max_len);
+        return;
+    }
+
+    while (value > 0 && i < sizeof(buf))
+    {
+        buf[i++] = (char)('0' + (value % 10U));
+        value /= 10U;
+    }
+
+    while (i > 0)
+    {
+        char one[2];
+        one[0] = buf[--i];
+        one[1] = '\0';
+        ai_append(dst, one, max_len);
+    }
+}
+
+static ai_task_type_t ai_local_detect_task(const ai_request_t *request, const ai_local_runtime_state_t *state)
+{
+    if (request->task_type == AI_TASK_SUMMARIZE || request->task_type == AI_TASK_CODE ||
+        request->task_type == AI_TASK_SYSTEM_HELP)
+        return request->task_type;
+
+    if (ai_tokens_have(state, "summarize") || ai_tokens_have(state, "summary") ||
+        ai_tokens_have(state, "总结") || ai_tokens_have(state, "摘要"))
+        return AI_TASK_SUMMARIZE;
+    if (ai_tokens_have(state, "code") || ai_tokens_have(state, "function") ||
+        ai_tokens_have(state, "bug") || ai_tokens_have(state, "编译"))
+        return AI_TASK_CODE;
+    if (ai_tokens_have(state, "openos") || ai_tokens_have(state, "kernel") ||
+        ai_tokens_have(state, "shell") || ai_tokens_have(state, "系统"))
+        return AI_TASK_SYSTEM_HELP;
+
+    return AI_TASK_CHAT;
+}
+
+static void ai_local_tensor_eval(ai_local_runtime_state_t *state, const ai_request_t *request)
+{
+    uint32_t i;
+    uint32_t word_chars = 0;
+
+    memset(&state->features, 0, sizeof(state->features));
+    state->features.dims = AI_LOCAL_TENSOR_DIMS;
+    for (i = 0; i < state->token_count; i++)
+        word_chars += state->tokens[i].len;
+
+    state->features.data[AI_LOCAL_DIM_TOKENS] = (int32_t)state->token_count;
+    state->features.data[AI_LOCAL_DIM_WORD_CHARS] = (int32_t)word_chars;
+    state->features.data[AI_LOCAL_DIM_SYSTEM] =
+        ai_tokens_have(state, "openos") || ai_tokens_have(state, "kernel") || ai_tokens_have(state, "shell");
+    state->features.data[AI_LOCAL_DIM_CODE] =
+        ai_tokens_have(state, "code") || ai_tokens_have(state, "function") || ai_tokens_have(state, "bug");
+    state->features.data[AI_LOCAL_DIM_SUMMARY] =
+        ai_tokens_have(state, "summarize") || ai_tokens_have(state, "summary");
+    state->features.data[AI_LOCAL_DIM_QUESTION] = ai_prompt_has_char(request->prompt, '?');
+    state->features.data[AI_LOCAL_DIM_PATH] = ai_prompt_has_char(request->prompt, '/');
+    state->features.data[AI_LOCAL_DIM_CONTEXT_LIMIT] =
+        state->model && state->model->context_length > 0 && state->prompt_tokens > state->model->context_length;
+}
+
+static int ai_local_runtime_prepare(const ai_request_t *request, const ai_model_info_t *model, ai_local_runtime_state_t *state)
+{
+    if (!request || !request->prompt || !model || !state)
+        return AI_STATUS_INVALID_ARGUMENT;
+    if (!ai_model_format_supported(model->backend, model->format))
+        return AI_STATUS_UNSUPPORTED;
+
+    memset(state, 0, sizeof(*state));
+    state->model = model;
+    state->prompt_tokens = ai_estimate_tokens(request->prompt);
+    state->output_budget = request->max_tokens ? request->max_tokens : 128;
+    if (model->context_length > 0 && state->output_budget > model->context_length)
+        state->output_budget = model->context_length;
+    state->token_count = ai_local_tokenize(request->prompt, state->tokens, AI_LOCAL_TOKEN_MAX);
+    state->task = ai_local_detect_task(request, state);
+    ai_local_tensor_eval(state, request);
+    return AI_STATUS_OK;
+}
+
+static void ai_local_emit_intro(char *out, const ai_local_runtime_state_t *state)
+{
+    ai_copy(out, "AI(local runtime)[", AI_RESPONSE_MAX);
+    ai_append(out, state->model->name, AI_RESPONSE_MAX);
+    ai_append(out, "] ", AI_RESPONSE_MAX);
+}
+
+static void ai_local_emit_summary(char *out, const ai_request_t *request, const ai_local_runtime_state_t *state)
+{
+    ai_local_emit_intro(out, state);
+    ai_append(out, "摘要：输入包含 ", AI_RESPONSE_MAX);
+    ai_append_u32(out, state->token_count, AI_RESPONSE_MAX);
+    ai_append(out, " 个 token，核心内容是：", AI_RESPONSE_MAX);
+    ai_append(out, request->prompt, AI_RESPONSE_MAX);
+}
+
+static void ai_local_emit_code(char *out, const ai_request_t *request, const ai_local_runtime_state_t *state)
+{
+    ai_local_emit_intro(out, state);
+    ai_append(out, "代码助手建议：先定位最小复现，再检查边界、返回值和构建告警。请求：", AI_RESPONSE_MAX);
+    ai_append(out, request->prompt, AI_RESPONSE_MAX);
+}
+
+static void ai_local_emit_system_help(char *out, const ai_request_t *request, const ai_local_runtime_state_t *state)
+{
+    ai_local_emit_intro(out, state);
+    ai_append(out, "OpenOS 助手：可按 init、driver、fs、proc、sched、user 分层排查。", AI_RESPONSE_MAX);
+    if (state->features.data[AI_LOCAL_DIM_PATH])
+        ai_append(out, " 检测到路径信息，建议同步检查文件引用和构建脚本。", AI_RESPONSE_MAX);
+    ai_append(out, " 问题：", AI_RESPONSE_MAX);
+    ai_append(out, request->prompt, AI_RESPONSE_MAX);
+}
+
+static void ai_local_emit_chat(char *out, const ai_request_t *request, const ai_local_runtime_state_t *state)
+{
+    ai_local_emit_intro(out, state);
+    ai_append(out, "已在本地完成 tokenizer -> tensor runtime -> decoder 执行链路。回复：", AI_RESPONSE_MAX);
+    ai_append(out, request->prompt, AI_RESPONSE_MAX);
+}
+
+static int ai_local_generate(const ai_request_t *request, ai_response_t *response)
+{
+    const ai_model_info_t *model;
+    const ai_accel_device_info_t *accel;
+    ai_local_runtime_state_t state;
+    uint32_t base_latency;
+    int status;
+
+    model = ai_select_model(AI_BACKEND_LOCAL, request->model);
+    if (!model)
+        return AI_STATUS_BACKEND_UNAVAILABLE;
+
+    accel = ai_accel_current();
+    if (!accel || !accel->available)
+        return AI_STATUS_BACKEND_UNAVAILABLE;
+
+    status = ai_local_runtime_prepare(request, model, &state);
+    if (status != AI_STATUS_OK)
+        return status;
+
+    if (state.features.data[AI_LOCAL_DIM_CONTEXT_LIMIT])
+        ai_copy(response->text, "AI(local runtime): prompt exceeds model context window", AI_RESPONSE_MAX);
+    else if (state.task == AI_TASK_SUMMARIZE)
+        ai_local_emit_summary(response->text, request, &state);
+    else if (state.task == AI_TASK_CODE)
+        ai_local_emit_code(response->text, request, &state);
+    else if (state.task == AI_TASK_SYSTEM_HELP)
+        ai_local_emit_system_help(response->text, request, &state);
+    else
+        ai_local_emit_chat(response->text, request, &state);
+
+    response->status = AI_STATUS_OK;
+    response->tokens_used = state.prompt_tokens + ai_estimate_tokens(response->text);
+    if (request->max_tokens && response->tokens_used > request->max_tokens)
+        response->tokens_used = request->max_tokens;
+    response->backend_used = AI_BACKEND_LOCAL;
+    base_latency = 2U;
+    if (accel->type == AI_ACCEL_GPU)
+        base_latency = 1U;
+    else if (accel->type == AI_ACCEL_NPU)
+        base_latency = 0U;
+    response->latency_ms = base_latency + state.token_count;
+    return AI_STATUS_OK;
+}
+
 static int ai_generate_with_prefix(const ai_request_t *request, ai_response_t *response, ai_backend_type_t backend, const char *prefix)
 {
     const ai_model_info_t *model;
@@ -2390,6 +3175,8 @@ static int ai_generate_with_prefix(const ai_request_t *request, ai_response_t *r
     model = ai_select_model(backend, request->model);
     if (!model)
         return AI_STATUS_BACKEND_UNAVAILABLE;
+    if (!ai_model_format_supported(backend, model->format))
+        return AI_STATUS_UNSUPPORTED;
 
     ai_copy(response->text, prefix, AI_RESPONSE_MAX);
     ai_append(response->text, "[", AI_RESPONSE_MAX);
@@ -2399,22 +3186,53 @@ static int ai_generate_with_prefix(const ai_request_t *request, ai_response_t *r
     response->status = AI_STATUS_OK;
     response->tokens_used = ai_estimate_tokens(response->text);
     response->backend_used = backend;
-    response->latency_ms = backend == AI_BACKEND_LOCAL ? 1 : (backend == AI_BACKEND_CLOUD ? 10 : 12);
+    response->latency_ms = backend == AI_BACKEND_CLOUD ? 10 : 12;
     return AI_STATUS_OK;
-}
-
-static int ai_local_generate(const ai_request_t *request, ai_response_t *response)
-{
-    return ai_generate_with_prefix(request, response, AI_BACKEND_LOCAL, "AI(local) ");
 }
 
 static int ai_cloud_generate(const ai_request_t *request, ai_response_t *response)
 {
-    return ai_generate_with_prefix(request, response, AI_BACKEND_CLOUD, "AI(cloud stub) ");
+    const ai_cloud_provider_info_t *provider;
+    const ai_model_info_t *model;
+
+    provider = ai_cloud_provider_current();
+    if (!provider || !provider->enabled)
+        return AI_STATUS_BACKEND_UNAVAILABLE;
+
+    model = ai_select_model(AI_BACKEND_CLOUD, request->model);
+    if (!model)
+        return AI_STATUS_BACKEND_UNAVAILABLE;
+    if (!ai_model_format_supported(AI_BACKEND_CLOUD, model->format))
+        return AI_STATUS_UNSUPPORTED;
+
+    ai_copy(response->text, "AI(cloud connector) [", AI_RESPONSE_MAX);
+    ai_append(response->text, provider->name, AI_RESPONSE_MAX);
+    ai_append(response->text, "/", AI_RESPONSE_MAX);
+    ai_append(response->text, model->name, AI_RESPONSE_MAX);
+    ai_append(response->text, "]: ", AI_RESPONSE_MAX);
+    ai_append(response->text, request->prompt, AI_RESPONSE_MAX);
+    if (provider->require_tls)
+        ai_append(response->text, " (tls-required)", AI_RESPONSE_MAX);
+
+    response->status = AI_STATUS_OK;
+    response->tokens_used = ai_estimate_tokens(response->text);
+    response->backend_used = AI_BACKEND_CLOUD;
+    response->latency_ms = 25U;
+    return AI_STATUS_OK;
 }
 
 static int ai_hybrid_generate(const ai_request_t *request, ai_response_t *response)
 {
+    int status;
+
+    status = ai_local_generate(request, response);
+    if (status == AI_STATUS_OK)
+    {
+        response->backend_used = AI_BACKEND_HYBRID;
+        response->latency_ms += 4;
+        return AI_STATUS_OK;
+    }
+
     return ai_generate_with_prefix(request, response, AI_BACKEND_HYBRID, "AI(hybrid stub) ");
 }
 
@@ -2422,6 +3240,9 @@ void ai_init(void)
 {
     uint32_t i;
 
+    ai_accel_init_builtin();
+    ai_cloud_provider_init_builtin();
+    ai_agent_reset();
     g_default_backend = AI_BACKEND_LOCAL;
     ai_copy(g_ai_repo_path, "/system/models", AI_REPO_PATH_MAX);
     ai_copy(g_ai_trust_root_path, "/system/security/ai-trusted-keys", AI_TRUST_ROOT_PATH_MAX);
@@ -2541,6 +3362,7 @@ static void ai_model_fix_current_after_update(int model_idx, ai_backend_type_t o
 
 int ai_model_register(const ai_model_info_t *model)
 {
+    ai_model_info_t candidate;
     int idx;
     int backend_idx;
     ai_backend_type_t old_backend;
@@ -2548,27 +3370,36 @@ int ai_model_register(const ai_model_info_t *model)
 
     if (!g_ai_initialized || !model || !model->name[0] || !ai_backend_valid(model->backend))
         return AI_STATUS_INVALID_ARGUMENT;
+    if (!ai_model_format_supported(model->backend, model->format))
+        return AI_STATUS_UNSUPPORTED;
+    if (model->backend == AI_BACKEND_LOCAL && model->context_length == 0)
+        return AI_STATUS_INVALID_ARGUMENT;
 
-    idx = ai_model_index_by_name(model->name);
+    candidate = *model;
+    ai_model_update_security_state(&candidate, "<register>");
+    if (candidate.security_status < 0)
+        candidate.loaded = 0;
+
+    idx = ai_model_index_by_name(candidate.name);
     if (idx >= 0)
     {
         old_backend = g_models[idx].backend;
         old_loaded = g_models[idx].loaded;
-        g_models[idx] = *model;
+        g_models[idx] = candidate;
         ai_model_fix_current_after_update(idx, old_backend, old_loaded, &g_models[idx]);
-        return AI_STATUS_OK;
+        return candidate.security_status < 0 ? candidate.security_status : AI_STATUS_OK;
     }
 
     if (g_model_count >= AI_MAX_MODELS)
         return AI_STATUS_NO_SPACE;
 
-    g_models[g_model_count] = *model;
-    backend_idx = ai_backend_index(model->backend);
-    if (backend_idx >= 0 && model->loaded && g_current_model[backend_idx] < 0)
+    g_models[g_model_count] = candidate;
+    backend_idx = ai_backend_index(candidate.backend);
+    if (backend_idx >= 0 && candidate.loaded && g_current_model[backend_idx] < 0)
         g_current_model[backend_idx] = (int)g_model_count;
 
     g_model_count++;
-    return AI_STATUS_OK;
+    return candidate.security_status < 0 ? candidate.security_status : AI_STATUS_OK;
 }
 
 int ai_model_count(void)
@@ -2612,6 +3443,14 @@ int ai_model_load(const char *name)
     idx = ai_model_index_by_name(name);
     if (idx < 0)
         return AI_STATUS_NOT_FOUND;
+    if (!ai_model_format_supported(g_models[idx].backend, g_models[idx].format))
+        return AI_STATUS_UNSUPPORTED;
+    if (g_models[idx].backend == AI_BACKEND_LOCAL && g_models[idx].context_length == 0)
+        return AI_STATUS_INVALID_ARGUMENT;
+
+    ai_model_update_security_state(&g_models[idx], "<load>");
+    if (g_models[idx].security_status < 0)
+        return g_models[idx].security_status;
 
     g_models[idx].loaded = 1;
     backend_idx = ai_backend_index(g_models[idx].backend);
@@ -2959,6 +3798,73 @@ int ai_trust_root_set_path(const char *path)
     return AI_STATUS_OK;
 }
 
+void ai_print_accel(void)
+{
+    uint32_t i;
+    const ai_accel_device_info_t *dev;
+
+    serial_write("AI accelerators:\n");
+    for (i = 0; i < g_ai_accel_count; i++)
+    {
+        dev = &g_ai_accel_devices[i];
+        serial_write("  ");
+        serial_write(dev->name);
+        serial_write(" type=");
+        serial_write(ai_accel_type_name(dev->type));
+        serial_write(dev->available ? " available" : " unavailable");
+        if ((int)i == g_ai_current_accel)
+            serial_write(" current");
+        if (dev->builtin)
+            serial_write(" builtin");
+        serial_write("\n");
+    }
+}
+
+void ai_print_cloud(void)
+{
+    uint32_t i;
+    const ai_cloud_provider_info_t *provider;
+
+    serial_write("AI cloud providers:\n");
+    for (i = 0; i < g_ai_cloud_provider_count; i++)
+    {
+        provider = &g_ai_cloud_providers[i];
+        serial_write("  ");
+        serial_write(provider->name);
+        serial_write(provider->enabled ? " enabled" : " disabled");
+        if ((int)i == g_ai_current_cloud_provider)
+            serial_write(" current");
+        if (provider->require_tls)
+            serial_write(" tls");
+        serial_write(" endpoint=");
+        serial_write(provider->endpoint);
+        serial_write("\n");
+    }
+}
+
+void ai_print_agent(void)
+{
+    ai_agent_status_t status;
+
+    if (ai_agent_status(&status) < 0)
+    {
+        serial_write("AI agent: unavailable\n");
+        return;
+    }
+
+    serial_write("AI agent: ");
+    serial_write(status.state == AI_AGENT_RUNNING ? "running" : "stopped");
+    serial_write(" submitted=");
+    ai_serial_write_dec(status.submitted);
+    serial_write(" completed=");
+    ai_serial_write_dec(status.completed);
+    serial_write(" pending=");
+    ai_serial_write_dec(status.pending);
+    serial_write(" last_task=");
+    ai_serial_write_dec(status.last_task_id);
+    serial_write("\n");
+}
+
 void ai_print_repo(void)
 {
     serial_write("AI model repository:\n");
@@ -3028,6 +3934,8 @@ void ai_print_models(void)
         serial_write(g_models[i].format);
         serial_write(" state=");
         serial_write(g_models[i].loaded ? "loaded" : "unloaded");
+        serial_write(" trust=");
+        serial_write(ai_model_security_state_name(&g_models[i]));
         serial_write(" caps=");
         serial_write(g_models[i].capabilities);
         if (g_models[i].sha256[0])

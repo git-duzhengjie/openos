@@ -16,6 +16,7 @@
 #include "../net/dhcp.h"
 #include "../net/dns.h"
 #include "../net/discovery.h"
+#include "../net/account.h"
 #include "../net/sync.h"
 #include "../net/bus.h"
 #include "ai.h"
@@ -34,6 +35,7 @@
 #include "rtl8139.h"
 #include "acpi.h"
 #include "apic.h"
+#include "smp.h"
 #include "rtc.h"
 #include "power.h"
 #include "vga.h"
@@ -205,6 +207,12 @@
 #define OPENOS_HAS_ECHO 1
 #else
 #define OPENOS_HAS_ECHO 0
+#endif
+#if __has_include("embed_ai.h")
+#include "embed_ai.h"  /* ai user command */
+#define OPENOS_HAS_AI_CMD 1
+#else
+#define OPENOS_HAS_AI_CMD 0
 #endif
 #if __has_include("embed_grep.h")
 #include "embed_grep.h"  /* grep user command */
@@ -631,6 +639,10 @@ void kernel_main(void) {
     apic_init();
     serial_write("[OK] APIC\n");
 
+    /* 初始化 SMP CPU 拓扑 */
+    smp_init();
+    serial_write("[OK] SMP\n");
+
     /* 读取 RTC 启动时间 */
     rtc_init();
     serial_write("[OK] RTC\n");
@@ -668,7 +680,8 @@ void kernel_main(void) {
 
     /* 初始化跨端设备发现协�?*/
     discovery_init();
-    serial_write("[OK] DISCOVERY\n");
+    account_init();
+    serial_write("[OK] DISCOVERY + ACCOUNT\n");
 
     /* 初始化跨端数据同步与任务流转协议 */
     sync_init();
@@ -1012,6 +1025,17 @@ void kernel_main(void) {
     }
 #endif
 
+#if OPENOS_HAS_AI_CMD
+    fd = vfs_open("/bin/ai", O_CREAT | O_RDWR, 0755);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)ai_elf, ai_elf_size);
+        vfs_close(fd);
+        serial_write("[OK] Installed /bin/ai user ELF\n");
+    } else {
+        serial_write("[WARN] Failed to install /bin/ai\n");
+    }
+#endif
+
 #if OPENOS_HAS_GREP
     fd = vfs_open("/bin/grep", O_CREAT | O_RDWR, 0755);
     if (fd >= 0) {
@@ -1297,7 +1321,7 @@ void kernel_main(void) {
      * sched_start() must enter the first thread through iret, and the
      * thread's initial EFLAGS (IF=1) will enable interrupts safely.
      * If sti runs too early, timer ISR may save the bootstrap stack into
-     * idle->kernel_esp and later context switches can restore a bad stack.
+     * idle->kernel_sp and later context switches can restore a bad stack.
      */
 
     /* 测试用户态切换已通过 Phase 2 验证，不再自动测�?*/

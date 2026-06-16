@@ -25,6 +25,14 @@
 #define AI_MAX_TRUSTED_KEYS 8
 #define AI_ED25519_PUBLIC_KEY_HEX_LEN 64
 #define AI_ED25519_SIGNATURE_HEX_LEN 128
+#define AI_ACCEL_NAME_MAX 32
+#define AI_MAX_ACCEL_DEVICES 4
+#define AI_CLOUD_PROVIDER_NAME_MAX 32
+#define AI_CLOUD_ENDPOINT_MAX 128
+#define AI_CLOUD_API_KEY_REF_MAX 64
+#define AI_MAX_CLOUD_PROVIDERS 4
+#define AI_AGENT_NAME_MAX 32
+#define AI_MAX_AGENT_TASKS 4
 
 typedef enum ai_task_type {
     AI_TASK_CHAT = 0,
@@ -39,6 +47,17 @@ typedef enum ai_backend_type {
     AI_BACKEND_HYBRID
 } ai_backend_type_t;
 
+typedef enum ai_accel_type {
+    AI_ACCEL_CPU = 0,
+    AI_ACCEL_GPU,
+    AI_ACCEL_NPU
+} ai_accel_type_t;
+
+typedef enum ai_agent_state {
+    AI_AGENT_STOPPED = 0,
+    AI_AGENT_RUNNING
+} ai_agent_state_t;
+
 typedef enum ai_status {
     AI_STATUS_OK = 0,
     AI_STATUS_NOT_INITIALIZED = -1,
@@ -52,6 +71,25 @@ typedef enum ai_status {
     AI_STATUS_UNSUPPORTED = -9
 } ai_status_t;
 
+typedef struct ai_accel_device_info {
+    char name[AI_ACCEL_NAME_MAX];
+    ai_accel_type_t type;
+    uint32_t available;
+    uint32_t builtin;
+    uint32_t memory_kb;
+    uint32_t max_tensor_dims;
+    uint32_t preferred;
+} ai_accel_device_info_t;
+
+typedef struct ai_cloud_provider_info {
+    char name[AI_CLOUD_PROVIDER_NAME_MAX];
+    char endpoint[AI_CLOUD_ENDPOINT_MAX];
+    char api_key_ref[AI_CLOUD_API_KEY_REF_MAX];
+    uint32_t enabled;
+    uint32_t require_tls;
+    uint32_t builtin;
+} ai_cloud_provider_info_t;
+
 typedef struct ai_model_info {
     char name[AI_MODEL_NAME_MAX];
     char path[AI_MODEL_PATH_MAX];
@@ -62,6 +100,8 @@ typedef struct ai_model_info {
     uint32_t quant_bits;
     uint32_t loaded;
     uint32_t builtin;
+    uint32_t security_checked;
+    int security_status;
     char sha256[AI_MODEL_SHA256_HEX_MAX];
     char signature[AI_MODEL_SIGNATURE_MAX];
     char sign_algo[AI_MODEL_SIGN_ALGO_MAX];
@@ -101,6 +141,23 @@ typedef struct ai_response {
     uint32_t latency_ms;
 } ai_response_t;
 
+typedef struct ai_agent_task {
+    uint32_t id;
+    char prompt[AI_PROMPT_MAX];
+    ai_response_t response;
+    uint32_t pending;
+    uint32_t completed;
+    int status;
+} ai_agent_task_t;
+
+typedef struct ai_agent_status {
+    ai_agent_state_t state;
+    uint32_t submitted;
+    uint32_t completed;
+    uint32_t pending;
+    uint32_t last_task_id;
+} ai_agent_status_t;
+
 void ai_init(void);
 int ai_is_initialized(void);
 const char *ai_backend_name(ai_backend_type_t backend);
@@ -108,6 +165,27 @@ ai_backend_type_t ai_get_default_backend(void);
 int ai_set_default_backend(ai_backend_type_t backend);
 int ai_parse_backend(const char *name, ai_backend_type_t *backend);
 int ai_generate(const ai_request_t *request, ai_response_t *response);
+const char *ai_accel_type_name(ai_accel_type_t type);
+int ai_accel_register(const ai_accel_device_info_t *device);
+int ai_accel_count(void);
+const ai_accel_device_info_t *ai_accel_get(uint32_t index);
+const ai_accel_device_info_t *ai_accel_current(void);
+int ai_accel_select(const char *name);
+void ai_print_accel(void);
+int ai_cloud_provider_register(const ai_cloud_provider_info_t *provider);
+int ai_cloud_provider_count(void);
+const ai_cloud_provider_info_t *ai_cloud_provider_get(uint32_t index);
+const ai_cloud_provider_info_t *ai_cloud_provider_current(void);
+int ai_cloud_provider_select(const char *name);
+void ai_print_cloud(void);
+int ai_agent_start(void);
+int ai_agent_stop(void);
+int ai_agent_is_running(void);
+int ai_agent_submit(const char *prompt, uint32_t *task_id);
+int ai_agent_step(void);
+int ai_agent_status(ai_agent_status_t *status);
+const ai_agent_task_t *ai_agent_task_get(uint32_t task_id);
+void ai_print_agent(void);
 
 int ai_model_register(const ai_model_info_t *model);
 int ai_model_count(void);

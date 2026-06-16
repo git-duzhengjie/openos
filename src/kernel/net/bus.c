@@ -1,4 +1,5 @@
 #include "bus.h"
+#include "account.h"
 #include "net.h"
 #include "string.h"
 #include "vga.h"
@@ -345,8 +346,13 @@ static void bus_make_msg_id(char *out, uint32_t out_size) {
 }
 
 static int bus_build_packet(char *packet, uint32_t packet_size, const bus_message_t *message) {
+    char sealed_payload[BUS_PAYLOAD_MAX * 2 + 8];
+    const char *wire_payload;
     uint32_t pos = 0;
     if (!packet || !message || packet_size == 0) return -1;
+    wire_payload = message->payload;
+    if (account_encrypt_field(message->payload, sealed_payload, sizeof(sealed_payload)) == 0)
+        wire_payload = sealed_payload;
     packet[0] = '\0';
     append_str(packet, packet_size, &pos, BUS_PROTO "\n");
     append_str(packet, packet_size, &pos, "type=PUB\n");
@@ -357,7 +363,7 @@ static int bus_build_packet(char *packet, uint32_t packet_size, const bus_messag
     append_str(packet, packet_size, &pos, "\ntopic=");
     append_str(packet, packet_size, &pos, message->topic);
     append_str(packet, packet_size, &pos, "\npayload=");
-    append_str(packet, packet_size, &pos, message->payload);
+    append_str(packet, packet_size, &pos, wire_payload);
     append_str(packet, packet_size, &pos, "\n");
     if (pos + 1 >= packet_size) return -1;
     return (int)pos;
@@ -422,6 +428,8 @@ static void bus_udp_recv(uint32_t src_ip, uint16_t src_port, uint16_t dst_port, 
         bus_rejected++;
         return;
     }
+    if (account_decrypt_field(message.payload, message.payload, sizeof(message.payload)) < 0)
+        safe_copy(message.payload, sizeof(message.payload), "<e2e-decrypt-failed>");
     bus_reliable_send_ack(BUS_PORT, BUS_PROTO, message.msg_id, message.from);
     if (bus_reliable_seen_before(BUS_PORT, message.from, message.msg_id)) {
         bus_duplicate_dropped++;
@@ -514,6 +522,8 @@ void bus_print_info(void) {
     vga_write(bus_ready ? "yes" : "no");
     vga_write(" subscribers=");
     print_dec(count);
+    vga_write(" e2e=");
+    vga_write(account_e2e_enabled() ? "on" : "off");
     vga_write("\nlimits: topic=");
     print_dec(BUS_TOPIC_MAX);
     vga_write(" payload=");
