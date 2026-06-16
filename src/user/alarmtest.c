@@ -4,6 +4,11 @@
 
 #include "openos.h"
 
+static void write_err(const char *s)
+{
+    openos_write_fd(STDERR_FILENO, s, openos_strlen(s));
+}
+
 int main(int argc, char **argv)
 {
     unsigned int seconds = 1;
@@ -15,13 +20,11 @@ int main(int argc, char **argv)
     }
 
     openos_write_str("alarmtest: arming alarm for ");
-    openos_write_int((int)seconds);
-    openos_write_str(" second(s); process should exit with SIGALRM
-");
+    openos_print_int((int)seconds);
+    openos_write_str(" second(s); process should exit with SIGALRM\n");
 
     if (openos_alarm(seconds) < 0) {
-        openos_write_str_fd(STDERR_FILENO, "alarmtest: alarm failed
-");
+        write_err("alarmtest: alarm failed\n");
         return 1;
     }
 

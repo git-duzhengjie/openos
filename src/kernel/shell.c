@@ -9,6 +9,7 @@
 #include "types.h"
 #include "pmm.h"
 #include "process.h"
+#include "idt.h"
 #include "input_buffer.h"
 #include "../fs/vfs.h"
 #include "../fs/ramfs.h"
@@ -194,6 +195,19 @@ static void shell_print_dec(int value)
         out[1] = '\0';
         print(out);
     }
+}
+
+static void shell_print_hex32(uint32_t value)
+{
+    const char *hex = "0123456789ABCDEF";
+    char out[11];
+    out[0] = '0';
+    out[1] = 'x';
+    for (int i = 0; i < 8; i++) {
+        out[2 + i] = hex[(value >> (28 - i * 4)) & 0xFu];
+    }
+    out[10] = '\0';
+    print(out);
 }
 
 #define CMD_BUF_SIZE 256
@@ -2463,6 +2477,24 @@ static void cmd_history(void)
     }
 }
 
+static void cmd_pfstats(void)
+{
+    page_fault_stats_t stats;
+    idt_get_page_fault_stats(&stats);
+
+    print("page fault stats:\n");
+    print("  total= "); shell_print_dec((int)stats.total); print("\n");
+    print("  cow= "); shell_print_dec((int)stats.cow); print(" cow_oom= "); shell_print_dec((int)stats.cow_oom); print("\n");
+    print("  demand= "); shell_print_dec((int)stats.demand); print(" demand_oom= "); shell_print_dec((int)stats.demand_oom); print("\n");
+    print("  user_invalid= "); shell_print_dec((int)stats.user_invalid); print(" kernel_fault= "); shell_print_dec((int)stats.kernel_fault); print("\n");
+    print("  protection= "); shell_print_dec((int)stats.protection); print(" not_present= "); shell_print_dec((int)stats.not_present); print("\n");
+    print("  last_addr= "); shell_print_hex32(stats.last_addr);
+    print(" last_err= "); shell_print_hex32(stats.last_err);
+    print(" last_eip= "); shell_print_hex32(stats.last_eip);
+    print(" last_pid= "); shell_print_dec((int)stats.last_pid);
+    print("\n");
+}
+
 static void cmd_help(void)
 {
     print("openos shell - Available commands:\n");
@@ -2508,6 +2540,7 @@ static void cmd_help(void)
     print("  devices         - List registered kernel devices\n");
     print("  hotplug         - Show pending hotplug events\n");
     print("  hotplug_poll    - Pop one hotplug event from queue\n");
+    print("  pfstats         - Show page fault/COW/demand statistics\n");
     print("  help            - Show this help\n");
     print("  clear           - Clear screen\n");
     print("  yield           - Yield CPU\n");
@@ -3394,6 +3427,10 @@ void shell_run(void)
                 {
                     mouse_print_info();
                     print("mouse: status written to serial log\n");
+                }
+                else if (shell_cmd_equals(cmd, "pfstats"))
+                {
+                    cmd_pfstats();
                 }
                 else if (shell_cmd_equals(cmd, "help"))
                 {

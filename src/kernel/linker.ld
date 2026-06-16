@@ -35,8 +35,19 @@ SECTIONS
         *(.gnu.linkonce.d*)
     }
 
+    . = ALIGN(4096);
+    __kernel_image_end = .;
+
+    /*
+     * Runtime BSS is intentionally placed above 1 MiB. The bootloader only
+     * needs to load text/rodata/data below the low-memory stack; BSS is zeroed
+     * by entry.asm at runtime and does not need disk space. This keeps growing
+     * kernel static state away from EBDA/VGA/temporary stack low memory.
+     */
+    . = 0x100000;
+
     /* === BSS 段 === */
-    .bss : AT(ADDR(.bss))
+    .bss (NOLOAD) : AT(ADDR(.bss))
     {
         __bss_start = .;
         *(COMMON)
@@ -49,9 +60,9 @@ SECTIONS
     /* 结束地址 (调试用) */
     __kernel_end = .;
 
-    /* 低端内存栈顶。必须高于内核映像/BSS，且低于 EBDA/显存区域。 */
+    /* 低端内存栈顶。必须高于内核镜像，且低于 EBDA/显存区域。 */
     kernel_stack_top = 0x9F000;
 
-    ASSERT(__kernel_end < 0x9A000, "kernel image/BSS overlaps low-memory stack reserve")
+    ASSERT(__kernel_image_end < 0x9A000, "kernel image overlaps low-memory stack reserve")
     ASSERT(kernel_stack_top <= 0x9F000, "kernel stack top exceeds safe low memory")
 }

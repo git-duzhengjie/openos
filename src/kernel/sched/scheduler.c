@@ -5,6 +5,7 @@
 #include "../include/idt.h"
 #include "../include/usermode.h"
 #include "../include/serial.h"
+#include "../include/vmm.h"
 #include "../net/sync.h"
 #include "../net/bus.h"
 
@@ -21,7 +22,34 @@ static struct {
     uint32_t time_ms;
     int initialized;
     int need_resched;
-} sched = {{0}, 0, 0, 0, 0, 0};
+    uint32_t current_cr3;
+} sched = {{0}, 0, 0, 0, 0, 0, 0};
+
+static uint32_t thread_target_cr3(thread_t *t) {
+    if (!t) return vmm_kernel_cr3();
+    process_t *proc = proc_find(t->pid);
+    if (proc && proc->cr3) return proc->cr3;
+    return vmm_kernel_cr3();
+}
+
+static void sched_switch_cr3_for_thread(thread_t *t) {
+    uint32_t target = thread_target_cr3(t);
+    uint32_t actual = vmm_get_cr3();
+    if (target && target != actual) {
+        vmm_load_cr3(target);
+        actual = target;
+    }
+    sched.current_cr3 = actual;
+}
+
+void sched_ensure_not_running_cr3(uint32_t cr3) {
+    if (!cr3) return;
+    if (vmm_get_cr3() == cr3) {
+        uint32_t kernel_cr3 = vmm_kernel_cr3();
+        vmm_load_cr3(kernel_cr3);
+        sched.current_cr3 = kernel_cr3;
+    }
+}
 
 static void enqueue(thread_t *t) {
     int prio = t->priority;
@@ -66,6 +94,7 @@ void sched_init(void) {
     sched.current_ticks = 0;
     sched.time_ms = 0;
     sched.need_resched = 0;
+    sched.current_cr3 = vmm_kernel_cr3();
 
     /* 创建 idle 线程并加入运行队列 */
     uint32_t idle_stack = (uint32_t)pmm_alloc_page() + 4096;
@@ -114,6 +143,7 @@ void sched_start(void) {
     first->state = PROC_RUNNING;
     sched.current_ticks = 0;
     tss_set_kernel_stack(first->kernel_stack_top);
+    sched_switch_cr3_for_thread(first);
 
     serial_write("[SCHED] Starting first thread\n");
 
@@ -174,6 +204,7 @@ thread_t *timer_schedule_handler(void) {
     sched.current_ticks = 0;
     sched.need_resched = 0;
     tss_set_kernel_stack(next->kernel_stack_top);
+    sched_switch_cr3_for_thread(next);
 
     return next;
 }
@@ -208,6 +239,7 @@ void sched_yield(void) {
     next->state = PROC_RUNNING;
     sched.current_ticks = 0;
     tss_set_kernel_stack(next->kernel_stack_top);
+    sched_switch_cr3_for_thread(next);
 
     /* Build a full interrupt-compatible frame:
      * low to high: [EFLAGS][CS][EIP][pushad: EAX..EDI][DS][ES][FS][GS]

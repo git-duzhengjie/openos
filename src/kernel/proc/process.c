@@ -17,6 +17,7 @@
 
 /* 外部函数 (usermode.c) */
 extern uint32_t alloc_user_stack(void);
+extern uint32_t alloc_user_stack_slot(uint32_t slot);
 extern void switch_to_user_asm(uint32_t eip, uint32_t esp);
 
 /* ---- 进程表 ---- */
@@ -37,9 +38,12 @@ typedef struct user_spawn_args {
 } user_spawn_args_t;
 
 static void user_process_trampoline(void *arg);
+static void user_thread_trampoline(void *arg);
+static void free_thread_kernel_resources(thread_t *t);
 static int copy_exec_args(user_spawn_args_t *args, const char *path,
                           char *const argv[], char *const envp[]);
 static uint32_t setup_user_args_stack(uint32_t stack_top, const user_spawn_args_t *args);
+static void proc_free_cloned_address_space(uint32_t *pgd);
 
 #define WAITPID_SUPPORTED_OPTIONS WAITPID_WNOHANG
 
@@ -159,6 +163,28 @@ static uint32_t setup_user_args_stack(uint32_t stack_top, const user_spawn_args_
     return sp;
 }
 
+static void proc_free_cloned_address_space(uint32_t *pgd) {
+    if (!pgd) return;
+
+    for (uint32_t pdi = 0; pdi < 1023; pdi++) {
+        if ((pgd[pdi] & PTE_PRESENT) == 0) continue;
+        if ((pgd[pdi] & PTE_USER) == 0) continue;
+
+        uint32_t *pt = (uint32_t *)(pgd[pdi] & PAGE_MASK);
+        for (uint32_t pti = 0; pti < 1024; pti++) {
+            if ((pt[pti] & PTE_PRESENT) == 0) continue;
+            if ((pt[pti] & PTE_USER) == 0) continue;
+            pmm_free_page((void *)(pt[pti] & PAGE_MASK));
+            pt[pti] = 0;
+        }
+
+        pmm_free_page(pt);
+        pgd[pdi] = 0;
+    }
+
+    pmm_free_page(pgd);
+}
+
 void proc_table_init(void) {
     for (int i = 0; i < MAX_PROCS; i++) {
         proc_table[i].pid = 0;
@@ -186,6 +212,8 @@ void proc_table_init(void) {
     init->code_size = 0;
     init->heap_start = 0;
     init->heap_end = 0;
+    init->mmap_base = 0;
+    init->mmap_end = 0;
     for (int i = 0; i < 31; i++) init->name[i] = 0;
     init->name[0] = 'i';
     init->name[1] = 'n';
@@ -219,11 +247,14 @@ process_t *proc_alloc(void) {
             p->threads = NULL;
             p->thread_count = 0;
             p->cr3 = 0;
+            p->owns_address_space = 0;
             p->exit_code = 0;
             p->code_addr = 0;
             p->code_size = 0;
             p->heap_start = 0;
             p->heap_end = 0;
+            p->mmap_base = 0;
+            p->mmap_end = 0;
             for (int j = 0; j < 31; j++) p->name[j] = 0;
             p->name[0] = '\0';
             /* 初始化文件描述符表 */
@@ -252,41 +283,57 @@ void proc_free(process_t *proc) {
     proc->threads = NULL;
     proc->thread_count = 0;
     proc->cr3 = 0;
+    proc->owns_address_space = 0;
     proc->code_addr = 0;
     proc->code_size = 0;
     proc->heap_start = 0;
     proc->heap_end = 0;
+    proc->mmap_base = 0;
+    proc->mmap_end = 0;
     proc->exit_code = 0;
     proc->pending_signals = 0;
     proc->alarm_deadline_ms = 0;
     proc->alarm_active = 0;
+    proc->next_user_stack_slot = 0;
     for (int i = 0; i < MAX_FD; i++) {
         proc->fds[i] = NULL;
         proc->fd_flags[i] = 0;
     }
 }
 
+static void free_thread_kernel_resources(thread_t *t) {
+    if (!t) return;
+
+    sched_remove_thread(t);
+
+    if (t->kernel_stack && t->kernel_stack_top > t->kernel_stack) {
+        uint32_t stack_size = t->kernel_stack_top - t->kernel_stack;
+        uint32_t stack_pages = (stack_size + PAGE_SIZE - 1) / PAGE_SIZE;
+        for (uint32_t page = 0; page < stack_pages; page++) {
+            pmm_free_page((void *)(t->kernel_stack + page * PAGE_SIZE));
+        }
+        t->kernel_stack = 0;
+        t->kernel_stack_top = 0;
+    }
+
+    pmm_free_page(t);
+}
+
 void proc_reap_zombie(process_t *proc) {
     if (!proc || proc->state != PROC_ZOMBIE) return;
 
-    /* Current process model uses one main thread per user process.
-     * thread_t.next/prev are scheduler queue links, not a private process
-     * thread list, so never iterate through t->next here. */
+    if (proc->owns_address_space && proc->cr3) {
+        sched_ensure_not_running_cr3(proc->cr3);
+        proc_free_cloned_address_space((uint32_t *)proc->cr3);
+        proc->cr3 = 0;
+        proc->owns_address_space = 0;
+    }
+
     thread_t *t = proc->threads;
-    if (t) {
-        sched_remove_thread(t);
-
-        if (t->kernel_stack && t->kernel_stack_top > t->kernel_stack) {
-            uint32_t stack_size = t->kernel_stack_top - t->kernel_stack;
-            uint32_t stack_pages = (stack_size + PAGE_SIZE - 1) / PAGE_SIZE;
-            for (uint32_t page = 0; page < stack_pages; page++) {
-                pmm_free_page((void *)(t->kernel_stack + page * PAGE_SIZE));
-            }
-            t->kernel_stack = 0;
-            t->kernel_stack_top = 0;
-        }
-
-        pmm_free_page(t);
+    while (t) {
+        thread_t *next = t->proc_next;
+        free_thread_kernel_resources(t);
+        t = next;
     }
 
     proc_free(proc);
@@ -392,8 +439,8 @@ void proc_mark_exit(uint32_t pid, int code) {
 
     proc->exit_code = (uint32_t)code;
     proc->state = PROC_ZOMBIE;
-    if (proc->threads)
-        proc->threads->state = PROC_ZOMBIE;
+    for (thread_t *t = proc->threads; t; t = t->proc_next)
+        t->state = PROC_ZOMBIE;
 
     proc_wake_waiter(parent_pid);
 
@@ -473,49 +520,78 @@ uint32_t sys_fork(void) {
     uint32_t child_pd_phys = (uint32_t)pmm_alloc_page();
     if (!child_pd_phys) { proc_free(child); return (uint32_t)-1; }
     uint32_t *child_pgd = (uint32_t *)child_pd_phys;
-
-    /* 复制内核映射 (高地址部分,恒等映射下全部复制) */
     for (int i = 0; i < 1024; i++) {
-        if (parent_pgd[i] & PTE_PRESENT) {
-            /* 分配新页表 */
-            uint32_t pt_phys = (uint32_t)pmm_alloc_page();
-            if (!pt_phys) {
-                /* TODO: 清理已分配的页 */
-                proc_free(child);
-                return (uint32_t)-1;
-            }
-            uint32_t *parent_pt = (uint32_t *)(parent_pgd[i] & ~0xFFF);
-            uint32_t *child_pt = (uint32_t *)pt_phys;
-
-            /* 复制页表条目 */
-            for (int j = 0; j < 1024; j++) {
-                if (parent_pt[j] & PTE_PRESENT) {
-                    /* 分配新物理页,复制内容 */
-                    uint32_t page_phys = (uint32_t)pmm_alloc_page();
-                    if (!page_phys) break;
-
-                    /* 复制页面内容 */
-                    uint8_t *src = (uint8_t *)(parent_pt[j] & ~0xFFF);
-                    uint8_t *dst = (uint8_t *)page_phys;
-                    for (int k = 0; k < 4096; k++)
-                        dst[k] = src[k];
-
-                    child_pt[j] = page_phys | (parent_pt[j] & 0xFFF);
-                } else {
-                    child_pt[j] = 0;
-                }
-            }
-            child_pgd[i] = pt_phys | (parent_pgd[i] & 0xFFF);
-        } else {
-            child_pgd[i] = 0;
-        }
+        child_pgd[i] = 0;
     }
 
+    /*
+     * Clone user pages only. Kernel/non-user mappings are shared so the child
+     * can still run kernel code after CR3 switch without duplicating kernel
+     * identity mappings. Recursive PDE points to the child page directory.
+     */
+    for (int i = 0; i < 1023; i++) {
+        if ((parent_pgd[i] & PTE_PRESENT) == 0) {
+            child_pgd[i] = 0;
+            continue;
+        }
+
+        if ((parent_pgd[i] & PTE_USER) == 0) {
+            child_pgd[i] = parent_pgd[i];
+            continue;
+        }
+
+        uint32_t *parent_pt = (uint32_t *)(parent_pgd[i] & PAGE_MASK);
+        uint32_t pt_phys = (uint32_t)pmm_alloc_page();
+        if (!pt_phys) {
+            proc_free_cloned_address_space(child_pgd);
+            proc_free(child);
+            return (uint32_t)-1;
+        }
+
+        uint32_t *child_pt = (uint32_t *)pt_phys;
+        for (int j = 0; j < 1024; j++) {
+            child_pt[j] = 0;
+        }
+        child_pgd[i] = pt_phys | (parent_pgd[i] & 0xFFF);
+
+        for (int j = 0; j < 1024; j++) {
+            if ((parent_pt[j] & PTE_PRESENT) == 0) {
+                child_pt[j] = 0;
+                continue;
+            }
+
+            if ((parent_pt[j] & PTE_USER) == 0) {
+                child_pt[j] = parent_pt[j];
+                continue;
+            }
+
+            uint32_t page_phys = parent_pt[j] & PAGE_MASK;
+            uint32_t flags = parent_pt[j] & 0xFFFu;
+
+            if (flags & PTE_RW) {
+                flags &= ~PTE_RW;
+                flags |= PTE_COW;
+                parent_pt[j] = page_phys | flags;
+            }
+
+            child_pt[j] = page_phys | flags;
+            pmm_ref_page((void *)page_phys);
+        }
+    }
+    child_pgd[1023] = child_pd_phys | (parent_pgd[1023] & 0xFFF);
+    __asm__ volatile ("mov %%cr3, %%eax; mov %%eax, %%cr3" ::: "eax", "memory");
+
     child->cr3 = child_pd_phys;
+    child->owns_address_space = 1;
 
     /* 创建子线程,复制父线程的栈帧 */
-    uint32_t child_stack = (uint32_t)pmm_alloc_page() + 4096;
-    if (!child_stack) { proc_free(child); return (uint32_t)-1; }
+    void *child_stack_page = pmm_alloc_page();
+    if (!child_stack_page) {
+        proc_free_cloned_address_space(child_pgd);
+        proc_free(child);
+        return (uint32_t)-1;
+    }
+    uint32_t child_stack = (uint32_t)child_stack_page + 4096;
 
     /* 复制父线程的内核栈 */
     uint8_t *src_stack = (uint8_t *)cur->kernel_stack;
@@ -525,7 +601,12 @@ uint32_t sys_fork(void) {
 
     thread_t *child_thread = thread_create(child->pid, child->name,
                                            cur->kernel_eip, child_stack);
-    if (!child_thread) { proc_free(child); return (uint32_t)-1; }
+    if (!child_thread) {
+        pmm_free_page(child_stack_page);
+        proc_free_cloned_address_space(child_pgd);
+        proc_free(child);
+        return (uint32_t)-1;
+    }
 
     /* 子线程的栈帧从父线程复制,但 EAX=0 (fork 返回 0) */
     /* 栈帧偏移: GS FS ES DS EDI ESI EBP ESP_skip EBX EDX ECX EAX EIP CS EFLAGS */
@@ -543,6 +624,12 @@ uint32_t sys_fork(void) {
     child_thread->pid = child->pid;
     child->threads = child_thread;
     child->thread_count = 1;
+    child->code_addr = parent->code_addr;
+    child->heap_start = parent->heap_start;
+    child->heap_end = parent->heap_end;
+    child->mmap_base = parent->mmap_base;
+    child->mmap_end = parent->mmap_end;
+    child->owns_address_space = 1;
     child->state = PROC_READY;
 
     /* 将子线程加入调度队列 */
@@ -604,6 +691,8 @@ int sys_exec_env(const char *path, char *const argv[], char *const envp[]) {
     proc->code_addr = load_result.brk_start;  /* 实际上是 brk 起点 */
     proc->heap_start = load_result.brk_start;
     proc->heap_end = load_result.brk_start;
+    proc->mmap_base = 0x50000000u;
+    proc->mmap_end = proc->mmap_base;
 
     serial_write("[EXEC] Loaded, entry=0x");
     serial_write_hex(load_result.entry);
@@ -676,11 +765,23 @@ int spawn_user_process_env(const char *path, char *const argv[], char *const env
         return -1;
     }
 
+    uint32_t child_cr3 = vmm_create_user_address_space();
+    if (!child_cr3) {
+        pmm_free_page(args);
+        proc_free(child);
+        return -1;
+    }
+    child->cr3 = child_cr3;
+    child->owns_address_space = 1;
+
     uint32_t stack_pages = PROC_KERNEL_STACK_SIZE / PAGE_SIZE;
     if (stack_pages == 0) stack_pages = 1;
     void *kernel_stack = pmm_alloc_pages(stack_pages);
     if (!kernel_stack) {
         pmm_free_page(args);
+        proc_free_cloned_address_space((uint32_t *)child_cr3);
+        child->cr3 = 0;
+        child->owns_address_space = 0;
         proc_free(child);
         return -1;
     }
@@ -697,10 +798,14 @@ int spawn_user_process_env(const char *path, char *const argv[], char *const env
     if (!thread) {
         pmm_free_page(args);
         pmm_free_page(kernel_stack);
+        proc_free_cloned_address_space((uint32_t *)child_cr3);
+        child->cr3 = 0;
+        child->owns_address_space = 0;
         proc_free(child);
         return -1;
     }
 
+    thread->proc_next = NULL;
     child->threads = thread;
     child->thread_count = 1;
     child->state = PROC_READY;
@@ -751,6 +856,103 @@ static void user_process_trampoline(void *arg) {
     }
 
     sys_exit(0);
+}
+
+static void user_thread_trampoline(void *arg) {
+    (void)arg;
+    thread_t *cur = sched_get_current();
+    if (!cur || !cur->is_user_thread || !cur->user_entry || !cur->user_stack_top) {
+        sys_thread_exit(-1);
+    }
+
+    tss_set_kernel_stack(cur->kernel_stack_top);
+    switch_to_user_asm(cur->user_entry, cur->user_stack_top);
+    sys_thread_exit(0);
+}
+
+int sys_thread_create(uint32_t entry, uint32_t arg, uint32_t return_entry) {
+    thread_t *cur = sched_get_current();
+    if (!cur || !entry) return -1;
+
+    process_t *proc = proc_find(cur->pid);
+    if (!proc || proc->state == PROC_DEAD || proc->state == PROC_ZOMBIE)
+        return -1;
+    if (proc->thread_count >= MAX_THREADS)
+        return -1;
+
+    uint32_t slot = ++proc->next_user_stack_slot;
+    uint32_t user_stack_top = alloc_user_stack_slot(slot);
+    if (!user_stack_top)
+        return -1;
+
+    uint32_t *usp = (uint32_t *)user_stack_top;
+    *(--usp) = arg;
+    *(--usp) = return_entry;
+    user_stack_top = (uint32_t)usp;
+
+    uint32_t stack_pages = PROC_KERNEL_STACK_SIZE / PAGE_SIZE;
+    if (stack_pages == 0) stack_pages = 1;
+    void *kernel_stack = pmm_alloc_pages(stack_pages);
+    if (!kernel_stack) {
+        free_user_stack_slot(slot);
+        return -1;
+    }
+
+    thread_t *thread = thread_create_sized(proc->pid, proc->name,
+                                           (uint32_t)user_thread_trampoline,
+                                           (uint32_t)kernel_stack + PROC_KERNEL_STACK_SIZE,
+                                           PROC_KERNEL_STACK_SIZE);
+    if (!thread) {
+        for (uint32_t page = 0; page < stack_pages; page++)
+            pmm_free_page((void *)((uint32_t)kernel_stack + page * PAGE_SIZE));
+        free_user_stack_slot(slot);
+        return -1;
+    }
+
+    thread->user_entry = entry;
+    thread->user_arg = arg;
+    thread->user_stack_top = user_stack_top;
+    thread->user_stack_slot = slot;
+    thread->user_return_entry = return_entry;
+    thread->is_user_thread = 1;
+    thread->proc_next = proc->threads;
+    proc->threads = thread;
+    proc->thread_count++;
+
+    sched_add_thread(thread);
+    return (int)thread->id;
+}
+
+void sys_thread_exit(int code) {
+    thread_t *cur = sched_get_current();
+    if (!cur) return;
+
+    process_t *proc = proc_find(cur->pid);
+    if (!proc) {
+        cur->state = PROC_ZOMBIE;
+        sched_yield();
+        for (;;) { __asm__ volatile("pause"); }
+    }
+
+    (void)code;
+    cur->state = PROC_ZOMBIE;
+    sched_remove_thread(cur);
+
+    if (cur->is_user_thread && cur->user_stack_slot != 0) {
+        free_user_stack_slot(cur->user_stack_slot);
+        cur->user_stack_slot = 0;
+        cur->user_stack_top = 0;
+    }
+
+    if (proc->thread_count > 0)
+        proc->thread_count--;
+
+    if (proc->thread_count == 0) {
+        proc_mark_exit(proc->pid, code);
+    }
+
+    sched_yield();
+    for (;;) { __asm__ volatile("pause"); }
 }
 
 /* ============================================================
@@ -822,7 +1024,7 @@ int proc_terminate(uint32_t pid, int exit_code)
 
     thread_t *t = p->threads;
     while (t) {
-        thread_t *next = t->next;
+        thread_t *next = t->proc_next;
         sched_remove_thread(t);
         t->state = PROC_ZOMBIE;
         t = next;

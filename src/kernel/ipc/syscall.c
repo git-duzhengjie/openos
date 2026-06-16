@@ -9,6 +9,7 @@
 #include "../include/vga.h"
 #include "../include/input_buffer.h"
 #include "../include/usermem.h"
+#include "../include/vmm.h"
 #include "../proc/process.h"
 #include "../fs/vfs.h"
 #include "../include/string.h"
@@ -22,6 +23,371 @@
 #define STDIN_FILENO  0
 #define STDOUT_FILENO 1
 #define STDERR_FILENO 2
+
+#define SYSCALL_MAX_MUTEXES 64u
+#define SYSCALL_MAX_SEMAPHORES 64u
+#define SYSCALL_MAX_CONDS 64u
+
+#define MUTEX_UNUSED 0u
+#define MUTEX_READY  1u
+#define SEM_UNUSED   0u
+#define SEM_READY    1u
+#define COND_UNUSED  0u
+#define COND_READY   1u
+
+#define MUTEX_WAIT_QUEUE_LIMIT 32u
+#define SEM_WAIT_QUEUE_LIMIT   32u
+#define COND_WAIT_QUEUE_LIMIT  32u
+
+typedef struct syscall_mutex {
+    uint8_t used;
+    uint32_t owner_tid;
+    thread_t *waiters[MUTEX_WAIT_QUEUE_LIMIT];
+    uint32_t wait_head;
+    uint32_t wait_count;
+} syscall_mutex_t;
+
+typedef struct syscall_sem {
+    uint8_t used;
+    uint32_t value;
+    thread_t *waiters[SEM_WAIT_QUEUE_LIMIT];
+    uint32_t wait_head;
+    uint32_t wait_count;
+} syscall_sem_t;
+
+typedef struct syscall_cond {
+    uint8_t used;
+    thread_t *waiters[COND_WAIT_QUEUE_LIMIT];
+    uint32_t wait_head;
+    uint32_t wait_count;
+} syscall_cond_t;
+
+static syscall_mutex_t syscall_mutexes[SYSCALL_MAX_MUTEXES];
+static syscall_sem_t syscall_sems[SYSCALL_MAX_SEMAPHORES];
+static syscall_cond_t syscall_conds[SYSCALL_MAX_CONDS];
+
+static syscall_mutex_t *syscall_mutex_from_handle(uint32_t handle)
+{
+    if (handle == 0 || handle > SYSCALL_MAX_MUTEXES)
+        return NULL;
+    if (syscall_mutexes[handle - 1].used != MUTEX_READY)
+        return NULL;
+    return &syscall_mutexes[handle - 1];
+}
+
+static int syscall_mutex_waiter_push(syscall_mutex_t *mutex, thread_t *thread)
+{
+    uint32_t pos;
+
+    if (!mutex || !thread || mutex->wait_count >= MUTEX_WAIT_QUEUE_LIMIT)
+        return -1;
+
+    pos = (mutex->wait_head + mutex->wait_count) % MUTEX_WAIT_QUEUE_LIMIT;
+    mutex->waiters[pos] = thread;
+    mutex->wait_count++;
+    return 0;
+}
+
+static thread_t *syscall_mutex_waiter_pop(syscall_mutex_t *mutex)
+{
+    thread_t *thread;
+
+    if (!mutex || mutex->wait_count == 0)
+        return NULL;
+
+    thread = mutex->waiters[mutex->wait_head];
+    mutex->waiters[mutex->wait_head] = NULL;
+    mutex->wait_head = (mutex->wait_head + 1) % MUTEX_WAIT_QUEUE_LIMIT;
+    mutex->wait_count--;
+    return thread;
+}
+
+static uint32_t syscall_mutex_create(void)
+{
+    for (uint32_t i = 0; i < SYSCALL_MAX_MUTEXES; i++) {
+        if (syscall_mutexes[i].used != MUTEX_READY) {
+            memset(&syscall_mutexes[i], 0, sizeof(syscall_mutexes[i]));
+            syscall_mutexes[i].used = MUTEX_READY;
+            return i + 1;
+        }
+    }
+    return (uint32_t)-1;
+}
+
+static uint32_t syscall_mutex_lock(uint32_t handle)
+{
+    syscall_mutex_t *mutex = syscall_mutex_from_handle(handle);
+    thread_t *current = sched_get_current();
+
+    if (!mutex || !current)
+        return (uint32_t)-1;
+    if (mutex->owner_tid == current->id)
+        return (uint32_t)-1;
+
+    while (mutex->owner_tid != 0) {
+        if (mutex->owner_tid == current->id)
+            return 0;
+        if (syscall_mutex_waiter_push(mutex, current) < 0)
+            return (uint32_t)-1;
+        current->state = PROC_BLOCKED;
+        sched_yield();
+        if (mutex->used != MUTEX_READY)
+            return (uint32_t)-1;
+        if (mutex->owner_tid == current->id)
+            return 0;
+    }
+
+    mutex->owner_tid = current->id;
+    return 0;
+}
+
+static uint32_t syscall_mutex_unlock(uint32_t handle)
+{
+    syscall_mutex_t *mutex = syscall_mutex_from_handle(handle);
+    thread_t *current = sched_get_current();
+    thread_t *next;
+
+    if (!mutex || !current || mutex->owner_tid != current->id)
+        return (uint32_t)-1;
+
+    next = syscall_mutex_waiter_pop(mutex);
+    if (next) {
+        mutex->owner_tid = next->id;
+        thread_wake(next);
+    } else {
+        mutex->owner_tid = 0;
+    }
+    return 0;
+}
+
+static uint32_t syscall_mutex_destroy(uint32_t handle)
+{
+    syscall_mutex_t *mutex = syscall_mutex_from_handle(handle);
+    thread_t *current = sched_get_current();
+    thread_t *waiter;
+
+    if (!mutex || !current)
+        return (uint32_t)-1;
+    if (mutex->owner_tid != 0 && mutex->owner_tid != current->id)
+        return (uint32_t)-1;
+
+    while ((waiter = syscall_mutex_waiter_pop(mutex)) != NULL)
+        thread_wake(waiter);
+    memset(mutex, 0, sizeof(*mutex));
+    return 0;
+}
+
+static syscall_sem_t *syscall_sem_from_handle(uint32_t handle)
+{
+    if (handle == 0 || handle > SYSCALL_MAX_SEMAPHORES)
+        return NULL;
+    if (syscall_sems[handle - 1].used != SEM_READY)
+        return NULL;
+    return &syscall_sems[handle - 1];
+}
+
+static int syscall_sem_waiter_push(syscall_sem_t *sem, thread_t *thread)
+{
+    uint32_t pos;
+
+    if (!sem || !thread || sem->wait_count >= SEM_WAIT_QUEUE_LIMIT)
+        return -1;
+
+    pos = (sem->wait_head + sem->wait_count) % SEM_WAIT_QUEUE_LIMIT;
+    sem->waiters[pos] = thread;
+    sem->wait_count++;
+    return 0;
+}
+
+static thread_t *syscall_sem_waiter_pop(syscall_sem_t *sem)
+{
+    thread_t *thread;
+
+    if (!sem || sem->wait_count == 0)
+        return NULL;
+
+    thread = sem->waiters[sem->wait_head];
+    sem->waiters[sem->wait_head] = NULL;
+    sem->wait_head = (sem->wait_head + 1) % SEM_WAIT_QUEUE_LIMIT;
+    sem->wait_count--;
+    return thread;
+}
+
+static uint32_t syscall_sem_create(uint32_t initial)
+{
+    for (uint32_t i = 0; i < SYSCALL_MAX_SEMAPHORES; i++) {
+        if (syscall_sems[i].used != SEM_READY) {
+            memset(&syscall_sems[i], 0, sizeof(syscall_sems[i]));
+            syscall_sems[i].used = SEM_READY;
+            syscall_sems[i].value = initial;
+            return i + 1;
+        }
+    }
+    return (uint32_t)-1;
+}
+
+static uint32_t syscall_sem_wait(uint32_t handle)
+{
+    syscall_sem_t *sem = syscall_sem_from_handle(handle);
+    thread_t *current = sched_get_current();
+
+    if (!sem || !current)
+        return (uint32_t)-1;
+
+    while (sem->value == 0) {
+        if (syscall_sem_waiter_push(sem, current) < 0)
+            return (uint32_t)-1;
+        current->state = PROC_BLOCKED;
+        sched_yield();
+        if (sem->used != SEM_READY)
+            return (uint32_t)-1;
+    }
+
+    sem->value--;
+    return 0;
+}
+
+static uint32_t syscall_sem_post(uint32_t handle)
+{
+    syscall_sem_t *sem = syscall_sem_from_handle(handle);
+    thread_t *waiter;
+
+    if (!sem)
+        return (uint32_t)-1;
+
+    waiter = syscall_sem_waiter_pop(sem);
+    if (waiter) {
+        sem->value++;
+        thread_wake(waiter);
+    } else {
+        sem->value++;
+    }
+    return 0;
+}
+
+static uint32_t syscall_sem_destroy(uint32_t handle)
+{
+    syscall_sem_t *sem = syscall_sem_from_handle(handle);
+    thread_t *waiter;
+
+    if (!sem)
+        return (uint32_t)-1;
+
+    while ((waiter = syscall_sem_waiter_pop(sem)) != NULL)
+        thread_wake(waiter);
+    memset(sem, 0, sizeof(*sem));
+    return 0;
+}
+
+static syscall_cond_t *syscall_cond_from_handle(uint32_t handle)
+{
+    if (handle == 0 || handle > SYSCALL_MAX_CONDS)
+        return NULL;
+    if (syscall_conds[handle - 1].used != COND_READY)
+        return NULL;
+    return &syscall_conds[handle - 1];
+}
+
+static int syscall_cond_waiter_push(syscall_cond_t *cond, thread_t *thread)
+{
+    uint32_t pos;
+
+    if (!cond || !thread || cond->wait_count >= COND_WAIT_QUEUE_LIMIT)
+        return -1;
+
+    pos = (cond->wait_head + cond->wait_count) % COND_WAIT_QUEUE_LIMIT;
+    cond->waiters[pos] = thread;
+    cond->wait_count++;
+    return 0;
+}
+
+static thread_t *syscall_cond_waiter_pop(syscall_cond_t *cond)
+{
+    thread_t *thread;
+
+    if (!cond || cond->wait_count == 0)
+        return NULL;
+
+    thread = cond->waiters[cond->wait_head];
+    cond->waiters[cond->wait_head] = NULL;
+    cond->wait_head = (cond->wait_head + 1) % COND_WAIT_QUEUE_LIMIT;
+    cond->wait_count--;
+    return thread;
+}
+
+static uint32_t syscall_cond_create(void)
+{
+    for (uint32_t i = 0; i < SYSCALL_MAX_CONDS; i++) {
+        if (syscall_conds[i].used != COND_READY) {
+            memset(&syscall_conds[i], 0, sizeof(syscall_conds[i]));
+            syscall_conds[i].used = COND_READY;
+            return i + 1;
+        }
+    }
+    return (uint32_t)-1;
+}
+
+static uint32_t syscall_cond_wait(uint32_t cond_handle, uint32_t mutex_handle)
+{
+    syscall_cond_t *cond = syscall_cond_from_handle(cond_handle);
+    syscall_mutex_t *mutex = syscall_mutex_from_handle(mutex_handle);
+    thread_t *current = sched_get_current();
+
+    if (!cond || !mutex || !current || mutex->owner_tid != current->id)
+        return (uint32_t)-1;
+    if (syscall_cond_waiter_push(cond, current) < 0)
+        return (uint32_t)-1;
+    if (syscall_mutex_unlock(mutex_handle) != 0)
+        return (uint32_t)-1;
+
+    current->state = PROC_BLOCKED;
+    sched_yield();
+
+    if (cond->used != COND_READY)
+        return (uint32_t)-1;
+    return syscall_mutex_lock(mutex_handle);
+}
+
+static uint32_t syscall_cond_signal(uint32_t handle)
+{
+    syscall_cond_t *cond = syscall_cond_from_handle(handle);
+    thread_t *waiter;
+
+    if (!cond)
+        return (uint32_t)-1;
+
+    waiter = syscall_cond_waiter_pop(cond);
+    if (waiter)
+        thread_wake(waiter);
+    return 0;
+}
+
+static uint32_t syscall_cond_broadcast(uint32_t handle)
+{
+    syscall_cond_t *cond = syscall_cond_from_handle(handle);
+    thread_t *waiter;
+
+    if (!cond)
+        return (uint32_t)-1;
+
+    while ((waiter = syscall_cond_waiter_pop(cond)) != NULL)
+        thread_wake(waiter);
+    return 0;
+}
+
+static uint32_t syscall_cond_destroy(uint32_t handle)
+{
+    syscall_cond_t *cond = syscall_cond_from_handle(handle);
+    thread_t *waiter;
+
+    if (!cond)
+        return (uint32_t)-1;
+
+    while ((waiter = syscall_cond_waiter_pop(cond)) != NULL)
+        thread_wake(waiter);
+    memset(cond, 0, sizeof(*cond));
+    return 0;
+}
 
 static void vga_write_str(const char *s, uint8_t color) {
     int row = 1;
@@ -200,6 +566,140 @@ static void syscall_fill_user_stat(openos_stat_t *user_st, const inode_t *st)
     user_st->fs_type = st->fs_type;
 }
 
+#define SYS_MMAP_BASE  0x50000000u
+#define SYS_MMAP_LIMIT 0x70000000u
+#define SYS_MMAP_MAX_REQUEST (16u * 1024u * 1024u)
+
+static uint32_t page_align_up_u32(uint32_t value)
+{
+    return (value + PAGE_SIZE - 1u) & ~(PAGE_SIZE - 1u);
+}
+
+static void sys_munmap_range(uint32_t addr, uint32_t len)
+{
+    uint32_t end = addr + len;
+    for (uint32_t va = addr; va < end; va += PAGE_SIZE) {
+        uint32_t pte = vmm_get_mapping(va);
+        if ((pte & (PTE_PRESENT | PTE_USER)) == (PTE_PRESENT | PTE_USER)) {
+            uint32_t pa = pte & PAGE_MASK;
+            vmm_unmap_page(va);
+            pmm_free_page((void *)pa);
+        }
+    }
+}
+
+static uint32_t sys_mmap_anonymous(uint32_t addr, uint32_t len, uint32_t flags)
+{
+    (void)flags;
+    process_t *proc;
+    uint32_t start;
+
+    if (addr != 0 || len == 0 || len > SYS_MMAP_MAX_REQUEST)
+        return (uint32_t)-1;
+
+    len = page_align_up_u32(len);
+    if (len == 0)
+        return (uint32_t)-1;
+
+    proc = proc_find(proc_current_pid());
+    if (!proc)
+        return (uint32_t)-1;
+
+    if (proc->mmap_base == 0 || proc->mmap_end < SYS_MMAP_BASE || proc->mmap_end >= SYS_MMAP_LIMIT) {
+        proc->mmap_base = SYS_MMAP_BASE;
+        proc->mmap_end = SYS_MMAP_BASE;
+    }
+
+    start = page_align_up_u32(proc->mmap_end);
+    if (start < SYS_MMAP_BASE || start > SYS_MMAP_LIMIT || len > (SYS_MMAP_LIMIT - start))
+        return (uint32_t)-1;
+
+    /* Demand paging: reserve virtual range only. Physical pages are allocated on #PF. */
+    proc->mmap_end = start + len;
+    return start;
+}
+
+static uint32_t sys_munmap_user(uint32_t addr, uint32_t len)
+{
+    process_t *proc;
+    uint32_t end;
+
+    if (len == 0 || (addr & (PAGE_SIZE - 1u)) != 0)
+        return (uint32_t)-1;
+
+    len = page_align_up_u32(len);
+    end = addr + len;
+    if (end <= addr || addr < SYS_MMAP_BASE || end > SYS_MMAP_LIMIT)
+        return (uint32_t)-1;
+
+    sys_munmap_range(addr, len);
+
+    proc = proc_find(proc_current_pid());
+    if (proc && end == proc->mmap_end)
+        proc->mmap_end = addr;
+
+    return 0;
+}
+
+static uint32_t page_align_down_u32(uint32_t value)
+{
+    return value & ~(PAGE_SIZE - 1u);
+}
+
+static uint32_t sys_brk_set(uint32_t new_end)
+{
+    process_t *proc = proc_find(proc_current_pid());
+    uint32_t old_end;
+
+    if (!proc || proc->heap_start == 0)
+        return (uint32_t)-1;
+
+    if (new_end == 0)
+        return proc->heap_end;
+
+    if (new_end < proc->heap_start || new_end >= SYS_MMAP_BASE)
+        return (uint32_t)-1;
+
+    old_end = proc->heap_end;
+    if (new_end < old_end) {
+        uint32_t va = page_align_up_u32(new_end);
+        uint32_t map_end = page_align_up_u32(old_end);
+        if (va < map_end)
+            sys_munmap_range(va, map_end - va);
+    }
+
+    /* Demand paging: heap growth only extends metadata; pages are allocated on #PF. */
+    proc->heap_end = new_end;
+    return proc->heap_end;
+}
+
+static uint32_t sys_sbrk_delta(uint32_t increment)
+{
+    process_t *proc = proc_find(proc_current_pid());
+    uint32_t old_end;
+    uint32_t new_end;
+    int32_t delta = (int32_t)increment;
+
+    if (!proc)
+        return (uint32_t)-1;
+
+    old_end = proc->heap_end;
+    if (delta >= 0) {
+        if ((uint32_t)delta > (SYS_MMAP_BASE - old_end))
+            return (uint32_t)-1;
+        new_end = old_end + (uint32_t)delta;
+    } else {
+        uint32_t abs_delta = (uint32_t)(-delta);
+        if (abs_delta > (old_end - proc->heap_start))
+            return (uint32_t)-1;
+        new_end = old_end - abs_delta;
+    }
+
+    if (sys_brk_set(new_end) == (uint32_t)-1)
+        return (uint32_t)-1;
+    return old_end;
+}
+
 static uint32_t syscall_return(uint32_t value)
 {
     uint32_t pid = proc_current_pid();
@@ -253,6 +753,64 @@ uint32_t syscall_dispatch(uint32_t num,
     case SYS_FREE:
         pmm_free_page((void *)a);
         return 0;
+
+    case SYS_MMAP:
+        return sys_mmap_anonymous(a, b, c);
+
+    case SYS_MUNMAP:
+        return sys_munmap_user(a, b);
+
+    case SYS_BRK:
+        return sys_brk_set(a);
+
+    case SYS_SBRK:
+        return sys_sbrk_delta(a);
+
+    case SYS_THREAD_CREATE:
+        return (uint32_t)sys_thread_create(a, b, c);
+
+    case SYS_THREAD_EXIT:
+        sys_thread_exit((int)a);
+        return 0;
+
+    case SYS_MUTEX_CREATE:
+        return syscall_mutex_create();
+
+    case SYS_MUTEX_LOCK:
+        return syscall_mutex_lock(a);
+
+    case SYS_MUTEX_UNLOCK:
+        return syscall_mutex_unlock(a);
+
+    case SYS_MUTEX_DESTROY:
+        return syscall_mutex_destroy(a);
+
+    case SYS_SEM_CREATE:
+        return syscall_sem_create(a);
+
+    case SYS_SEM_WAIT:
+        return syscall_sem_wait(a);
+
+    case SYS_SEM_POST:
+        return syscall_sem_post(a);
+
+    case SYS_SEM_DESTROY:
+        return syscall_sem_destroy(a);
+
+    case SYS_COND_CREATE:
+        return syscall_cond_create();
+
+    case SYS_COND_WAIT:
+        return syscall_cond_wait(a, b);
+
+    case SYS_COND_SIGNAL:
+        return syscall_cond_signal(a);
+
+    case SYS_COND_BROADCAST:
+        return syscall_cond_broadcast(a);
+
+    case SYS_COND_DESTROY:
+        return syscall_cond_destroy(a);
 
     case SYS_FORK:
         return sys_fork();

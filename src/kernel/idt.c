@@ -7,6 +7,9 @@
 #include "include/io.h"
 #include "include/mouse.h"
 #include "include/process.h"
+#include "include/pmm.h"
+#include "include/vmm.h"
+#include "include/string.h"
 #include "serial.h"
 
 /* IDT表 (256个条目) */
@@ -17,6 +20,7 @@ static idt_ptr_t idt_ptr;
 
 /* 中断处理函数数组 */
 static isr_t interrupt_handlers[256] = {0};
+static page_fault_stats_t pf_stats;
 
 /* 定时器中断专用处理函数（在 timer_isr.asm 中）*/
 extern void timer_isr_entry(void);
@@ -195,6 +199,184 @@ static void kill_current_user_process(registers_t *regs) {
 	}
 }
 
+void idt_get_page_fault_stats(page_fault_stats_t *out)
+{
+	if (!out)
+		return;
+	*out = pf_stats;
+}
+
+static void page_fault_record(registers_t *regs, uint32_t fault_addr)
+{
+	thread_t *cur = sched_get_current();
+	pf_stats.total++;
+	pf_stats.last_addr = fault_addr;
+	pf_stats.last_err = regs->err_code;
+	pf_stats.last_eip = regs->eip;
+	pf_stats.last_pid = cur ? cur->pid : 0;
+	if (regs->err_code & 0x01)
+		pf_stats.protection++;
+	else
+		pf_stats.not_present++;
+}
+
+static void page_fault_write_flags(uint32_t err)
+{
+	serial_write((err & 0x01) ? " present" : " not-present");
+	serial_write((err & 0x02) ? " write" : " read");
+	serial_write((err & 0x04) ? " user" : " kernel");
+	if (err & 0x08)
+		serial_write(" reserved-bit");
+	if (err & 0x10)
+		serial_write(" instruction-fetch");
+}
+
+static uint32_t pf_align_down(uint32_t value)
+{
+	return value & ~(PAGE_SIZE - 1u);
+}
+
+static int page_fault_is_demand_region(process_t *proc, uint32_t fault_addr)
+{
+	if (!proc)
+		return 0;
+	if (proc->heap_start && fault_addr >= proc->heap_start && fault_addr < proc->heap_end)
+		return 1;
+	if (proc->mmap_base && fault_addr >= proc->mmap_base && fault_addr < proc->mmap_end)
+		return 1;
+	return 0;
+}
+
+static int page_fault_handle_cow(registers_t *regs, uint32_t fault_addr)
+{
+	uint32_t va = pf_align_down(fault_addr);
+	uint32_t pte = vmm_get_mapping(va);
+	uint32_t old_phys;
+	uint32_t new_phys;
+	uint32_t flags;
+
+	if (!is_user_mode_trap(regs))
+		return 0;
+	if ((regs->err_code & 0x02u) == 0)
+		return 0;
+	if ((pte & PTE_PRESENT) == 0 || (pte & PTE_COW) == 0)
+		return 0;
+
+	old_phys = pte & PAGE_MASK;
+	flags = (pte & 0xFFFu) | PTE_RW;
+	flags &= ~PTE_COW;
+
+	if (pmm_page_refcount((void *)old_phys) <= 1) {
+		vmm_update_page_flags(va, flags);
+		pf_stats.cow++;
+		return 1;
+	}
+
+	new_phys = (uint32_t)pmm_alloc_page();
+	if (!new_phys) {
+		pf_stats.cow_oom++;
+		serial_write("[PF] COW OOM va=");
+		serial_write_hex(va);
+		serial_write(" old_pa=");
+		serial_write_hex(old_phys);
+		serial_write("\n");
+		return 0;
+	}
+
+	memcpy((void *)new_phys, (void *)old_phys, PAGE_SIZE);
+	pmm_free_page((void *)old_phys);
+	vmm_map_page(va, new_phys, flags);
+	pf_stats.cow++;
+	serial_write("[PF] COW copied va=");
+	serial_write_hex(va);
+	serial_write(" old_pa=");
+	serial_write_hex(old_phys);
+	serial_write(" new_pa=");
+	serial_write_hex(new_phys);
+	serial_write("\n");
+	return 1;
+}
+
+static int page_fault_handle_demand(registers_t *regs, uint32_t fault_addr)
+{
+	thread_t *cur = sched_get_current();
+	process_t *proc;
+	uint32_t va;
+	uint32_t pa;
+
+	if (!cur || cur->pid == 0)
+		return 0;
+	if (!is_user_mode_trap(regs))
+		return 0;
+	if (regs->err_code & 0x01)
+		return 0;
+
+	proc = proc_find(cur->pid);
+	if (!page_fault_is_demand_region(proc, fault_addr))
+		return 0;
+
+	va = pf_align_down(fault_addr);
+	if (vmm_get_mapping(va) & PTE_PRESENT)
+		return 1;
+
+	pa = (uint32_t)pmm_alloc_page();
+	if (!pa) {
+		pf_stats.demand_oom++;
+		serial_write("[PF] demand OOM va=");
+		serial_write_hex(va);
+		serial_write("\n");
+		return 0;
+	}
+	memset((void *)pa, 0, PAGE_SIZE);
+	vmm_map_page(va, pa, VMM_USER);
+	serial_write("[PF] demand mapped va=");
+	serial_write_hex(va);
+	serial_write(" pa=");
+	serial_write_hex(pa);
+	serial_write("\n");
+	pf_stats.demand++;
+	return 1;
+}
+
+static void idt_page_fault_handler(registers_t *regs)
+{
+	uint32_t fault_addr;
+	thread_t *cur = sched_get_current();
+	__asm__ volatile ("mov %%cr2, %0" : "=r"(fault_addr));
+	page_fault_record(regs, fault_addr);
+
+	if (page_fault_handle_cow(regs, fault_addr))
+		return;
+
+	if (page_fault_handle_demand(regs, fault_addr))
+		return;
+
+	serial_write("\n[PF] page fault addr=");
+	serial_write_hex(fault_addr);
+	serial_write(" err=");
+	serial_write_hex(regs->err_code);
+	serial_write(" eip=");
+	serial_write_hex(regs->eip);
+	serial_write(" cs=");
+	serial_write_hex(regs->cs);
+	serial_write(" pid=");
+	serial_write_hex(cur ? cur->pid : 0);
+	serial_write(" flags:");
+	page_fault_write_flags(regs->err_code);
+	serial_write("\n");
+
+	if (is_user_mode_trap(regs)) {
+		pf_stats.user_invalid++;
+		kill_current_user_process(regs);
+		return;
+	}
+
+	pf_stats.kernel_fault++;
+	terminal_write("\nKernel Page Fault\n");
+	serial_write("System Halted.\n");
+	__asm__ volatile ("cli; hlt");
+}
+
 /*
  * ISR处理函数 (由isr.asm调用)
  */
@@ -206,6 +388,11 @@ void isr_handler(registers_t *regs) {
 		serial_write_hex(stk[i]); serial_write(" ");
 	}
 	serial_write("\n");
+
+	if (regs->int_no == 14) {
+		idt_page_fault_handler(regs);
+		return;
+	}
 
 	/* 调用已注册的处理函数 */
 	if (interrupt_handlers[regs->int_no]) {

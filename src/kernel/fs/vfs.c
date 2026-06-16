@@ -21,17 +21,17 @@ static dentry_t *root_dentry;
 static inode_t  *root_inode;
 static mount_t  *mount_list;
 
-#define MAX_INODES 256
+#define MAX_INODES 192
 static inode_t  inode_pool[MAX_INODES];
 static uint32_t next_ino = 1;
 
-#define MAX_DENTRY 256
+#define MAX_DENTRY 192
 static dentry_t dentry_pool[MAX_DENTRY];
 
 #define MAX_MOUNTS 16
 static mount_t mount_pool[MAX_MOUNTS];
 
-#define MAX_SYMLINKS 64
+#define MAX_SYMLINKS 32
 static char symlink_target_pool[MAX_SYMLINKS][MAX_PATH];
 static uint8_t symlink_target_used[MAX_SYMLINKS];
 

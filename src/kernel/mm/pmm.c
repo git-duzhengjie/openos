@@ -12,6 +12,9 @@
 /* 全局 PMM 状态 */
 static pmm_info_t pmm = {0};
 
+#define PMM_REF_MAX_PAGES 8192u
+static uint16_t pmm_refcounts[PMM_REF_MAX_PAGES];
+
 /* VGA 输出宏 */
 #define VGA_BASE  ((volatile uint16_t *)0xB8000)
 #define VGA_WIDTH 80
@@ -39,6 +42,16 @@ static void vga_write_hex(uint32_t val, uint8_t color)
     vga_write_str("0x", color);
     for (int i = 28; i >= 0; i -= 4)
         vga_put(hex[(val >> i) & 0xF], color);
+}
+
+static uint32_t pmm_page_index(void *page)
+{
+    return ((uint32_t)page) / PAGE_SIZE;
+}
+
+static int pmm_page_tracked(uint32_t page_num)
+{
+    return page_num < PMM_REF_MAX_PAGES;
 }
 
 /* ============================================================
@@ -122,6 +135,8 @@ void *pmm_alloc_page(void)
                 uint32_t page = word * 32 + bit;
                 pmm.used_pages++;
                 pmm.free_pages--;
+                if (pmm_page_tracked(page))
+                    pmm_refcounts[page] = 1;
                 return (void *)(page * PAGE_SIZE);
             }
         }
@@ -161,6 +176,11 @@ void *pmm_alloc_pages(uint32_t count)
         }
         pmm.used_pages += count;
         pmm.free_pages -= count;
+        for (uint32_t i = 0; i < count; i++) {
+            uint32_t page = (uint32_t)start + i;
+            if (pmm_page_tracked(page))
+                pmm_refcounts[page] = 1;
+        }
         return (void *)((uint32_t)start * PAGE_SIZE);
     }
 
@@ -172,16 +192,46 @@ void *pmm_alloc_pages(uint32_t count)
  * ============================================================ */
 void pmm_free_page(void *page)
 {
-    uint32_t page_num = (uint32_t)page / PAGE_SIZE;
+    uint32_t page_num = pmm_page_index(page);
     uint32_t word = page_num / 32;
     uint32_t bit  = page_num % 32;
 
     if (word >= pmm.bitmap_size / 4)
         return;
 
+    if (pmm_page_tracked(page_num)) {
+        if (pmm_refcounts[page_num] > 1) {
+            pmm_refcounts[page_num]--;
+            return;
+        }
+        if (pmm_refcounts[page_num] == 0)
+            return;
+        pmm_refcounts[page_num] = 0;
+    }
+
     pmm.bitmap[word] |= (1U << bit);
-    pmm.used_pages--;
+    if (pmm.used_pages > 0)
+        pmm.used_pages--;
     pmm.free_pages++;
+}
+
+void pmm_ref_page(void *page)
+{
+    uint32_t page_num = pmm_page_index(page);
+    if (!pmm_page_tracked(page_num))
+        return;
+    if (pmm_refcounts[page_num] == 0)
+        pmm_refcounts[page_num] = 1;
+    else
+        pmm_refcounts[page_num]++;
+}
+
+uint32_t pmm_page_refcount(void *page)
+{
+    uint32_t page_num = pmm_page_index(page);
+    if (!pmm_page_tracked(page_num))
+        return 1;
+    return pmm_refcounts[page_num];
 }
 
 /* ============================================================

@@ -31,11 +31,47 @@
 #include "pmm.h"
 #include "embed_hello.h"  /* 嵌入的用户程�?*/
 #include "embed_fault.h"  /* 用户异常隔离测试程序 */
+#if __has_include("embed_isotest.h")
+#include "embed_isotest.h"  /* 用户/内核内存隔离回归测试程序 */
+#define OPENOS_HAS_ISOTEST 1
+#else
+#define OPENOS_HAS_ISOTEST 0
+#endif
 #if __has_include("embed_waittest.h")
 #include "embed_waittest.h"  /* spawn/waitpid 回归测试程序 */
 #define OPENOS_HAS_WAITTEST 1
 #else
 #define OPENOS_HAS_WAITTEST 0
+#endif
+#if __has_include("embed_forktest.h")
+#include "embed_forktest.h"  /* fork/address-space 回归测试程序 */
+#define OPENOS_HAS_FORKTEST 1
+#else
+#define OPENOS_HAS_FORKTEST 0
+#endif
+#if __has_include("embed_threadtest.h")
+#include "embed_threadtest.h"  /* user thread API 回归测试程序 */
+#define OPENOS_HAS_THREADTEST 1
+#else
+#define OPENOS_HAS_THREADTEST 0
+#endif
+#if __has_include("embed_mutextest.h")
+#include "embed_mutextest.h"  /* mutex 回归测试程序 */
+#define OPENOS_HAS_MUTEXTEST 1
+#else
+#define OPENOS_HAS_MUTEXTEST 0
+#endif
+#if __has_include("embed_semtest.h")
+#include "embed_semtest.h"  /* semaphore 回归测试程序 */
+#define OPENOS_HAS_SEMTEST 1
+#else
+#define OPENOS_HAS_SEMTEST 0
+#endif
+#if __has_include("embed_condtest.h")
+#include "embed_condtest.h"  /* condition variable 回归测试程序 */
+#define OPENOS_HAS_CONDTEST 1
+#else
+#define OPENOS_HAS_CONDTEST 0
 #endif
 #if __has_include("embed_exit42.h")
 #include "embed_exit42.h"  /* exit status 回归测试程序 */
@@ -219,6 +255,20 @@
 #define OPENOS_HAS_ALARMTEST 1
 #else
 #define OPENOS_HAS_ALARMTEST 0
+#endif
+
+#if __has_include("embed_mmaptest.h")
+#include "embed_mmaptest.h"  /* mmaptest user command */
+#define OPENOS_HAS_MMAPTEST 1
+#else
+#define OPENOS_HAS_MMAPTEST 0
+#endif
+
+#if __has_include("embed_sbrktest.h")
+#include "embed_sbrktest.h"  /* sbrktest user command */
+#define OPENOS_HAS_SBRKTEST 1
+#else
+#define OPENOS_HAS_SBRKTEST 0
 #endif
 
 
@@ -543,6 +593,17 @@ void kernel_main(void) {
         serial_write("[WARN] Failed to install /bin/fault\n");
     }
 
+#if OPENOS_HAS_ISOTEST
+    fd = vfs_open("/bin/isotest", O_CREAT | O_RDWR, 0755);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)isotest_elf, isotest_elf_size);
+        vfs_close(fd);
+        serial_write("[OK] Installed /bin/isotest user ELF\n");
+    } else {
+        serial_write("[WARN] Failed to install /bin/isotest\n");
+    }
+#endif
+
 #if OPENOS_HAS_WAITTEST
     fd = vfs_open("/bin/waittest", O_CREAT | O_RDWR, 0755);
     if (fd >= 0) {
@@ -551,6 +612,61 @@ void kernel_main(void) {
         serial_write("[OK] Installed /bin/waittest user ELF\n");
     } else {
         serial_write("[WARN] Failed to install /bin/waittest\n");
+    }
+#endif
+
+#if OPENOS_HAS_FORKTEST
+    fd = vfs_open("/bin/forktest", O_CREAT | O_RDWR, 0755);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)forktest_elf, forktest_elf_size);
+        vfs_close(fd);
+        serial_write("[OK] Installed /bin/forktest user ELF\n");
+    } else {
+        serial_write("[WARN] Failed to install /bin/forktest\n");
+    }
+#endif
+
+#if OPENOS_HAS_THREADTEST
+    fd = vfs_open("/bin/threadtest", O_CREAT | O_RDWR, 0755);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)threadtest_elf, threadtest_elf_size);
+        vfs_close(fd);
+        serial_write("[OK] Installed /bin/threadtest user ELF\n");
+    } else {
+        serial_write("[WARN] Failed to install /bin/threadtest\n");
+    }
+#endif
+
+#if OPENOS_HAS_MUTEXTEST
+    fd = vfs_open("/bin/mutextest", O_CREAT | O_RDWR, 0755);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)mutextest_elf, mutextest_elf_size);
+        vfs_close(fd);
+        serial_write("[OK] Installed /bin/mutextest user ELF\n");
+    } else {
+        serial_write("[WARN] Failed to install /bin/mutextest\n");
+    }
+#endif
+
+#if OPENOS_HAS_SEMTEST
+    fd = vfs_open("/bin/semtest", O_CREAT | O_RDWR, 0755);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)semtest_elf, semtest_elf_size);
+        vfs_close(fd);
+        serial_write("[OK] Installed /bin/semtest user ELF\n");
+    } else {
+        serial_write("[WARN] Failed to install /bin/semtest\n");
+    }
+#endif
+
+#if OPENOS_HAS_CONDTEST
+    fd = vfs_open("/bin/condtest", O_CREAT | O_RDWR, 0755);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)condtest_elf, condtest_elf_size);
+        vfs_close(fd);
+        serial_write("[OK] Installed /bin/condtest user ELF\n");
+    } else {
+        serial_write("[WARN] Failed to install /bin/condtest\n");
     }
 #endif
 
@@ -881,6 +997,28 @@ void kernel_main(void) {
         serial_write("[OK] Installed /bin/alarmtest user ELF\n");
     } else {
         serial_write("[WARN] Failed to install /bin/alarmtest\n");
+    }
+#endif
+
+#if OPENOS_HAS_MMAPTEST
+    fd = vfs_open("/bin/mmaptest", O_CREAT | O_RDWR, 0755);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)mmaptest_elf, mmaptest_elf_size);
+        vfs_close(fd);
+        serial_write("[OK] Installed /bin/mmaptest user ELF\n");
+    } else {
+        serial_write("[WARN] Failed to install /bin/mmaptest\n");
+    }
+#endif
+
+#if OPENOS_HAS_SBRKTEST
+    fd = vfs_open("/bin/sbrktest", O_CREAT | O_RDWR, 0755);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)sbrktest_elf, sbrktest_elf_size);
+        vfs_close(fd);
+        serial_write("[OK] Installed /bin/sbrktest user ELF\n");
+    } else {
+        serial_write("[WARN] Failed to install /bin/sbrktest\n");
     }
 #endif
 

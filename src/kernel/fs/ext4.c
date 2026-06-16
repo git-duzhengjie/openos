@@ -27,8 +27,8 @@
 #define EXT4_S_IFDIR                 0x4000u
 
 #define EXT4_NAME_LEN                255u
-#define EXT4_MAX_MOUNTS              4u
-#define EXT4_MAX_NODES               256u
+#define EXT4_MAX_MOUNTS              2u
+#define EXT4_MAX_NODES               96u
 #define EXT4_MAX_BLOCK_SIZE          4096u
 #define EXT4_MAX_EXTENT_DEPTH        5u
 #define EXT4_MAX_SCAN_DEPTH          8u

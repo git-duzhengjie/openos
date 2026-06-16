@@ -47,6 +47,25 @@
 #define SYS_LINK        247
 #define SYS_SYMLINK     248
 #define SYS_READLINK    249
+#define SYS_MMAP        250
+#define SYS_MUNMAP      251
+#define SYS_BRK         252
+#define SYS_SBRK        253
+#define SYS_THREAD_CREATE 254
+#define SYS_THREAD_EXIT   255
+#define SYS_MUTEX_CREATE  256
+#define SYS_MUTEX_LOCK    257
+#define SYS_MUTEX_UNLOCK  258
+#define SYS_MUTEX_DESTROY 259
+#define SYS_SEM_CREATE    260
+#define SYS_SEM_WAIT      261
+#define SYS_SEM_POST      262
+#define SYS_SEM_DESTROY   263
+#define SYS_COND_CREATE   264
+#define SYS_COND_WAIT     265
+#define SYS_COND_SIGNAL   266
+#define SYS_COND_BROADCAST 267
+#define SYS_COND_DESTROY  268
 
 typedef struct openos_stat {
     uint32_t ino;

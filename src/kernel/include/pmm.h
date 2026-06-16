@@ -46,6 +46,8 @@ void pmm_init(uint32_t kernel_end);           /* 初始化物理内存管理 */
 void *pmm_alloc_page(void);                  /* 分配一个物理页 */
 void *pmm_alloc_pages(uint32_t count); /* allocate contiguous physical pages */
 void  pmm_free_page(void *page);             /* 释放一个物理页 */
+void  pmm_ref_page(void *page);              /* 增加物理页引用计数 */
+uint32_t pmm_page_refcount(void *page);      /* 查询物理页引用计数 */
 uint32_t pmm_get_free_pages(void);           /* 获取空闲页数 */
 void pmm_init_from_mmap(mmap_entry_t *mmap, uint32_t count);  /* 从 GRUB mmap 初始化 */
 void pmm_set_bitmap_range(uint32_t start_page, uint32_t count, int used); /* 设置范围状态 */

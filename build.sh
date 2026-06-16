@@ -62,6 +62,60 @@ if [ -f $USR/waittest.c ]; then
     echo "  Embedded: waittest.elf"
 fi
 
+if [ -f $USR/forktest.c ]; then
+    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+        -fno-stack-protector -fno-builtin \
+        -c $USR/forktest.c -o $BUILD/forktest.o
+    ld -m elf_i386 -T $USR/user.ld -o $BUILD/forktest.elf $BUILD/forktest.o
+    python3 _embed_elf.py $BUILD/forktest.elf $SRC/include/embed_forktest.h forktest_elf
+    echo "  Embedded: forktest.elf"
+fi
+
+if [ -f $USR/threadtest.c ]; then
+    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+        -fno-stack-protector -fno-builtin \
+        -c $USR/threadtest.c -o $BUILD/threadtest.o
+    ld -m elf_i386 -T $USR/user.ld -o $BUILD/threadtest.elf $BUILD/threadtest.o
+    python3 _embed_elf.py $BUILD/threadtest.elf $SRC/include/embed_threadtest.h threadtest_elf
+    echo "  Embedded: threadtest.elf"
+fi
+
+if [ -f $USR/mutextest.c ]; then
+    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+        -fno-stack-protector -fno-builtin \
+        -c $USR/mutextest.c -o $BUILD/mutextest.o
+    ld -m elf_i386 -T $USR/user.ld -o $BUILD/mutextest.elf $BUILD/mutextest.o
+    python3 _embed_elf.py $BUILD/mutextest.elf $SRC/include/embed_mutextest.h mutextest_elf
+    echo "  Embedded: mutextest.elf"
+fi
+
+if [ -f $USR/semtest.c ]; then
+    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+        -fno-stack-protector -fno-builtin \
+        -c $USR/semtest.c -o $BUILD/semtest.o
+    ld -m elf_i386 -T $USR/user.ld -o $BUILD/semtest.elf $BUILD/semtest.o
+    python3 _embed_elf.py $BUILD/semtest.elf $SRC/include/embed_semtest.h semtest_elf
+    echo "  Embedded: semtest.elf"
+fi
+
+if [ -f $USR/condtest.c ]; then
+    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+        -fno-stack-protector -fno-builtin \
+        -c $USR/condtest.c -o $BUILD/condtest.o
+    ld -m elf_i386 -T $USR/user.ld -o $BUILD/condtest.elf $BUILD/condtest.o
+    python3 _embed_elf.py $BUILD/condtest.elf $SRC/include/embed_condtest.h condtest_elf
+    echo "  Embedded: condtest.elf"
+fi
+
+if [ -f $USR/isotest.c ]; then
+    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+        -fno-stack-protector -fno-builtin \
+        -c $USR/isotest.c -o $BUILD/isotest.o
+    ld -m elf_i386 -T $USR/user.ld -o $BUILD/isotest.elf $BUILD/isotest.o
+    python3 _embed_elf.py $BUILD/isotest.elf $SRC/include/embed_isotest.h isotest_elf
+    echo "  Embedded: isotest.elf"
+fi
+
 if [ -f $USR/exit42.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \
@@ -391,6 +445,26 @@ if [ -f $USR/alarmtest.c ]; then
     ld -m elf_i386 -T $USR/user.ld -o $BUILD/alarmtest.elf $BUILD/alarmtest.o
     python3 _embed_elf.py $BUILD/alarmtest.elf $SRC/include/embed_alarmtest.h alarmtest_elf
     echo "  Embedded: alarmtest.elf"
+fi
+
+if [ -f $USR/mmaptest.c ]; then
+    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+        -fno-stack-protector -fno-builtin \
+        -I $SRC/include \
+        -c $USR/mmaptest.c -o $BUILD/mmaptest.o
+    ld -m elf_i386 -T $USR/user.ld -o $BUILD/mmaptest.elf $BUILD/mmaptest.o
+    python3 _embed_elf.py $BUILD/mmaptest.elf $SRC/include/embed_mmaptest.h mmaptest_elf
+    echo "  Embedded: mmaptest.elf"
+fi
+
+if [ -f $USR/sbrktest.c ]; then
+    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+        -fno-stack-protector -fno-builtin \
+        -I $SRC/include \
+        -c $USR/sbrktest.c -o $BUILD/sbrktest.o
+    ld -m elf_i386 -T $USR/user.ld -o $BUILD/sbrktest.elf $BUILD/sbrktest.o
+    python3 _embed_elf.py $BUILD/sbrktest.elf $SRC/include/embed_sbrktest.h sbrktest_elf
+    echo "  Embedded: sbrktest.elf"
 fi
 
 echo "[3/5] Compiling kernel C files..."

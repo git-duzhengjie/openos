@@ -1,8 +1,13 @@
 #include "openos.h"
 
+static void write_err(const char *s)
+{
+    openos_write_fd(2, s, openos_strlen(s));
+}
+
 static void usage(void)
 {
-    openos_write_str(2, "usage: ln [-s] OLD NEW\n");
+    write_err("usage: ln [-s] OLD NEW\n");
 }
 
 int main(int argc, char **argv)
@@ -11,7 +16,7 @@ int main(int argc, char **argv)
     const char *oldpath;
     const char *newpath;
 
-    if (argc == 4 && openos_str_equal(argv[1], "-s")) {
+    if (argc == 4 && openos_strcmp(argv[1], "-s") == 0) {
         symbolic = 1;
         oldpath = argv[2];
         newpath = argv[3];
@@ -25,22 +30,22 @@ int main(int argc, char **argv)
 
     if (symbolic) {
         if (openos_symlink(oldpath, newpath) < 0) {
-            openos_write_str(2, "ln: cannot create symbolic link '");
-            openos_write_str(2, newpath);
-            openos_write_str(2, "' to '");
-            openos_write_str(2, oldpath);
-            openos_write_str(2, "'\n");
+            write_err("ln: cannot create symbolic link '");
+            write_err(newpath);
+            write_err("' to '");
+            write_err(oldpath);
+            write_err("'\n");
             return 1;
         }
         return 0;
     }
 
     if (openos_link(oldpath, newpath) < 0) {
-        openos_write_str(2, "ln: cannot create hard link '");
-        openos_write_str(2, newpath);
-        openos_write_str(2, "' to '");
-        openos_write_str(2, oldpath);
-        openos_write_str(2, "'\n");
+        write_err("ln: cannot create hard link '");
+        write_err(newpath);
+        write_err("' to '");
+        write_err(oldpath);
+        write_err("'\n");
         return 1;
     }
 

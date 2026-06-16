@@ -111,27 +111,28 @@
 
 ### 4. 内存管理
 
-- [ ] 真正的进程独立地址空间
-- [ ] 重新设计稳定的 CR3 切换方案
-- [ ] 用户态 / 内核态完整内存隔离
-- [ ] `mmap` / `munmap`
-- [ ] `brk` / `sbrk`
-- [ ] demand paging
-- [ ] copy-on-write
-- [ ] page fault 完整处理
-- [ ] 用户栈 guard page
+- [√] 真正的进程独立地址空间（已新增独立用户 CR3 创建、spawn 独立地址空间、调度按进程切 CR3，用户程序改为 0x40000000 高地址加载）
+- [√] 重新设计稳定的 CR3 切换方案（已在调度启动、tick 切换、yield 切换中按目标线程加载 CR3，并在释放地址空间前切回 kernel CR3）
+- [√] 用户态 / 内核态完整内存隔离（用户程序已迁移到高地址独立 CR3，内核低端映射保持 supervisor-only，并新增 /bin/isotest 回归验证用户态写内核低地址会触发 PF）
+- [√] `mmap` / `munmap`（最小匿名映射：`SYS_MMAP` / `SYS_MUNMAP`、固定用户 mmap 区、释放物理页、新增 `/bin/mmaptest` 回归）
+- [√] `brk` / `sbrk`（`SYS_BRK` / `SYS_SBRK`、进程堆页增长/收缩、用户 `openos_sbrk/openos_brk`、malloc 后端改为 sbrk、新增 `/bin/sbrktest` 回归）
+- [√] page fault 用户态处理框架（#PF 专用处理、CR2/error code/fault flags 日志、用户态故障终止进程、内核态故障停机，为 demand paging 铺路）
+- [√] demand paging（heap/mmap 懒分配：`sbrk/mmap` 只保留虚拟区间，用户态 #PF 首次访问合法 heap/mmap 区间时分配并映射零页）
+- [√] copy-on-write（fork 用户可写页共享只读 + PTE_COW，写入 #PF 时按物理页 refcount 复制私有页）
+- [√] page fault 完整处理（COW/demand/非法访问/OOM 分类处理，新增 pfstats 诊断）
+- [√] 用户栈 guard page（栈底预留 4KB 未映射 guard，demand fault 不补映射该页）
 - [√] 用户指针安全访问检查（已补强 exec/spawn 的 argv/envp 二级用户指针拷贝，并由 /bin/systest 覆盖非法指针）
-- [ ] 进程退出时完整释放用户内存映射
+- [√] 进程退出时完整释放用户内存映射（已为 fork 独立地址空间增加 owns_address_space，并在 zombie reap 时释放用户页/页表/页目录）
 
 ### 5. 调度与同步
 
 - [√] waitpid 阻塞等待，避免忙等 `sched_yield`
 - [√] 完善进程 `BLOCKED` / `SLEEPING` 状态语义
 - [√] 子进程 exit 唤醒父进程
-- [ ] 多线程用户态 API
-- [ ] mutex
-- [ ] semaphore
-- [ ] condition variable
+- [√] 多线程用户态 API（已接入 `SYS_THREAD_CREATE` / `SYS_THREAD_EXIT`、`openos_thread_create` / `openos_thread_exit`、独立用户栈槽位、线程退出栈回收，并由 `/bin/threadtest` 覆盖）
+- [√] mutex（已实现 `SYS_MUTEX_CREATE/LOCK/UNLOCK/DESTROY`、用户态 `openos_mutex_*` API、阻塞等待队列，并由 `/bin/mutextest` 覆盖）
+- [√] semaphore（已实现 `SYS_SEM_CREATE/WAIT/POST/DESTROY`、用户态 `openos_sem_*` API、计数信号量阻塞等待队列，并由 `/bin/semtest` 覆盖）
+- [√] condition variable（已实现 `SYS_COND_CREATE/WAIT/SIGNAL/BROADCAST/DESTROY`、用户态 `openos_cond_*` API、条件变量等待队列，并由 `/bin/condtest` 覆盖）
 - [ ] futex 或类似轻量同步机制
 - [ ] priority / nice
 - [ ] 更完整的调度策略
@@ -139,7 +140,7 @@
 ### 6. 进程控制与信号
 
 - [√] init 进程模型（已实现 PID1 init/reaper 内核线程模型）
-- [ ] `fork` 稳定化
+- [√] `fork` 稳定化（已新增 /bin/forktest，覆盖 fork 父子返回、私有数据复制、waitpid 退出码回收）
 - [ ] `exec` 完整替换当前进程镜像
 - [√] `kill`（最小实现：支持 SIGTERM/SIGKILL/signal 0，新增 `/bin/kill`）
 - [√] signal 机制（最小实现：pending signal 位图，SIGTERM/SIGKILL 默认终止，signal 0 存在性检查）

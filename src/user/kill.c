@@ -4,6 +4,18 @@
 
 #include "openos.h"
 
+static void write_fd_str(int fd, const char *s)
+{
+    openos_write_fd(fd, s, openos_strlen(s));
+}
+
+static void write_fd_int(int fd, int value)
+{
+    char buf[16];
+    if (openos_itoa(value, buf, 10))
+        write_fd_str(fd, buf);
+}
+
 static int parse_positive_int(const char *s, int *out)
 {
     int v = 0;
@@ -44,7 +56,7 @@ static int parse_signal(const char *s, int *out)
 
 static void usage(void)
 {
-    openos_write_str_fd(STDERR_FILENO, "usage: kill [-9|-15|-0] pid...\n");
+    write_fd_str(STDERR_FILENO, "usage: kill [-9|-15|-0] pid...\n");
 }
 
 int main(int argc, char **argv)
@@ -60,7 +72,7 @@ int main(int argc, char **argv)
 
     if (argv[argi] && argv[argi][0] == '-') {
         if (parse_signal(argv[argi], &sig) != 0) {
-            openos_write_str_fd(STDERR_FILENO, "kill: unsupported signal\n");
+            write_fd_str(STDERR_FILENO, "kill: unsupported signal\n");
             return 1;
         }
         argi++;
@@ -74,16 +86,16 @@ int main(int argc, char **argv)
     for (; argi < argc; argi++) {
         int pid = 0;
         if (parse_positive_int(argv[argi], &pid) != 0) {
-            openos_write_str_fd(STDERR_FILENO, "kill: invalid pid: ");
-            openos_write_str_fd(STDERR_FILENO, argv[argi]);
-            openos_write_str_fd(STDERR_FILENO, "\n");
+            write_fd_str(STDERR_FILENO, "kill: invalid pid: ");
+            write_fd_str(STDERR_FILENO, argv[argi]);
+            write_fd_str(STDERR_FILENO, "\n");
             rc = 1;
             continue;
         }
         if (openos_kill(pid, sig) != 0) {
-            openos_write_str_fd(STDERR_FILENO, "kill: failed to kill pid ");
-            openos_write_int_fd(STDERR_FILENO, pid);
-            openos_write_str_fd(STDERR_FILENO, "\n");
+            write_fd_str(STDERR_FILENO, "kill: failed to kill pid ");
+            write_fd_int(STDERR_FILENO, pid);
+            write_fd_str(STDERR_FILENO, "\n");
             rc = 1;
         }
     }

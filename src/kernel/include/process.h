@@ -45,8 +45,17 @@ typedef struct thread {
     uint32_t quantum;          /* 时间片剩余 */
     uint32_t quantum_total;   /* 时间片总长 */
     uint32_t wake_time;       /* 睡眠唤醒时间 */
-    struct thread *next;      /* 链表下一项 */
-    struct thread *prev;
+    struct thread *next;      /* 调度队列下一项 */
+    struct thread *prev;      /* 调度队列上一项 */
+    struct thread *proc_next; /* 所属进程线程链下一项 */
+
+    /* 用户线程入口元数据 */
+    uint32_t user_entry;      /* 用户态线程函数 */
+    uint32_t user_arg;        /* 用户态线程参数 */
+    uint32_t user_stack_top;  /* 用户栈顶 */
+    uint32_t user_stack_slot; /* 用户栈槽位，用于退出时释放 */
+    uint32_t user_return_entry;/* 用户线程函数自然返回后的入口 */
+    uint8_t is_user_thread;   /* 是否为 pthread 风格用户线程 */
 
     /* 上下文 (内核栈) */
     uint32_t kernel_esp;      /* 内核栈指针 */
@@ -74,10 +83,13 @@ typedef struct process {
 
     /* 内存 */
     uint32_t cr3;             /* 页目录基址 */
+    uint8_t owns_address_space; /* 是否拥有独立用户地址空间 */
     uint32_t code_addr;       /* 代码段起始 */
     uint32_t code_size;       /* 代码段大小 */
     uint32_t heap_start;      /* 堆起始 */
     uint32_t heap_end;        /* 堆结束 */
+    uint32_t mmap_base;       /* 匿名 mmap 区起始 */
+    uint32_t mmap_end;        /* 匿名 mmap 区当前结束 */
 
     /* 文件系统 */
     void *fds[MAX_FD];        /* 文件描述符表 (per-process fd table) */
@@ -88,6 +100,7 @@ typedef struct process {
     uint32_t pending_signals; /* 待处理信号掩码 */
     uint32_t alarm_deadline_ms; /* alarm 到期时间，单位 ms */
     uint8_t alarm_active;       /* alarm 是否启用 */
+    uint32_t next_user_stack_slot; /* 下一个用户线程栈槽位 */
 
     /* 统计 */
     uint64_t total_ticks;     /* 总运行时间 */
@@ -150,6 +163,8 @@ uint32_t sys_gettid(void);
 void sys_exit(int code);
 int sys_kill(int pid, int sig);
 int sys_alarm(unsigned int seconds);
+int sys_thread_create(uint32_t entry, uint32_t arg, uint32_t return_entry);
+void sys_thread_exit(int code);
 
 /* 调度器核心函数 */
 void sched_init(void);
@@ -160,6 +175,7 @@ void sched_yield(void);
 thread_t *sched_get_current(void);
 int sched_need_resched(void);
 void sched_set_need_resched(int need);
+void sched_ensure_not_running_cr3(uint32_t cr3);
 void sched_tick(void);
 uint32_t sched_time_ms(void);
 

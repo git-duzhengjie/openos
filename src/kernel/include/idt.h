@@ -52,11 +52,28 @@ typedef struct {
 /* 中断处理函数类型 */
 typedef void (*isr_t)(registers_t*);
 
+typedef struct page_fault_stats {
+    uint32_t total;
+    uint32_t cow;
+    uint32_t cow_oom;
+    uint32_t demand;
+    uint32_t demand_oom;
+    uint32_t user_invalid;
+    uint32_t kernel_fault;
+    uint32_t protection;
+    uint32_t not_present;
+    uint32_t last_addr;
+    uint32_t last_err;
+    uint32_t last_eip;
+    uint32_t last_pid;
+} page_fault_stats_t;
+
 /* 函数声明 */
 void idt_init(void);
 void idt_set_gate(uint8_t num, uint32_t base, uint16_t sel, uint8_t flags);
 void isr_install_handler(uint8_t num, isr_t handler);
 void isr_uninstall_handler(uint8_t num);
+void idt_get_page_fault_stats(page_fault_stats_t *out);
 
 /* 汇编函数声明 (在isr.asm中) */
 extern void isr0(void);   /* 除零错误 */

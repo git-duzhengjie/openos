@@ -1,13 +1,13 @@
 /* openos 用户程序链接脚本 */
-/* 用户程序加载地址在 identity 映射范围内 */
+/* 用户程序加载到独立用户虚拟地址空间 */
 
 OUTPUT_FORMAT("elf32-i386")
 ENTRY(_start)
 
 SECTIONS
 {
-    /* 用户程序加载地址 - 在 identity 映射范围内 */
-    . = 0x00400000;  /* 4MB */
+    /* 用户程序加载地址 - 避开内核低端 identity 映射 */
+    . = 0x40000000;  /* 1GB */
 
     .text : {
         *(.text*)

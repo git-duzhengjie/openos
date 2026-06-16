@@ -44,6 +44,25 @@
 #define SYS_LINK        247
 #define SYS_SYMLINK     248
 #define SYS_READLINK    249
+#define SYS_MMAP        250
+#define SYS_MUNMAP      251
+#define SYS_BRK         252
+#define SYS_SBRK        253
+#define SYS_THREAD_CREATE 254
+#define SYS_THREAD_EXIT   255
+#define SYS_MUTEX_CREATE  256
+#define SYS_MUTEX_LOCK    257
+#define SYS_MUTEX_UNLOCK  258
+#define SYS_MUTEX_DESTROY 259
+#define SYS_SEM_CREATE    260
+#define SYS_SEM_WAIT      261
+#define SYS_SEM_POST      262
+#define SYS_SEM_DESTROY   263
+#define SYS_COND_CREATE   264
+#define SYS_COND_WAIT     265
+#define SYS_COND_SIGNAL   266
+#define SYS_COND_BROADCAST 267
+#define SYS_COND_DESTROY  268
 
 #define WNOHANG         1
 #define SIGKILL         9
@@ -127,6 +146,11 @@ static inline int openos_syscall_result(int ret)
 }
 
 typedef unsigned int openos_uint32_t;
+typedef int openos_thread_t;
+typedef int openos_mutex_t;
+typedef int openos_sem_t;
+typedef int openos_cond_t;
+typedef void (*openos_thread_start_t)(void *);
 
 typedef struct openos_stat {
     openos_uint32_t ino;
@@ -170,6 +194,196 @@ static inline int openos_syscall1(int num, int a)
 static inline int openos_syscall2(int num, int a, int b)
 {
     return openos_syscall3(num, a, b, 0);
+}
+
+static inline void openos_thread_exit(int code);
+
+static void __attribute__((unused)) openos_thread_return_trampoline(void)
+{
+    openos_thread_exit(0);
+}
+
+static inline int openos_thread_create(openos_thread_t *thread,
+                                       openos_thread_start_t start,
+                                       void *arg)
+{
+    int tid;
+
+    if (!start) {
+        openos_set_errno(OPENOS_EINVAL);
+        return -1;
+    }
+
+    tid = openos_syscall_result(openos_syscall3(SYS_THREAD_CREATE,
+                                               (int)start,
+                                               (int)arg,
+                                               (int)openos_thread_return_trampoline));
+    if (tid < 0)
+        return -1;
+    if (thread)
+        *thread = tid;
+    return 0;
+}
+
+static inline void openos_thread_exit(int code)
+{
+    openos_syscall1(SYS_THREAD_EXIT, code);
+    for (;;) {
+        __asm__ volatile("pause");
+    }
+}
+
+static inline int openos_mutex_init(openos_mutex_t *mutex)
+{
+    int handle;
+
+    if (!mutex) {
+        openos_set_errno(OPENOS_EINVAL);
+        return -1;
+    }
+
+    handle = openos_syscall_result(openos_syscall0(SYS_MUTEX_CREATE));
+    if (handle < 0)
+        return -1;
+    *mutex = handle;
+    return 0;
+}
+
+static inline int openos_mutex_lock(openos_mutex_t *mutex)
+{
+    if (!mutex || *mutex <= 0) {
+        openos_set_errno(OPENOS_EINVAL);
+        return -1;
+    }
+    return openos_syscall_result(openos_syscall1(SYS_MUTEX_LOCK, *mutex));
+}
+
+static inline int openos_mutex_unlock(openos_mutex_t *mutex)
+{
+    if (!mutex || *mutex <= 0) {
+        openos_set_errno(OPENOS_EINVAL);
+        return -1;
+    }
+    return openos_syscall_result(openos_syscall1(SYS_MUTEX_UNLOCK, *mutex));
+}
+
+static inline int openos_mutex_destroy(openos_mutex_t *mutex)
+{
+    int ret;
+
+    if (!mutex || *mutex <= 0) {
+        openos_set_errno(OPENOS_EINVAL);
+        return -1;
+    }
+    ret = openos_syscall_result(openos_syscall1(SYS_MUTEX_DESTROY, *mutex));
+    if (ret == 0)
+        *mutex = 0;
+    return ret;
+}
+
+static inline int openos_sem_init(openos_sem_t *sem, int initial)
+{
+    int handle;
+
+    if (!sem || initial < 0) {
+        openos_set_errno(OPENOS_EINVAL);
+        return -1;
+    }
+
+    handle = openos_syscall_result(openos_syscall1(SYS_SEM_CREATE, initial));
+    if (handle < 0)
+        return -1;
+    *sem = handle;
+    return 0;
+}
+
+static inline int openos_sem_wait(openos_sem_t *sem)
+{
+    if (!sem || *sem <= 0) {
+        openos_set_errno(OPENOS_EINVAL);
+        return -1;
+    }
+    return openos_syscall_result(openos_syscall1(SYS_SEM_WAIT, *sem));
+}
+
+static inline int openos_sem_post(openos_sem_t *sem)
+{
+    if (!sem || *sem <= 0) {
+        openos_set_errno(OPENOS_EINVAL);
+        return -1;
+    }
+    return openos_syscall_result(openos_syscall1(SYS_SEM_POST, *sem));
+}
+
+static inline int openos_sem_destroy(openos_sem_t *sem)
+{
+    int ret;
+
+    if (!sem || *sem <= 0) {
+        openos_set_errno(OPENOS_EINVAL);
+        return -1;
+    }
+    ret = openos_syscall_result(openos_syscall1(SYS_SEM_DESTROY, *sem));
+    if (ret == 0)
+        *sem = 0;
+    return ret;
+}
+
+static inline int openos_cond_init(openos_cond_t *cond)
+{
+    int handle;
+
+    if (!cond) {
+        openos_set_errno(OPENOS_EINVAL);
+        return -1;
+    }
+
+    handle = openos_syscall_result(openos_syscall0(SYS_COND_CREATE));
+    if (handle < 0)
+        return -1;
+    *cond = handle;
+    return 0;
+}
+
+static inline int openos_cond_wait(openos_cond_t *cond, openos_mutex_t *mutex)
+{
+    if (!cond || *cond <= 0 || !mutex || *mutex <= 0) {
+        openos_set_errno(OPENOS_EINVAL);
+        return -1;
+    }
+    return openos_syscall_result(openos_syscall2(SYS_COND_WAIT, *cond, *mutex));
+}
+
+static inline int openos_cond_signal(openos_cond_t *cond)
+{
+    if (!cond || *cond <= 0) {
+        openos_set_errno(OPENOS_EINVAL);
+        return -1;
+    }
+    return openos_syscall_result(openos_syscall1(SYS_COND_SIGNAL, *cond));
+}
+
+static inline int openos_cond_broadcast(openos_cond_t *cond)
+{
+    if (!cond || *cond <= 0) {
+        openos_set_errno(OPENOS_EINVAL);
+        return -1;
+    }
+    return openos_syscall_result(openos_syscall1(SYS_COND_BROADCAST, *cond));
+}
+
+static inline int openos_cond_destroy(openos_cond_t *cond)
+{
+    int ret;
+
+    if (!cond || *cond <= 0) {
+        openos_set_errno(OPENOS_EINVAL);
+        return -1;
+    }
+    ret = openos_syscall_result(openos_syscall1(SYS_COND_DESTROY, *cond));
+    if (ret == 0)
+        *cond = 0;
+    return ret;
 }
 
 static inline void openos_exit(int code)
@@ -792,6 +1006,32 @@ static inline int openos_readlink(const char *path, char *buf, int size)
     return openos_syscall_result(openos_syscall3(SYS_READLINK, (int)path, (int)buf, size));
 }
 
+static inline void *openos_mmap(void *addr, int len, int flags)
+{
+    int result = openos_syscall3(SYS_MMAP, (int)addr, len, flags);
+    if (result == -1)
+        openos_errno = OPENOS_EINVAL;
+    return (void *)result;
+}
+
+static inline int openos_munmap(void *addr, int len)
+{
+    return openos_syscall_result(openos_syscall2(SYS_MUNMAP, (int)addr, len));
+}
+
+static inline int openos_brk(void *addr)
+{
+    return openos_syscall_result(openos_syscall1(SYS_BRK, (int)addr));
+}
+
+static inline void *openos_sbrk(int increment)
+{
+    int result = openos_syscall1(SYS_SBRK, increment);
+    if (result == -1)
+        openos_errno = OPENOS_EINVAL;
+    return (void *)result;
+}
+
 static inline int openos_rmdir(const char *path)
 {
     return openos_syscall_result(openos_syscall1(SYS_RMDIR, (int)path));
@@ -848,18 +1088,17 @@ static openos_heap_block_t *openos_heap_head = 0;
 
 static inline void *openos_heap_alloc_page(void)
 {
-    int ret = openos_syscall1(SYS_MALLOC, OPENOS_HEAP_PAGE_SIZE);
-    if (ret <= 0) {
-        openos_set_errno(ret < 0 ? ret : OPENOS_ENOMEM);
+    void *ret = openos_sbrk(OPENOS_HEAP_PAGE_SIZE);
+    if ((int)ret == -1)
         return 0;
-    }
     openos_clear_errno();
-    return (void *)ret;
+    return ret;
 }
 
 static inline int openos_heap_free_page(void *ptr)
 {
-    return openos_syscall_result(openos_syscall1(SYS_FREE, (int)ptr));
+    (void)ptr;
+    return 0;
 }
 
 static inline int openos_heap_align_size(int size)
