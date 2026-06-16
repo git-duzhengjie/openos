@@ -226,7 +226,7 @@
 - [√] `recv`（已支持 socketpair / TCP / UDP 接收队列）
 - [√] TCP 完整状态机（已覆盖 SYN/ESTABLISHED/FIN/CLOSE_WAIT/LAST_ACK/TIME_WAIT，含 TIME_WAIT 回收）
 - [√] TCP 重传（已支持未确认段缓存、定时重传、最大重试关闭和 3 次重复 ACK 快速重传）
-- [x] TCP 拥塞控制
+- [√] TCP 拥塞控制（已支持 cwnd/ssthresh、慢启动、拥塞避免、超时降窗，并限制发送窗口）
 - [x] TCP 窗口管理
 - [x] UDP 用户态接口
 - [x] ping / ifconfig / netstat 等工具
