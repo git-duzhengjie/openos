@@ -241,7 +241,7 @@
 - [√] eventfd（已实现 SYS_EVENTFD_CREATE/WRITE/READ/DESTROY、计数语义和用户态 wrapper） 类机制
 - [√] socketpair（已实现 SYS_SOCKETPAIR、成对 fd 创建、内存队列收发和用户态 wrapper）
 - [√] 用户态服务进程通信模型（已基于 socketpair 提供 service channel、同步 call/reply helper 和 servicetest）
-- [x] 微内核式服务消息机制
+- [√] 微内核式服务消息机制（已提供 typed service message、service/opcode/seq/status 协议、send/recv/call helper 和 micromsgtest）
 
 ---
 
