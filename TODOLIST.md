@@ -230,7 +230,7 @@
 - [√] TCP 窗口管理（已支持接收窗口通告、对端发送窗口跟踪、cwnd/swnd 综合发送限制）
 - [√] UDP 用户态接口（已实现 sendto/recvfrom syscall、用户态 wrapper、DGRAM 发送和接收队列投递）
 - [√] ping / ifconfig / netstat 等工具（已提供用户态命令、构建接入和内核 /bin 嵌入安装）
-- [x] 网络配置管理
+- [√] 网络配置管理（已支持 DHCP 获取配置、SYS_NETCONFIG 静态配置、ifconfig 查看/设置 IP/掩码/网关）
 - [x] 防火墙 / 权限控制
 
 ### 14. IPC
