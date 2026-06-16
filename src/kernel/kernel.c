@@ -451,7 +451,7 @@ void kernel_start_shell_thread(void) {
 
     sh = thread_create_sized(INIT_PID, "shell", (uint32_t)shell_run, shell_stack, KERNEL_UI_THREAD_STACK_SIZE);
     if (sh) {
-        sh->priority = PRIORITY_LOW;
+        sh->priority = PRIORITY_NORMAL;
         g_shell_thread_started = 1;
         sched_add_thread(sh);
         serial_write("[SHELL] Shell thread started on demand.\n");
