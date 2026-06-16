@@ -13,6 +13,8 @@
 #define NULL ((void*)0)
 #endif
 
+#define SCHED_QUEUE_COUNT 8u
+
 void idle_entry(void) { while (1) { __asm__ volatile("hlt"); } }
 
 static struct {
@@ -23,7 +25,8 @@ static struct {
     int initialized;
     int need_resched;
     uint32_t current_cr3;
-} sched = {{0}, 0, 0, 0, 0, 0, 0};
+    uint64_t context_switches;
+} sched = {{0}, 0, 0, 0, 0, 0, 0, 0};
 
 static uint32_t thread_target_cr3(thread_t *t) {
     if (!t) return vmm_kernel_cr3();
@@ -51,8 +54,35 @@ void sched_ensure_not_running_cr3(uint32_t cr3) {
     }
 }
 
+static uint32_t sched_quantum_for_priority(uint32_t priority) {
+    if (priority <= PRIORITY_REALTIME) return 4;
+    if (priority <= PRIORITY_HIGH) return QUANTUM_HIGH;
+    if (priority <= PRIORITY_NORMAL) return QUANTUM_DEFAULT;
+    if (priority <= PRIORITY_LOW) return 15;
+    return QUANTUM_LOW;
+}
+
+static void sched_refresh_quantum(thread_t *t) {
+    if (!t) return;
+    t->quantum_total = sched_quantum_for_priority(t->priority);
+    if (t->quantum == 0 || t->quantum > t->quantum_total)
+        t->quantum = t->quantum_total;
+}
+
+static int sched_has_higher_ready(uint32_t priority) {
+    uint32_t limit = priority;
+    if (limit > SCHED_QUEUE_COUNT) limit = SCHED_QUEUE_COUNT;
+    for (uint32_t i = 0; i < limit; i++) {
+        if (sched.queues[i]) return 1;
+    }
+    return 0;
+}
+
 static void enqueue(thread_t *t) {
-    int prio = t->priority;
+    if (!t) return;
+    if (t->priority >= SCHED_QUEUE_COUNT) t->priority = PRIORITY_IDLE;
+    sched_refresh_quantum(t);
+    int prio = (int)t->priority;
     t->next = NULL;
     t->prev = NULL;
     if (!sched.queues[prio]) {
@@ -95,6 +125,7 @@ void sched_init(void) {
     sched.time_ms = 0;
     sched.need_resched = 0;
     sched.current_cr3 = vmm_kernel_cr3();
+    sched.context_switches = 0;
 
     /* 创建 idle 线程并加入运行队列 */
     uint32_t idle_stack = (uint32_t)pmm_alloc_page() + 4096;
@@ -102,6 +133,8 @@ void sched_init(void) {
     if (idle) {
         idle->priority = PRIORITY_IDLE;
         idle->state = PROC_READY;
+        idle->quantum_total = sched_quantum_for_priority(idle->priority);
+        idle->quantum = idle->quantum_total;
         enqueue(idle);
         sched.current = idle;
     }
@@ -113,6 +146,8 @@ void sched_add_thread(thread_t *t) {
     if (!t || t->state == PROC_RUNNING) return;
     t->state = PROC_READY;
     enqueue(t);
+    if (sched.current && t->priority < sched.current->priority)
+        sched.need_resched = 1;
 }
 
 void sched_remove_thread(thread_t *t) {
@@ -146,12 +181,19 @@ int sched_set_thread_priority(thread_t *thread, uint32_t priority) {
     if (thread->state == PROC_READY) {
         remove_from_queue(thread);
         thread->priority = priority;
+        thread->quantum_total = sched_quantum_for_priority(priority);
+        thread->quantum = thread->quantum_total;
         enqueue(thread);
     } else {
         thread->priority = priority;
+        thread->quantum_total = sched_quantum_for_priority(priority);
+        if (thread->quantum == 0 || thread->quantum > thread->quantum_total)
+            thread->quantum = thread->quantum_total;
     }
 
     if (thread == sched.current && priority > old_priority) {
+        sched.need_resched = 1;
+    } else if (thread != sched.current && sched.current && priority < sched.current->priority) {
         sched.need_resched = 1;
     }
 
@@ -200,7 +242,12 @@ void sched_tick(void) {
     proc_wake_sleepers(sched.time_ms);
     if (!sched.current) return;
     sched.current_ticks++;
-    if (sched.current_ticks >= 10) {
+    sched.current->total_ticks++;
+    if (sched.current->quantum == 0)
+        sched.current->quantum = sched.current->quantum_total ? sched.current->quantum_total : sched_quantum_for_priority(sched.current->priority);
+    if (sched.current->quantum > 0)
+        sched.current->quantum--;
+    if (sched.current->quantum == 0 || sched_has_higher_ready(sched.current->priority)) {
         sched.current_ticks = 0;
         sched.need_resched = 1;
     }
@@ -229,8 +276,10 @@ thread_t *timer_schedule_handler(void) {
 
     sched.current = next;
     next->state = PROC_RUNNING;
+    next->quantum = next->quantum_total ? next->quantum_total : sched_quantum_for_priority(next->priority);
     sched.current_ticks = 0;
     sched.need_resched = 0;
+    sched.context_switches++;
     tss_set_kernel_stack(next->kernel_stack_top);
     sched_switch_cr3_for_thread(next);
 
@@ -265,7 +314,9 @@ void sched_yield(void) {
 
     sched.current = next;
     next->state = PROC_RUNNING;
+    next->quantum = next->quantum_total ? next->quantum_total : sched_quantum_for_priority(next->priority);
     sched.current_ticks = 0;
+    sched.context_switches++;
     tss_set_kernel_stack(next->kernel_stack_top);
     sched_switch_cr3_for_thread(next);
 
@@ -326,6 +377,8 @@ thread_t *thread_create_sized(uint32_t pid, const char *name, uint32_t entry, ui
     t->id = (uint32_t)t;
     t->pid = pid;
     t->priority = PRIORITY_NORMAL;
+    t->quantum_total = sched_quantum_for_priority(t->priority);
+    t->quantum = t->quantum_total;
     t->state = PROC_READY;
     (void)name;
 

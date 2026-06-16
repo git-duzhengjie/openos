@@ -135,7 +135,7 @@
 - [√] condition variable（已实现 `SYS_COND_CREATE/WAIT/SIGNAL/BROADCAST/DESTROY`、用户态 `openos_cond_*` API、条件变量等待队列，并由 `/bin/condtest` 覆盖）
 - [√] futex 或类似轻量同步机制
 - [√] priority / nice
-- [ ] 更完整的调度策略
+- [√] 更完整的调度策略
 
 ### 6. 进程控制与信号
 

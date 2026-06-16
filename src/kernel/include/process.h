@@ -44,6 +44,7 @@ typedef struct thread {
     uint32_t priority;        /* 优先级 (0=最高, 7=最低) */
     uint32_t quantum;          /* 时间片剩余 */
     uint32_t quantum_total;   /* 时间片总长 */
+    uint64_t total_ticks;     /* 累计运行 tick 数 */
     uint32_t wake_time;       /* 睡眠唤醒时间 */
     struct thread *next;      /* 调度队列下一项 */
     struct thread *prev;      /* 调度队列上一项 */
