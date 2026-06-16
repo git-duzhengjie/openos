@@ -87,6 +87,8 @@
 #define SYS_CONNECT       287
 #define SYS_SEND          288
 #define SYS_RECV          289
+#define SYS_SENDTO        290
+#define SYS_RECVFROM      291
 
 #define OPENOS_POLLIN     0x0001
 #define OPENOS_POLLOUT    0x0004

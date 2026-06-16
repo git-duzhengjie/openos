@@ -54,7 +54,11 @@ int socket_listen_fd(int fd, int backlog);
 int socket_accept_fd(int fd, openos_sockaddr_t *addr, uint32_t *addrlen);
 int socket_connect_fd(int fd, const openos_sockaddr_t *addr, uint32_t addrlen);
 int socket_send_fd(int fd, const uint8_t *data, uint32_t len, int flags);
+int socket_sendto_fd(int fd, const uint8_t *data, uint32_t len, int flags,
+                     const openos_sockaddr_t *addr, uint32_t addrlen);
 int socket_recv_fd(int fd, uint8_t *data, uint32_t len, int flags);
+int socket_recvfrom_fd(int fd, uint8_t *data, uint32_t len, int flags,
+                       openos_sockaddr_t *addr, uint32_t *addrlen);
 int socket_deliver_udp(uint32_t src_ip, uint16_t src_port, uint16_t dst_port,
                        const uint8_t *data, uint16_t len);
 const openos_socket_info_t *socket_get_info(int fd);

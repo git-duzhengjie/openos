@@ -84,6 +84,8 @@
 #define SYS_CONNECT       287
 #define SYS_SEND          288
 #define SYS_RECV          289
+#define SYS_SENDTO        290
+#define SYS_RECVFROM      291
 
 #define OPENOS_AF_UNSPEC  0
 #define OPENOS_AF_INET    2
@@ -313,6 +315,7 @@ static inline int openos_recv(int fd, void *buf, unsigned int len, int flags)
     return openos_syscall_result(openos_syscall4(SYS_RECV, fd, (int)buf, (int)len, flags));
 }
 
+
 static inline int openos_syscall5(int num, int a, int b, int c, int d, int e)
 {
     int ret;
@@ -322,6 +325,22 @@ static inline int openos_syscall5(int num, int a, int b, int c, int d, int e)
         : "a"(num), "b"(a), "c"(b), "d"(c), "S"(d), "D"(e)
         : "memory"
     );
+    return ret;
+}
+
+static inline int openos_sendto(int fd, const void *buf, unsigned int len, int flags,
+                                const openos_sockaddr_t *addr, unsigned int addrlen)
+{
+    (void)addrlen;
+    return openos_syscall_result(openos_syscall5(SYS_SENDTO, fd, (int)buf, (int)len, flags, (int)addr));
+}
+
+static inline int openos_recvfrom(int fd, void *buf, unsigned int len, int flags,
+                                  openos_sockaddr_t *addr, unsigned int *addrlen)
+{
+    int ret = openos_syscall_result(openos_syscall5(SYS_RECVFROM, fd, (int)buf, (int)len, flags, (int)addr));
+    if (ret >= 0 && addr && addrlen)
+        *addrlen = sizeof(openos_sockaddr_in_t);
     return ret;
 }
 

@@ -174,7 +174,8 @@ static int socket_close(file_t *f) {
     return 0;
 }
 
-static int socket_dequeue(socket_file_t *sock, uint8_t *buf, uint32_t count) {
+static int socket_dequeue_from(socket_file_t *sock, uint8_t *buf, uint32_t count,
+                               uint32_t *src_ip, uint16_t *src_port) {
     socket_packet_t *pkt;
     uint32_t copy_len;
     if (!sock || !buf || count == 0 || sock->recv_count == 0) {
@@ -190,10 +191,20 @@ static int socket_dequeue(socket_file_t *sock, uint8_t *buf, uint32_t count) {
         copy_len = count;
     }
     memcpy(buf, pkt->data, copy_len);
+    if (src_ip) {
+        *src_ip = pkt->src_ip;
+    }
+    if (src_port) {
+        *src_port = pkt->src_port;
+    }
     memset(pkt, 0, sizeof(*pkt));
     sock->recv_head = (sock->recv_head + 1u) % SOCKET_RECV_QUEUE_LEN;
     sock->recv_count--;
     return (int)copy_len;
+}
+
+static int socket_dequeue(socket_file_t *sock, uint8_t *buf, uint32_t count) {
+    return socket_dequeue_from(sock, buf, count, NULL, NULL);
 }
 
 static int socket_read(file_t *f, void *buf, uint32_t count) {
@@ -470,6 +481,77 @@ int socket_send_fd(int fd, const uint8_t *data, uint32_t len, int flags) {
         return -1;
     }
     return (int)len;
+}
+
+int socket_sendto_fd(int fd, const uint8_t *data, uint32_t len, int flags,
+                     const openos_sockaddr_t *addr, uint32_t addrlen) {
+    file_t *file;
+    socket_file_t *sock;
+    const openos_sockaddr_in_t *in;
+    uint32_t remote_ip;
+    uint16_t remote_port;
+
+    (void)flags;
+    if (!data || !addr || len == 0 || len > (NET_ETH_MTU - 8u) ||
+        addrlen < sizeof(openos_sockaddr_in_t)) {
+        return -1;
+    }
+    file = vfs_get_file(fd);
+    sock = socket_from_file(file);
+    if (!sock || sock->info.domain != OPENOS_AF_INET ||
+        socket_type_base(sock->info.type) != OPENOS_SOCK_DGRAM ||
+        sock->info.state == OPENOS_SOCKET_STATE_CLOSED ||
+        addr->sa_family != OPENOS_AF_INET) {
+        return -1;
+    }
+    in = (const openos_sockaddr_in_t *)addr;
+    remote_ip = in->sin_addr;
+    remote_port = socket_bswap16(in->sin_port);
+    if (remote_ip == OPENOS_INADDR_ANY || remote_port == 0) {
+        return -1;
+    }
+    if (sock->info.local_port == 0 && socket_reserve_port(sock, OPENOS_INADDR_ANY, 0) < 0) {
+        return -1;
+    }
+    if (net_send_udp(remote_ip, sock->info.local_port, remote_port, data, (uint16_t)len) < 0) {
+        return -1;
+    }
+    return (int)len;
+}
+
+int socket_recvfrom_fd(int fd, uint8_t *data, uint32_t len, int flags,
+                       openos_sockaddr_t *addr, uint32_t *addrlen) {
+    file_t *file;
+    socket_file_t *sock;
+    uint32_t src_ip = OPENOS_INADDR_ANY;
+    uint16_t src_port = 0;
+    int ret;
+
+    (void)flags;
+    if (!data || len == 0 || (addr && !addrlen)) {
+        return -1;
+    }
+    file = vfs_get_file(fd);
+    sock = socket_from_file(file);
+    if (!sock || socket_type_base(sock->info.type) != OPENOS_SOCK_DGRAM) {
+        return -1;
+    }
+    ret = socket_dequeue_from(sock, data, len, &src_ip, &src_port);
+    if (ret < 0) {
+        return ret;
+    }
+    if (addr) {
+        openos_sockaddr_in_t *in = (openos_sockaddr_in_t *)addr;
+        if (*addrlen < sizeof(openos_sockaddr_in_t)) {
+            return -1;
+        }
+        memset(in, 0, sizeof(*in));
+        in->sin_family = OPENOS_AF_INET;
+        in->sin_port = socket_bswap16(src_port);
+        in->sin_addr = src_ip;
+        *addrlen = sizeof(openos_sockaddr_in_t);
+    }
+    return ret;
 }
 
 int socket_bind_fd(int fd, const openos_sockaddr_t *addr, uint32_t addrlen) {

@@ -1429,6 +1429,54 @@ uint32_t syscall_dispatch(uint32_t num,
             return (uint32_t)ret;
         }
 
+    case SYS_SENDTO:
+        {
+            void *kbuf;
+            openos_sockaddr_in_t addr;
+            int ret;
+            if (!b || !e || c == 0 || c > SYSCALL_SEND_MAX)
+                return (uint32_t)-1;
+            if (copy_from_user(&addr, (const void *)e, sizeof(addr)) < 0)
+                return (uint32_t)-1;
+            kbuf = pmm_alloc_page();
+            if (!kbuf)
+                return (uint32_t)-1;
+            if (copy_from_user(kbuf, (const void *)b, c) < 0) {
+                pmm_free_page(kbuf);
+                return (uint32_t)-1;
+            }
+            ret = socket_sendto_fd((int)a, (const uint8_t *)kbuf, c, (int)d,
+                                   (const openos_sockaddr_t *)&addr, sizeof(addr));
+            pmm_free_page(kbuf);
+            return (uint32_t)ret;
+        }
+
+    case SYS_RECVFROM:
+        {
+            void *kbuf;
+            openos_sockaddr_in_t addr;
+            uint32_t addrlen = sizeof(addr);
+            int ret;
+            if (!b || c == 0 || c > SYSCALL_RECV_MAX)
+                return (uint32_t)-1;
+            kbuf = pmm_alloc_page();
+            if (!kbuf)
+                return (uint32_t)-1;
+            ret = socket_recvfrom_fd((int)a, (uint8_t *)kbuf, c, (int)d,
+                                     e ? (openos_sockaddr_t *)&addr : NULL,
+                                     e ? &addrlen : NULL);
+            if (ret > 0 && copy_to_user((void *)b, kbuf, (uint32_t)ret) < 0) {
+                pmm_free_page(kbuf);
+                return (uint32_t)-1;
+            }
+            if (ret >= 0 && e && copy_to_user((void *)e, &addr, sizeof(addr)) < 0) {
+                pmm_free_page(kbuf);
+                return (uint32_t)-1;
+            }
+            pmm_free_page(kbuf);
+            return (uint32_t)ret;
+        }
+
     case SYS_FSYNC:
         {
             file_t *f = vfs_get_file((int)a);
