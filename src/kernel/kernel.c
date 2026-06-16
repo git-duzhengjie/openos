@@ -167,6 +167,12 @@
 #else
 #define OPENOS_HAS_FSTEST 0
 #endif
+#if __has_include("embed_sh.h")
+#include "embed_sh.h"  /* interactive userspace shell */
+#define OPENOS_HAS_SH 1
+#else
+#define OPENOS_HAS_SH 0
+#endif
 #if __has_include("embed_pwd.h")
 #include "embed_pwd.h"  /* pwd user command */
 #define OPENOS_HAS_PWD 1
@@ -928,6 +934,17 @@ void kernel_main(void) {
         serial_write("[OK] Installed /bin/fstest user ELF\n");
     } else {
         serial_write("[WARN] Failed to install /bin/fstest\n");
+    }
+#endif
+
+#if OPENOS_HAS_SH
+    fd = vfs_open("/bin/sh", O_CREAT | O_RDWR, 0755);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)sh_elf, sh_elf_size);
+        vfs_close(fd);
+        serial_write("[OK] Installed /bin/sh user ELF\n");
+    } else {
+        serial_write("[WARN] Failed to install /bin/sh\n");
     }
 #endif
 

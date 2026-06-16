@@ -319,7 +319,8 @@ if [ -f $USR/sh.c ]; then
         -I $SRC/include \
         -c $USR/sh.c -o $BUILD/sh.o
     ld -m elf_i386 -T $USR/user.ld -o $BUILD/sh.elf $BUILD/sh.o
-    echo "  Built: sh.elf"
+    python3 _embed_elf.py $BUILD/sh.elf $SRC/include/embed_sh.h sh_elf
+    echo "  Embedded: sh.elf"
 fi
 
 if [ -f $USR/pwd.c ]; then
