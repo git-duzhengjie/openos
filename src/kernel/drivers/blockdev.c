@@ -680,8 +680,72 @@ static int blockdev_scan_gpt(blockdev_t *parent, int first_part_index) {
     return part_index;
 }
 
+static int mbr_partition_type_is_extended(uint8_t type) {
+    return type == 0x05 || type == 0x0F || type == 0x85;
+}
+
+static int blockdev_scan_ebr(blockdev_t *parent,
+                             uint32_t extended_base_lba,
+                             uint32_t extended_sector_count,
+                             int first_part_index) {
+    mbr_boot_sector_t ebr;
+    uint32_t next_ebr_lba = extended_base_lba;
+    uint64_t extended_end_lba = (uint64_t)extended_base_lba + extended_sector_count;
+    uint32_t visited = 0;
+    int part_index = first_part_index;
+
+    if (!parent || extended_sector_count == 0) return first_part_index;
+    if (extended_end_lba > parent->sector_count) return first_part_index;
+
+    serial_write("[BLOCKDEV] scanning EBR logical partitions\n");
+    while (part_index < BLOCKDEV_MAX && visited < 32) {
+        mbr_part_entry_t *logical;
+        mbr_part_entry_t *next;
+        uint64_t logical_start64;
+        uint32_t logical_start;
+        uint32_t next_rel;
+
+        if ((uint64_t)next_ebr_lba < extended_base_lba) break;
+        if ((uint64_t)next_ebr_lba >= extended_end_lba) break;
+        if (blockdev_read_blocks(parent, next_ebr_lba, 1, &ebr) != 1 || ebr.signature != 0xAA55) break;
+
+        logical = &ebr.partitions[0];
+        next = &ebr.partitions[1];
+
+        if (logical->type != 0 && logical->sector_count != 0 &&
+            !mbr_partition_type_is_extended(logical->type)) {
+            logical_start64 = (uint64_t)next_ebr_lba + logical->lba_start;
+            if (logical_start64 >= extended_base_lba &&
+                logical_start64 < extended_end_lba &&
+                logical->sector_count <= extended_end_lba - logical_start64 &&
+                logical_start64 <= 0xFFFFFFFFull) {
+                logical_start = (uint32_t)logical_start64;
+                if (partition_register_child(parent, part_index,
+                                             logical_start,
+                                             logical->sector_count) == 0) {
+                    part_index++;
+                }
+            }
+        }
+
+        if (next->type == 0 || next->sector_count == 0 ||
+            !mbr_partition_type_is_extended(next->type)) {
+            break;
+        }
+
+        next_rel = next->lba_start;
+        if (next_rel == 0 || next_rel >= extended_sector_count) break;
+        next_ebr_lba = extended_base_lba + next_rel;
+        visited++;
+    }
+
+    return part_index;
+}
+
 static int blockdev_scan_mbr(blockdev_t *parent, int first_part_index, int *has_protective_mbr) {
     mbr_boot_sector_t mbr;
+    uint32_t extended_base_lba = 0;
+    uint32_t extended_sector_count = 0;
     int part_index = first_part_index;
     int i;
 
@@ -696,11 +760,25 @@ static int blockdev_scan_mbr(blockdev_t *parent, int first_part_index, int *has_
             if (has_protective_mbr) *has_protective_mbr = 1;
             continue;
         }
+        if (mbr_partition_type_is_extended(mbr.partitions[i].type)) {
+            if (extended_base_lba == 0) {
+                extended_base_lba = mbr.partitions[i].lba_start;
+                extended_sector_count = mbr.partitions[i].sector_count;
+            }
+            continue;
+        }
         if (partition_register_child(parent, part_index,
                                      mbr.partitions[i].lba_start,
                                      mbr.partitions[i].sector_count) == 0) {
             part_index++;
         }
+    }
+
+    if (extended_base_lba != 0 && part_index < 5) part_index = 5;
+    if (extended_base_lba != 0 && part_index < BLOCKDEV_MAX) {
+        part_index = blockdev_scan_ebr(parent, extended_base_lba,
+                                       extended_sector_count,
+                                       part_index);
     }
     return part_index;
 }
