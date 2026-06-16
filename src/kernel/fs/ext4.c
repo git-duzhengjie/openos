@@ -1,5 +1,5 @@
 /* ============================================================
- * openos - EXT4 filesystem driver (read-only subset)
+ * openos - EXT4 filesystem driver (read/write subset)
  * ============================================================ */
 
 #include "../include/ext4.h"
@@ -17,6 +17,7 @@
 #define EXT4_SUPER_MAGIC             0xEF53u
 #define EXT4_GOOD_OLD_INODE_SIZE     128u
 #define EXT4_ROOT_INO                2u
+#define EXT4_FS_MAGIC                 0xEF530004u
 
 #define EXT4_N_BLOCKS                15u
 #define EXT4_EXTENTS_FL              0x00080000u
@@ -259,6 +260,16 @@ static int ext4_read_block(ext4_mount_t *m, uint64_t block_no, void *buf) {
     return 0;
 }
 
+static int ext4_write_block(ext4_mount_t *m, uint64_t block_no, const void *buf) {
+    if (!m || !m->dev || !buf) return -1;
+    if (!m->dev->ops || !m->dev->ops->write_blocks) return -1;
+    if (m->block_size > EXT4_MAX_BLOCK_SIZE) return -1;
+    if (block_no > 0xFFFFFFFFu) return -1;
+    if (blockdev_write_blocks(m->dev, (uint32_t)block_no * m->sectors_per_block,
+                              m->sectors_per_block, buf) != (int)m->sectors_per_block) return -1;
+    return 0;
+}
+
 static uint64_t ext4_blocks_count(ext4_mount_t *m) {
     return (uint64_t)m->sb.s_blocks_count_lo;
 }
@@ -318,18 +329,15 @@ static int ext4_read_group_desc(ext4_mount_t *m, uint32_t group, ext4_group_desc
     return 0;
 }
 
-static int ext4_read_inode(ext4_mount_t *m, uint32_t inode_no, ext4_inode_disk_t *inode) {
+static int ext4_inode_location(ext4_mount_t *m, uint32_t inode_no, uint64_t *block_no, uint32_t *block_off) {
     ext4_group_desc32_t gd;
-    uint8_t block[EXT4_MAX_BLOCK_SIZE];
     uint32_t index;
     uint32_t group;
     uint32_t index_in_group;
     uint64_t inode_table;
     uint64_t byte_offset;
-    uint64_t block_no;
-    uint32_t block_off;
 
-    if (!m || !inode || inode_no == 0) return -1;
+    if (!m || !block_no || !block_off || inode_no == 0) return -1;
     index = inode_no - 1;
     group = index / m->sb.s_inodes_per_group;
     index_in_group = index % m->sb.s_inodes_per_group;
@@ -337,11 +345,51 @@ static int ext4_read_inode(ext4_mount_t *m, uint32_t inode_no, ext4_inode_disk_t
 
     inode_table = gd.bg_inode_table_lo;
     byte_offset = (uint64_t)index_in_group * m->inode_size;
-    block_no = inode_table + ext4_div_u64_u32(byte_offset, m->block_size, &block_off);
+    *block_no = inode_table + ext4_div_u64_u32(byte_offset, m->block_size, block_off);
+    if (*block_off + sizeof(ext4_inode_disk_t) > m->block_size) return -1;
+    return 0;
+}
 
-    if (block_off + sizeof(ext4_inode_disk_t) > m->block_size) return -1;
+static int ext4_read_inode(ext4_mount_t *m, uint32_t inode_no, ext4_inode_disk_t *inode) {
+    uint8_t block[EXT4_MAX_BLOCK_SIZE];
+    uint64_t block_no;
+    uint32_t block_off;
+
+    if (!m || !inode || inode_no == 0) return -1;
+    if (ext4_inode_location(m, inode_no, &block_no, &block_off) < 0) return -1;
     if (ext4_read_block(m, block_no, block) < 0) return -1;
     memcpy(inode, block + block_off, sizeof(ext4_inode_disk_t));
+    return 0;
+}
+
+static int ext4_write_inode_size(ext4_node_t *node, uint64_t size) {
+    uint8_t block[EXT4_MAX_BLOCK_SIZE];
+    uint8_t *ino;
+    uint64_t block_no;
+    uint32_t block_off;
+    uint32_t sectors;
+
+    if (!node || !node->mount || size > 0xFFFFFFFFu) return -1;
+    if (ext4_inode_location(node->mount, node->inode_no, &block_no, &block_off) < 0) return -1;
+    if (ext4_read_block(node->mount, block_no, block) < 0) return -1;
+
+    ino = block + block_off;
+    sectors = (uint32_t)((size + 511u) >> 9);
+    ino[4] = (uint8_t)((uint32_t)size & 0xFFu);
+    ino[5] = (uint8_t)(((uint32_t)size >> 8) & 0xFFu);
+    ino[6] = (uint8_t)(((uint32_t)size >> 16) & 0xFFu);
+    ino[7] = (uint8_t)(((uint32_t)size >> 24) & 0xFFu);
+    ino[28] = (uint8_t)(sectors & 0xFFu);
+    ino[29] = (uint8_t)((sectors >> 8) & 0xFFu);
+    ino[30] = (uint8_t)((sectors >> 16) & 0xFFu);
+    ino[31] = (uint8_t)((sectors >> 24) & 0xFFu);
+    ino[108] = 0;
+    ino[109] = 0;
+    ino[110] = 0;
+    ino[111] = 0;
+
+    if (ext4_write_block(node->mount, block_no, block) < 0) return -1;
+    node->size = size;
     return 0;
 }
 
@@ -467,10 +515,45 @@ static int ext4_file_read(file_t *file, void *buf, uint32_t size) {
 }
 
 static int ext4_file_write(file_t *file, const void *buf, uint32_t size) {
-    (void)file;
-    (void)buf;
-    (void)size;
-    return -1;
+    ext4_node_t *node;
+    const uint8_t *in = (const uint8_t *)buf;
+    uint8_t block[EXT4_MAX_BLOCK_SIZE];
+    uint32_t done = 0;
+    uint32_t block_size;
+    uint32_t offset;
+    uint64_t end_pos;
+
+    if (!file || !file->inode || !buf) return -1;
+    node = (ext4_node_t *)file->inode->fs_data;
+    if (!node || !node->mount) return -1;
+    if ((node->mode & EXT4_S_IFMT) != EXT4_S_IFREG) return -1;
+    if (size == 0) return 0;
+
+    block_size = node->mount->block_size;
+    offset = file->offset;
+    end_pos = (uint64_t)offset + size;
+    if (end_pos > 0xFFFFFFFFu) return -1;
+
+    while (done < size) {
+        uint32_t logical = (offset + done) / block_size;
+        uint32_t in_block = (offset + done) % block_size;
+        uint32_t chunk = block_size - in_block;
+        uint64_t phys;
+
+        if (chunk > size - done) chunk = size - done;
+        if (ext4_inode_logical_to_phys(node, logical, &phys) < 0) return done ? (int)done : -1;
+        if (ext4_read_block(node->mount, phys, block) < 0) return -1;
+        memcpy(block + in_block, in + done, chunk);
+        if (ext4_write_block(node->mount, phys, block) < 0) return -1;
+        done += chunk;
+    }
+
+    file->offset += done;
+    if ((uint64_t)file->offset > node->size) {
+        if (ext4_write_inode_size(node, file->offset) < 0) return -1;
+        file->inode->size = file->offset;
+    }
+    return (int)done;
 }
 
 static int ext4_file_seek(file_t *file, int offset, int whence) {
@@ -489,9 +572,24 @@ static int ext4_file_seek(file_t *file, int offset, int whence) {
 }
 
 static int ext4_file_truncate(inode_t *inode, uint32_t size) {
-    (void)inode;
-    (void)size;
-    return -1;
+    ext4_node_t *node;
+    uint32_t block_size;
+    uint32_t old_blocks;
+    uint32_t new_blocks;
+
+    if (!inode) return -1;
+    node = (ext4_node_t *)inode->fs_data;
+    if (!node || !node->mount) return -1;
+    if ((node->mode & EXT4_S_IFMT) != EXT4_S_IFREG) return -1;
+
+    block_size = node->mount->block_size;
+    old_blocks = (uint32_t)ext4_div_u64_u32(node->size + block_size - 1u, block_size, NULL);
+    new_blocks = (size + block_size - 1u) / block_size;
+    if (new_blocks > old_blocks) return -1;
+
+    if (ext4_write_inode_size(node, size) < 0) return -1;
+    inode->size = size;
+    return 0;
 }
 
 static file_ops_t ext4_file_ops = {
@@ -501,6 +599,7 @@ static file_ops_t ext4_file_ops = {
     ext4_file_write,
     ext4_file_seek,
     ext4_file_truncate,
+    0,
     0
 };
 
@@ -564,11 +663,13 @@ static int ext4_scan_directory(ext4_mount_t *m, dentry_t *parent, ext4_node_t *d
                         if (!child_node) return -1;
 
                         if (file_type == EXT4_FT_DIR || ext4_is_dir(&child_inode)) {
-                            child = vfs_create_node_under(parent, name, FS_DIR | 0555, 0, child_node, (uint32_t)child_node->size);
+                            child = vfs_create_node_under(parent, name, FS_DIR | 0755, 0, child_node, (uint32_t)child_node->size);
+                            if (child && child->inode) child->inode->fs_type = EXT4_FS_MAGIC;
                             if (!child) return -1;
                             ext4_scan_directory(m, child, child_node, depth + 1);
                         } else if (file_type == EXT4_FT_REG_FILE || ext4_is_file(&child_inode)) {
-                            child = vfs_create_node_under(parent, name, FS_FILE | 0444, &ext4_file_ops, child_node, (uint32_t)child_node->size);
+                            child = vfs_create_node_under(parent, name, FS_FILE | 0644, &ext4_file_ops, child_node, (uint32_t)child_node->size);
+                            if (child && child->inode) child->inode->fs_type = EXT4_FS_MAGIC;
                             if (!child) return -1;
                         }
                     }
@@ -635,6 +736,7 @@ int ext4_mount(const char *dev_name, const char *mount_path) {
     root_node = ext4_node_from_inode(m, EXT4_ROOT_INO, &root_inode);
     if (!root_node) return -1;
     mount_dentry->inode->fs_data = root_node;
+    mount_dentry->inode->fs_type = EXT4_FS_MAGIC;
 
     if (ext4_scan_directory(m, mount_dentry, root_node, 0) < 0) {
         serial_write("[EXT4] scan root failed\n");
@@ -650,6 +752,10 @@ int ext4_mount(const char *dev_name, const char *mount_path) {
 #define EXT4_MKFS_INODE_SIZE        128u
 #define EXT4_MKFS_INODES            128u
 #define EXT4_MKFS_ROOT_BLOCK        11u
+#define EXT4_MKFS_RW_INO             12u
+#define EXT4_MKFS_RW_BLOCK           12u
+#define EXT4_MKFS_RW_FILE_NAME       "rw.txt"
+#define EXT4_MKFS_RW_FILE_DATA       "openos ext4 writable file\n"
 
 static void ext4_set_bit(uint8_t *bitmap, uint32_t bit) {
     bitmap[bit >> 3] = (uint8_t)(bitmap[bit >> 3] | (uint8_t)(1u << (bit & 7u)));
@@ -736,7 +842,7 @@ int ext4_format_test_volume(const char *dev_name) {
         blockdev_close(dev);
         return -1;
     }
-    used_blocks = EXT4_MKFS_ROOT_BLOCK + 1u;
+    used_blocks = EXT4_MKFS_RW_BLOCK + 1u;
     free_blocks = total_blocks - used_blocks;
 
     memset(block, 0, sizeof(block));
@@ -753,7 +859,7 @@ int ext4_format_test_volume(const char *dev_name) {
     ext4_w32(block + 4, total_blocks);
     ext4_w32(block + 8, 0);
     ext4_w32(block + 12, free_blocks);
-    ext4_w32(block + 16, EXT4_MKFS_INODES - 11u);
+    ext4_w32(block + 16, EXT4_MKFS_INODES - 12u);
     ext4_w32(block + 20, 1);
     ext4_w32(block + 24, 0);
     ext4_w32(block + 32, total_blocks);
@@ -777,7 +883,7 @@ int ext4_format_test_volume(const char *dev_name) {
     ext4_w32(block + 4, 4);
     ext4_w32(block + 8, 5);
     ext4_w16(block + 12, (uint16_t)free_blocks);
-    ext4_w16(block + 14, (uint16_t)(EXT4_MKFS_INODES - 11u));
+    ext4_w16(block + 14, (uint16_t)(EXT4_MKFS_INODES - 12u));
     ext4_w16(block + 16, 2);
     if (ext4_mkfs_write_block(dev, 2, block) < 0) {
         blockdev_close(dev);
@@ -793,7 +899,7 @@ int ext4_format_test_volume(const char *dev_name) {
     }
 
     memset(block, 0, sizeof(block));
-    for (i = 0; i < 11u; i++) ext4_set_bit(block, i);
+    for (i = 0; i < 12u; i++) ext4_set_bit(block, i);
     if (ext4_mkfs_write_block(dev, 4, block) < 0) {
         blockdev_close(dev);
         return -1;
@@ -803,6 +909,9 @@ int ext4_format_test_volume(const char *dev_name) {
     ext4_mkfs_write_inode(inode_table, EXT4_ROOT_INO, 0x41EDu, EXT4_MKFS_BLOCK_SIZE,
                           EXT4_MKFS_ROOT_BLOCK, EXT4_EXTENTS_FL);
     ext4_mkfs_write_inode(inode_table, 11u, 0x41C0u, 0u, 0u, 0u);
+    ext4_mkfs_write_inode(inode_table, EXT4_MKFS_RW_INO, 0x81A4u,
+                          (uint32_t)(sizeof(EXT4_MKFS_RW_FILE_DATA) - 1u),
+                          EXT4_MKFS_RW_BLOCK, EXT4_EXTENTS_FL);
     for (i = 0; i < 4u; i++) {
         if (ext4_mkfs_write_block(dev, 5u + i, inode_table + i * EXT4_MKFS_BLOCK_SIZE) < 0) {
             blockdev_close(dev);
@@ -812,8 +921,19 @@ int ext4_format_test_volume(const char *dev_name) {
 
     memset(block, 0, sizeof(block));
     ext4_mkfs_write_dirent(block, EXT4_ROOT_INO, 12u, 1u, 2u, ".");
-    ext4_mkfs_write_dirent(block + 12u, EXT4_ROOT_INO, (uint16_t)(EXT4_MKFS_BLOCK_SIZE - 12u), 2u, 2u, "..");
+    ext4_mkfs_write_dirent(block + 12u, EXT4_ROOT_INO, 12u, 2u, 2u, "..");
+    ext4_mkfs_write_dirent(block + 24u, EXT4_MKFS_RW_INO,
+                           (uint16_t)(EXT4_MKFS_BLOCK_SIZE - 24u),
+                           (uint8_t)(sizeof(EXT4_MKFS_RW_FILE_NAME) - 1u),
+                           EXT4_FT_REG_FILE, EXT4_MKFS_RW_FILE_NAME);
     if (ext4_mkfs_write_block(dev, EXT4_MKFS_ROOT_BLOCK, block) < 0) {
+        blockdev_close(dev);
+        return -1;
+    }
+
+    memset(block, 0, sizeof(block));
+    memcpy(block, EXT4_MKFS_RW_FILE_DATA, sizeof(EXT4_MKFS_RW_FILE_DATA) - 1u);
+    if (ext4_mkfs_write_block(dev, EXT4_MKFS_RW_BLOCK, block) < 0) {
         blockdev_close(dev);
         return -1;
     }
