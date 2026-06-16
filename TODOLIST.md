@@ -194,7 +194,7 @@
 
 - [√] IDE / ATA（已实现 legacy PIO identify/read/write、/dev 节点注册并接入启动）
 - [√] AHCI / SATA（已实现 AHCI 控制器/端口探测、IDENTIFY、READ/WRITE DMA EXT 与 /dev 节点注册）
-- [x] virtio-blk
+- [√] virtio-blk（已实现 legacy PCI virtqueue 初始化、容量读取、同步读写请求与 /dev 节点注册；modern transport 暂跳过）
 
 ### 11. 网络驱动
 
