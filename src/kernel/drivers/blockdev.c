@@ -469,6 +469,254 @@ static void ramdisk_refresh_ops(void) {
     ramdisk_ops.ioctl = 0;
 }
 
+
+typedef struct block_partition_private {
+    blockdev_t *parent;
+    uint32_t start_lba;
+    uint32_t sector_count;
+} block_partition_private_t;
+
+static block_partition_private_t partition_private_table[BLOCKDEV_MAX];
+static blockdev_ops_t partition_ops;
+static uint32_t partition_private_count = 0;
+
+static int partition_read_blocks(blockdev_t *dev, uint32_t lba, uint32_t count, void *buf) {
+    block_partition_private_t *part;
+
+    if (!dev || !buf || !dev->private_data) return -1;
+    part = (block_partition_private_t *)dev->private_data;
+    if (!part->parent) return -1;
+    if (count == 0) return 0;
+    if (lba >= part->sector_count) return -1;
+    if (count > part->sector_count - lba) return -1;
+    return blockdev_read_blocks(part->parent, part->start_lba + lba, count, buf);
+}
+
+static int partition_write_blocks(blockdev_t *dev, uint32_t lba, uint32_t count, const void *buf) {
+    block_partition_private_t *part;
+
+    if (!dev || !buf || !dev->private_data) return -1;
+    part = (block_partition_private_t *)dev->private_data;
+    if (!part->parent) return -1;
+    if (count == 0) return 0;
+    if (lba >= part->sector_count) return -1;
+    if (count > part->sector_count - lba) return -1;
+    return blockdev_write_blocks(part->parent, part->start_lba + lba, count, buf);
+}
+
+static int partition_ioctl(blockdev_t *dev, uint32_t request, void *arg) {
+    block_partition_private_t *part;
+
+    if (!dev || !dev->private_data) return -1;
+    part = (block_partition_private_t *)dev->private_data;
+    if (!part->parent) return -1;
+    return blockdev_ioctl(part->parent, request, arg);
+}
+
+static void partition_refresh_ops(void) {
+    partition_ops.open = 0;
+    partition_ops.close = 0;
+    partition_ops.read_blocks = partition_read_blocks;
+    partition_ops.write_blocks = partition_write_blocks;
+    partition_ops.ioctl = partition_ioctl;
+}
+
+static void partition_make_name(const char *base, int index, char *out) {
+    uint32_t pos = 0;
+    uint32_t i;
+
+    if (!out) return;
+    if (!base) base = "blk";
+    for (i = 0; base[i] && pos < BLOCKDEV_NAME_MAX - 1; i++) out[pos++] = base[i];
+    if (pos < BLOCKDEV_NAME_MAX - 1) out[pos++] = 'p';
+    if (index >= 10 && pos < BLOCKDEV_NAME_MAX - 1) out[pos++] = (char)('0' + (index / 10));
+    if (pos < BLOCKDEV_NAME_MAX - 1) out[pos++] = (char)('0' + (index % 10));
+    out[pos] = 0;
+}
+
+static void partition_make_path(const char *name, char *out) {
+    uint32_t pos = 0;
+    uint32_t i;
+    const char prefix[] = "/dev/";
+
+    if (!out) return;
+    for (i = 0; prefix[i] && pos < 31; i++) out[pos++] = prefix[i];
+    if (name) {
+        for (i = 0; name[i] && pos < 31; i++) out[pos++] = name[i];
+    }
+    out[pos] = 0;
+}
+
+static int partition_register_child(blockdev_t *parent, int index, uint32_t start_lba, uint32_t sector_count) {
+    block_partition_private_t *priv;
+    char dev_name[BLOCKDEV_NAME_MAX];
+    char dev_path[32];
+
+    if (!parent || sector_count == 0) return -1;
+    if (start_lba >= parent->sector_count) return -1;
+    if (sector_count > parent->sector_count - start_lba) return -1;
+    if (partition_private_count >= BLOCKDEV_MAX) return -1;
+
+    partition_make_name(parent->name, index, dev_name);
+    partition_make_path(dev_name, dev_path);
+    if (blockdev_find(dev_name)) return -1;
+
+    priv = &partition_private_table[partition_private_count++];
+    priv->parent = parent;
+    priv->start_lba = start_lba;
+    priv->sector_count = sector_count;
+
+    if (blockdev_register(dev_name, parent->major, (uint32_t)index,
+                          parent->sector_size, sector_count,
+                          &partition_ops, priv) < 0) {
+        partition_private_count--;
+        memset(priv, 0, sizeof(*priv));
+        return -1;
+    }
+
+    if (vfs_mknod(dev_path, FS_BLOCK_DEVICE | 0666, dev_name) < 0) {
+        serial_write("[WARN] partition node create failed: ");
+        serial_write(dev_path);
+        serial_write("\n");
+    }
+
+    serial_write("[BLOCKDEV] found partition ");
+    serial_write(dev_name);
+    serial_write(" LBA: 0x");
+    serial_write_hex(start_lba);
+    serial_write(" sectors: 0x");
+    serial_write_hex(sector_count);
+    serial_write("\n");
+    return 0;
+}
+
+typedef struct mbr_part_entry {
+    uint8_t boot_flag;
+    uint8_t chs_start[3];
+    uint8_t type;
+    uint8_t chs_end[3];
+    uint32_t lba_start;
+    uint32_t sector_count;
+} __attribute__((packed)) mbr_part_entry_t;
+
+typedef struct mbr_boot_sector {
+    uint8_t boot_code[446];
+    mbr_part_entry_t partitions[4];
+    uint16_t signature;
+} __attribute__((packed)) mbr_boot_sector_t;
+
+typedef struct gpt_header {
+    uint8_t signature[8];
+    uint32_t revision;
+    uint32_t header_size;
+    uint32_t header_crc32;
+    uint32_t reserved;
+    uint64_t current_lba;
+    uint64_t backup_lba;
+    uint64_t first_usable_lba;
+    uint64_t last_usable_lba;
+    uint8_t disk_guid[16];
+    uint64_t partition_entry_lba;
+    uint32_t num_partition_entries;
+    uint32_t sizeof_partition_entry;
+    uint32_t partition_entry_array_crc32;
+} __attribute__((packed)) gpt_header_t;
+
+typedef struct gpt_entry_min {
+    uint8_t type_guid[16];
+    uint8_t unique_guid[16];
+    uint64_t first_lba;
+    uint64_t last_lba;
+    uint64_t attributes;
+} __attribute__((packed)) gpt_entry_min_t;
+
+static int gpt_guid_is_zero(const uint8_t *guid) {
+    uint32_t i;
+    if (!guid) return 1;
+    for (i = 0; i < 16; i++) {
+        if (guid[i] != 0) return 0;
+    }
+    return 1;
+}
+
+static int blockdev_scan_gpt(blockdev_t *parent, int first_part_index) {
+    uint8_t sector[BLOCK_CACHE_SECTOR_SIZE];
+    gpt_header_t *hdr;
+    uint32_t i;
+    int part_index = first_part_index;
+
+    if (!parent || parent->sector_size != BLOCK_CACHE_SECTOR_SIZE) return first_part_index;
+    if (parent->sector_count < 2) return first_part_index;
+    if (blockdev_read_blocks(parent, 1, 1, sector) != 1) return first_part_index;
+
+    hdr = (gpt_header_t *)sector;
+    if (memcmp(hdr->signature, "EFI PART", 8) != 0) return first_part_index;
+    if (hdr->sizeof_partition_entry < sizeof(gpt_entry_min_t)) return first_part_index;
+    if (hdr->partition_entry_lba == 0 || hdr->partition_entry_lba > 0xFFFFFFFFull) return first_part_index;
+
+    serial_write("[BLOCKDEV] scanning GPT partitions\n");
+    for (i = 0; i < hdr->num_partition_entries && part_index < BLOCKDEV_MAX; i++) {
+        uint64_t byte_off = (uint64_t)i * hdr->sizeof_partition_entry;
+        uint32_t entry_sector = (uint32_t)hdr->partition_entry_lba + (uint32_t)(byte_off / parent->sector_size);
+        uint32_t entry_off = (uint32_t)(byte_off % parent->sector_size);
+        gpt_entry_min_t *entry;
+        uint64_t count64;
+
+        if (entry_sector >= parent->sector_count) break;
+        if (entry_off + sizeof(gpt_entry_min_t) > parent->sector_size) continue;
+        if (blockdev_read_blocks(parent, entry_sector, 1, sector) != 1) break;
+
+        entry = (gpt_entry_min_t *)(sector + entry_off);
+        if (gpt_guid_is_zero(entry->type_guid)) continue;
+        if (entry->last_lba < entry->first_lba) continue;
+        if (entry->first_lba > 0xFFFFFFFFull || entry->last_lba > 0xFFFFFFFFull) continue;
+
+        count64 = entry->last_lba - entry->first_lba + 1;
+        if (count64 == 0 || count64 > 0xFFFFFFFFull) continue;
+        if (partition_register_child(parent, part_index, (uint32_t)entry->first_lba, (uint32_t)count64) == 0) {
+            part_index++;
+        }
+    }
+    return part_index;
+}
+
+static int blockdev_scan_mbr(blockdev_t *parent, int first_part_index, int *has_protective_mbr) {
+    mbr_boot_sector_t mbr;
+    int part_index = first_part_index;
+    int i;
+
+    if (has_protective_mbr) *has_protective_mbr = 0;
+    if (!parent || parent->sector_size != BLOCK_CACHE_SECTOR_SIZE) return first_part_index;
+    if (blockdev_read_blocks(parent, 0, 1, &mbr) != 1 || mbr.signature != 0xAA55) return first_part_index;
+
+    serial_write("[BLOCKDEV] scanning MBR partitions\n");
+    for (i = 0; i < 4 && part_index < BLOCKDEV_MAX; i++) {
+        if (mbr.partitions[i].type == 0 || mbr.partitions[i].sector_count == 0) continue;
+        if (mbr.partitions[i].type == 0xEE) {
+            if (has_protective_mbr) *has_protective_mbr = 1;
+            continue;
+        }
+        if (partition_register_child(parent, part_index,
+                                     mbr.partitions[i].lba_start,
+                                     mbr.partitions[i].sector_count) == 0) {
+            part_index++;
+        }
+    }
+    return part_index;
+}
+
+static void blockdev_scan_partitions(blockdev_t *parent) {
+    int next_index;
+    int has_protective_mbr;
+
+    if (!parent) return;
+    partition_refresh_ops();
+    next_index = blockdev_scan_mbr(parent, 1, &has_protective_mbr);
+    if (has_protective_mbr || next_index == 1) {
+        blockdev_scan_gpt(parent, next_index);
+    }
+}
+
 void blockdev_register_builtin_devices(void) {
     serial_write("[BLOCKDEV] builtin begin\n");
     vfs_mkdir("/dev", 0755);
@@ -497,57 +745,7 @@ void blockdev_register_builtin_devices(void) {
         return;
     }
 
-    /* MBR partition scan */
-    typedef struct mbr_part_entry {
-        uint8_t boot_flag;
-        uint8_t chs_start[3];
-        uint8_t type;
-        uint8_t chs_end[3];
-        uint32_t lba_start;
-        uint32_t sector_count;
-    } __attribute__((packed)) mbr_part_entry_t;
-
-    typedef struct mbr_boot_sector {
-        uint8_t boot_code[446];
-        mbr_part_entry_t partitions[4];
-        uint16_t signature;
-    } __attribute__((packed)) mbr_boot_sector_t;
-
-    mbr_boot_sector_t mbr;
-    if (blockdev_read_blocks(&blockdev_table[0], 0, 1, &mbr) == 1 && mbr.signature == 0xAA55) {
-        int part_index = 1;
-        int i;
-
-        serial_write("[BLOCKDEV] scanning MBR partitions\n");
-        for (i = 0; i < 4; i++) {
-            if (mbr.partitions[i].type == 0 || mbr.partitions[i].sector_count == 0) continue;
-
-            char dev_name[32];
-            char dev_path[32];
-            dev_name[0] = 'r'; dev_name[1] = 'a'; dev_name[2] = 'm'; dev_name[3] = '0'; dev_name[4] = 'p'; dev_name[5] = '0' + part_index; dev_name[6] = 0;
-            dev_path[0] = '/'; dev_path[1] = 'd'; dev_path[2] = 'e'; dev_path[3] = 'v'; dev_path[4] = '/'; memcpy(dev_path + 5, dev_name, 7);
-
-            serial_write("[BLOCKDEV] found partition ");
-            serial_write(dev_name);
-            serial_write(" LBA: 0x");
-            serial_write_hex(mbr.partitions[i].lba_start);
-            serial_write(" sectors: 0x");
-            serial_write_hex(mbr.partitions[i].sector_count);
-            serial_write("\n");
-
-            blockdev_t *parent = &blockdev_table[0];
-            static blockdev_ops_t part_ops;
-            memcpy(&part_ops, parent->ops, sizeof(part_ops));
-
-            if (blockdev_register(dev_name, 1, part_index,
-                                  parent->sector_size,
-                                  mbr.partitions[i].sector_count,
-                                  &part_ops, parent->private_data) < 0) continue;
-
-            if (vfs_mknod(dev_path, FS_BLOCK_DEVICE | 0666, dev_name) < 0) continue;
-            part_index++;
-        }
-    }
+    blockdev_scan_partitions(&blockdev_table[0]);
 
     serial_write("[OK] block devices registered\n");
 }
