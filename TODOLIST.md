@@ -192,7 +192,7 @@
 
 ### 10. 存储驱动
 
-- [ ] IDE / ATA
+- [x] IDE / ATA
 - [ ] AHCI / SATA
 - [ ] virtio-blk
 

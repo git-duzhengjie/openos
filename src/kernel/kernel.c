@@ -24,6 +24,7 @@
 #include "chardev.h"
 #include "blockdev.h"
 #include "pci.h"
+#include "ata.h"
 #include "acpi.h"
 #include "apic.h"
 #include "rtc.h"
@@ -564,7 +565,8 @@ void kernel_main(void) {
     /* 初始化块设备框架�?RAM disk */
     blockdev_init();
     blockdev_register_builtin_devices();
-    serial_write("[OK] BLOCKDEV + ram0\n");
+    ata_init();
+    serial_write("[OK] BLOCKDEV + ram0 + ATA\n");
 
     /* 初始化最�?TCP/IP 网络�?*/
     net_init();
