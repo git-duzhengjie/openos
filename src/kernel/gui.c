@@ -15,6 +15,7 @@
 #include "heap.h"
 
 static gui_system_t g_gui;
+static gui_accel_info_t g_gui_accel;
 
 #ifndef GUI_DEBUG_LOG
 #define GUI_DEBUG_LOG 0
@@ -33,6 +34,15 @@ static char g_terminal_out_queue[GUI_TERMINAL_OUTPUT_QUEUE_SIZE];
 static int gui_compositor_active(void) {
     return g_gui.initialized && g_gui.compositor_enabled &&
            g_gui.double_buffered && g_gui.backbuffer;
+}
+
+int gui_accel_is_enabled(void) {
+    return g_gui_accel.enabled;
+}
+
+void gui_get_accel_info(gui_accel_info_t *info) {
+    if (!info) return;
+    *info = g_gui_accel;
 }
 
 static int gui_rect_contains(const gui_rect_t *r, int x, int y);
@@ -100,17 +110,33 @@ static void gui_raw_fill_rect(int x, int y, int w, int h, uint32_t color) {
     int yy, xx;
     gui_rect_t rect;
     gui_rect_t clipped;
+    uint32_t pixels;
     if (w <= 0 || h <= 0) return;
     rect.x = x; rect.y = y; rect.w = w; rect.h = h;
+    clipped.x = 0;
+    clipped.y = 0;
+    clipped.w = (int)g_gui.width;
+    clipped.h = (int)g_gui.height;
+    if (!gui_rect_intersect(&rect, &clipped, &rect)) return;
     if (g_gui.clip_enabled) {
         if (!gui_rect_intersect(&rect, &g_gui.clip_rect, &clipped)) return;
         rect = clipped;
     }
-    for (yy = rect.y; yy < rect.y + rect.h; yy++) {
-        for (xx = rect.x; xx < rect.x + rect.w; xx++) {
-            gui_put_pixel_unclipped(xx, yy, color);
+    pixels = (uint32_t)rect.w * (uint32_t)rect.h;
+    g_gui_accel.rect_fills++;
+    g_gui_accel.rect_fill_pixels += pixels;
+    if (gui_compositor_active()) {
+        for (yy = rect.y; yy < rect.y + rect.h; yy++) {
+            uint32_t *dst = &g_gui.backbuffer[(uint32_t)yy * g_gui.width + (uint32_t)rect.x];
+            for (xx = 0; xx < rect.w; xx++) {
+                dst[xx] = color;
+            }
         }
+        g_gui_accel.backbuffer_fast_fills++;
+        return;
     }
+    framebuffer_fill_rect((uint32_t)rect.x, (uint32_t)rect.y, (uint32_t)rect.w, (uint32_t)rect.h, color);
+    g_gui_accel.framebuffer_fast_fills++;
 }
 
 static void gui_raw_line(int x0, int y0, int x1, int y1, uint32_t color) {
@@ -692,11 +718,15 @@ void gui_invalidate_all(void) {
 
 static void gui_flush_rect(const gui_rect_t *r) {
     int x, y;
-    if (!r) return;
+    if (!r || !g_gui.backbuffer) return;
+    g_gui_accel.flush_rects++;
+    g_gui_accel.flush_pixels += (uint32_t)r->w * (uint32_t)r->h;
     for (y = r->y; y < r->y + r->h; y++) {
-        for (x = r->x; x < r->x + r->w; x++) {
-            framebuffer_put_pixel((uint32_t)x, (uint32_t)y, g_gui.backbuffer[y * (int)g_gui.width + x]);
+        const uint32_t *src = &g_gui.backbuffer[(uint32_t)y * g_gui.width + (uint32_t)r->x];
+        for (x = 0; x < r->w; x++) {
+            framebuffer_put_pixel((uint32_t)(r->x + x), (uint32_t)y, src[x]);
         }
+        g_gui_accel.flush_rows++;
     }
 }
 
@@ -1551,6 +1581,8 @@ static void gui_poll_mouse(void) {
 
 void gui_init(void) {
     memset(&g_gui, 0, sizeof(g_gui));
+    memset(&g_gui_accel, 0, sizeof(g_gui_accel));
+    g_gui_accel.enabled = 1;
     g_gui.colors.desktop_bg = gui_rgb(18, 28, 45);
     g_gui.colors.window_bg = gui_rgb(236, 238, 244);
     g_gui.colors.window_border = gui_rgb(70, 80, 95);
@@ -1755,6 +1787,9 @@ void gui_print_info(void) {
     serial_write(" events="); gui_write_dec(g_gui.event_count);
     serial_write(" dblbuf="); gui_write_dec((uint32_t)g_gui.double_buffered);
     serial_write(" compositor="); gui_write_dec((uint32_t)gui_compositor_active());
+    serial_write(" accel="); gui_write_dec((uint32_t)gui_accel_is_enabled());
+    serial_write(" fills="); gui_write_dec(g_gui_accel.rect_fills);
+    serial_write(" flush_px="); gui_write_dec(g_gui_accel.flush_pixels);
     serial_write(" cursor="); gui_write_dec((uint32_t)g_gui.cursor_visible);
     serial_write(" mouse="); gui_write_dec((uint32_t)g_gui.mouse_x); serial_write(","); gui_write_dec((uint32_t)g_gui.mouse_y);
     serial_write("\n");

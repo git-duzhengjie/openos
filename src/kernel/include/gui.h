@@ -184,6 +184,17 @@ typedef struct gui_compositor_info {
     int full_dirty;
 } gui_compositor_info_t;
 
+typedef struct gui_accel_info {
+    int enabled;
+    uint32_t rect_fills;
+    uint32_t rect_fill_pixels;
+    uint32_t backbuffer_fast_fills;
+    uint32_t framebuffer_fast_fills;
+    uint32_t flush_rects;
+    uint32_t flush_pixels;
+    uint32_t flush_rows;
+} gui_accel_info_t;
+
 typedef struct gui_system {
     int initialized;
     uint32_t width;
@@ -243,6 +254,8 @@ int gui_is_cursor_visible(void);
 
 const gui_system_t *gui_get_system(void);
 void gui_get_compositor_info(gui_compositor_info_t *info);
+void gui_get_accel_info(gui_accel_info_t *info);
+int gui_accel_is_enabled(void);
 int gui_compositor_is_active(void);
 void gui_set_compositor_enabled(int enabled);
 void gui_compositor_flush(void);
