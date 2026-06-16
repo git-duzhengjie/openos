@@ -651,6 +651,75 @@ static int syscall_copy_user_path(char *dst, const char *user_path)
     return strncpy_from_user(dst, user_path, USERMEM_CSTR_MAX);
 }
 
+static uint32_t syscall_poll(openos_pollfd_t *user_fds, uint32_t nfds, uint32_t timeout_ms)
+{
+    openos_pollfd_t pfd;
+    uint32_t ready = 0;
+
+    (void)timeout_ms;
+    if (nfds > 64)
+        return (uint32_t)-1;
+    if (nfds > 0 && (!user_fds || !user_ptr_valid(user_fds, nfds * sizeof(openos_pollfd_t), USERMEM_READ | USERMEM_WRITE)))
+        return (uint32_t)-1;
+
+    for (uint32_t i = 0; i < nfds; i++) {
+        if (copy_from_user(&pfd, &user_fds[i], sizeof(pfd)) < 0)
+            return (uint32_t)-1;
+        pfd.revents = 0;
+        if (pfd.fd >= 0 && pfd.events != 0)
+            pfd.revents = (short)vfs_poll_fd(pfd.fd, (uint32_t)pfd.events);
+        if (pfd.revents != 0)
+            ready++;
+        if (copy_to_user(&user_fds[i], &pfd, sizeof(pfd)) < 0)
+            return (uint32_t)-1;
+    }
+    return ready;
+}
+
+static uint32_t syscall_select(uint32_t nfds, uint32_t *readfds, uint32_t *writefds, uint32_t *exceptfds, uint32_t timeout_ms)
+{
+    uint32_t in_read = 0;
+    uint32_t in_write = 0;
+    uint32_t out_read = 0;
+    uint32_t out_write = 0;
+    uint32_t out_except = 0;
+    uint32_t ready = 0;
+
+    (void)timeout_ms;
+    if (nfds > 32)
+        return (uint32_t)-1;
+    if (readfds) {
+        if (!user_ptr_valid(readfds, sizeof(uint32_t), USERMEM_READ | USERMEM_WRITE) || copy_from_user(&in_read, readfds, sizeof(in_read)) < 0)
+            return (uint32_t)-1;
+    }
+    if (writefds) {
+        if (!user_ptr_valid(writefds, sizeof(uint32_t), USERMEM_READ | USERMEM_WRITE) || copy_from_user(&in_write, writefds, sizeof(in_write)) < 0)
+            return (uint32_t)-1;
+    }
+    if (exceptfds && !user_ptr_valid(exceptfds, sizeof(uint32_t), USERMEM_WRITE))
+        return (uint32_t)-1;
+
+    for (uint32_t fd = 0; fd < nfds; fd++) {
+        uint32_t bit = 1u << fd;
+        if ((in_read & bit) && (vfs_poll_fd((int)fd, VFS_POLLIN) & (VFS_POLLIN | VFS_POLLHUP | VFS_POLLERR))) {
+            out_read |= bit;
+            ready++;
+        }
+        if ((in_write & bit) && (vfs_poll_fd((int)fd, VFS_POLLOUT) & (VFS_POLLOUT | VFS_POLLERR))) {
+            out_write |= bit;
+            ready++;
+        }
+    }
+
+    if (readfds && copy_to_user(readfds, &out_read, sizeof(out_read)) < 0)
+        return (uint32_t)-1;
+    if (writefds && copy_to_user(writefds, &out_write, sizeof(out_write)) < 0)
+        return (uint32_t)-1;
+    if (exceptfds && copy_to_user(exceptfds, &out_except, sizeof(out_except)) < 0)
+        return (uint32_t)-1;
+    return ready;
+}
+
 #define SYSCALL_ARG_MAX 8
 #define SYSCALL_ARG_LEN 64
 #define SYSCALL_ENV_MAX 8
@@ -1268,6 +1337,12 @@ uint32_t syscall_dispatch(uint32_t num,
 
     case SYS_SETGID:
         return (uint32_t)proc_set_current_gid((uint32_t)a);
+
+    case SYS_POLL:
+        return syscall_poll((openos_pollfd_t *)a, b, c);
+
+    case SYS_SELECT:
+        return syscall_select(a, (uint32_t *)b, (uint32_t *)c, (uint32_t *)d, e);
 
     case SYS_READDIR:
         {

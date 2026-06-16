@@ -92,6 +92,7 @@ typedef int (*write_fn_t)(struct file *f, const void *buf, uint32_t count);
 typedef int (*seek_fn_t)(struct file *f, int offset, int whence);
 typedef int (*truncate_fn_t)(struct inode *inode, uint32_t size);
 typedef struct dentry *(*readdir_fn_t)(struct file *f);
+typedef int (*poll_fn_t)(struct file *f, uint32_t events);
 
 typedef struct file_ops {
     open_fn_t     open;
@@ -101,6 +102,7 @@ typedef struct file_ops {
     seek_fn_t     seek;
     truncate_fn_t truncate;
     readdir_fn_t  readdir;
+    poll_fn_t     poll;
 } file_ops_t;
 
 /* ---- inode ---- */
@@ -212,6 +214,14 @@ void   vfs_close_fds_for_process(void *proc);      /* 关闭指定进程的 fd �
 int    vfs_chdir(const char *path);               /* 切换当前工作目录 */
 int    vfs_getcwd(char *buf, uint32_t size);      /* 获取当前工作目录 */
 int    vfs_clone_cwd_for_process(void *dst_proc, void *src_proc); /* 继承 cwd */
+
+/* fd readiness */
+#define VFS_POLLIN      0x0001
+#define VFS_POLLOUT     0x0004
+#define VFS_POLLERR     0x0008
+#define VFS_POLLHUP     0x0010
+
+int    vfs_poll_fd(int fd, uint32_t events);
 
 /* fd duplication / pipe */
 int    vfs_dup(int oldfd);

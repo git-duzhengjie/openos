@@ -165,7 +165,7 @@
 - [√] 文件描述符表标准化
 - [√] `dup` / `dup2`
 - [√] pipe（已实现 VFS 匿名管道、`SYS_PIPE`、shell pipeline，并由 `/bin/systest` 覆盖）
-- [ ] `select` / `poll`
+- [√] `select` / `poll`
 
 ### 8. 持久化存储
 

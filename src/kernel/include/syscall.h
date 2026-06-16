@@ -77,6 +77,19 @@
 #define SYS_SETUID        277
 #define SYS_GETGID        278
 #define SYS_SETGID        279
+#define SYS_POLL          280
+#define SYS_SELECT        281
+
+#define OPENOS_POLLIN     0x0001
+#define OPENOS_POLLOUT    0x0004
+#define OPENOS_POLLERR    0x0008
+#define OPENOS_POLLHUP    0x0010
+
+typedef struct openos_pollfd {
+    int fd;
+    short events;
+    short revents;
+} openos_pollfd_t;
 
 typedef struct openos_stat {
     uint32_t ino;

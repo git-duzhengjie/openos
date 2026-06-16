@@ -11,6 +11,7 @@
 #include "chardev.h"
 #include "blockdev.h"
 #include "process.h"
+#include "input_buffer.h"
 
 #ifndef NULL
 #define NULL ((void*)0)
@@ -722,6 +723,33 @@ static int vfs_pipe_read(file_t *file, void *buf, uint32_t count) {
     return (int)n;
 }
 
+static int vfs_pipe_poll(file_t *file, uint32_t events) {
+    uint32_t revents = 0;
+    vfs_pipe_t *p;
+
+    if (!file)
+        return VFS_POLLERR;
+    p = (vfs_pipe_t *)file->fs_data;
+    if (!p || !p->used)
+        return VFS_POLLERR;
+
+    if ((events & VFS_POLLIN) && file->ops == &vfs_pipe_read_ops) {
+        if (p->count > 0 || p->writers <= 0)
+            revents |= VFS_POLLIN;
+        if (p->writers <= 0)
+            revents |= VFS_POLLHUP;
+    }
+    if ((events & VFS_POLLOUT) && file->ops == &vfs_pipe_write_ops) {
+        if (p->readers <= 0) {
+            revents |= VFS_POLLERR | VFS_POLLHUP;
+        } else if (p->count < VFS_PIPE_CAPACITY) {
+            revents |= VFS_POLLOUT;
+        }
+    }
+
+    return (int)revents;
+}
+
 static int vfs_pipe_write(file_t *file, const void *buf, uint32_t count) {
     if (!file || !buf) return -1;
     vfs_pipe_t *p = (vfs_pipe_t *)file->fs_data;
@@ -759,11 +787,13 @@ static int vfs_pipe_close(file_t *file) {
 
 static file_ops_t vfs_pipe_read_ops = {
     .read = vfs_pipe_read,
+    .poll = vfs_pipe_poll,
     .close = vfs_pipe_close,
 };
 
 static file_ops_t vfs_pipe_write_ops = {
     .write = vfs_pipe_write,
+    .poll = vfs_pipe_poll,
     .close = vfs_pipe_close,
 };
 
@@ -825,6 +855,33 @@ int vfs_mark_fd_cloexec(int fd) {
     int flags = vfs_get_fd_flags(fd);
     if (flags < 0) return -1;
     return vfs_set_fd_flags(fd, (uint32_t)flags | FD_CLOEXEC);
+}
+
+int vfs_poll_fd(int fd, uint32_t events) {
+    file_t *file;
+    uint32_t revents = 0;
+
+    if (fd == 0) {
+        if (events & VFS_POLLIN) {
+            if (input_has_data() || input_has_eof())
+                revents |= VFS_POLLIN;
+        }
+        return (int)revents;
+    }
+    if (fd == 1 || fd == 2)
+        return (events & VFS_POLLOUT) ? VFS_POLLOUT : 0;
+
+    file = vfs_get_file(fd);
+    if (!file)
+        return VFS_POLLERR;
+    if (file->ops && file->ops->poll)
+        return file->ops->poll(file, events);
+
+    if ((events & VFS_POLLIN) && file->ops && file->ops->read)
+        revents |= VFS_POLLIN;
+    if ((events & VFS_POLLOUT) && file->ops && file->ops->write)
+        revents |= VFS_POLLOUT;
+    return (int)revents;
 }
 
 int vfs_clear_fd_cloexec(int fd) {

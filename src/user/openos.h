@@ -74,6 +74,13 @@
 #define SYS_SETUID        277
 #define SYS_GETGID        278
 #define SYS_SETGID        279
+#define SYS_POLL          280
+#define SYS_SELECT        281
+
+#define OPENOS_POLLIN     0x0001
+#define OPENOS_POLLOUT    0x0004
+#define OPENOS_POLLERR    0x0008
+#define OPENOS_POLLHUP    0x0010
 
 #define WNOHANG         1
 #define SIGKILL         9
@@ -194,6 +201,12 @@ typedef struct openos_dirent {
     char name[32];
 } openos_dirent_t;
 
+typedef struct openos_pollfd {
+    int fd;
+    short events;
+    short revents;
+} openos_pollfd_t;
+
 static inline int openos_syscall3(int num, int a, int b, int c)
 {
     int ret;
@@ -219,6 +232,18 @@ static inline int openos_syscall1(int num, int a)
 static inline int openos_syscall2(int num, int a, int b)
 {
     return openos_syscall3(num, a, b, 0);
+}
+
+static inline int openos_syscall5(int num, int a, int b, int c, int d, int e)
+{
+    int ret;
+    __asm__ volatile(
+        "int $0x80"
+        : "=a"(ret)
+        : "a"(num), "b"(a), "c"(b), "d"(c), "S"(d), "D"(e)
+        : "memory"
+    );
+    return ret;
 }
 
 static inline void openos_thread_exit(int code);
@@ -1696,6 +1721,16 @@ static inline int openos_getgid(void)
 static inline int openos_setgid(openos_uint32_t gid)
 {
     return openos_syscall_result(openos_syscall1(SYS_SETGID, (int)gid));
+}
+
+static inline int openos_poll(openos_pollfd_t *fds, openos_uint32_t nfds, openos_uint32_t timeout_ms)
+{
+    return openos_syscall_result(openos_syscall3(SYS_POLL, (int)fds, (int)nfds, (int)timeout_ms));
+}
+
+static inline int openos_select(openos_uint32_t nfds, openos_uint32_t *readfds, openos_uint32_t *writefds, openos_uint32_t *exceptfds, openos_uint32_t timeout_ms)
+{
+    return openos_syscall_result(openos_syscall5(SYS_SELECT, (int)nfds, (int)readfds, (int)writefds, (int)exceptfds, (int)timeout_ms));
 }
 
 static inline int openos_readdir_path(const char *path, int index, openos_dirent_t *entry)
