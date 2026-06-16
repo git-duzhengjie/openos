@@ -23,6 +23,7 @@
 #include "keyboard.h"
 #include "chardev.h"
 #include "blockdev.h"
+#include "pci.h"
 #include "vga.h"
 #include "framebuffer.h"
 #include "gui.h"
@@ -535,6 +536,10 @@ void kernel_main(void) {
     chardev_init();
     chardev_register_builtin_devices();
     serial_write("[OK] CHARDEV + /dev\n");
+
+    /* 扫描 PCI 总线 */
+    pci_scan_all();
+    serial_write("[OK] PCI SCAN\n");
 
     /* 初始化块设备框架�?RAM disk */
     blockdev_init();
