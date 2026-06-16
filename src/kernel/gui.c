@@ -1392,11 +1392,11 @@ void gui_process_events(void) {
                 /* Terminal input must flow through shell_run(), not GUI key events. */
             }
         } else if (ev.type == GUI_EVENT_MOUSE_DOWN) {
-            /* Mouse actions are handled synchronously in gui_poll_mouse(). */
+            if (ev.button & 1u) gui_handle_mouse_down(ev.x, ev.y);
         } else if (ev.type == GUI_EVENT_MOUSE_UP) {
-            /* Mouse actions are handled synchronously in gui_poll_mouse(). */
+            if (ev.button & 1u) gui_handle_mouse_up(ev.x, ev.y);
         } else if (ev.type == GUI_EVENT_MOUSE_MOVE) {
-            /* Mouse actions are handled synchronously in gui_poll_mouse(). */
+            gui_handle_mouse_move(ev.x, ev.y);
         } else if (ev.type == GUI_EVENT_BUTTON_CLICK) {
             if (ev.widget && gui_widget_is_clickable(ev.widget)) {
                 serial_write("[GUI] button clicked\n");
@@ -1426,9 +1426,25 @@ static void gui_poll_mouse(void) {
     if (ms.y > (int)g_gui.height - 1) ms.y = (int)g_gui.height - 1;
 
     if ((ms.buttons & 1u) && !(g_gui.last_mouse_buttons & 1u)) {
-        gui_handle_mouse_down(ms.x, ms.y);
+        gui_event_t ev;
+        memset(&ev, 0, sizeof(ev));
+        ev.type = GUI_EVENT_MOUSE_DOWN;
+        ev.x = ms.x;
+        ev.y = ms.y;
+        ev.button = 1u;
+        ev.window = gui_window_at(ms.x, ms.y);
+        ev.widget = gui_widget_at_screen(ms.x, ms.y);
+        gui_event_push(ev);
     } else if (!(ms.buttons & 1u) && (g_gui.last_mouse_buttons & 1u)) {
-        gui_handle_mouse_up(ms.x, ms.y);
+        gui_event_t ev;
+        memset(&ev, 0, sizeof(ev));
+        ev.type = GUI_EVENT_MOUSE_UP;
+        ev.x = ms.x;
+        ev.y = ms.y;
+        ev.button = 1u;
+        ev.window = gui_window_at(ms.x, ms.y);
+        ev.widget = gui_widget_at_screen(ms.x, ms.y);
+        gui_event_push(ev);
     }
 
     if (ms.x != g_gui.mouse_x || ms.y != g_gui.mouse_y) {
@@ -1436,9 +1452,19 @@ static void gui_poll_mouse(void) {
         complex_move = (g_gui.drag_window != 0) || g_gui.terminal.selecting ||
                        ((ms.buttons & 1u) != 0) || ((g_gui.last_mouse_buttons & 1u) != 0);
         if (complex_move) {
+            gui_event_t ev;
             gui_invalidate_rect(g_gui.mouse_x - 2, g_gui.mouse_y - 2, 22, 22);
             gui_invalidate_rect(ms.x - 2, ms.y - 2, 22, 22);
-            gui_handle_mouse_move(ms.x, ms.y);
+            memset(&ev, 0, sizeof(ev));
+            ev.type = GUI_EVENT_MOUSE_MOVE;
+            ev.x = ms.x;
+            ev.y = ms.y;
+            ev.dx = ms.x - g_gui.mouse_x;
+            ev.dy = ms.y - g_gui.mouse_y;
+            ev.button = (uint8_t)(ms.buttons & 0xffu);
+            ev.window = gui_window_at(ms.x, ms.y);
+            ev.widget = gui_widget_at_screen(ms.x, ms.y);
+            gui_event_push(ev);
         } else {
             g_gui.mouse_x = ms.x;
             g_gui.mouse_y = ms.y;
