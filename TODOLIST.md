@@ -199,7 +199,7 @@
 ### 11. 网络驱动
 
 - [√] virtio-net（已实现 legacy PCI virtqueue 初始化、TX/RX 队列、IRQ 收包与 net_input 接入；modern transport 暂跳过）
-- [x] e1000
+- [√] e1000（已实现 PCI 探测、MMIO 初始化、MAC 读取、RX/TX 描述符环、IRQ 收包与 net_input 接入）
 - [x] rtl8139
 
 ### 12. 输入与多媒体
