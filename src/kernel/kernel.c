@@ -29,6 +29,7 @@
 #include "virtio_blk.h"
 #include "virtio_net.h"
 #include "e1000.h"
+#include "rtl8139.h"
 #include "acpi.h"
 #include "apic.h"
 #include "rtc.h"
@@ -578,7 +579,8 @@ void kernel_main(void) {
     net_init();
     virtio_net_init();
     e1000_init();
-    serial_write("[OK] NET + virtio-net + e1000\n");
+    rtl8139_init();
+    serial_write("[OK] NET + virtio-net + e1000 + rtl8139\n");
 
     /* 初始化跨端设备发现协�?*/
     discovery_init();

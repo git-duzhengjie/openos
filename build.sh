@@ -32,7 +32,7 @@ nasm -f elf32 $SRC/sched/context_switch.asm -o $BUILD/context_switch.o
 nasm -f elf32 $SRC/timer_isr.asm -o $BUILD/timer_isr.o
 nasm -f elf32 $SRC/switch_to_user.asm -o $BUILD/switch_to_user.o
 
-# 编译用户程序并嵌入内�?
+# 编译用户程序并嵌入内�?
 echo "[2.5] Building user program..."
 USR=src/user
 if [ -f $USR/hello.c ]; then
@@ -585,6 +585,11 @@ gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
     -I $SRC/include \
+    -c $SRC/drivers/rtl8139.c -o $BUILD/rtl8139.o
+
+gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
+    -I $SRC/include \
     -c $SRC/drivers/pci.c -o $BUILD/pci.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
@@ -755,6 +760,7 @@ ld -m elf_i386 -T $SRC/linker.ld \
     $BUILD/virtio_blk.o \
     $BUILD/virtio_net.o \
     $BUILD/e1000.o \
+    $BUILD/rtl8139.o \
     $BUILD/pci.o \
     $BUILD/acpi.o \
     $BUILD/apic.o \
@@ -783,7 +789,7 @@ objcopy -O binary $BUILD/kernel.elf $BUILD/kernel.bin
 
 KERNEL_BYTES=$(stat -c%s "$BUILD/kernel.bin")
 KERNEL_SECTORS=$(( (KERNEL_BYTES + 511) / 512 ))
-BOOT_LOAD_SECTORS=1088
+BOOT_LOAD_SECTORS=1152
 if [ "$KERNEL_SECTORS" -gt "$BOOT_LOAD_SECTORS" ]; then
     echo "ERROR: kernel.bin is ${KERNEL_SECTORS} sectors, but bootloader loads only ${BOOT_LOAD_SECTORS} sectors."
     echo "Increase bootloader kernel load chunks before building the image."

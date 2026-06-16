@@ -21,7 +21,7 @@
 - [√] 用户态切换、ELF 用户程序加载
 - [√] VFS / ramfs / tmpfs 基础能力
 - [√] RAM disk / 内置用户程序嵌入
-- [√] bootloader 内核加载上限提升到 1088 扇区（提交：本提交）
+- [√] bootloader 内核加载上限提升到 1152 扇区（提交：本提交）
 - [√] Shell、VGA / GUI Terminal、基础输入
 - [√] 基础网络栈雏形（ARP / IPv4 / ICMP / UDP / TCP）
 - [√] `/bin/hello`、`/bin/fault`、`/bin/waittest`、`/bin/orphan`、`/bin/argtest`、`/bin/envtest`、`/bin/fstest`、`/bin/libctest`、`/bin/maintest`、`/bin/systest`、`/bin/malloctest`、`/bin/errnotest`、`/bin/pwd`、`/bin/ls`、`/bin/cat`、`/bin/echo`、`/bin/mkdir`、`/bin/touch`、`/bin/cp`、`/bin/mv`、`/bin/tee`、`/bin/head`、`/bin/tail`、`/bin/sort`、`/bin/env`、`/bin/rm`、`/bin/rmdir`、`/bin/kill`、`/bin/grep`、`/bin/wc` 基础用户程序
@@ -200,7 +200,7 @@
 
 - [x] virtio-net
 - [x] e1000
-- [ ] rtl8139
+- [x] rtl8139
 
 ### 12. 输入与多媒体
 
