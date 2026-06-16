@@ -224,7 +224,7 @@
 - [√] `connect`（已支持 TCP 主动打开和 UDP connected socket）
 - [√] `send`（已支持 socketpair / TCP / UDP connected socket 发送）
 - [√] `recv`（已支持 socketpair / TCP / UDP 接收队列）
-- [x] TCP 完整状态机
+- [√] TCP 完整状态机（已覆盖 SYN/ESTABLISHED/FIN/CLOSE_WAIT/LAST_ACK/TIME_WAIT，含 TIME_WAIT 回收）
 - [x] TCP 重传
 - [x] TCP 拥塞控制
 - [x] TCP 窗口管理

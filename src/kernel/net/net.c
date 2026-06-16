@@ -37,6 +37,7 @@
 #define TCP_INITIAL_CWND TCP_MSS
 #define TCP_INITIAL_SSTHRESH (TCP_MSS * 4u)
 #define TCP_DEFAULT_WINDOW TCP_RECV_BUFFER_SIZE
+#define TCP_TIME_WAIT_MS 2000u
 
 #define TCP_STATE_CLOSED      NET_TCP_STATE_CLOSED
 #define TCP_STATE_LISTEN      NET_TCP_STATE_LISTEN
@@ -150,6 +151,7 @@ struct tcp_connection {
     uint32_t cwnd;
     uint32_t ssthresh;
     uint32_t cwnd_acked;
+    uint32_t state_since_ms;
     uint8_t unacked_data[TCP_RETX_BUFFER_SIZE];
 };
 
@@ -620,6 +622,19 @@ static void tcp_clear_unacked(struct tcp_connection *c) {
     c->unacked_retries = 0;
 }
 
+static void tcp_set_state(struct tcp_connection *c, uint8_t state) {
+    if (!c || c->state == state) return;
+    c->state = state;
+    c->state_since_ms = tcp_clock_ms;
+}
+
+static void tcp_release_conn(struct tcp_connection *c) {
+    if (!c) return;
+    tcp_clear_unacked(c);
+    c->state = TCP_STATE_CLOSED;
+    c->used = 0;
+}
+
 static uint32_t tcp_max_u32(uint32_t a, uint32_t b) {
     return a > b ? a : b;
 }
@@ -752,7 +767,7 @@ int net_tcp_open(uint32_t local_ip, uint16_t local_port,
     c->remote_port = remote_port;
     c->snd_nxt = 1;
     c->rcv_nxt = 0;
-    c->state = active ? TCP_STATE_SYN_SENT : TCP_STATE_LISTEN;
+    tcp_set_state(c, active ? TCP_STATE_SYN_SENT : TCP_STATE_LISTEN);
     if (active) {
         if (!remote_ip || !remote_port || tcp_send_for_conn(c, TCP_FLAG_SYN, 0, 0) != 0) {
             c->used = 0;
@@ -792,16 +807,15 @@ int net_tcp_close(int conn_id) {
     if (!c) return -1;
     if (c->state == TCP_STATE_ESTABLISHED) {
         if (tcp_send_for_conn(c, TCP_FLAG_FIN | TCP_FLAG_ACK, 0, 0) != 0) return -1;
-        c->state = TCP_STATE_FIN_WAIT_1;
+        tcp_set_state(c, TCP_STATE_FIN_WAIT_1);
         return 0;
     }
     if (c->state == TCP_STATE_CLOSE_WAIT) {
         if (tcp_send_for_conn(c, TCP_FLAG_FIN | TCP_FLAG_ACK, 0, 0) != 0) return -1;
-        c->state = TCP_STATE_LAST_ACK;
+        tcp_set_state(c, TCP_STATE_LAST_ACK);
         return 0;
     }
-    c->state = TCP_STATE_CLOSED;
-    c->used = 0;
+    tcp_release_conn(c);
     return 0;
 }
 
@@ -830,11 +844,16 @@ void net_tick(uint32_t elapsed_ms) {
     tcp_clock_ms += elapsed_ms;
     for (i = 0; i < TCP_CONN_SIZE; i++) {
         struct tcp_connection *c = &tcp_connections[i];
-        if (!c->used || !c->unacked_used) continue;
+        if (!c->used) continue;
+        if (c->state == TCP_STATE_TIME_WAIT &&
+            (uint32_t)(tcp_clock_ms - c->state_since_ms) >= TCP_TIME_WAIT_MS) {
+            tcp_release_conn(c);
+            continue;
+        }
+        if (!c->unacked_used) continue;
         if ((uint32_t)(tcp_clock_ms - c->unacked_sent_ms) < TCP_RETX_TIMEOUT_MS) continue;
         if (c->unacked_retries >= TCP_RETX_MAX_RETRIES) {
-            c->state = TCP_STATE_CLOSED;
-            c->used = 0;
+            tcp_release_conn(c);
             continue;
         }
         tcp_congestion_on_timeout(c);
@@ -878,8 +897,7 @@ static void handle_tcp(uint32_t src_ip, const uint8_t *payload, uint16_t len) {
 
     c = tcp_match_conn(default_dev ? default_dev->ip : 0, dst_port, src_ip, src_port);
     if (c && (tcp->flags & TCP_FLAG_RST)) {
-        c->state = TCP_STATE_CLOSED;
-        c->used = 0;
+        tcp_release_conn(c);
         return;
     }
 
@@ -894,7 +912,7 @@ static void handle_tcp(uint32_t src_ip, const uint8_t *payload, uint16_t len) {
                 c->snd_nxt = 100;
                 c->rcv_nxt = seq + 1;
                 if (tcp_send_for_conn(c, TCP_FLAG_SYN | TCP_FLAG_ACK, 0, 0) == 0) {
-                    c->state = TCP_STATE_SYN_RCVD;
+                    tcp_set_state(c, TCP_STATE_SYN_RCVD);
                 }
                 return;
             }
@@ -933,11 +951,11 @@ static void handle_tcp(uint32_t src_ip, const uint8_t *payload, uint16_t len) {
         if ((tcp->flags & (TCP_FLAG_SYN | TCP_FLAG_ACK)) == (TCP_FLAG_SYN | TCP_FLAG_ACK) && ack == c->snd_nxt) {
             c->rcv_nxt = seq + 1;
             tcp_send_for_conn(c, TCP_FLAG_ACK, 0, 0);
-            c->state = TCP_STATE_ESTABLISHED;
+            tcp_set_state(c, TCP_STATE_ESTABLISHED);
         }
         break;
     case TCP_STATE_SYN_RCVD:
-        if ((tcp->flags & TCP_FLAG_ACK) && ack == c->snd_nxt) c->state = TCP_STATE_ESTABLISHED;
+        if ((tcp->flags & TCP_FLAG_ACK) && ack == c->snd_nxt) tcp_set_state(c, TCP_STATE_ESTABLISHED);
         break;
     case TCP_STATE_ESTABLISHED:
         if (data_len) {
@@ -946,29 +964,34 @@ static void handle_tcp(uint32_t src_ip, const uint8_t *payload, uint16_t len) {
         }
         if (tcp->flags & TCP_FLAG_FIN) {
             tcp_send_for_conn(c, TCP_FLAG_ACK, 0, 0);
-            c->state = TCP_STATE_CLOSE_WAIT;
+            tcp_set_state(c, TCP_STATE_CLOSE_WAIT);
+        }
+        break;
+    case TCP_STATE_CLOSE_WAIT:
+        if (data_len || (tcp->flags & TCP_FLAG_FIN)) {
+            tcp_send_for_conn(c, TCP_FLAG_ACK, 0, 0);
         }
         break;
     case TCP_STATE_FIN_WAIT_1:
-        if ((tcp->flags & TCP_FLAG_ACK) && ack == c->snd_nxt) c->state = TCP_STATE_FIN_WAIT_2;
+        if ((tcp->flags & TCP_FLAG_ACK) && ack == c->snd_nxt) tcp_set_state(c, TCP_STATE_FIN_WAIT_2);
         if (tcp->flags & TCP_FLAG_FIN) {
+            uint8_t next_state = (c->state == TCP_STATE_FIN_WAIT_2) ? TCP_STATE_TIME_WAIT : TCP_STATE_CLOSING;
             tcp_send_for_conn(c, TCP_FLAG_ACK, 0, 0);
-            c->state = (c->state == TCP_STATE_FIN_WAIT_2) ? TCP_STATE_TIME_WAIT : TCP_STATE_CLOSING;
+            tcp_set_state(c, next_state);
         }
         break;
     case TCP_STATE_FIN_WAIT_2:
         if (tcp->flags & TCP_FLAG_FIN) {
             tcp_send_for_conn(c, TCP_FLAG_ACK, 0, 0);
-            c->state = TCP_STATE_TIME_WAIT;
+            tcp_set_state(c, TCP_STATE_TIME_WAIT);
         }
         break;
     case TCP_STATE_CLOSING:
-        if ((tcp->flags & TCP_FLAG_ACK) && ack == c->snd_nxt) c->state = TCP_STATE_TIME_WAIT;
+        if ((tcp->flags & TCP_FLAG_ACK) && ack == c->snd_nxt) tcp_set_state(c, TCP_STATE_TIME_WAIT);
         break;
     case TCP_STATE_LAST_ACK:
         if ((tcp->flags & TCP_FLAG_ACK) && ack == c->snd_nxt) {
-            c->state = TCP_STATE_CLOSED;
-            c->used = 0;
+            tcp_release_conn(c);
         }
         break;
     case TCP_STATE_TIME_WAIT:
