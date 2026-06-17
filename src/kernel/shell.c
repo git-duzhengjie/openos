@@ -2649,8 +2649,24 @@ void shell_run(void)
         if (!from_script && c == 0x1B)
         {
             char c2 = shell_read_input_char(10000);
-            char c3 = shell_read_input_char(10000);
+            char c3 = 0;
             int gui_key = 0;
+
+            /* Alt+Tab and Alt+` are sent as ESC followed by single char */
+            if (c2 == '\t')
+            {
+                if (gui_should_capture_key_code(GUI_KEY_ALT_TAB))
+                    gui_post_key_code(GUI_KEY_ALT_TAB);
+                continue;
+            }
+            if (c2 == '`')
+            {
+                if (gui_should_capture_key_code(GUI_KEY_SUPER))
+                    gui_post_key_code(GUI_KEY_SUPER);
+                continue;
+            }
+
+            c3 = shell_read_input_char(10000);
 
             if (c2 == '[' || c2 == 'O')
             {

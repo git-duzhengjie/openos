@@ -51,6 +51,8 @@
 #define GUI_KEY_END        0x105
 #define GUI_KEY_UP         0x106
 #define GUI_KEY_DOWN       0x107
+#define GUI_KEY_ALT_TAB    0x108
+#define GUI_KEY_SUPER      0x109
 
 typedef struct gui_rect {
     int x;

@@ -31,6 +31,7 @@ static void gui_file_preview_rebuild(void);
 static void gui_about_open(void);
 static void gui_recycle_open(void);
 static void gui_notif_open(void);
+static void gui_launcher_scan_bin(uint32_t start_index);
 static void gui_notify(const char *text);
 static int  fp_str_append(char *dst, int pos, int cap, const char *src);
 static void fp_itoa(int n, char *buf);
@@ -1311,6 +1312,43 @@ void gui_set_active_window(gui_window_t *window) {
     gui_invalidate_all();
 }
 
+void gui_alt_tab_cycle(void) {
+    uint32_t i;
+    int found = -1;
+    /* Pick second-topmost visible non-minimized window */
+    for (i = 0; i < g_gui.window_count; i++) {
+        uint32_t idx = g_gui.z_order[g_gui.window_count - 1 - i];
+        gui_window_t *w = &g_gui.windows[idx];
+        if (!w->used || !w->visible || (w->flags & GUI_WINDOW_FLAG_MINIMIZED)) continue;
+        if (w == g_gui.active_window) continue;
+        found = (int)idx;
+        break;
+    }
+    if (found < 0) {
+        /* fallback: a minimized window? restore it */
+        for (i = 0; i < g_gui.window_count; i++) {
+            uint32_t idx = g_gui.z_order[g_gui.window_count - 1 - i];
+            gui_window_t *w = &g_gui.windows[idx];
+            if (!w->used) continue;
+            if (w == g_gui.active_window) continue;
+            if (w->flags & GUI_WINDOW_FLAG_MINIMIZED) {
+                gui_restore_window(w);
+                return;
+            }
+        }
+        return;
+    }
+    gui_set_active_window(&g_gui.windows[found]);
+}
+
+void gui_toggle_start_menu(void) {
+    g_gui.desktop_start_menu_open = g_gui.desktop_start_menu_open ? 0 : 1;
+    if (g_gui.desktop_start_menu_open) {
+        gui_launcher_scan_bin(3);
+    }
+    gui_invalidate_all();
+}
+
 void gui_destroy_window(gui_window_t *window) {
     int idx;
     uint32_t i;
@@ -1962,7 +2000,11 @@ void gui_process_events(void) {
     gui_event_t ev;
     while (gui_event_pop(&ev)) {
         if (ev.type == GUI_EVENT_KEY_DOWN) {
-            if (ev.key == GUI_KEY_TAB) {
+            if (ev.key == GUI_KEY_ALT_TAB) {
+                gui_alt_tab_cycle();
+            } else if (ev.key == GUI_KEY_SUPER) {
+                gui_toggle_start_menu();
+            } else if (ev.key == GUI_KEY_TAB) {
                 gui_focus_next_widget();
             } else if (g_gui.focused_widget && g_gui.focused_widget->focused &&
                        g_gui.focused_widget->type == GUI_WIDGET_TEXTBOX) {
@@ -2627,6 +2669,9 @@ int gui_should_capture_key_code(int key) {
     gui_widget_t *wg;
 
     if (!g_gui.initialized) return 0;
+
+    /* Global hotkeys: always capture regardless of focus. */
+    if (key == GUI_KEY_ALT_TAB || key == GUI_KEY_SUPER) return 1;
 
     /* GUI Terminal is the Shell's graphical output window. Do not capture
      * printable keys here: shell_run() must receive them so command editing,
