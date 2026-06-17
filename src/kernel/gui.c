@@ -2321,12 +2321,9 @@ static void gui_desktop_init(void) {
     g_gui.desktop_start_menu_rect.h = GUI_DESKTOP_MENU_H;
 
     memset(g_gui.desktop_icons, 0, sizeof(g_gui.desktop_icons));
+    /* 桌面只保留 Files 和 Recycle Bin，其他入口走开始菜单/任务栏挂件 */
     gui_desktop_add_icon(0, 32, 72,  "Files",       gui_rgb(242, 194, 74),  GUI_DESKTOP_ACTION_FILES);
-    gui_desktop_add_icon(1, 32, 160, "Terminal",    gui_rgb(60, 60, 70),    GUI_DESKTOP_ACTION_TERMINAL);
-    gui_desktop_add_icon(2, 32, 248, "About",       gui_rgb(76, 144, 232),  GUI_DESKTOP_ACTION_ABOUT);
-    gui_desktop_add_icon(3, 32, 336, "Recycle Bin", gui_rgb(180, 180, 188), GUI_DESKTOP_ACTION_RECYCLE);
-    gui_desktop_add_icon(4, 32, 424, "Theme",       gui_rgb(220, 130, 200), GUI_DESKTOP_ACTION_THEME);
-    gui_desktop_add_icon(5, 32, 512, "Notifications", gui_rgb(255, 200, 110), GUI_DESKTOP_ACTION_NOTIF);
+    gui_desktop_add_icon(1, 32, 160, "Recycle Bin", gui_rgb(180, 180, 188), GUI_DESKTOP_ACTION_RECYCLE);
     g_gui.desktop_icon_count = 6;
 }
 
@@ -2448,11 +2445,21 @@ static void gui_desktop_run_action(uint32_t action) {
     }
 }
 
+/* taskbar-anchored notification widget (drawn in gui_draw_taskbar, hit-tested here) */
+static gui_rect_t g_notif_widget_rect;
+static uint32_t   g_notif_count; /* tentative def; real def + initial value live with the log below */
+
 static int gui_desktop_handle_click(int x, int y) {
     uint32_t i;
     gui_rect_t item;
 
     if (!g_gui.desktop_enabled) return 0;
+    /* notification widget pinned at the bottom-right (left of the clock) */
+    if (g_notif_widget_rect.w > 0 && g_notif_widget_rect.h > 0 &&
+        gui_rect_contains(&g_notif_widget_rect, x, y)) {
+        gui_desktop_run_action(GUI_DESKTOP_ACTION_NOTIF);
+        return 1;
+    }
     if (gui_rect_contains(&g_gui.desktop_start_button_rect, x, y)) {
         gui_desktop_run_action(GUI_DESKTOP_ACTION_MENU);
         return 1;
@@ -3414,6 +3421,42 @@ static void gui_draw_taskbar(void) {
             gui_raw_line(box_x + box_w - 1, box_y, box_x + box_w - 1, box_y + box_h - 1, gui_rgb(12, 16, 24));
             gui_draw_text(cx, cy, clk, gui_rgb(220, 240, 255));
         }
+    }
+    /* notification widget pinned just left of the clock (independent of taskbar position) */
+    {
+        int box_w = 30;
+        int box_h = 18;
+        int clock_box_w = 8 * 8 + 12;
+        int box_x = (int)g_gui.width - clock_box_w - 6 - box_w - 4; /* clock_x - box_w - 4px gap */
+        int box_y = (int)g_gui.height - box_h - 3;
+        char cbuf[8];
+        int n = (int)g_notif_count;
+        int p = 0;
+        if (n > 99) n = 99;
+        if (n >= 10) cbuf[p++] = (char)('0' + (n / 10) % 10);
+        cbuf[p++] = (char)('0' + n % 10);
+        cbuf[p] = 0;
+        gui_raw_fill_rect(box_x, box_y, box_w, box_h, gui_rgb(36, 44, 60));
+        gui_raw_line(box_x, box_y, box_x + box_w - 1, box_y, gui_rgb(80, 92, 120));
+        gui_raw_line(box_x, box_y + box_h - 1, box_x + box_w - 1, box_y + box_h - 1, gui_rgb(12, 16, 24));
+        gui_raw_line(box_x, box_y, box_x, box_y + box_h - 1, gui_rgb(80, 92, 120));
+        gui_raw_line(box_x + box_w - 1, box_y, box_x + box_w - 1, box_y + box_h - 1, gui_rgb(12, 16, 24));
+        /* bell glyph: 3x5 bell-ish shape */
+        {
+            int gx = box_x + 4;
+            int gy = box_y + 5;
+            uint32_t bc = (n > 0) ? gui_rgb(255, 210, 90) : gui_rgb(160, 180, 210);
+            gui_raw_fill_rect(gx + 1, gy,     3, 1, bc);
+            gui_raw_fill_rect(gx,     gy + 1, 5, 4, bc);
+            gui_raw_fill_rect(gx + 1, gy + 5, 3, 1, bc);
+            gui_raw_fill_rect(gx + 2, gy + 6, 1, 1, bc);
+        }
+        gui_draw_text(box_x + 12, box_y + 5, cbuf,
+                      (n > 0) ? gui_rgb(255, 220, 120) : gui_rgb(200, 220, 240));
+        g_notif_widget_rect.x = box_x;
+        g_notif_widget_rect.y = box_y;
+        g_notif_widget_rect.w = box_w;
+        g_notif_widget_rect.h = box_h;
     }
 }
 
