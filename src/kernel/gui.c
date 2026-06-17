@@ -18,6 +18,11 @@
 extern int spawn_user_process(const char *path, char *const argv[]);
 
 static void gui_desktop_run_action(uint32_t action);
+static void gui_handle_mouse_right_down(int x, int y);
+static void gui_ctxmenu_close(void);
+static int  gui_ctxmenu_handle_click(int x, int y);
+static void gui_ctxmenu_draw(void);
+static int  gui_ctxmenu_is_open(void);
 static void gui_file_preview_open(void);
 static void gui_file_preview_render_list(void);
 static void gui_file_preview_render_view(void);
@@ -1750,6 +1755,10 @@ const char *gui_terminal_get_clipboard_text(void) {
 
 __attribute__((optimize("no-jump-tables")))
 static void gui_handle_mouse_down(int x, int y) {
+    if (gui_ctxmenu_is_open()) {
+        gui_ctxmenu_handle_click(x, y);
+        return;
+    }
     if (gui_desktop_handle_click(x, y)) {
         gui_set_focused_widget(0);
         return;
@@ -1969,6 +1978,7 @@ void gui_process_events(void) {
             }
         } else if (ev.type == GUI_EVENT_MOUSE_DOWN) {
             if (ev.button & 1u) gui_handle_mouse_down(ev.x, ev.y);
+            else if (ev.button & 2u) gui_handle_mouse_right_down(ev.x, ev.y);
         } else if (ev.type == GUI_EVENT_MOUSE_UP) {
             if (ev.button & 1u) gui_handle_mouse_up(ev.x, ev.y);
         } else if (ev.type == GUI_EVENT_MOUSE_MOVE) {
@@ -2017,6 +2027,18 @@ static void gui_poll_mouse(void) {
         ev.x = ms.x;
         ev.y = ms.y;
         ev.button = 1u;
+        ev.window = gui_window_at(ms.x, ms.y);
+        ev.widget = gui_widget_at_screen(ms.x, ms.y);
+        gui_event_push(ev);
+    }
+
+    if ((ms.buttons & 2u) && !(g_gui.last_mouse_buttons & 2u)) {
+        gui_event_t ev;
+        memset(&ev, 0, sizeof(ev));
+        ev.type = GUI_EVENT_MOUSE_DOWN;
+        ev.x = ms.x;
+        ev.y = ms.y;
+        ev.button = 2u;
         ev.window = gui_window_at(ms.x, ms.y);
         ev.widget = gui_widget_at_screen(ms.x, ms.y);
         gui_event_push(ev);
@@ -2419,6 +2441,161 @@ static int gui_desktop_handle_click(int x, int y) {
         }
     }
     return 0;
+}
+
+/* ============================================================
+ * Context Menu (right-click menu)
+ * ============================================================ */
+#define GUI_CTXMENU_MAX_ITEMS 8
+#define GUI_CTXMENU_ITEM_H    22
+#define GUI_CTXMENU_W         170
+#define GUI_CTXMENU_PADDING   6
+
+typedef void (*gui_ctxmenu_handler_t)(int item_id, void *user);
+
+typedef struct {
+    char label[40];
+    int  id;
+    int  enabled;
+} gui_ctxmenu_item_t;
+
+static struct {
+    int open;
+    int x;
+    int y;
+    int item_count;
+    gui_ctxmenu_item_t items[GUI_CTXMENU_MAX_ITEMS];
+    gui_ctxmenu_handler_t handler;
+    void *user;
+} g_ctxmenu;
+
+static int gui_ctxmenu_is_open(void) {
+    return g_ctxmenu.open;
+}
+
+static void gui_ctxmenu_close(void) {
+    if (g_ctxmenu.open) {
+        g_ctxmenu.open = 0;
+        gui_invalidate_all();
+    }
+}
+
+static void gui_ctxmenu_open_at(int x, int y, gui_ctxmenu_handler_t h, void *user) {
+    int menu_h;
+    g_ctxmenu.open = 1;
+    g_ctxmenu.handler = h;
+    g_ctxmenu.user = user;
+    g_ctxmenu.x = x;
+    g_ctxmenu.y = y;
+    menu_h = g_ctxmenu.item_count * GUI_CTXMENU_ITEM_H + GUI_CTXMENU_PADDING * 2;
+    if (g_ctxmenu.x + GUI_CTXMENU_W > (int)g_gui.width) {
+        g_ctxmenu.x = (int)g_gui.width - GUI_CTXMENU_W - 2;
+    }
+    if (g_ctxmenu.y + menu_h > (int)g_gui.height - GUI_TASKBAR_HEIGHT) {
+        g_ctxmenu.y = (int)g_gui.height - GUI_TASKBAR_HEIGHT - menu_h - 2;
+    }
+    if (g_ctxmenu.x < 0) g_ctxmenu.x = 0;
+    if (g_ctxmenu.y < 0) g_ctxmenu.y = 0;
+    gui_invalidate_all();
+}
+
+static void gui_ctxmenu_reset(void) {
+    g_ctxmenu.item_count = 0;
+}
+
+static void gui_ctxmenu_add(const char *label, int id, int enabled) {
+    int i;
+    int n = g_ctxmenu.item_count;
+    if (n >= GUI_CTXMENU_MAX_ITEMS) return;
+    g_ctxmenu.items[n].id = id;
+    g_ctxmenu.items[n].enabled = enabled;
+    for (i = 0; i < 39 && label[i]; i++) g_ctxmenu.items[n].label[i] = label[i];
+    g_ctxmenu.items[n].label[i] = 0;
+    g_ctxmenu.item_count = n + 1;
+}
+
+static int gui_ctxmenu_handle_click(int x, int y) {
+    int i;
+    int menu_h;
+    if (!g_ctxmenu.open) return 0;
+    menu_h = g_ctxmenu.item_count * GUI_CTXMENU_ITEM_H + GUI_CTXMENU_PADDING * 2;
+    if (x < g_ctxmenu.x || x >= g_ctxmenu.x + GUI_CTXMENU_W ||
+        y < g_ctxmenu.y || y >= g_ctxmenu.y + menu_h) {
+        gui_ctxmenu_close();
+        return 0; /* allow click-through cancel */
+    }
+    for (i = 0; i < g_ctxmenu.item_count; i++) {
+        int item_y = g_ctxmenu.y + GUI_CTXMENU_PADDING + i * GUI_CTXMENU_ITEM_H;
+        if (y >= item_y && y < item_y + GUI_CTXMENU_ITEM_H) {
+            int id = g_ctxmenu.items[i].id;
+            int en = g_ctxmenu.items[i].enabled;
+            gui_ctxmenu_handler_t h = g_ctxmenu.handler;
+            void *u = g_ctxmenu.user;
+            gui_ctxmenu_close();
+            if (en && h) h(id, u);
+            return 1;
+        }
+    }
+    return 1;
+}
+
+static void gui_ctxmenu_draw(void) {
+    int i;
+    int menu_h;
+    uint32_t bg, border, fg, dim, hl;
+    if (!g_ctxmenu.open) return;
+    bg     = gui_rgb(245, 246, 248);
+    border = gui_rgb(120, 130, 145);
+    fg     = gui_rgb(30, 36, 48);
+    dim    = gui_rgb(160, 165, 175);
+    hl     = gui_rgb(64, 110, 175);
+    (void)hl;
+    menu_h = g_ctxmenu.item_count * GUI_CTXMENU_ITEM_H + GUI_CTXMENU_PADDING * 2;
+    /* drop shadow */
+    gui_raw_fill_rect(g_ctxmenu.x + 3, g_ctxmenu.y + 3, GUI_CTXMENU_W, menu_h, gui_rgb(0, 0, 0));
+    /* body */
+    gui_raw_fill_rect(g_ctxmenu.x, g_ctxmenu.y, GUI_CTXMENU_W, menu_h, bg);
+    /* border */
+    gui_raw_line(g_ctxmenu.x, g_ctxmenu.y, g_ctxmenu.x + GUI_CTXMENU_W - 1, g_ctxmenu.y, border);
+    gui_raw_line(g_ctxmenu.x, g_ctxmenu.y + menu_h - 1, g_ctxmenu.x + GUI_CTXMENU_W - 1, g_ctxmenu.y + menu_h - 1, border);
+    gui_raw_line(g_ctxmenu.x, g_ctxmenu.y, g_ctxmenu.x, g_ctxmenu.y + menu_h - 1, border);
+    gui_raw_line(g_ctxmenu.x + GUI_CTXMENU_W - 1, g_ctxmenu.y, g_ctxmenu.x + GUI_CTXMENU_W - 1, g_ctxmenu.y + menu_h - 1, border);
+    for (i = 0; i < g_ctxmenu.item_count; i++) {
+        int item_y = g_ctxmenu.y + GUI_CTXMENU_PADDING + i * GUI_CTXMENU_ITEM_H;
+        uint32_t color = g_ctxmenu.items[i].enabled ? fg : dim;
+        gui_draw_text(g_ctxmenu.x + 12, item_y + 5, g_ctxmenu.items[i].label, color);
+        (void)bg;
+    }
+}
+
+/* Handlers for desktop right-click menu */
+static void gui_ctxmenu_desktop_action(int id, void *user) {
+    (void)user;
+    switch (id) {
+        case 1: gui_file_preview_open(); break;        /* Open Files */
+        case 2: gui_desktop_run_action(GUI_DESKTOP_ACTION_TERMINAL); break;
+        case 3: gui_desktop_run_action(GUI_DESKTOP_ACTION_THEME); break;
+        case 4: gui_notify("Desktop refreshed"); gui_invalidate_all(); break;
+        case 5: gui_about_open(); break;
+    }
+}
+
+static void gui_handle_mouse_right_down(int x, int y) {
+    /* close any existing menu */
+    if (g_ctxmenu.open) {
+        gui_ctxmenu_close();
+        return;
+    }
+    /* only desktop-area right-click for now (not on taskbar / window) */
+    if (gui_window_at(x, y) != 0) return;
+    if (y >= (int)g_gui.height - GUI_TASKBAR_HEIGHT) return;
+    gui_ctxmenu_reset();
+    gui_ctxmenu_add("Open Files",        1, 1);
+    gui_ctxmenu_add("Open Terminal",     2, 1);
+    gui_ctxmenu_add("Change Wallpaper",  3, 1);
+    gui_ctxmenu_add("Refresh",           4, 1);
+    gui_ctxmenu_add("About OpenOS...",   5, 1);
+    gui_ctxmenu_open_at(x, y, gui_ctxmenu_desktop_action, 0);
 }
 
 int gui_start_desktop(void) {
@@ -3312,6 +3489,7 @@ static void gui_render_scene(void) {
         if (idx < GUI_MAX_WINDOWS) gui_draw_window(&g_gui.windows[idx]);
     }
     gui_terminal_redraw();
+    gui_ctxmenu_draw();
 }
 
 void gui_render(void) {
