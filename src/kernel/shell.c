@@ -1530,6 +1530,8 @@ static int shell_source_script(const char *path)
 
 static char shell_read_script_char(int *from_script)
 {
+    int had_script_input = shell_script_depth > 0;
+
     if (from_script)
         *from_script = 0;
 
@@ -1556,7 +1558,8 @@ static char shell_read_script_char(int *from_script)
         shell_script_depth--;
     }
 
-    shell_script_prompt_pending = 1;
+    if (had_script_input)
+        shell_script_prompt_pending = 1;
     return 0;
 }
 
