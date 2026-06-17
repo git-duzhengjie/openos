@@ -28,7 +28,7 @@
 #define GUI_DESKTOP_ICON_H       64
 #define GUI_DESKTOP_MENU_W       184
 #define GUI_DESKTOP_MENU_H       144
-#define GUI_LAUNCHER_MAX_APPS    8u
+#define GUI_LAUNCHER_MAX_APPS    24u
 #define GUI_LAUNCHER_ITEM_H      24
 
 #define GUI_WINDOW_FLAG_NONE      0x00000000u
@@ -250,6 +250,7 @@ typedef struct gui_launcher_entry {
     char title[64];
     uint32_t action;
     uint32_t color;
+    char path[64];  /* if non-empty and action >= LAUNCH_BIN_BASE, exec this path */
 } gui_launcher_entry_t;
 
 typedef struct gui_launcher_info {

@@ -15,6 +15,7 @@
 #include "heap.h"
 #include "input_buffer.h"
 #include "fs/vfs.h"
+extern int spawn_user_process(const char *path, char *const argv[]);
 
 static void gui_desktop_run_action(uint32_t action);
 static void gui_file_preview_open(void);
@@ -2017,6 +2018,49 @@ static void gui_launcher_add(uint32_t index, const char *name, const char *title
     entry->title[i] = 0;
 }
 
+/* like gui_launcher_add, but also records an executable path so the launcher
+ * can spawn it via spawn_user_process() (used for /bin/* entries). */
+static void gui_launcher_add_with_path(uint32_t index, const char *name, const char *title,
+                                       uint32_t action, uint32_t color, const char *path) {
+    gui_launcher_entry_t *entry;
+    uint32_t i;
+
+    gui_launcher_add(index, name, title, action, color);
+    if (index >= GUI_LAUNCHER_MAX_APPS || !path) return;
+    entry = &g_gui.launcher_entries[index];
+    for (i = 0; i < sizeof(entry->path) - 1 && path[i]; i++) entry->path[i] = path[i];
+    entry->path[i] = 0;
+}
+
+/* scan /bin via vfs_readdir and append each non-dot entry to launcher list */
+static void gui_launcher_scan_bin(uint32_t start_index) {
+    int i;
+    uint32_t idx = start_index;
+    static const uint32_t palette[6] = {
+        0x4C90E8u, 0xAA70EBu, 0x58C480u, 0xE89B4Cu, 0xE85C7Au, 0x6A9BE0u
+    };
+    int color_i = 0;
+    for (i = 0; i < 256 && idx < GUI_LAUNCHER_MAX_APPS; i++) {
+        dentry_t *e = vfs_readdir("/bin", i);
+        char path[80];
+        int p, k;
+        uint32_t color;
+        if (!e) break;
+        /* skip ., .., directories */
+        if (e->name[0] == '.' && (e->name[1] == 0 || (e->name[1] == '.' && e->name[2] == 0))) continue;
+        if (e->inode && (e->inode->mode & FS_DIR)) continue;
+        /* build path "/bin/<name>" */
+        path[0] = '/'; path[1] = 'b'; path[2] = 'i'; path[3] = 'n'; path[4] = '/'; p = 5;
+        for (k = 0; k < (int)(sizeof(path) - 6) && e->name[k]; k++) path[p++] = e->name[k];
+        path[p] = 0;
+        color = palette[(color_i++) % 6];
+        gui_launcher_add_with_path(idx, e->name, e->name,
+                                   GUI_DESKTOP_ACTION_LAUNCH_BIN_BASE + idx, color, path);
+        idx++;
+    }
+    g_gui.launcher_app_count = idx;
+}
+
 static void gui_launcher_init(void) {
     memset(g_gui.launcher_entries, 0, sizeof(g_gui.launcher_entries));
     g_gui.launcher_enabled = 1;
@@ -2024,6 +2068,7 @@ static void gui_launcher_init(void) {
     gui_launcher_add(0, "terminal", "Terminal", GUI_DESKTOP_ACTION_TERMINAL, gui_rgb(68, 144, 245));
     gui_launcher_add(1, "demo", "Window Demo", GUI_DESKTOP_ACTION_DEMO, gui_rgb(170, 112, 235));
     gui_launcher_add(2, "about", "About OpenOS", GUI_DESKTOP_ACTION_ABOUT, gui_rgb(88, 196, 128));
+    /* programs under /bin appear after the 3 built-ins; scan happens lazily */
 }
 
 static void gui_desktop_add_icon(uint32_t index, int x, int y, const char *label, uint32_t color, uint32_t action) {
@@ -2161,7 +2206,25 @@ static void gui_desktop_run_action(uint32_t action) {
     }
     if (action == GUI_DESKTOP_ACTION_MENU) {
         g_gui.desktop_start_menu_open = !g_gui.desktop_start_menu_open;
+        if (g_gui.desktop_start_menu_open) {
+            /* refresh /bin entries every time menu opens (lazy scan) */
+            gui_launcher_scan_bin(3);
+        }
         gui_invalidate_all();
+    }
+    /* launch /bin/* program: action encoded as LAUNCH_BIN_BASE + index */
+    if (action >= GUI_DESKTOP_ACTION_LAUNCH_BIN_BASE) {
+        uint32_t idx = action - GUI_DESKTOP_ACTION_LAUNCH_BIN_BASE;
+        if (idx < GUI_LAUNCHER_MAX_APPS) {
+            gui_launcher_entry_t *e = &g_gui.launcher_entries[idx];
+            if (e->used && e->path[0]) {
+                serial_write("[GUI] launching ");
+                serial_write(e->path);
+                serial_write("\n");
+                spawn_user_process(e->path, 0);
+            }
+        }
+        return;
     }
 }
 
