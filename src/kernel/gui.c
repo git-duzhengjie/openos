@@ -25,6 +25,10 @@ static void gui_file_preview_render_edit(void);
 static void gui_file_preview_rebuild(void);
 static void gui_about_open(void);
 static void gui_recycle_open(void);
+static void gui_notif_open(void);
+static void gui_notify(const char *text);
+static int  fp_str_append(char *dst, int pos, int cap, const char *src);
+static void fp_itoa(int n, char *buf);
 
 static gui_system_t g_gui;
 static gui_accel_info_t g_gui_accel;
@@ -46,6 +50,7 @@ static gui_accel_info_t g_gui_accel;
 #define GUI_DESKTOP_ACTION_FILES    5u
 #define GUI_DESKTOP_ACTION_RECYCLE  6u
 #define GUI_DESKTOP_ACTION_THEME    7u
+#define GUI_DESKTOP_ACTION_NOTIF    8u
 #define GUI_DESKTOP_ACTION_LAUNCH_BIN_BASE 0x1000u  /* +index into binlist */
 static volatile uint32_t g_terminal_out_head = 0;
 static volatile uint32_t g_terminal_out_tail = 0;
@@ -2056,6 +2061,8 @@ int gui_start(uint32_t width, uint32_t height) {
 
     gui_terminal_init();
     gui_desktop_init();
+    gui_notify("Welcome to OpenOS desktop");
+    gui_notify("Tip: click Theme icon to switch wallpaper");
     gui_render();
     return 0;
 }
@@ -2175,7 +2182,8 @@ static void gui_desktop_init(void) {
     gui_desktop_add_icon(2, 32, 248, "About",       gui_rgb(76, 144, 232),  GUI_DESKTOP_ACTION_ABOUT);
     gui_desktop_add_icon(3, 32, 336, "Recycle Bin", gui_rgb(180, 180, 188), GUI_DESKTOP_ACTION_RECYCLE);
     gui_desktop_add_icon(4, 32, 424, "Theme",       gui_rgb(220, 130, 200), GUI_DESKTOP_ACTION_THEME);
-    g_gui.desktop_icon_count = 4;
+    gui_desktop_add_icon(5, 32, 512, "Notifications", gui_rgb(255, 200, 110), GUI_DESKTOP_ACTION_NOTIF);
+    g_gui.desktop_icon_count = 6;
 }
 
 static void gui_desktop_draw_icon(gui_desktop_icon_t *icon) {
@@ -2258,6 +2266,10 @@ static void gui_desktop_run_action(uint32_t action) {
     if (action == GUI_DESKTOP_ACTION_THEME) {
         g_gui.wallpaper_theme = (g_gui.wallpaper_theme + 1u) % 3u;
         gui_invalidate_all();
+        return;
+    }
+    if (action == GUI_DESKTOP_ACTION_NOTIF) {
+        gui_notif_open();
         return;
     }
     if (action == GUI_DESKTOP_ACTION_DEMO) {
@@ -3309,6 +3321,36 @@ static int gui_demo_app_entry(gui_app_t *app, void *user_data) {
 
 static gui_window_t *g_about_win = 0;
 static gui_window_t *g_recycle_win = 0;
+static gui_window_t *g_notif_win = 0;
+
+#define GUI_NOTIF_MAX        16
+#define GUI_NOTIF_TEXT_LEN   80
+
+typedef struct {
+    int used;
+    char text[GUI_NOTIF_TEXT_LEN];
+} gui_notif_entry_t;
+
+static gui_notif_entry_t g_notif_log[GUI_NOTIF_MAX];
+static uint32_t g_notif_count = 0;
+static uint32_t g_notif_unread = 0;
+
+static void gui_notify(const char *text) {
+    uint32_t i, j;
+    if (!text) return;
+    /* shift if full */
+    if (g_notif_count >= GUI_NOTIF_MAX) {
+        for (i = 0; i + 1 < GUI_NOTIF_MAX; i++) g_notif_log[i] = g_notif_log[i + 1];
+        g_notif_count = GUI_NOTIF_MAX - 1;
+    }
+    g_notif_log[g_notif_count].used = 1;
+    for (j = 0; j + 1 < GUI_NOTIF_TEXT_LEN && text[j]; j++) {
+        g_notif_log[g_notif_count].text[j] = text[j];
+    }
+    g_notif_log[g_notif_count].text[j] = 0;
+    g_notif_count++;
+    g_notif_unread++;
+}
 
 static void about_on_close(gui_window_t *win, void *ud) {
     (void)win; (void)ud;
@@ -3374,6 +3416,74 @@ static void gui_recycle_open(void) {
     gui_add_label(g_recycle_win, 16, 74,  348, 16, "(Trash management is not implemented yet.)");
     gui_add_button(g_recycle_win, 150, 168, 80, 28, "Close", recycle_on_close_btn, 0);
     gui_render();
+}
+
+/* === Notification Center === */
+static void notif_on_close(gui_window_t *win, void *ud) {
+    (void)win; (void)ud;
+    g_notif_win = 0;
+}
+
+static void notif_on_close_btn(gui_widget_t *w, void *ud) {
+    (void)w; (void)ud;
+    if (g_notif_win) {
+        gui_window_t *win = g_notif_win;
+        g_notif_win = 0;
+        gui_window_set_on_close(win, 0, 0);
+        gui_destroy_window(win);
+        gui_render();
+    }
+}
+
+static void notif_on_clear(gui_widget_t *w, void *ud);
+
+static void gui_notif_open(void) {
+    int y;
+    uint32_t i;
+    char header[64];
+    int pos;
+    char nbuf[16];
+    if (g_notif_win) {
+        gui_window_set_on_close(g_notif_win, 0, 0);
+        gui_destroy_window(g_notif_win);
+        g_notif_win = 0;
+    }
+    g_notif_win = gui_create_window(120, 100, 420, 320, "Notifications");
+    if (!g_notif_win) return;
+    gui_window_set_on_close(g_notif_win, notif_on_close, 0);
+
+    pos = 0;
+    pos = fp_str_append(header, pos, sizeof(header), "Total: ");
+    fp_itoa((int)g_notif_count, nbuf);
+    pos = fp_str_append(header, pos, sizeof(header), nbuf);
+    pos = fp_str_append(header, pos, sizeof(header), "  Unread: ");
+    fp_itoa((int)g_notif_unread, nbuf);
+    pos = fp_str_append(header, pos, sizeof(header), nbuf);
+    (void)pos;
+    gui_add_label(g_notif_win, 16, 36, 280, 16, header);
+
+    gui_add_button(g_notif_win, 300, 32, 48, 22, "Clear", notif_on_clear, 0);
+    gui_add_button(g_notif_win, 354, 32, 48, 22, "Close", notif_on_close_btn, 0);
+
+    y = 64;
+    if (g_notif_count == 0) {
+        gui_add_label(g_notif_win, 16, y, 388, 16, "(no notifications)");
+    } else {
+        for (i = 0; i < g_notif_count && i < 14; i++) {
+            gui_add_label(g_notif_win, 16, y, 388, 16, g_notif_log[i].text);
+            y += 18;
+        }
+    }
+
+    g_notif_unread = 0;
+    gui_render();
+}
+
+static void notif_on_clear(gui_widget_t *w, void *ud) {
+    (void)w; (void)ud;
+    g_notif_count = 0;
+    g_notif_unread = 0;
+    gui_notif_open();   /* rebuild to refresh */
 }
 
 /* === File Preview (enhanced) === */
@@ -3804,6 +3914,14 @@ static void fp_on_edit_save(gui_widget_t *w, void *ud) {
         return;
     }
     /* success: return to view mode */
+    {
+        char msg[GUI_NOTIF_TEXT_LEN];
+        int mp = 0;
+        mp = fp_str_append(msg, mp, sizeof(msg), "Saved ");
+        mp = fp_str_append(msg, mp, sizeof(msg), fp_view_name);
+        (void)mp;
+        gui_notify(msg);
+    }
     fp_mode = 1;
     fp_view_line_offset = 0;
     gui_file_preview_rebuild();
