@@ -1089,10 +1089,18 @@ static void gui_draw_window(gui_window_t *w) {
     uint32_t i;
     uint32_t border;
     uint32_t title;
+    uint32_t title_text;
+    uint32_t close_bg;
+    uint32_t min_bg;
+    uint32_t btn_fg;
     if (!w || !w->visible || (w->flags & GUI_WINDOW_FLAG_MINIMIZED)) return;
 
     border = w->active ? g_gui.colors.accent : g_gui.colors.window_border;
     title = w->active ? g_gui.colors.title_bg : gui_rgb(50, 55, 68);
+    title_text = w->active ? gui_rgb(235, 242, 255) : gui_rgb(150, 158, 172);
+    close_bg = w->active ? gui_rgb(160, 50, 55) : gui_rgb(95, 60, 65);
+    min_bg = w->active ? gui_rgb(80, 90, 105) : gui_rgb(55, 62, 75);
+    btn_fg = w->active ? gui_rgb(255, 255, 255) : gui_rgb(170, 178, 192);
 
     gui_raw_fill_rect(w->rect.x, w->rect.y, w->rect.w, w->rect.h, border);
     gui_raw_fill_rect(w->rect.x + GUI_BORDER_SIZE, w->rect.y + GUI_BORDER_SIZE,
@@ -1104,15 +1112,15 @@ static void gui_draw_window(gui_window_t *w) {
 
     if (w->flags & GUI_WINDOW_FLAG_CLOSABLE) {
         gui_rect_t c = gui_close_rect(w);
-        gui_raw_fill_rect(c.x, c.y, c.w, c.h, gui_rgb(160, 50, 55));
-        gui_raw_line(c.x + 3, c.y + 3, c.x + c.w - 4, c.y + c.h - 4, gui_rgb(255,255,255));
-        gui_raw_line(c.x + c.w - 4, c.y + 3, c.x + 3, c.y + c.h - 4, gui_rgb(255,255,255));
+        gui_raw_fill_rect(c.x, c.y, c.w, c.h, close_bg);
+        gui_raw_line(c.x + 3, c.y + 3, c.x + c.w - 4, c.y + c.h - 4, btn_fg);
+        gui_raw_line(c.x + c.w - 4, c.y + 3, c.x + 3, c.y + c.h - 4, btn_fg);
     }
 
     if (w->flags & GUI_WINDOW_FLAG_MINIMIZABLE) {
         gui_rect_t m = gui_min_rect(w);
-        gui_raw_fill_rect(m.x, m.y, m.w, m.h, gui_rgb(80, 90, 105));
-        gui_raw_line(m.x + 3, m.y + m.h - 4, m.x + m.w - 4, m.y + m.h - 4, gui_rgb(255,255,255));
+        gui_raw_fill_rect(m.x, m.y, m.w, m.h, min_bg);
+        gui_raw_line(m.x + 3, m.y + m.h - 4, m.x + m.w - 4, m.y + m.h - 4, btn_fg);
     }
 
     {
@@ -1133,7 +1141,7 @@ static void gui_draw_window(gui_window_t *w) {
         title_clip.w = title_right - title_x;
         title_clip.h = GUI_TITLE_HEIGHT - GUI_BORDER_SIZE;
         if (title_clip.w > 0 && title_clip.h > 0) {
-            gui_draw_window_title_text(title_x, title_y, w->title, gui_rgb(235, 242, 255), &title_clip);
+            gui_draw_window_title_text(title_x, title_y, w->title, title_text, &title_clip);
         }
     }
 
