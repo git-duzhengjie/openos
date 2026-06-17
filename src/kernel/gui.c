@@ -101,6 +101,22 @@ static uint32_t gui_rgb(uint8_t r, uint8_t g, uint8_t b) {
     return ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
 }
 
+static uint32_t gui_mix_rgb(uint32_t a, uint32_t b, uint32_t amount) {
+    uint32_t ar = (a >> 16) & 0xffu;
+    uint32_t ag = (a >> 8) & 0xffu;
+    uint32_t ab = a & 0xffu;
+    uint32_t br = (b >> 16) & 0xffu;
+    uint32_t bg = (b >> 8) & 0xffu;
+    uint32_t bb = b & 0xffu;
+    uint32_t inv;
+
+    if (amount > 255u) amount = 255u;
+    inv = 255u - amount;
+    return gui_rgb((uint8_t)((ar * inv + br * amount) / 255u),
+                   (uint8_t)((ag * inv + bg * amount) / 255u),
+                   (uint8_t)((ab * inv + bb * amount) / 255u));
+}
+
 static void gui_write_dec(uint32_t value) {
     char buf[11];
     int i = 0;
@@ -2766,6 +2782,82 @@ static void gui_draw_taskbar(void) {
     }
 }
 
+static void gui_draw_wallpaper(void) {
+    int y;
+    int x;
+    int width = (int)g_gui.width;
+    int height = (int)g_gui.height;
+    int taskbar_top = height > GUI_TASKBAR_HEIGHT ? height - GUI_TASKBAR_HEIGHT : height;
+    int horizon = taskbar_top * 56 / 100;
+    uint32_t sky_top = gui_rgb(18, 34, 70);
+    uint32_t sky_mid = gui_rgb(44, 84, 145);
+    uint32_t glow = gui_rgb(238, 158, 114);
+    uint32_t ground = gui_rgb(22, 45, 58);
+
+    if (width <= 0 || height <= 0) return;
+
+    for (y = 0; y < taskbar_top; y++) {
+        uint32_t amount = taskbar_top > 1 ? (uint32_t)(y * 255 / taskbar_top) : 0u;
+        uint32_t color = gui_mix_rgb(sky_top, sky_mid, amount);
+        uint32_t warm = 0u;
+        int dy = y - horizon;
+        if (dy < 0) dy = -dy;
+        if (dy < 140) warm = (uint32_t)((140 - dy) * 90 / 140);
+        if (warm) color = gui_mix_rgb(color, glow, warm);
+        gui_raw_fill_rect(0, y, width, 1, color);
+    }
+
+    for (y = 0; y < taskbar_top; y += 41) {
+        int sx = (y * 37 + 53) % (width > 0 ? width : 1);
+        if (y < horizon - 35) {
+            gui_raw_put_pixel(sx, y + 9, gui_rgb(180, 210, 255));
+            if (sx + 1 < width) gui_raw_put_pixel(sx + 1, y + 9, gui_rgb(118, 160, 220));
+        }
+    }
+
+    {
+        int sun_x = width * 78 / 100;
+        int sun_y = horizon - 80;
+        int r;
+        for (r = 46; r > 0; r -= 8) {
+            uint32_t color = gui_mix_rgb(gui_rgb(248, 198, 128), gui_rgb(255, 238, 185), (uint32_t)(r * 4));
+            gui_raw_fill_rect(sun_x - r, sun_y - r / 2, r * 2, r, color);
+        }
+    }
+
+    for (y = horizon - 112; y < taskbar_top; y++) {
+        int left_peak = horizon - 72 - y;
+        int right_peak = horizon - 42 - y;
+        int d1 = left_peak > 0 ? left_peak : -left_peak;
+        int d2 = right_peak > 0 ? right_peak : -right_peak;
+        int top1 = horizon - 18 + d1 * 2 / 3;
+        int top2 = horizon - 8 + d2 * 3 / 5;
+        int top = top1 < top2 ? top1 : top2;
+        if (y >= top) {
+            uint32_t c = y < horizon + 18 ? gui_rgb(45, 74, 98) : gui_rgb(32, 57, 76);
+            gui_raw_fill_rect(0, y, width, 1, c);
+        }
+    }
+
+    for (y = horizon + 36; y < taskbar_top; y++) {
+        uint32_t amount = taskbar_top > horizon ? (uint32_t)((y - horizon) * 255 / (taskbar_top - horizon)) : 255u;
+        uint32_t color = gui_mix_rgb(gui_rgb(38, 77, 92), ground, amount);
+        gui_raw_fill_rect(0, y, width, 1, color);
+    }
+
+    for (x = -80; x < width + 120; x += 92) {
+        int base = taskbar_top - 28 - ((x * 7) & 23);
+        gui_raw_line(x, base, x + 42, horizon + 62, gui_rgb(74, 112, 132));
+        gui_raw_line(x + 42, horizon + 62, x + 96, base + 10, gui_rgb(42, 76, 98));
+    }
+
+    gui_raw_fill_rect(0, taskbar_top - 50, width, 50, gui_rgb(18, 39, 52));
+    for (x = 0; x < width; x += 36) {
+        int wave_y = taskbar_top - 42 + ((x / 36) & 1) * 5;
+        gui_raw_line(x, wave_y, x + 22, wave_y + 3, gui_rgb(67, 116, 136));
+    }
+}
+
 static int gui_has_dirty(void) {
     return g_gui.full_dirty || g_gui.dirty_count > 0;
 }
@@ -2784,7 +2876,7 @@ static void gui_terminal_tick_cursor(void) {
 
 static void gui_render_scene(void) {
     uint32_t i;
-    gui_raw_fill_rect(0, 0, (int)g_gui.width, (int)g_gui.height, g_gui.colors.desktop_bg);
+    gui_draw_wallpaper();
     gui_desktop_draw();
     gui_draw_taskbar();
     gui_desktop_draw_start_menu();
