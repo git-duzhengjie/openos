@@ -21,6 +21,8 @@ static void gui_file_preview_open(void);
 static void gui_file_preview_render_list(void);
 static void gui_file_preview_render_view(void);
 static void gui_file_preview_rebuild(void);
+static void gui_about_open(void);
+static void gui_recycle_open(void);
 
 static gui_system_t g_gui;
 static gui_accel_info_t g_gui_accel;
@@ -40,6 +42,8 @@ static gui_accel_info_t g_gui_accel;
 #define GUI_DESKTOP_ACTION_MENU     3u
 #define GUI_DESKTOP_ACTION_DEMO     4u
 #define GUI_DESKTOP_ACTION_FILES    5u
+#define GUI_DESKTOP_ACTION_RECYCLE  6u
+#define GUI_DESKTOP_ACTION_LAUNCH_BIN_BASE 0x1000u  /* +index into binlist */
 static volatile uint32_t g_terminal_out_head = 0;
 static volatile uint32_t g_terminal_out_tail = 0;
 static char g_terminal_out_queue[GUI_TERMINAL_OUTPUT_QUEUE_SIZE];
@@ -2063,8 +2067,11 @@ static void gui_desktop_init(void) {
     g_gui.desktop_start_menu_rect.h = GUI_DESKTOP_MENU_H;
 
     memset(g_gui.desktop_icons, 0, sizeof(g_gui.desktop_icons));
-    gui_desktop_add_icon(0, 32, 72, "Files", gui_rgb(242, 194, 74), GUI_DESKTOP_ACTION_FILES);
-    g_gui.desktop_icon_count = 1;
+    gui_desktop_add_icon(0, 32, 72,  "Files",       gui_rgb(242, 194, 74),  GUI_DESKTOP_ACTION_FILES);
+    gui_desktop_add_icon(1, 32, 160, "Terminal",    gui_rgb(60, 60, 70),    GUI_DESKTOP_ACTION_TERMINAL);
+    gui_desktop_add_icon(2, 32, 248, "About",       gui_rgb(76, 144, 232),  GUI_DESKTOP_ACTION_ABOUT);
+    gui_desktop_add_icon(3, 32, 336, "Recycle Bin", gui_rgb(180, 180, 188), GUI_DESKTOP_ACTION_RECYCLE);
+    g_gui.desktop_icon_count = 4;
 }
 
 static void gui_desktop_draw_icon(gui_desktop_icon_t *icon) {
@@ -2137,8 +2144,11 @@ static void gui_desktop_run_action(uint32_t action) {
         return;
     }
     if (action == GUI_DESKTOP_ACTION_ABOUT) {
-        serial_write("[GUI] OpenOS launcher about\n");
-        gui_demo();
+        gui_about_open();
+        return;
+    }
+    if (action == GUI_DESKTOP_ACTION_RECYCLE) {
+        gui_recycle_open();
         return;
     }
     if (action == GUI_DESKTOP_ACTION_DEMO) {
@@ -3108,6 +3118,77 @@ static int gui_demo_app_entry(gui_app_t *app, void *user_data) {
     gui_terminal_write("\n[GUI] demo app started\n> ");
 #endif
     return (w1 || w2) ? 0 : -1;
+}
+
+/* === About / Recycle Bin simple windows === */
+
+static gui_window_t *g_about_win = 0;
+static gui_window_t *g_recycle_win = 0;
+
+static void about_on_close(gui_window_t *win, void *ud) {
+    (void)win; (void)ud;
+    g_about_win = 0;
+}
+
+static void about_on_ok(gui_widget_t *w, void *ud) {
+    (void)w; (void)ud;
+    if (g_about_win) {
+        gui_window_t *win = g_about_win;
+        g_about_win = 0;
+        gui_window_set_on_close(win, 0, 0);
+        gui_destroy_window(win);
+        gui_render();
+    }
+}
+
+static void gui_about_open(void) {
+    gui_widget_t *btn;
+    if (g_about_win) {
+        gui_window_set_on_close(g_about_win, 0, 0);
+        gui_destroy_window(g_about_win);
+        g_about_win = 0;
+    }
+    g_about_win = gui_create_window(180, 140, 360, 200, "About OpenOS");
+    if (!g_about_win) return;
+    gui_window_set_on_close(g_about_win, about_on_close, 0);
+    gui_add_label(g_about_win, 16, 50,  328, 16, "OpenOS - a hobby kernel & desktop");
+    gui_add_label(g_about_win, 16, 74,  328, 16, "Version: 0.5.0");
+    gui_add_label(g_about_win, 16, 98,  328, 16, "Build:   x86_64 multiboot kernel");
+    gui_add_label(g_about_win, 16, 122, 328, 16, "License: see project README");
+    btn = gui_add_button(g_about_win, 140, 152, 80, 28, "OK", about_on_ok, 0);
+    (void)btn;
+    gui_render();
+}
+
+static void recycle_on_close(gui_window_t *win, void *ud) {
+    (void)win; (void)ud;
+    g_recycle_win = 0;
+}
+
+static void recycle_on_close_btn(gui_widget_t *w, void *ud) {
+    (void)w; (void)ud;
+    if (g_recycle_win) {
+        gui_window_t *win = g_recycle_win;
+        g_recycle_win = 0;
+        gui_window_set_on_close(win, 0, 0);
+        gui_destroy_window(win);
+        gui_render();
+    }
+}
+
+static void gui_recycle_open(void) {
+    if (g_recycle_win) {
+        gui_window_set_on_close(g_recycle_win, 0, 0);
+        gui_destroy_window(g_recycle_win);
+        g_recycle_win = 0;
+    }
+    g_recycle_win = gui_create_window(140, 120, 380, 220, "Recycle Bin");
+    if (!g_recycle_win) return;
+    gui_window_set_on_close(g_recycle_win, recycle_on_close, 0);
+    gui_add_label(g_recycle_win, 16, 50,  348, 16, "Recycle Bin is empty.");
+    gui_add_label(g_recycle_win, 16, 74,  348, 16, "(Trash management is not implemented yet.)");
+    gui_add_button(g_recycle_win, 150, 168, 80, 28, "Close", recycle_on_close_btn, 0);
+    gui_render();
 }
 
 /* === File Preview (enhanced) === */
