@@ -19,6 +19,11 @@
 #define PS2_MOUSE_GET_ID      0xF2
 #define PS2_MOUSE_ACK         0xFA
 
+#define PS2_CONFIG_IRQ1_ENABLE      0x01
+#define PS2_CONFIG_IRQ12_ENABLE     0x02
+#define PS2_CONFIG_FIRST_PORT_CLOCK 0x10
+#define PS2_CONFIG_AUX_PORT_CLOCK   0x20
+
 static mouse_state_t g_mouse;
 
 static void mouse_write(uint8_t val);
@@ -154,8 +159,10 @@ void mouse_init(void) {
     outb(PS2_CMD_PORT, PS2_CMD_READ_CONFIG);
     io_wait();
     uint8_t config = mouse_read();
-    config |= (1 << 1); /* 启用 IRQ12 */
-    config &= ~(1 << 5); /* 禁用鼠标时钟 */
+    config |= PS2_CONFIG_IRQ1_ENABLE;  /* 保持键盘 IRQ1 打开 */
+    config |= PS2_CONFIG_IRQ12_ENABLE; /* 启用 IRQ12 */
+    config &= (uint8_t)~PS2_CONFIG_FIRST_PORT_CLOCK; /* 保持键盘时钟打开 */
+    config &= (uint8_t)~PS2_CONFIG_AUX_PORT_CLOCK;   /* 启用鼠标时钟 */
 
     /* 写回配置 */
     mouse_wait_input();
