@@ -44,6 +44,7 @@ static gui_accel_info_t g_gui_accel;
 #define GUI_DESKTOP_ACTION_DEMO     4u
 #define GUI_DESKTOP_ACTION_FILES    5u
 #define GUI_DESKTOP_ACTION_RECYCLE  6u
+#define GUI_DESKTOP_ACTION_THEME    7u
 #define GUI_DESKTOP_ACTION_LAUNCH_BIN_BASE 0x1000u  /* +index into binlist */
 static volatile uint32_t g_terminal_out_head = 0;
 static volatile uint32_t g_terminal_out_tail = 0;
@@ -2172,6 +2173,7 @@ static void gui_desktop_init(void) {
     gui_desktop_add_icon(1, 32, 160, "Terminal",    gui_rgb(60, 60, 70),    GUI_DESKTOP_ACTION_TERMINAL);
     gui_desktop_add_icon(2, 32, 248, "About",       gui_rgb(76, 144, 232),  GUI_DESKTOP_ACTION_ABOUT);
     gui_desktop_add_icon(3, 32, 336, "Recycle Bin", gui_rgb(180, 180, 188), GUI_DESKTOP_ACTION_RECYCLE);
+    gui_desktop_add_icon(4, 32, 424, "Theme",       gui_rgb(220, 130, 200), GUI_DESKTOP_ACTION_THEME);
     g_gui.desktop_icon_count = 4;
 }
 
@@ -2250,6 +2252,11 @@ static void gui_desktop_run_action(uint32_t action) {
     }
     if (action == GUI_DESKTOP_ACTION_RECYCLE) {
         gui_recycle_open();
+        return;
+    }
+    if (action == GUI_DESKTOP_ACTION_THEME) {
+        g_gui.wallpaper_theme = (g_gui.wallpaper_theme + 1u) % 3u;
+        gui_invalidate_all();
         return;
     }
     if (action == GUI_DESKTOP_ACTION_DEMO) {
@@ -3060,6 +3067,55 @@ static void gui_draw_taskbar(void) {
     }
 }
 
+static void gui_draw_wallpaper_day(int width, int taskbar_top) {
+    int y;
+    int x;
+    int horizon = taskbar_top * 62 / 100;
+    uint32_t sky_top = gui_rgb(120, 180, 230);
+    uint32_t sky_mid = gui_rgb(190, 220, 240);
+    uint32_t sun = gui_rgb(255, 230, 130);
+    uint32_t ground = gui_rgb(95, 145, 80);
+
+    for (y = 0; y < taskbar_top; y++) {
+        uint32_t amount = taskbar_top > 1 ? (uint32_t)(y * 255 / taskbar_top) : 0u;
+        uint32_t color = gui_mix_rgb(sky_top, sky_mid, amount);
+        if (y >= horizon) {
+            uint32_t g_amt = taskbar_top > horizon ? (uint32_t)((y - horizon) * 255 / (taskbar_top - horizon)) : 0u;
+            color = gui_mix_rgb(gui_rgb(140, 180, 110), ground, g_amt);
+        }
+        gui_raw_fill_rect(0, y, width, 1, color);
+    }
+    {
+        int cx = width * 3 / 4;
+        int cy = horizon - 60;
+        int r = 28;
+        int dx, dy;
+        for (dy = -r; dy <= r; dy++) {
+            for (dx = -r; dx <= r; dx++) {
+                if (dx * dx + dy * dy <= r * r) {
+                    gui_raw_put_pixel(cx + dx, cy + dy, sun);
+                }
+            }
+        }
+    }
+    for (x = 60; x < width; x += 180) {
+        int cy = 60 + ((x / 180) & 1) * 20;
+        int i;
+        for (i = 0; i < 50; i++) {
+            gui_raw_put_pixel(x + i, cy, gui_rgb(250, 250, 252));
+            gui_raw_put_pixel(x + i, cy + 1, gui_rgb(245, 245, 250));
+        }
+        for (i = 8; i < 42; i++) {
+            gui_raw_put_pixel(x + i, cy - 1, gui_rgb(250, 250, 252));
+        }
+    }
+}
+
+static void gui_draw_wallpaper_solid(int width, int taskbar_top) {
+    uint32_t bg = gui_rgb(45, 75, 110);
+    gui_raw_fill_rect(0, 0, width, taskbar_top, bg);
+}
+
 static void gui_draw_wallpaper(void) {
     int y;
     int x;
@@ -3073,6 +3129,15 @@ static void gui_draw_wallpaper(void) {
     uint32_t ground = gui_rgb(22, 45, 58);
 
     if (width <= 0 || height <= 0) return;
+
+    if (g_gui.wallpaper_theme == 1) {
+        gui_draw_wallpaper_day(width, taskbar_top);
+        return;
+    }
+    if (g_gui.wallpaper_theme == 2) {
+        gui_draw_wallpaper_solid(width, taskbar_top);
+        return;
+    }
 
     for (y = 0; y < taskbar_top; y++) {
         uint32_t amount = taskbar_top > 1 ? (uint32_t)(y * 255 / taskbar_top) : 0u;

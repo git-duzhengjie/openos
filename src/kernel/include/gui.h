@@ -320,6 +320,7 @@ typedef struct gui_system {
     int launcher_enabled;
     gui_launcher_entry_t launcher_entries[GUI_LAUNCHER_MAX_APPS];
     uint32_t launcher_app_count;
+    uint32_t wallpaper_theme;
 
     gui_terminal_t terminal;
 } gui_system_t;
