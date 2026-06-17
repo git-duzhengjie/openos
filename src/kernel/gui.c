@@ -2323,7 +2323,7 @@ static void gui_desktop_init(void) {
     memset(g_gui.desktop_icons, 0, sizeof(g_gui.desktop_icons));
     /* 桌面只保留 Files 和 Recycle Bin，其他入口走开始菜单/任务栏挂件 */
     gui_desktop_add_icon(0, 32, 72,  "Files",       gui_rgb(242, 194, 74),  GUI_DESKTOP_ACTION_FILES);
-    gui_desktop_add_icon(1, 32, 160, "Recycle Bin", gui_rgb(180, 180, 188), GUI_DESKTOP_ACTION_RECYCLE);
+    gui_desktop_add_icon(1, 32, 160, "Recycle Bin", gui_rgb(168, 178, 198), GUI_DESKTOP_ACTION_RECYCLE);
     g_gui.desktop_icon_count = 6;
 }
 
@@ -2347,6 +2347,33 @@ static void gui_desktop_draw_icon(gui_desktop_icon_t *icon) {
         gui_raw_line(cx, iy + 11, cx, iy + 30, gui_rgb(255, 238, 160));
         gui_raw_line(cx + 27, iy + 11, cx + 27, iy + 30, gui_rgb(130, 90, 24));
         gui_raw_line(cx, iy + 30, cx + 27, iy + 30, gui_rgb(130, 90, 24));
+    } else if (icon->action == GUI_DESKTOP_ACTION_RECYCLE) {
+        uint32_t lid    = gui_rgb(150, 152, 162);
+        uint32_t body   = icon->color;
+        uint32_t shade  = gui_rgb(110, 112, 124);
+        uint32_t hl     = gui_rgb(225, 228, 236);
+        uint32_t arrow  = gui_rgb(120, 220, 140);
+        /* handle on top of lid */
+        gui_raw_fill_rect(cx + 10, iy + 1, 8, 3, lid);
+        gui_raw_line(cx + 10, iy + 1, cx + 17, iy + 1, hl);
+        /* lid */
+        gui_raw_fill_rect(cx + 1, iy + 4, 26, 4, lid);
+        gui_raw_line(cx + 1, iy + 4, cx + 26, iy + 4, hl);
+        gui_raw_line(cx + 1, iy + 7, cx + 26, iy + 7, shade);
+        /* body (trash can with slight taper feel via shading) */
+        gui_raw_fill_rect(cx + 3, iy + 9, 22, 19, body);
+        gui_raw_line(cx + 3, iy + 9,  cx + 24, iy + 9,  hl);
+        gui_raw_line(cx + 3, iy + 9,  cx + 3,  iy + 27, hl);
+        gui_raw_line(cx + 24, iy + 9, cx + 24, iy + 27, shade);
+        gui_raw_line(cx + 3, iy + 27, cx + 24, iy + 27, shade);
+        /* recycle arrow triangle in the middle (3 little green pixels forming arrow) */
+        gui_raw_fill_rect(cx + 12, iy + 14, 4, 1, arrow);
+        gui_raw_fill_rect(cx + 11, iy + 15, 6, 1, arrow);
+        gui_raw_fill_rect(cx + 10, iy + 16, 8, 1, arrow);
+        gui_raw_fill_rect(cx + 13, iy + 17, 2, 5, arrow);
+        /* vertical wear lines on body sides */
+        gui_raw_line(cx + 7,  iy + 12, cx + 7,  iy + 25, shade);
+        gui_raw_line(cx + 20, iy + 12, cx + 20, iy + 25, shade);
     } else {
         gui_raw_fill_rect(cx, iy, 28, 28, icon->color);
         gui_raw_line(cx, iy, cx + 27, iy, gui_rgb(225, 235, 255));
