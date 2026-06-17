@@ -1456,7 +1456,6 @@ static void gui_handle_mouse_down(int x, int y) {
     }
 
     if (gui_taskbar_terminal_button_at(x, y)) {
-        serial_write("[GUI] taskbar terminal button\n");
         gui_set_focused_widget(0);
         gui_terminal_open();
         return;
@@ -1465,7 +1464,6 @@ static void gui_handle_mouse_down(int x, int y) {
     gui_window_t *tw = gui_taskbar_window_at(x, y);
     if (tw) {
         if (tw == g_gui.terminal.window || (tw->flags & GUI_WINDOW_FLAG_TERMINAL)) {
-            serial_write("[GUI] taskbar terminal window\n");
             gui_set_focused_widget(0);
             gui_terminal_open();
             return;
@@ -1475,17 +1473,6 @@ static void gui_handle_mouse_down(int x, int y) {
     }
 
     if (gui_is_taskbar_at(x, y)) {
-        gui_taskbar_layout_t layout;
-        gui_taskbar_get_layout(&layout);
-        serial_write("[GUI] taskbar miss x=");
-        gui_write_dec((uint32_t)x);
-        serial_write(" y=");
-        gui_write_dec((uint32_t)y);
-        serial_write(" terminal_x=");
-        gui_write_dec((uint32_t)layout.terminal_button.x);
-        serial_write("..");
-        gui_write_dec((uint32_t)(layout.terminal_button.x + layout.terminal_button.w - 1));
-        serial_write("\n");
         return;
     }
 
@@ -1496,7 +1483,6 @@ static void gui_handle_mouse_down(int x, int y) {
 
         if (w == g_gui.terminal.window) {
             uint32_t tc, trc;
-            serial_write("[GUI] terminal focus\n");
             gui_set_focused_widget(0);
             gui_terminal_set_input_focus(1);
             if (gui_terminal_point_to_cell(x, y, &tc, &trc)) {
@@ -1519,7 +1505,6 @@ static void gui_handle_mouse_down(int x, int y) {
         minr = gui_min_rect(w);
 
         if ((w->flags & GUI_WINDOW_FLAG_CLOSABLE) && gui_rect_contains(&close, x, y)) {
-            serial_write("[GUI] window close\n");
             gui_set_focused_widget(0);
             if (g_gui.drag_window == w) g_gui.drag_window = 0;
             if (g_gui.pressed_widget && g_gui.pressed_widget->owner == w) g_gui.pressed_widget = 0;
@@ -1528,7 +1513,6 @@ static void gui_handle_mouse_down(int x, int y) {
         }
 
         if ((w->flags & GUI_WINDOW_FLAG_MINIMIZABLE) && gui_rect_contains(&minr, x, y)) {
-            serial_write("[GUI] window minimize\n");
             gui_set_focused_widget(0);
             if (g_gui.drag_window == w) g_gui.drag_window = 0;
             if (g_gui.pressed_widget && g_gui.pressed_widget->owner == w) g_gui.pressed_widget = 0;
@@ -1543,7 +1527,6 @@ static void gui_handle_mouse_down(int x, int y) {
             w->drag_offset_x = x - w->rect.x;
             w->drag_offset_y = y - w->rect.y;
             g_gui.drag_window = w;
-            serial_write("[GUI] drag start\n");
             return;
         }
 
@@ -2462,11 +2445,15 @@ void gui_terminal_open(void) {
     if (!g_gui.initialized) return;
 
     if (!g_gui.terminal.window) {
+#if GUI_DEBUG_LOG
         serial_write("[GUI] terminal rebuild\n");
+#endif
         gui_terminal_init();
     }
     if (!g_gui.terminal.window) {
+#if GUI_DEBUG_LOG
         serial_write("[GUI] terminal open failed\n");
+#endif
         return;
     }
 
@@ -2494,9 +2481,7 @@ void gui_terminal_open(void) {
 #if GUI_TERMINAL_START_SHELL
     kernel_start_shell_thread();
 #else
-    serial_write("[GUI] terminal shell start skipped for diagnosis\n");
 #endif
-    serial_write("[GUI] terminal activated\n");
 }
 
 int gui_terminal_is_active(void) {
@@ -2767,7 +2752,9 @@ void gui_poll(void) {
 static void gui_demo_button(gui_widget_t *widget, void *user_data) {
     (void)widget;
     (void)user_data;
+#if GUI_DEBUG_LOG
     gui_terminal_write("\n[GUI] button clicked\n> ");
+#endif
 }
 
 static int gui_demo_app_entry(gui_app_t *app, void *user_data) {
@@ -2789,7 +2776,9 @@ static int gui_demo_app_entry(gui_app_t *app, void *user_data) {
         gui_add_label(w2, 18, 48, 260, 18, "Framebuffer + windows + events");
         gui_add_button(w2, 18, 90, 100, 28, "OK", gui_demo_button, 0);
     }
+#if GUI_DEBUG_LOG
     gui_terminal_write("\n[GUI] demo app started\n> ");
+#endif
     return (w1 || w2) ? 0 : -1;
 }
 
