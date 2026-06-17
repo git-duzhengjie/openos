@@ -21,6 +21,7 @@ static void gui_desktop_run_action(uint32_t action);
 static void gui_file_preview_open(void);
 static void gui_file_preview_render_list(void);
 static void gui_file_preview_render_view(void);
+static void gui_file_preview_render_edit(void);
 static void gui_file_preview_rebuild(void);
 static void gui_about_open(void);
 static void gui_recycle_open(void);
@@ -3384,6 +3385,8 @@ static void gui_recycle_open(void) {
 #define GUI_FP_VIEW_MAX_LINES  12
 #define GUI_FP_VIEW_LINE_CHARS 56
 #define GUI_FP_VIEW_BUF_SIZE   8192
+#define GUI_FP_EDIT_MAX_LINES  8
+#define GUI_FP_EDIT_LINE_CHARS 56
 
 /* enhanced list layout: name | mtime | type | size */
 #define GUI_FP_COL_NAME_X      28   /* after 18px icon + 4px gap */
@@ -3396,10 +3399,12 @@ static void gui_recycle_open(void) {
 static gui_window_t *fp_window = 0;
 static char          fp_path[GUI_FP_MAX_PATH];
 static int           fp_page = 0;
-static int           fp_mode = 0;            /* 0=list, 1=view */
+static int           fp_mode = 0;            /* 0=list, 1=view, 2=edit */
 static char          fp_view_name[GUI_FP_MAX_NAME];
 static int           fp_view_line_offset = 0; /* first visible line index in view mode */
 static int           fp_view_total_lines = 0; /* cached total wrapped line count */
+static gui_widget_t *fp_edit_widgets[GUI_FP_EDIT_MAX_LINES];
+static gui_widget_t *fp_edit_status = 0;
 static int           fp_sort_key  = 0;        /* 0=name, 1=mtime, 2=size */
 static int           fp_sort_desc = 0;        /* 0=asc, 1=desc */
 static int           fp_sorted_idx[GUI_FP_MAX_ENTRIES];
@@ -3744,6 +3749,66 @@ static void fp_on_view_down(gui_widget_t *w, void *ud) {
     }
 }
 
+static void fp_on_edit_enter(gui_widget_t *w, void *ud) {
+    (void)w; (void)ud;
+    fp_mode = 2;
+    gui_file_preview_rebuild();
+}
+
+static void fp_on_edit_cancel(gui_widget_t *w, void *ud) {
+    (void)w; (void)ud;
+    fp_mode = 1;
+    gui_file_preview_rebuild();
+}
+
+static void fp_on_edit_save(gui_widget_t *w, void *ud) {
+    char full[GUI_FP_MAX_PATH];
+    char out[GUI_FP_EDIT_MAX_LINES * (GUI_FP_EDIT_LINE_CHARS + 1) + 1];
+    int op = 0;
+    int i, j;
+    int fd;
+    int written = 0;
+    int total;
+    int last_non_empty = -1;
+    (void)w; (void)ud;
+
+    for (i = 0; i < GUI_FP_EDIT_MAX_LINES; i++) {
+        if (fp_edit_widgets[i] && fp_edit_widgets[i]->text[0]) last_non_empty = i;
+    }
+
+    for (i = 0; i <= last_non_empty; i++) {
+        const char *src = fp_edit_widgets[i] ? fp_edit_widgets[i]->text : "";
+        for (j = 0; src[j] && j < GUI_FP_EDIT_LINE_CHARS; j++) {
+            if (op < (int)sizeof(out) - 1) out[op++] = src[j];
+        }
+        if (i < last_non_empty && op < (int)sizeof(out) - 1) out[op++] = '\n';
+    }
+    total = op;
+
+    fp_path_join(fp_path, fp_view_name, full, sizeof(full));
+    fd = vfs_open(full, O_WRONLY | O_TRUNC, 0644);
+    if (fd < 0) {
+        if (fp_edit_status) gui_widget_set_text(fp_edit_status, "Save failed: open");
+        gui_render();
+        return;
+    }
+    while (written < total) {
+        int n = vfs_write(fd, out + written, total - written);
+        if (n <= 0) break;
+        written += n;
+    }
+    vfs_close(fd);
+    if (written < total) {
+        if (fp_edit_status) gui_widget_set_text(fp_edit_status, "Save failed: write");
+        gui_render();
+        return;
+    }
+    /* success: return to view mode */
+    fp_mode = 1;
+    fp_view_line_offset = 0;
+    gui_file_preview_rebuild();
+}
+
 static void fp_on_prev(gui_widget_t *w, void *ud) {
     (void)w; (void)ud;
     if (fp_page > 0) {
@@ -4005,6 +4070,7 @@ static void gui_file_preview_render_view(void) {
     gui_add_button(fp_window, 8, 48, 60, 20, "< Back", fp_on_back, 0);
     gui_add_button(fp_window, 76, 48, 36, 20, "^", fp_on_view_up, 0);
     gui_add_button(fp_window, 116, 48, 36, 20, "v", fp_on_view_down, 0);
+    gui_add_button(fp_window, 380, 48, 64, 20, "Edit", fp_on_edit_enter, 0);
 
     /* load file content */
     fp_path_join(fp_path, fp_view_name, full, sizeof(full));
@@ -4112,9 +4178,82 @@ static void fp_on_window_close(gui_window_t *win, void *ud) {
     fp_window = 0;
 }
 
+/* render edit mode ---------------------------------------------- */
+static void gui_file_preview_render_edit(void) {
+    char header[GUI_FP_MAX_PATH + 16];
+    char full[GUI_FP_MAX_PATH];
+    char buf[GUI_FP_VIEW_BUF_SIZE + 1];
+    char line[GUI_FP_EDIT_LINE_CHARS + 1];
+    int fd, total, i, pos, n;
+    int line_pos;
+    int line_idx;
+
+    if (!fp_window) return;
+
+    for (i = 0; i < GUI_FP_EDIT_MAX_LINES; i++) fp_edit_widgets[i] = 0;
+    fp_edit_status = 0;
+
+    pos = 0;
+    pos = fp_str_append(header, pos, sizeof(header), "Edit: ");
+    pos = fp_str_append(header, pos, sizeof(header), fp_view_name);
+    (void)pos;
+    gui_add_label(fp_window, 8, 28, 360, 16, header);
+
+    gui_add_button(fp_window, 8, 48, 60, 20, "Save", fp_on_edit_save, 0);
+    gui_add_button(fp_window, 76, 48, 60, 20, "Cancel", fp_on_edit_cancel, 0);
+    fp_edit_status = gui_add_label(fp_window, 144, 50, 300, 16, "");
+
+    /* load existing content */
+    fp_path_join(fp_path, fp_view_name, full, sizeof(full));
+    fd = vfs_open(full, O_RDONLY, 0);
+    total = 0;
+    if (fd >= 0) {
+        while (total < GUI_FP_VIEW_BUF_SIZE) {
+            n = vfs_read(fd, buf + total, GUI_FP_VIEW_BUF_SIZE - total);
+            if (n <= 0) break;
+            total += n;
+        }
+        vfs_close(fd);
+    }
+    buf[total] = 0;
+
+    /* split into lines, fill GUI_FP_EDIT_MAX_LINES textboxes */
+    line_idx = 0;
+    line_pos = 0;
+    for (i = 0; i <= total && line_idx < GUI_FP_EDIT_MAX_LINES; i++) {
+        char c = (i < total) ? buf[i] : '\n';
+        int flush = 0;
+        if (c == '\n') flush = 1;
+        else if (line_pos >= GUI_FP_EDIT_LINE_CHARS) flush = 1;
+
+        if (flush) {
+            line[line_pos] = 0;
+            fp_edit_widgets[line_idx] = gui_add_textbox(fp_window, 8, 76 + line_idx * 26, 444, 22, line);
+            line_idx++;
+            line_pos = 0;
+            if (c == '\n') continue;
+        }
+        if (i < total) {
+            unsigned char uc = (unsigned char)c;
+            if (uc < 32 || uc > 126) c = '.';
+            line[line_pos++] = c;
+        }
+    }
+    /* fill remaining slots with empty textboxes so user can append */
+    for (; line_idx < GUI_FP_EDIT_MAX_LINES; line_idx++) {
+        fp_edit_widgets[line_idx] = gui_add_textbox(fp_window, 8, 76 + line_idx * 26, 444, 22, "");
+    }
+}
+
 /* rebuild and open ---------------------------------------------- */
 static void gui_file_preview_rebuild(void) {
-    const char *title = (fp_mode == 0) ? "Files" : "File Viewer";
+    const char *title;
+    switch (fp_mode) {
+        case 0:  title = "Files"; break;
+        case 1:  title = "File Viewer"; break;
+        case 2:  title = "File Editor"; break;
+        default: title = "Files"; break;
+    }
     if (fp_window) {
         /* avoid firing close hook (it would null fp_window prematurely) */
         gui_window_set_on_close(fp_window, 0, 0);
@@ -4126,8 +4265,10 @@ static void gui_file_preview_rebuild(void) {
     gui_window_set_on_close(fp_window, fp_on_window_close, 0);
     if (fp_mode == 0) {
         gui_file_preview_render_list();
-    } else {
+    } else if (fp_mode == 1) {
         gui_file_preview_render_view();
+    } else {
+        gui_file_preview_render_edit();
     }
     gui_render();
 }
