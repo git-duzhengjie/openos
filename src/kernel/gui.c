@@ -1303,6 +1303,58 @@ static gui_window_t *gui_taskbar_window_at(int x, int y) {
     return 0;
 }
 
+static int gui_taskbar_icon_hovered(gui_rect_t rect) {
+    return gui_rect_contains(&rect, g_gui.mouse_x, g_gui.mouse_y);
+}
+
+static int gui_taskbar_icon_hover_lift(gui_rect_t rect) {
+    return gui_taskbar_icon_hovered(rect) ? 2 : 0;
+}
+
+static void gui_taskbar_draw_icon_shadow(int x, int y, int w, int h) {
+    gui_raw_fill_rect(x + 2, y + 4, w, h, gui_rgb(10, 14, 22));
+}
+
+static void gui_taskbar_invalidate_icon_hover_change(gui_rect_t rect,
+                                                     int old_x,
+                                                     int old_y,
+                                                     int new_x,
+                                                     int new_y) {
+    if (rect.w <= 0 || rect.h <= 0) return;
+    if (gui_rect_contains(&rect, old_x, old_y) != gui_rect_contains(&rect, new_x, new_y)) {
+        gui_invalidate_rect(rect.x - 3, rect.y - 5, rect.w + 6, rect.h + 8);
+    }
+}
+
+static void gui_taskbar_invalidate_hover_changes(int old_x, int old_y, int new_x, int new_y) {
+    uint32_t i;
+    gui_taskbar_layout_t layout;
+    int bx;
+    gui_taskbar_get_layout(&layout);
+    gui_taskbar_invalidate_icon_hover_change(layout.start_button, old_x, old_y, new_x, new_y);
+    gui_taskbar_invalidate_icon_hover_change(layout.terminal_button, old_x, old_y, new_x, new_y);
+    bx = layout.first_window_x;
+    for (i = 0; i < g_gui.window_count; i++) {
+        uint32_t idx = g_gui.z_order[i];
+        gui_window_t *w;
+        gui_rect_t button;
+        if (idx >= GUI_MAX_WINDOWS) continue;
+        w = &g_gui.windows[idx];
+        if (!w->used || !w->visible) continue;
+        if (w->flags & GUI_WINDOW_FLAG_TERMINAL) continue;
+        button.x = bx;
+        button.y = layout.item_y;
+        button.w = gui_taskbar_button_width(w);
+        button.h = layout.item_h;
+        if (button.x + button.w > layout.bar.x + layout.bar.w - 8) {
+            button.w = layout.bar.x + layout.bar.w - 8 - button.x;
+        }
+        if (button.w <= 0) break;
+        gui_taskbar_invalidate_icon_hover_change(button, old_x, old_y, new_x, new_y);
+        bx += gui_taskbar_button_width(w) + 6;
+    }
+}
+
 void gui_post_key_code(int key) {
     gui_event_t ev;
     if (!g_gui.initialized || !key) return;
@@ -1681,24 +1733,7 @@ static void gui_poll_mouse(void) {
 
     if (ms.x != g_gui.mouse_x || ms.y != g_gui.mouse_y) {
         int complex_move;
-        gui_taskbar_layout_t layout;
-        int was_start_hover;
-        int is_start_hover;
-        int was_terminal_hover;
-        int is_terminal_hover;
-        gui_taskbar_get_layout(&layout);
-        was_start_hover = gui_rect_contains(&layout.start_button, g_gui.mouse_x, g_gui.mouse_y);
-        is_start_hover = gui_rect_contains(&layout.start_button, ms.x, ms.y);
-        if (was_start_hover != is_start_hover) {
-            gui_invalidate_rect(layout.start_button.x - 3, layout.start_button.y - 5,
-                                layout.start_button.w + 6, layout.start_button.h + 8);
-        }
-        was_terminal_hover = gui_rect_contains(&layout.terminal_button, g_gui.mouse_x, g_gui.mouse_y);
-        is_terminal_hover = gui_rect_contains(&layout.terminal_button, ms.x, ms.y);
-        if (was_terminal_hover != is_terminal_hover) {
-            gui_invalidate_rect(layout.terminal_button.x - 3, layout.terminal_button.y - 5,
-                                layout.terminal_button.w + 6, layout.terminal_button.h + 8);
-        }
+        gui_taskbar_invalidate_hover_changes(g_gui.mouse_x, g_gui.mouse_y, ms.x, ms.y);
         complex_move = (g_gui.drag_window != 0) || g_gui.terminal.selecting ||
                        ((ms.buttons & 1u) != 0) || ((g_gui.last_mouse_buttons & 1u) != 0);
         if (complex_move) {
@@ -2617,7 +2652,7 @@ static void gui_terminal_invalidate_cursor(void) {
 }
 
 static void gui_draw_taskbar_start_icon(gui_rect_t rect) {
-    int hover = gui_rect_contains(&rect, g_gui.mouse_x, g_gui.mouse_y);
+    int hover = gui_taskbar_icon_hovered(rect);
     int x = rect.x + (rect.w - 17) / 2;
     int y = rect.y + (rect.h - 17) / 2;
     uint32_t blue = hover ? gui_rgb(118, 184, 255) : gui_rgb(86, 160, 255);
@@ -2626,11 +2661,11 @@ static void gui_draw_taskbar_start_icon(gui_rect_t rect) {
     uint32_t red = hover ? gui_rgb(255, 138, 154) : gui_rgb(255, 110, 130);
 
     if (hover) {
-        y -= 2;
-        gui_raw_fill_rect(x + 1, y + 4, 7, 7, gui_rgb(10, 14, 22));
-        gui_raw_fill_rect(x + 11, y + 4, 7, 7, gui_rgb(10, 14, 22));
-        gui_raw_fill_rect(x + 1, y + 14, 7, 7, gui_rgb(10, 14, 22));
-        gui_raw_fill_rect(x + 11, y + 14, 7, 7, gui_rgb(10, 14, 22));
+        y -= gui_taskbar_icon_hover_lift(rect);
+        gui_taskbar_draw_icon_shadow(x + 1, y, 7, 7);
+        gui_taskbar_draw_icon_shadow(x + 11, y, 7, 7);
+        gui_taskbar_draw_icon_shadow(x + 1, y + 10, 7, 7);
+        gui_taskbar_draw_icon_shadow(x + 11, y + 10, 7, 7);
     }
 
     gui_raw_fill_rect(x, y, 7, 7, blue);
@@ -2640,7 +2675,7 @@ static void gui_draw_taskbar_start_icon(gui_rect_t rect) {
 }
 
 static void gui_draw_taskbar_terminal_icon(gui_rect_t rect) {
-    int hover = gui_rect_contains(&rect, g_gui.mouse_x, g_gui.mouse_y);
+    int hover = gui_taskbar_icon_hovered(rect);
     int x = rect.x + (rect.w - 26) / 2;
     int y = rect.y + (rect.h - 22) / 2;
     uint32_t bg = hover ? gui_rgb(14, 24, 40) : gui_rgb(8, 14, 24);
@@ -2650,8 +2685,8 @@ static void gui_draw_taskbar_terminal_icon(gui_rect_t rect) {
     uint32_t text = hover ? gui_rgb(220, 244, 255) : gui_rgb(190, 230, 255);
 
     if (hover) {
-        y -= 2;
-        gui_raw_fill_rect(x + 2, y + 4, 26, 22, gui_rgb(10, 14, 22));
+        y -= gui_taskbar_icon_hover_lift(rect);
+        gui_taskbar_draw_icon_shadow(x, y, 26, 22);
     }
 
     gui_raw_fill_rect(x, y, 26, 22, bg);
@@ -2665,12 +2700,21 @@ static void gui_draw_taskbar_terminal_icon(gui_rect_t rect) {
 }
 
 static void gui_draw_taskbar_window_icon(gui_rect_t rect, int minimized) {
+    int hover = gui_taskbar_icon_hovered(rect);
     int x = rect.x + (rect.w - 26) / 2;
     int y = rect.y + (rect.h - 22) / 2;
     uint32_t title = minimized ? gui_rgb(95, 125, 175) : gui_rgb(86, 130, 210);
     uint32_t body = minimized ? gui_rgb(28, 36, 55) : gui_rgb(32, 44, 70);
     uint32_t border = gui_rgb(205, 225, 255);
     uint32_t shadow = gui_rgb(60, 76, 110);
+    if (hover) {
+        y -= gui_taskbar_icon_hover_lift(rect);
+        title = minimized ? gui_rgb(118, 150, 205) : gui_rgb(112, 158, 232);
+        body = minimized ? gui_rgb(38, 50, 74) : gui_rgb(44, 60, 92);
+        border = gui_rgb(230, 242, 255);
+        shadow = gui_rgb(24, 32, 48);
+        gui_taskbar_draw_icon_shadow(x, y, 26, 22);
+    }
 
     gui_raw_fill_rect(x, y, 26, 22, body);
     gui_raw_fill_rect(x + 1, y + 1, 24, 5, title);
