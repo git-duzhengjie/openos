@@ -18,6 +18,9 @@
 
 static void gui_desktop_run_action(uint32_t action);
 static void gui_file_preview_open(void);
+static void gui_file_preview_render_list(void);
+static void gui_file_preview_render_view(void);
+static void gui_file_preview_rebuild(void);
 
 static gui_system_t g_gui;
 static gui_accel_info_t g_gui_accel;
@@ -2980,63 +2983,370 @@ static int gui_demo_app_entry(gui_app_t *app, void *user_data) {
     return (w1 || w2) ? 0 : -1;
 }
 
-static void gui_file_preview_add_entry(gui_window_t *win, int y, const dentry_t *entry) {
-    char line[64];
-    const char *prefix;
-    const char *name;
-    uint32_t i = 0;
-    uint32_t j = 0;
-    uint32_t mode = 0;
-    gui_widget_t *label;
+/* === File Preview (enhanced) === */
 
-    if (!win || !entry) return;
-    name = entry->name;
-    if (entry->inode) mode = entry->inode->mode & 0xF000;
-    prefix = (mode == FS_DIR) ? "[DIR]  " : "[FILE] ";
+#define GUI_FP_MAX_PATH        256
+#define GUI_FP_MAX_NAME        64
+#define GUI_FP_LIST_PER_PAGE   12
+#define GUI_FP_VIEW_MAX_LINES  13
+#define GUI_FP_VIEW_LINE_CHARS 56
+#define GUI_FP_VIEW_BUF_SIZE   2048
 
-    while (prefix[i] && i + 1 < sizeof(line)) {
-        line[i] = prefix[i];
+static gui_window_t *fp_window = 0;
+static char          fp_path[GUI_FP_MAX_PATH];
+static int           fp_page = 0;
+static int           fp_mode = 0;            /* 0=list, 1=view */
+static char          fp_view_name[GUI_FP_MAX_NAME];
+
+/* path helpers --------------------------------------------------- */
+static int fp_is_root(void) {
+    return fp_path[0] == '/' && fp_path[1] == 0;
+}
+
+static void fp_path_set_root(void) {
+    fp_path[0] = '/';
+    fp_path[1] = 0;
+}
+
+static void fp_path_push(const char *name) {
+    int len = 0;
+    while (fp_path[len]) len++;
+    if (!fp_is_root()) {
+        if (len < GUI_FP_MAX_PATH - 1) fp_path[len++] = '/';
+    }
+    while (*name && len < GUI_FP_MAX_PATH - 1) {
+        fp_path[len++] = *name++;
+    }
+    fp_path[len] = 0;
+}
+
+static void fp_path_pop(void) {
+    int len = 0, last = -1, i;
+    while (fp_path[len]) len++;
+    if (len <= 1) return;
+    for (i = 0; i < len; i++) {
+        if (fp_path[i] == '/') last = i;
+    }
+    if (last <= 0) {
+        fp_path_set_root();
+    } else {
+        fp_path[last] = 0;
+    }
+}
+
+static void fp_path_join(const char *dir, const char *name, char *out, int cap) {
+    int i = 0, j;
+    for (j = 0; dir[j] && i < cap - 1; j++) out[i++] = dir[j];
+    if (i > 0 && out[i - 1] != '/' && i < cap - 1) out[i++] = '/';
+    for (j = 0; name[j] && i < cap - 1; j++) out[i++] = name[j];
+    out[i] = 0;
+}
+
+static void fp_itoa(int n, char *buf) {
+    char tmp[12];
+    int i = 0, j = 0;
+    if (n < 0) { buf[j++] = '-'; n = -n; }
+    if (n == 0) tmp[i++] = '0';
+    while (n > 0) { tmp[i++] = (char)('0' + (n % 10)); n /= 10; }
+    while (i > 0) buf[j++] = tmp[--i];
+    buf[j] = 0;
+}
+
+static int fp_str_append(char *dst, int pos, int cap, const char *src) {
+    while (*src && pos < cap - 1) dst[pos++] = *src++;
+    dst[pos] = 0;
+    return pos;
+}
+
+static int fp_entry_is_dot(const dentry_t *e) {
+    return e->name[0] == '.' &&
+           (e->name[1] == 0 ||
+            (e->name[1] == '.' && e->name[2] == 0));
+}
+
+static int fp_entry_is_dir(const dentry_t *e) {
+    return e && e->inode && (e->inode->mode & FS_DIR);
+}
+
+/* count real entries (skipping . and ..) ------------------------- */
+static int fp_count_entries(void) {
+    int i, count = 0;
+    dentry_t *e;
+    for (i = 0; ; i++) {
+        e = vfs_readdir(fp_path, i);
+        if (!e) break;
+        if (fp_entry_is_dot(e)) continue;
+        count++;
+    }
+    return count;
+}
+
+static int fp_total_items(void) {
+    int n = fp_count_entries();
+    if (!fp_is_root()) n++; /* leading ".." */
+    return n;
+}
+
+static int fp_total_pages(void) {
+    int n = fp_total_items();
+    if (n <= 0) return 1;
+    return (n + GUI_FP_LIST_PER_PAGE - 1) / GUI_FP_LIST_PER_PAGE;
+}
+
+/* fetch the Nth real entry (N=0 = first non-dot child) ---------- */
+static dentry_t *fp_get_real_entry(int target) {
+    int i, idx = 0;
+    dentry_t *e;
+    for (i = 0; ; i++) {
+        e = vfs_readdir(fp_path, i);
+        if (!e) return 0;
+        if (fp_entry_is_dot(e)) continue;
+        if (idx == target) return e;
+        idx++;
+    }
+}
+
+/* callbacks ------------------------------------------------------ */
+static void fp_on_back(gui_widget_t *w, void *ud) {
+    (void)w; (void)ud;
+    fp_mode = 0;
+    fp_page = 0;
+    gui_file_preview_rebuild();
+}
+
+static void fp_on_prev(gui_widget_t *w, void *ud) {
+    (void)w; (void)ud;
+    if (fp_page > 0) {
+        fp_page--;
+        gui_file_preview_rebuild();
+    }
+}
+
+static void fp_on_next(gui_widget_t *w, void *ud) {
+    (void)w; (void)ud;
+    if (fp_page + 1 < fp_total_pages()) {
+        fp_page++;
+        gui_file_preview_rebuild();
+    }
+}
+
+static void fp_on_entry(gui_widget_t *w, void *ud) {
+    int slot = (int)(intptr_t)ud;
+    int global_index, real_index;
+    dentry_t *e;
+    (void)w;
+
+    global_index = fp_page * GUI_FP_LIST_PER_PAGE + slot;
+
+    /* slot 0 of page 0 in non-root is the ".." shortcut */
+    if (!fp_is_root() && global_index == 0) {
+        fp_path_pop();
+        fp_page = 0;
+        gui_file_preview_rebuild();
+        return;
+    }
+
+    real_index = fp_is_root() ? global_index : (global_index - 1);
+    e = fp_get_real_entry(real_index);
+    if (!e) return;
+
+    if (fp_entry_is_dir(e)) {
+        fp_path_push(e->name);
+        fp_page = 0;
+        gui_file_preview_rebuild();
+    } else {
+        int i = 0;
+        while (e->name[i] && i < GUI_FP_MAX_NAME - 1) {
+            fp_view_name[i] = e->name[i];
+            i++;
+        }
+        fp_view_name[i] = 0;
+        fp_mode = 1;
+        gui_file_preview_rebuild();
+    }
+}
+
+/* render list mode ---------------------------------------------- */
+static void gui_file_preview_render_list(void) {
+    char header[GUI_FP_MAX_PATH + 16];
+    char pageinfo[32];
+    char buf[12];
+    gui_widget_t *btn;
+    int y, slot, total_pages, total_items, base;
+    int pos;
+
+    if (!fp_window) return;
+
+    /* path header */
+    pos = 0;
+    pos = fp_str_append(header, pos, sizeof(header), "Path: ");
+    pos = fp_str_append(header, pos, sizeof(header), fp_path);
+    (void)pos;
+    gui_add_label(fp_window, 8, 28, 384, 16, header);
+
+    /* nav buttons */
+    btn = gui_add_button(fp_window, 8, 48, 60, 20, "< Prev", fp_on_prev, 0);
+    (void)btn;
+    btn = gui_add_button(fp_window, 76, 48, 60, 20, "Next >", fp_on_next, 0);
+    (void)btn;
+
+    total_pages = fp_total_pages();
+    total_items = fp_total_items();
+    pos = 0;
+    pos = fp_str_append(pageinfo, pos, sizeof(pageinfo), "Page ");
+    fp_itoa(fp_page + 1, buf);
+    pos = fp_str_append(pageinfo, pos, sizeof(pageinfo), buf);
+    pos = fp_str_append(pageinfo, pos, sizeof(pageinfo), "/");
+    fp_itoa(total_pages, buf);
+    pos = fp_str_append(pageinfo, pos, sizeof(pageinfo), buf);
+    pos = fp_str_append(pageinfo, pos, sizeof(pageinfo), " (");
+    fp_itoa(total_items, buf);
+    pos = fp_str_append(pageinfo, pos, sizeof(pageinfo), buf);
+    pos = fp_str_append(pageinfo, pos, sizeof(pageinfo), " items)");
+    (void)pos;
+    gui_add_label(fp_window, 144, 50, 240, 16, pageinfo);
+
+    /* entries */
+    y = 76;
+    base = fp_page * GUI_FP_LIST_PER_PAGE;
+    for (slot = 0; slot < GUI_FP_LIST_PER_PAGE; slot++) {
+        char line[80];
+        const char *prefix;
+        int gidx = base + slot;
+        int real_index;
+        dentry_t *e;
+
+        if (gidx >= total_items) break;
+
+        if (!fp_is_root() && gidx == 0) {
+            prefix = "[..]   ";
+            pos = 0;
+            pos = fp_str_append(line, pos, sizeof(line), prefix);
+            pos = fp_str_append(line, pos, sizeof(line), "parent directory");
+            (void)pos;
+            gui_add_button(fp_window, 8, y, 384, 18, line,
+                           fp_on_entry, (void *)(intptr_t)slot);
+            y += 20;
+            continue;
+        }
+
+        real_index = fp_is_root() ? gidx : (gidx - 1);
+        e = fp_get_real_entry(real_index);
+        if (!e) break;
+
+        prefix = fp_entry_is_dir(e) ? "[DIR]  " : "[FILE] ";
+        pos = 0;
+        pos = fp_str_append(line, pos, sizeof(line), prefix);
+        pos = fp_str_append(line, pos, sizeof(line), e->name);
+        (void)pos;
+        gui_add_button(fp_window, 8, y, 384, 18, line,
+                       fp_on_entry, (void *)(intptr_t)slot);
+        y += 20;
+    }
+}
+
+/* render view mode ---------------------------------------------- */
+static void gui_file_preview_render_view(void) {
+    char header[GUI_FP_MAX_PATH + 16];
+    char full[GUI_FP_MAX_PATH];
+    char buf[GUI_FP_VIEW_BUF_SIZE + 1];
+    char line[GUI_FP_VIEW_LINE_CHARS + 1];
+    int fd, total, i, pos, lines, n;
+    int line_pos;
+    int y;
+
+    if (!fp_window) return;
+
+    /* header */
+    pos = 0;
+    pos = fp_str_append(header, pos, sizeof(header), "File: ");
+    pos = fp_str_append(header, pos, sizeof(header), fp_view_name);
+    (void)pos;
+    gui_add_label(fp_window, 8, 28, 384, 16, header);
+
+    gui_add_button(fp_window, 8, 48, 60, 20, "< Back", fp_on_back, 0);
+
+    /* load file content */
+    fp_path_join(fp_path, fp_view_name, full, sizeof(full));
+    fd = vfs_open(full, O_RDONLY, 0);
+    if (fd < 0) {
+        gui_add_label(fp_window, 8, 76, 384, 16,
+                      "(cannot open file)");
+        return;
+    }
+
+    total = 0;
+    while (total < GUI_FP_VIEW_BUF_SIZE) {
+        n = vfs_read(fd, buf + total, GUI_FP_VIEW_BUF_SIZE - total);
+        if (n <= 0) break;
+        total += n;
+    }
+    vfs_close(fd);
+    buf[total] = 0;
+
+    /* split into lines, render up to GUI_FP_VIEW_MAX_LINES */
+    y = 76;
+    lines = 0;
+    i = 0;
+    line_pos = 0;
+    while (i <= total && lines < GUI_FP_VIEW_MAX_LINES) {
+        char c = (i < total) ? buf[i] : '\n';
+        int flush = 0;
+
+        if (c == '\n') {
+            flush = 1;
+        } else if (line_pos >= GUI_FP_VIEW_LINE_CHARS) {
+            flush = 1;
+        }
+
+        if (flush) {
+            line[line_pos] = 0;
+            gui_add_label(fp_window, 8, y, 384, 14, line);
+            y += 16;
+            lines++;
+            line_pos = 0;
+            if (c == '\n') {
+                i++;
+                continue;
+            }
+            /* hard wrap: keep current char */
+        }
+
+        if (i < total) {
+            unsigned char uc = (unsigned char)c;
+            if (uc < 32 || uc > 126) c = '.';
+            line[line_pos++] = c;
+        }
         i++;
     }
-    while (name[j] && i + 1 < sizeof(line)) {
-        line[i++] = name[j++];
-    }
-    line[i] = 0;
 
-    label = gui_add_label(win, 28, y, 360, 18, line);
-    if (label) label->fg_color = mode == FS_DIR ? gui_rgb(255, 223, 122) : gui_rgb(218, 232, 255);
+    if (i < total && lines >= GUI_FP_VIEW_MAX_LINES) {
+        /* nothing to do - file truncated visually */
+    }
+}
+
+/* rebuild and open ---------------------------------------------- */
+static void gui_file_preview_rebuild(void) {
+    const char *title = (fp_mode == 0) ? "Files" : "File Viewer";
+    if (fp_window) {
+        gui_destroy_window(fp_window);
+        fp_window = 0;
+    }
+    fp_window = gui_create_window(60, 60, 400, 360, title);
+    if (!fp_window) return;
+    if (fp_mode == 0) {
+        gui_file_preview_render_list();
+    } else {
+        gui_file_preview_render_view();
+    }
+    gui_render();
 }
 
 static void gui_file_preview_open(void) {
-    gui_window_t *win;
-    dentry_t *entry;
-    int i;
-    int shown = 0;
-
-    if (!g_gui.initialized) return;
-    win = gui_create_window(150, 105, 430, 360, "File Preview");
-    if (!win) return;
-
-    {
-        gui_widget_t *title = gui_add_label(win, 24, 28, 360, 18, "Folder: /");
-        gui_widget_t *hint = gui_add_label(win, 24, 52, 360, 18, "Preview files and folders");
-        if (title) title->fg_color = gui_rgb(245, 250, 255);
-        if (hint) hint->fg_color = gui_rgb(178, 205, 238);
-    }
-
-    for (i = 0; i < 12; i++) {
-        entry = vfs_readdir("/", i);
-        if (!entry) break;
-        gui_file_preview_add_entry(win, 92 + shown * 20, entry);
-        shown++;
-    }
-
-    if (shown == 0) {
-        gui_widget_t *empty = gui_add_label(win, 28, 92, 360, 18, "This folder is empty.");
-        if (empty) empty->fg_color = gui_rgb(210, 225, 245);
-    }
-
-    gui_render();
+    if (fp_path[0] == 0) fp_path_set_root();
+    fp_mode = 0;
+    fp_page = 0;
+    gui_file_preview_rebuild();
 }
 
 void gui_demo(void) {
