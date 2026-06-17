@@ -2332,11 +2332,7 @@ static void gui_desktop_draw_icon(gui_desktop_icon_t *icon) {
     int iy;
 
     if (!icon || !icon->used) return;
-    gui_raw_fill_rect(icon->rect.x, icon->rect.y, icon->rect.w, icon->rect.h, gui_rgb(30, 45, 68));
-    gui_raw_line(icon->rect.x, icon->rect.y, icon->rect.x + icon->rect.w - 1, icon->rect.y, gui_rgb(92, 125, 170));
-    gui_raw_line(icon->rect.x, icon->rect.y, icon->rect.x, icon->rect.y + icon->rect.h - 1, gui_rgb(92, 125, 170));
-    gui_raw_line(icon->rect.x + icon->rect.w - 1, icon->rect.y, icon->rect.x + icon->rect.w - 1, icon->rect.y + icon->rect.h - 1, gui_rgb(14, 20, 32));
-    gui_raw_line(icon->rect.x, icon->rect.y + icon->rect.h - 1, icon->rect.x + icon->rect.w - 1, icon->rect.y + icon->rect.h - 1, gui_rgb(14, 20, 32));
+    /* no background plate / border — let the icon art sit directly on wallpaper */
     cx = icon->rect.x + (icon->rect.w - 28) / 2;
     iy = icon->rect.y + 8;
     if (icon->action == GUI_DESKTOP_ACTION_FILES) {
