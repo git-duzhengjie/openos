@@ -1681,6 +1681,16 @@ static void gui_poll_mouse(void) {
 
     if (ms.x != g_gui.mouse_x || ms.y != g_gui.mouse_y) {
         int complex_move;
+        gui_taskbar_layout_t layout;
+        int was_start_hover;
+        int is_start_hover;
+        gui_taskbar_get_layout(&layout);
+        was_start_hover = gui_rect_contains(&layout.start_button, g_gui.mouse_x, g_gui.mouse_y);
+        is_start_hover = gui_rect_contains(&layout.start_button, ms.x, ms.y);
+        if (was_start_hover != is_start_hover) {
+            gui_invalidate_rect(layout.start_button.x - 3, layout.start_button.y - 5,
+                                layout.start_button.w + 6, layout.start_button.h + 8);
+        }
         complex_move = (g_gui.drag_window != 0) || g_gui.terminal.selecting ||
                        ((ms.buttons & 1u) != 0) || ((g_gui.last_mouse_buttons & 1u) != 0);
         if (complex_move) {
@@ -2599,13 +2609,26 @@ static void gui_terminal_invalidate_cursor(void) {
 }
 
 static void gui_draw_taskbar_start_icon(gui_rect_t rect) {
+    int hover = gui_rect_contains(&rect, g_gui.mouse_x, g_gui.mouse_y);
     int x = rect.x + (rect.w - 17) / 2;
     int y = rect.y + (rect.h - 17) / 2;
+    uint32_t blue = hover ? gui_rgb(118, 184, 255) : gui_rgb(86, 160, 255);
+    uint32_t green = hover ? gui_rgb(154, 255, 188) : gui_rgb(120, 255, 160);
+    uint32_t yellow = hover ? gui_rgb(255, 214, 112) : gui_rgb(255, 196, 86);
+    uint32_t red = hover ? gui_rgb(255, 138, 154) : gui_rgb(255, 110, 130);
 
-    gui_raw_fill_rect(x, y, 7, 7, gui_rgb(86, 160, 255));
-    gui_raw_fill_rect(x + 10, y, 7, 7, gui_rgb(120, 255, 160));
-    gui_raw_fill_rect(x, y + 10, 7, 7, gui_rgb(255, 196, 86));
-    gui_raw_fill_rect(x + 10, y + 10, 7, 7, gui_rgb(255, 110, 130));
+    if (hover) {
+        y -= 2;
+        gui_raw_fill_rect(x + 1, y + 4, 7, 7, gui_rgb(10, 14, 22));
+        gui_raw_fill_rect(x + 11, y + 4, 7, 7, gui_rgb(10, 14, 22));
+        gui_raw_fill_rect(x + 1, y + 14, 7, 7, gui_rgb(10, 14, 22));
+        gui_raw_fill_rect(x + 11, y + 14, 7, 7, gui_rgb(10, 14, 22));
+    }
+
+    gui_raw_fill_rect(x, y, 7, 7, blue);
+    gui_raw_fill_rect(x + 10, y, 7, 7, green);
+    gui_raw_fill_rect(x, y + 10, 7, 7, yellow);
+    gui_raw_fill_rect(x + 10, y + 10, 7, 7, red);
 }
 
 static void gui_draw_taskbar_terminal_icon(gui_rect_t rect) {
