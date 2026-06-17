@@ -1843,7 +1843,7 @@ static void gui_desktop_init(void) {
 
     g_gui.desktop_enabled = 1;
     g_gui.desktop_start_menu_open = 0;
-    g_gui.desktop_icon_count = 3;
+    g_gui.desktop_icon_count = 0;
     gui_launcher_init();
 
     top = g_gui.height > GUI_TASKBAR_HEIGHT ? g_gui.height - GUI_TASKBAR_HEIGHT : 0;
@@ -1861,9 +1861,6 @@ static void gui_desktop_init(void) {
     g_gui.desktop_start_menu_rect.h = GUI_DESKTOP_MENU_H;
 
     memset(g_gui.desktop_icons, 0, sizeof(g_gui.desktop_icons));
-    gui_desktop_add_icon(0, 28, 42, "Terminal", gui_rgb(68, 144, 245), GUI_DESKTOP_ACTION_TERMINAL);
-    gui_desktop_add_icon(1, 28, 128, "Demo", gui_rgb(170, 112, 235), GUI_DESKTOP_ACTION_DEMO);
-    gui_desktop_add_icon(2, 28, 214, "About", gui_rgb(88, 196, 128), GUI_DESKTOP_ACTION_ABOUT);
 }
 
 static void gui_desktop_draw_icon(gui_desktop_icon_t *icon) {
@@ -1914,7 +1911,7 @@ static void gui_desktop_draw(void) {
     if (!g_gui.desktop_enabled) return;
     gui_draw_text(116, 72, "Welcome to OpenOS", gui_rgb(235, 242, 255));
     gui_draw_text(116, 104, "Desktop environment is ready.", gui_rgb(205, 220, 245));
-    gui_draw_text(116, 132, "Use Start or desktop icons to launch tools.", gui_rgb(170, 195, 230));
+    gui_draw_text(116, 132, "Use Start to launch tools.", gui_rgb(170, 195, 230));
     for (i = 0; i < g_gui.desktop_icon_count && i < GUI_DESKTOP_MAX_ICONS; i++) {
         gui_desktop_draw_icon(&g_gui.desktop_icons[i]);
     }
