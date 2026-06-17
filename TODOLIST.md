@@ -296,8 +296,8 @@
 
 ### 17.1 桌面增强（File Preview / 窗口管理 / 启动器）
 
-- [ ] File Preview 表格单元格列分隔线（视觉更像表格）
-- [ ] File Preview 点击列头排序（name / mtime / size 升降序切换）
+- [√] File Preview 表格单元格列分隔线（视觉更像表格）
+- [√] File Preview 点击列头排序（name / mtime / size 升降序切换）
 - [ ] 窗口管理：拖动标题栏 / 关闭按钮 / 最小化按钮
 - [ ] 桌面增加更多图标（Terminal / About / 回收站）
 - [ ] 开始菜单列出 `/bin/*` 可执行程序并支持点击启动

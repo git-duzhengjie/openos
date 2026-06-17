@@ -1258,6 +1258,14 @@ void gui_destroy_window(gui_window_t *window) {
         if (app->main_window == window) app->main_window = 0;
         if (app->window_count == 0) app->running = 0;
     }
+    /* fire on_close hook (if any) before zeroing memory */
+    if (window->on_close) {
+        void (*cb)(gui_window_t *, void *) = window->on_close;
+        void *ud = window->close_user_data;
+        window->on_close = 0;
+        window->close_user_data = 0;
+        cb(window, ud);
+    }
     memset(window, 0, sizeof(gui_window_t));
 
     gui_refresh_window_refs();
@@ -1269,6 +1277,14 @@ void gui_destroy_window(gui_window_t *window) {
         gui_set_focused_widget(0);
     }
     gui_invalidate_all();
+}
+
+void gui_window_set_on_close(gui_window_t *window,
+                             void (*cb)(gui_window_t *win, void *user_data),
+                             void *user_data) {
+    if (!window || !window->used) return;
+    window->on_close = cb;
+    window->close_user_data = user_data;
 }
 
 void gui_minimize_window(gui_window_t *window) {
@@ -3755,15 +3771,25 @@ static void gui_file_preview_render_view(void) {
     }
 }
 
+/* clear fp_window pointer when window is closed by user (X button) */
+static void fp_on_window_close(gui_window_t *win, void *ud) {
+    (void)win;
+    (void)ud;
+    fp_window = 0;
+}
+
 /* rebuild and open ---------------------------------------------- */
 static void gui_file_preview_rebuild(void) {
     const char *title = (fp_mode == 0) ? "Files" : "File Viewer";
     if (fp_window) {
+        /* avoid firing close hook (it would null fp_window prematurely) */
+        gui_window_set_on_close(fp_window, 0, 0);
         gui_destroy_window(fp_window);
         fp_window = 0;
     }
     fp_window = gui_create_window(60, 60, 460, 360, title);
     if (!fp_window) return;
+    gui_window_set_on_close(fp_window, fp_on_window_close, 0);
     if (fp_mode == 0) {
         gui_file_preview_render_list();
     } else {

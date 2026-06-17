@@ -157,6 +157,8 @@ struct gui_window {
     int drag_offset_x;
     int drag_offset_y;
     gui_app_t *owner_app;
+    void (*on_close)(struct gui_window *win, void *user_data);
+    void *close_user_data;
     gui_widget_t widgets[GUI_MAX_WIDGETS_PER_WIN];
     uint32_t widget_count;
 };
@@ -348,6 +350,9 @@ gui_app_t *gui_get_window_app(gui_window_t *window);
 gui_window_t *gui_create_app_window(gui_app_t *app, int x, int y, int w, int h, const char *title);
 gui_window_t *gui_create_window(int x, int y, int w, int h, const char *title);
 void gui_destroy_window(gui_window_t *window);
+void gui_window_set_on_close(gui_window_t *window,
+                             void (*cb)(gui_window_t *win, void *user_data),
+                             void *user_data);
 void gui_show_window(gui_window_t *window);
 void gui_hide_window(gui_window_t *window);
 void gui_minimize_window(gui_window_t *window);
