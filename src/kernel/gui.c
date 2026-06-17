@@ -3353,8 +3353,8 @@ static void gui_draw_taskbar(void) {
     bx = layout.first_window_x;
 
     gui_raw_fill_rect(layout.bar.x, layout.bar.y, layout.bar.w, layout.bar.h, gui_rgb(24, 28, 38));
-    gui_raw_line(layout.bar.x, layout.bar.y, layout.bar.x + layout.bar.w - 1, layout.bar.y, gui_rgb(76, 86, 112));
-    gui_raw_line(layout.bar.x, layout.bar.y, layout.bar.x, layout.bar.y + layout.bar.h - 1, gui_rgb(58, 66, 88));
+    /* 顶部高光边框移除：原 gui_rgb(76,86,112) 在窄于全屏的居中任务栏上呈现为贯穿全屏的亮蓝细线 */
+    gui_raw_line(layout.bar.x, layout.bar.y, layout.bar.x, layout.bar.y + layout.bar.h - 1, gui_rgb(40, 46, 60));
     gui_raw_line(layout.bar.x + layout.bar.w - 1, layout.bar.y, layout.bar.x + layout.bar.w - 1, layout.bar.y + layout.bar.h - 1, gui_rgb(10, 13, 20));
     gui_raw_line(layout.bar.x, layout.bar.y + layout.bar.h - 1, layout.bar.x + layout.bar.w - 1, layout.bar.y + layout.bar.h - 1, gui_rgb(10, 13, 20));
 
