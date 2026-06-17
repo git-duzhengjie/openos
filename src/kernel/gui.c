@@ -1589,7 +1589,6 @@ static void gui_handle_mouse_up(int x, int y) {
         still_inside = (under == wg && gui_widget_is_clickable(wg));
         gui_invalidate_all();
         if (still_inside) {
-            serial_write("[GUI] button activate\n");
             gui_button_activate(wg);
         }
     }
@@ -1645,7 +1644,6 @@ void gui_process_events(void) {
             gui_handle_mouse_move(ev.x, ev.y);
         } else if (ev.type == GUI_EVENT_BUTTON_CLICK) {
             if (ev.widget && gui_widget_is_clickable(ev.widget)) {
-                serial_write("[GUI] button clicked\n");
                 if (ev.widget->on_click) {
                     ev.widget->on_click(ev.widget, ev.widget->user_data);
                 }
@@ -2459,7 +2457,8 @@ void gui_terminal_set_input_focus(int focused) {
 
 void gui_terminal_open(void) {
     extern void kernel_start_shell_thread(void);
-    serial_write("[GUI] terminal open\n");
+    int already_active;
+
     if (!g_gui.initialized) return;
 
     if (!g_gui.terminal.window) {
@@ -2471,17 +2470,27 @@ void gui_terminal_open(void) {
         return;
     }
 
-    input_flush();
+    already_active = g_gui.terminal.enabled &&
+                     g_gui.terminal.input_focused &&
+                     g_gui.terminal.window->visible &&
+                     !(g_gui.terminal.window->flags & GUI_WINDOW_FLAG_MINIMIZED) &&
+                     g_gui.active_window == g_gui.terminal.window;
+
+    gui_set_focused_widget(0);
+    gui_restore_window(g_gui.terminal.window);
+    gui_set_active_window(g_gui.terminal.window);
     g_gui.terminal.enabled = 1;
     g_gui.terminal.input_focused = 1;
     g_gui.terminal.cursor_visible = 1;
     g_gui.terminal.cursor_blink_ticks = 0;
-    gui_set_focused_widget(0);
-    gui_restore_window(g_gui.terminal.window);
-    gui_set_active_window(g_gui.terminal.window);
+
     gui_invalidate_rect(g_gui.terminal.window->rect.x, g_gui.terminal.window->rect.y,
                         g_gui.terminal.window->rect.w, g_gui.terminal.window->rect.h);
     gui_invalidate_all();
+
+    if (already_active) return;
+
+    input_flush();
 #if GUI_TERMINAL_START_SHELL
     kernel_start_shell_thread();
 #else
