@@ -2330,11 +2330,25 @@ static void gui_desktop_init(void) {
 static void gui_desktop_draw_icon(gui_desktop_icon_t *icon) {
     int cx;
     int iy;
+    int text_w;
+    int text_x;
+    int text_y;
+    /* layout:
+     *   icon art   : 28x28
+     *   gap        : 6 px
+     *   label      : 8 px (single line, GUI_CHAR_H)
+     * total content height = 28 + 6 + 8 = 42, vertically centered in rect.h (64).
+     */
+    const int art_h = 28;
+    const int gap   = 6;
+    int top_pad;
 
     if (!icon || !icon->used) return;
     /* no background plate / border — let the icon art sit directly on wallpaper */
     cx = icon->rect.x + (icon->rect.w - 28) / 2;
-    iy = icon->rect.y + 8;
+    top_pad = (icon->rect.h - (art_h + gap + GUI_CHAR_H)) / 2;
+    if (top_pad < 0) top_pad = 0;
+    iy = icon->rect.y + top_pad;
     if (icon->action == GUI_DESKTOP_ACTION_FILES) {
         gui_raw_fill_rect(cx + 2, iy + 6, 11, 6, gui_rgb(255, 220, 105));
         gui_raw_fill_rect(cx, iy + 11, 28, 20, icon->color);
@@ -2377,7 +2391,11 @@ static void gui_desktop_draw_icon(gui_desktop_icon_t *icon) {
         gui_raw_line(cx + 27, iy, cx + 27, iy + 27, gui_rgb(18, 25, 38));
         gui_raw_line(cx, iy + 27, cx + 27, iy + 27, gui_rgb(18, 25, 38));
     }
-    gui_draw_text(icon->rect.x + 6, icon->rect.y + 44, icon->label, gui_rgb(232, 240, 255));
+    text_w = (int)strlen(icon->label) * GUI_CHAR_W;
+    text_x = icon->rect.x + (icon->rect.w - text_w) / 2;
+    if (text_x < icon->rect.x) text_x = icon->rect.x;
+    text_y = iy + art_h + gap;
+    gui_draw_text(text_x, text_y, icon->label, gui_rgb(232, 240, 255));
 }
 
 static void gui_desktop_draw_start_menu(void) {
