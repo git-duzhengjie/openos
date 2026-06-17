@@ -37,6 +37,8 @@
 #define GUI_WINDOW_FLAG_TERMINAL  0x00000004u
 #define GUI_WINDOW_FLAG_MINIMIZABLE 0x00000008u
 #define GUI_WINDOW_FLAG_RESIZABLE 0x00000010u
+#define GUI_WINDOW_FLAG_MAXIMIZABLE 0x00000020u
+#define GUI_WINDOW_FLAG_MAXIMIZED 0x00000040u
 
 #define GUI_KEY_BACKSPACE  8
 #define GUI_KEY_TAB        9
@@ -162,6 +164,8 @@ struct gui_window {
     int resize_start_my;
     int resize_start_w;
     int resize_start_h;
+    gui_rect_t saved_rect;
+    uint32_t last_title_click_frame;
     gui_app_t *owner_app;
     void (*on_close)(struct gui_window *win, void *user_data);
     void *close_user_data;
@@ -321,6 +325,7 @@ typedef struct gui_system {
     gui_launcher_entry_t launcher_entries[GUI_LAUNCHER_MAX_APPS];
     uint32_t launcher_app_count;
     uint32_t wallpaper_theme;
+    uint32_t frame_counter;
 
     gui_terminal_t terminal;
 } gui_system_t;
@@ -365,6 +370,7 @@ void gui_show_window(gui_window_t *window);
 void gui_hide_window(gui_window_t *window);
 void gui_minimize_window(gui_window_t *window);
 void gui_restore_window(gui_window_t *window);
+void gui_toggle_maximize_window(gui_window_t *window);
 void gui_set_active_window(gui_window_t *window);
 void gui_bring_to_front(gui_window_t *window);
 gui_window_t *gui_get_window_at(int x, int y);

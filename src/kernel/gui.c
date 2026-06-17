@@ -483,6 +483,15 @@ static gui_rect_t gui_close_rect(gui_window_t *w) {
 
 static gui_rect_t gui_min_rect(gui_window_t *w) {
     gui_rect_t r;
+    r.x = w->rect.x + w->rect.w - GUI_TITLE_HEIGHT * 3 + 7;
+    r.y = w->rect.y + 4;
+    r.w = GUI_TITLE_HEIGHT - 8;
+    r.h = GUI_TITLE_HEIGHT - 8;
+    return r;
+}
+
+static gui_rect_t gui_max_rect(gui_window_t *w) {
+    gui_rect_t r;
     r.x = w->rect.x + w->rect.w - GUI_TITLE_HEIGHT * 2 + 5;
     r.y = w->rect.y + 4;
     r.w = GUI_TITLE_HEIGHT - 8;
@@ -1108,6 +1117,7 @@ static void gui_draw_window(gui_window_t *w) {
     uint32_t title_text;
     uint32_t close_bg;
     uint32_t min_bg;
+    uint32_t max_bg;
     uint32_t btn_fg;
     if (!w || !w->visible || (w->flags & GUI_WINDOW_FLAG_MINIMIZED)) return;
 
@@ -1116,6 +1126,7 @@ static void gui_draw_window(gui_window_t *w) {
     title_text = w->active ? gui_rgb(235, 242, 255) : gui_rgb(150, 158, 172);
     close_bg = w->active ? gui_rgb(160, 50, 55) : gui_rgb(95, 60, 65);
     min_bg = w->active ? gui_rgb(80, 90, 105) : gui_rgb(55, 62, 75);
+    max_bg = w->active ? gui_rgb(80, 110, 90) : gui_rgb(55, 70, 60);
     btn_fg = w->active ? gui_rgb(255, 255, 255) : gui_rgb(170, 178, 192);
 
     gui_raw_fill_rect(w->rect.x, w->rect.y, w->rect.w, w->rect.h, border);
@@ -1139,6 +1150,28 @@ static void gui_draw_window(gui_window_t *w) {
         gui_raw_line(m.x + 3, m.y + m.h - 4, m.x + m.w - 4, m.y + m.h - 4, btn_fg);
     }
 
+    if (w->flags & GUI_WINDOW_FLAG_MAXIMIZABLE) {
+        gui_rect_t mx = gui_max_rect(w);
+        gui_raw_fill_rect(mx.x, mx.y, mx.w, mx.h, max_bg);
+        if (w->flags & GUI_WINDOW_FLAG_MAXIMIZED) {
+            /* restore icon: two overlapping squares */
+            gui_raw_line(mx.x + 5, mx.y + 3, mx.x + mx.w - 3, mx.y + 3, btn_fg);
+            gui_raw_line(mx.x + 5, mx.y + 3, mx.x + 5, mx.y + 5, btn_fg);
+            gui_raw_line(mx.x + mx.w - 3, mx.y + 3, mx.x + mx.w - 3, mx.y + mx.h - 5, btn_fg);
+            gui_raw_line(mx.x + 5, mx.y + 5, mx.x + mx.w - 3, mx.y + 5, btn_fg);
+            gui_raw_line(mx.x + 3, mx.y + 5, mx.x + mx.w - 5, mx.y + 5, btn_fg);
+            gui_raw_line(mx.x + 3, mx.y + 5, mx.x + 3, mx.y + mx.h - 3, btn_fg);
+            gui_raw_line(mx.x + mx.w - 5, mx.y + 5, mx.x + mx.w - 5, mx.y + mx.h - 3, btn_fg);
+            gui_raw_line(mx.x + 3, mx.y + mx.h - 3, mx.x + mx.w - 5, mx.y + mx.h - 3, btn_fg);
+        } else {
+            /* maximize icon: single square */
+            gui_raw_line(mx.x + 3, mx.y + 3, mx.x + mx.w - 4, mx.y + 3, btn_fg);
+            gui_raw_line(mx.x + 3, mx.y + mx.h - 4, mx.x + mx.w - 4, mx.y + mx.h - 4, btn_fg);
+            gui_raw_line(mx.x + 3, mx.y + 3, mx.x + 3, mx.y + mx.h - 4, btn_fg);
+            gui_raw_line(mx.x + mx.w - 4, mx.y + 3, mx.x + mx.w - 4, mx.y + mx.h - 4, btn_fg);
+        }
+    }
+
     {
         gui_rect_t title_clip;
         int title_x = w->rect.x + 8;
@@ -1151,6 +1184,10 @@ static void gui_draw_window(gui_window_t *w) {
         if (w->flags & GUI_WINDOW_FLAG_MINIMIZABLE) {
             gui_rect_t m = gui_min_rect(w);
             if (m.x - 6 < title_right) title_right = m.x - 6;
+        }
+        if (w->flags & GUI_WINDOW_FLAG_MAXIMIZABLE) {
+            gui_rect_t mx = gui_max_rect(w);
+            if (mx.x - 6 < title_right) title_right = mx.x - 6;
         }
         title_clip.x = title_x;
         title_clip.y = w->rect.y + GUI_BORDER_SIZE;
@@ -1174,7 +1211,7 @@ static void gui_draw_window(gui_window_t *w) {
         gui_clear_clip_rect();
     }
 
-    if (w->flags & GUI_WINDOW_FLAG_RESIZABLE) {
+    if ((w->flags & GUI_WINDOW_FLAG_RESIZABLE) && !(w->flags & GUI_WINDOW_FLAG_MAXIMIZED)) {
         gui_rect_t g = gui_resize_grip_rect(w);
         uint32_t gc = w->active ? gui_rgb(190, 200, 220) : gui_rgb(110, 118, 132);
         int k;
@@ -1358,6 +1395,28 @@ void gui_restore_window(gui_window_t *window) {
     if (!window) return;
     window->flags &= ~GUI_WINDOW_FLAG_MINIMIZED;
     window->visible = 1;
+    gui_set_active_window(window);
+    gui_invalidate_all();
+}
+
+void gui_toggle_maximize_window(gui_window_t *window) {
+    if (!window || !window->used) return;
+    if (!(window->flags & GUI_WINDOW_FLAG_MAXIMIZABLE)) return;
+    if (window->flags & GUI_WINDOW_FLAG_MAXIMIZED) {
+        window->rect = window->saved_rect;
+        window->flags &= ~GUI_WINDOW_FLAG_MAXIMIZED;
+    } else {
+        window->saved_rect = window->rect;
+        window->rect.x = 0;
+        window->rect.y = 0;
+        window->rect.w = (int)g_gui.width;
+        int max_h = (int)g_gui.height - GUI_TASKBAR_HEIGHT;
+        if (max_h < 60) max_h = 60;
+        window->rect.h = max_h;
+        window->flags |= GUI_WINDOW_FLAG_MAXIMIZED;
+    }
+    window->dragging = 0;
+    window->resizing = 0;
     gui_set_active_window(window);
     gui_invalidate_all();
 }
@@ -1744,6 +1803,7 @@ static void gui_handle_mouse_down(int x, int y) {
         gui_set_active_window(w);
         close = gui_close_rect(w);
         minr = gui_min_rect(w);
+        gui_rect_t maxr = gui_max_rect(w);
 
         if ((w->flags & GUI_WINDOW_FLAG_CLOSABLE) && gui_rect_contains(&close, x, y)) {
             gui_set_focused_widget(0);
@@ -1761,7 +1821,15 @@ static void gui_handle_mouse_down(int x, int y) {
             return;
         }
 
-        if (w->flags & GUI_WINDOW_FLAG_RESIZABLE) {
+        if ((w->flags & GUI_WINDOW_FLAG_MAXIMIZABLE) && gui_rect_contains(&maxr, x, y)) {
+            gui_set_focused_widget(0);
+            if (g_gui.drag_window == w) g_gui.drag_window = 0;
+            if (g_gui.pressed_widget && g_gui.pressed_widget->owner == w) g_gui.pressed_widget = 0;
+            gui_toggle_maximize_window(w);
+            return;
+        }
+
+        if ((w->flags & GUI_WINDOW_FLAG_RESIZABLE) && !(w->flags & GUI_WINDOW_FLAG_MAXIMIZED)) {
             gui_rect_t gr = gui_resize_grip_rect(w);
             if (gui_rect_contains(&gr, x, y)) {
                 gui_set_focused_widget(0);
@@ -1778,10 +1846,21 @@ static void gui_handle_mouse_down(int x, int y) {
         gui_rect_t tr = gui_title_rect(w);
         if (gui_rect_contains(&tr, x, y)) {
             gui_set_focused_widget(0);
-            w->dragging = 1;
-            w->drag_offset_x = x - w->rect.x;
-            w->drag_offset_y = y - w->rect.y;
-            g_gui.drag_window = w;
+            /* double-click on title to toggle maximize */
+            if ((w->flags & GUI_WINDOW_FLAG_MAXIMIZABLE) &&
+                w->last_title_click_frame != 0 &&
+                (g_gui.frame_counter - w->last_title_click_frame) < 18) {
+                w->last_title_click_frame = 0;
+                gui_toggle_maximize_window(w);
+                return;
+            }
+            w->last_title_click_frame = g_gui.frame_counter;
+            if (!(w->flags & GUI_WINDOW_FLAG_MAXIMIZED)) {
+                w->dragging = 1;
+                w->drag_offset_x = x - w->rect.x;
+                w->drag_offset_y = y - w->rect.y;
+                g_gui.drag_window = w;
+            }
             return;
         }
 
@@ -2551,7 +2630,7 @@ gui_window_t *gui_create_window(int x, int y, int w, int h, const char *title) {
     win->rect.x = x; win->rect.y = y; win->rect.w = w; win->rect.h = h;
     gui_copy_text(win->title, title ? title : "Window", sizeof(win->title));
     win->bg_color = g_gui.colors.window_bg;
-    win->flags = GUI_WINDOW_FLAG_CLOSABLE | GUI_WINDOW_FLAG_MINIMIZABLE | GUI_WINDOW_FLAG_RESIZABLE;
+    win->flags = GUI_WINDOW_FLAG_CLOSABLE | GUI_WINDOW_FLAG_MINIMIZABLE | GUI_WINDOW_FLAG_MAXIMIZABLE | GUI_WINDOW_FLAG_RESIZABLE;
     win->visible = 1;
     owner = g_gui.launching_app;
     if (owner && owner->used) {
@@ -3240,6 +3319,7 @@ void gui_render(void) {
     uint32_t dirty_count;
     gui_rect_t dirty_rects[GUI_MAX_DIRTY_RECTS];
     if (!g_gui.initialized) return;
+    g_gui.frame_counter++;
     if (gui_compositor_active() && !gui_has_dirty()) return;
 
     gui_cursor_restore_fb();
