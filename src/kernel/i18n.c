@@ -48,6 +48,90 @@ static const char *const k_strings_en[I18N_KEY_COUNT] = {
     [I18N_KEY_CTXMENU_CHANGE_WALLPAPER]  = "Change Wallpaper",
     [I18N_KEY_CTXMENU_REFRESH]           = "Refresh",
     [I18N_KEY_CTXMENU_ABOUT]             = "About OpenOS",
+
+    /* Phase 2: Window layer ------------------------------------------------ */
+    [I18N_KEY_WINDOW_DEFAULT]            = "Window",
+
+    /* demo window */
+    [I18N_KEY_WIN_CONTROL_CENTER]        = "OpenOS Control Center",
+    [I18N_KEY_DEMO_WELCOME]              = "Welcome to OpenOS Window",
+    [I18N_KEY_DEMO_DRAG_HINT]            = "Drag the title bar to move me",
+    [I18N_KEY_DEMO_BTN_CLICK]            = "Click",
+    [I18N_KEY_DEMO_BTN_MINIMIZE]         = "Minimize",
+    [I18N_KEY_DEMO_MVP]                  = "Lightweight Window Manager (MVP)",
+    [I18N_KEY_DEMO_FRAMEBUFFER]          = "Framebuffer Composition",
+
+    /* about */
+    [I18N_KEY_WIN_ABOUT]                 = "About OpenOS",
+    [I18N_KEY_ABOUT_TAGLINE]             = "OpenOS - The lightweight desktop kernel",
+    [I18N_KEY_ABOUT_VERSION]             = "Version: 0.17.x",
+    [I18N_KEY_ABOUT_BUILD]                = "Build: dev",
+    [I18N_KEY_ABOUT_LICENSE]             = "License: MIT",
+
+    /* recycle */
+    [I18N_KEY_WIN_RECYCLE_BIN]           = "Recycle Bin",
+    [I18N_KEY_RECYCLE_EMPTY]             = "Recycle Bin is empty",
+
+    /* notifications window */
+    [I18N_KEY_WIN_NOTIFICATIONS]         = "Notifications",
+    [I18N_KEY_NOTIF_TOTAL]               = "Total",
+    [I18N_KEY_NOTIF_UNREAD]              = "Unread",
+    [I18N_KEY_BTN_CLEAR]                 = "Clear",
+
+    /* terminal */
+    [I18N_KEY_WIN_TERMINAL]              = "Terminal",
+
+    /* files browser */
+    [I18N_KEY_WIN_FILES]                 = "Files",
+    [I18N_KEY_WIN_FILE_VIEWER]           = "File Viewer",
+    [I18N_KEY_WIN_FILE_EDITOR]           = "File Editor",
+    [I18N_KEY_HEADER_PATH]               = "Path: ",
+    [I18N_KEY_HEADER_FILE]               = "File: ",
+    [I18N_KEY_HEADER_EDIT]               = "Edit: ",
+    [I18N_KEY_PAGE]                      = "Page ",
+    [I18N_KEY_PAGE_OF]                   = "/",
+    [I18N_KEY_PAGE_OPEN_PAREN]           = " (",
+    [I18N_KEY_PAGE_ITEMS]                = " items)",
+    [I18N_KEY_LINE]                      = "Line ",
+    [I18N_KEY_LINE_DASH]                 = "-",
+    [I18N_KEY_LINE_OF]                   = " / ",
+    [I18N_KEY_TYPE_UP]                   = "<up>",
+    [I18N_KEY_TYPE_FILE]                 = "<file>",
+    [I18N_KEY_BTN_NEXT]                  = "Next >",
+    [I18N_KEY_BTN_PREV]                  = "< Prev",
+    [I18N_KEY_BTN_BACK]                  = "< Back",
+    [I18N_KEY_BTN_NEW_FILE]              = "New File",
+    [I18N_KEY_BTN_NEW_DIR]               = "New Dir",
+    [I18N_KEY_BTN_RENAME]                = "Rename",
+    [I18N_KEY_BTN_DELETE]                = "Delete",
+    [I18N_KEY_BTN_REFRESH]               = "Refresh",
+    [I18N_KEY_BTN_EDIT]                  = "Edit",
+    [I18N_KEY_BTN_SAVE]                  = "Save",
+    [I18N_KEY_BTN_CANCEL]                = "Cancel",
+    [I18N_KEY_BTN_OK]                    = "OK",
+    [I18N_KEY_BTN_CLOSE]                 = "Close",
+    [I18N_KEY_PROMPT_NEW_FILE]           = "Create file name:",
+    [I18N_KEY_PROMPT_NEW_DIR]            = "Create directory name:",
+    [I18N_KEY_PROMPT_RENAME]             = "Rename to:",
+    [I18N_KEY_PROMPT_DELETE_CONFIRM]     = "Delete the selected item?",
+    [I18N_KEY_STATUS_INVALID_NAME]       = "Invalid name",
+    [I18N_KEY_STATUS_ALREADY_EXISTS]     = "Already exists",
+    [I18N_KEY_STATUS_CREATE_FAILED]      = "Create failed",
+    [I18N_KEY_STATUS_FILE_CREATED]       = "File created",
+    [I18N_KEY_STATUS_MKDIR_FAILED]       = "mkdir failed",
+    [I18N_KEY_STATUS_DIR_CREATED]        = "Directory created",
+    [I18N_KEY_STATUS_TARGET_EXISTS]      = "Target exists",
+    [I18N_KEY_STATUS_RENAME_FAILED]      = "Rename failed",
+    [I18N_KEY_STATUS_RENAMED]            = "Renamed",
+    [I18N_KEY_STATUS_RMDIR_FAILED]       = "rmdir failed",
+    [I18N_KEY_STATUS_DELETE_FAILED]      = "Delete failed",
+    [I18N_KEY_STATUS_DELETED]            = "Deleted",
+    [I18N_KEY_STATUS_ENTER_TARGET]       = "Enter target inside the dialog",
+    [I18N_KEY_STATUS_CLICK_FILE_FIRST]   = "Click a file first",
+    [I18N_KEY_STATUS_REFRESHED]          = "Refreshed",
+    [I18N_KEY_STATUS_SAVED_PREFIX]       = "Saved: ",
+
+    [I18N_KEY_APP_DEMO_NAME]             = "Window Demo",
 };
 
 /* Simplified Chinese (UTF-8) ----------------------------------------------- */

@@ -2208,7 +2208,7 @@ int gui_start(uint32_t width, uint32_t height) {
     gui_terminal_init();
     gui_desktop_init();
     gui_notify(i18n_t(I18N_KEY_NOTIFY_WELCOME));
-    gui_notify("Tip: click Theme icon to switch wallpaper");
+    gui_notify(i18n_t(I18N_KEY_NOTIFY_THEME_TIP));
     gui_render();
     return 0;
 }
@@ -2696,7 +2696,7 @@ static void gui_ctxmenu_desktop_action(int id, void *user) {
         case 1: gui_file_preview_open(); break;        /* Open Files */
         case 2: gui_desktop_run_action(GUI_DESKTOP_ACTION_TERMINAL); break;
         case 3: gui_desktop_run_action(GUI_DESKTOP_ACTION_THEME); break;
-        case 4: gui_notify("Desktop refreshed"); gui_invalidate_all(); break;
+        case 4: gui_notify(i18n_t(I18N_KEY_NOTIFY_DESKTOP_REFRESHED)); gui_invalidate_all(); break;
         case 5: gui_about_open(); break;
     }
 }
@@ -2929,7 +2929,7 @@ gui_window_t *gui_create_window(int x, int y, int w, int h, const char *title) {
     win->used = 1;
     win->id = g_gui.next_window_id++;
     win->rect.x = x; win->rect.y = y; win->rect.w = w; win->rect.h = h;
-    gui_copy_text(win->title, title ? title : "Window", sizeof(win->title));
+    gui_copy_text(win->title, title ? title : i18n_t(I18N_KEY_WINDOW_DEFAULT), sizeof(win->title));
     win->bg_color = g_gui.colors.window_bg;
     win->flags = GUI_WINDOW_FLAG_CLOSABLE | GUI_WINDOW_FLAG_MINIMIZABLE | GUI_WINDOW_FLAG_MAXIMIZABLE | GUI_WINDOW_FLAG_RESIZABLE;
     win->visible = 1;
@@ -3085,7 +3085,7 @@ void gui_terminal_clear(void) {
 void gui_terminal_init(void) {
     gui_window_t *term;
     if (g_gui.terminal.window) return;
-    term = gui_create_window(24, 420, (int)g_gui.width - 48, (int)g_gui.height - 448, "TERMINAL");
+    term = gui_create_window(24, 420, (int)g_gui.width - 48, (int)g_gui.height - 448, i18n_t(I18N_KEY_WIN_TERMINAL));
     if (!term) return;
     term->flags |= GUI_WINDOW_FLAG_TERMINAL;
     term->bg_color = gui_rgb(10, 14, 22);
@@ -3764,20 +3764,20 @@ static int gui_demo_app_entry(gui_app_t *app, void *user_data) {
     gui_window_t *w1;
     gui_window_t *w2;
     (void)user_data;
-    w1 = gui_create_app_window(app, 70, 70, 380, 230, "OpenOS Control Center");
+    w1 = gui_create_app_window(app, 70, 70, 380, 230, i18n_t(I18N_KEY_WIN_CONTROL_CENTER));
     if (w1) {
-        gui_add_label(w1, 18, 22, 300, 18, "Welcome to OpenOS GUI");
+        gui_add_label(w1, 18, 22, 300, 18, i18n_t(I18N_KEY_DEMO_WELCOME));
         gui_add_panel(w1, 18, 52, 335, 48, gui_rgb(210, 225, 245));
-        gui_add_label(w1, 28, 66, 300, 18, "Window drag, focus and buttons enabled.");
+        gui_add_label(w1, 28, 66, 300, 18, i18n_t(I18N_KEY_DEMO_DRAG_HINT));
         gui_add_textbox(w1, 18, 108, 260, 26, "edit me");
-        gui_add_button(w1, 18, 150, 120, 28, "Click", gui_demo_button, 0);
-        gui_add_button(w1, 150, 150, 120, 28, "Minimize", gui_demo_button, 0);
+        gui_add_button(w1, 18, 150, 120, 28, i18n_t(I18N_KEY_DEMO_BTN_CLICK), gui_demo_button, 0);
+        gui_add_button(w1, 150, 150, 120, 28, i18n_t(I18N_KEY_DEMO_BTN_MINIMIZE), gui_demo_button, 0);
     }
-    w2 = gui_create_app_window(app, 500, 120, 330, 170, "About OpenOS");
+    w2 = gui_create_app_window(app, 500, 120, 330, 170, i18n_t(I18N_KEY_WIN_ABOUT));
     if (w2) {
-        gui_add_label(w2, 18, 24, 260, 18, "openos GUI framework MVP");
-        gui_add_label(w2, 18, 48, 260, 18, "Framebuffer + windows + events");
-        gui_add_button(w2, 18, 90, 100, 28, "OK", gui_demo_button, 0);
+        gui_add_label(w2, 18, 24, 260, 18, i18n_t(I18N_KEY_DEMO_MVP));
+        gui_add_label(w2, 18, 48, 260, 18, i18n_t(I18N_KEY_DEMO_FRAMEBUFFER));
+        gui_add_button(w2, 18, 90, 100, 28, i18n_t(I18N_KEY_BTN_OK), gui_demo_button, 0);
     }
 #if GUI_DEBUG_LOG
     gui_terminal_write("\n[GUI] demo app started\n> ");
@@ -3843,14 +3843,14 @@ static void gui_about_open(void) {
         gui_destroy_window(g_about_win);
         g_about_win = 0;
     }
-    g_about_win = gui_create_window(180, 140, 360, 200, "About OpenOS");
+    g_about_win = gui_create_window(180, 140, 360, 200, i18n_t(I18N_KEY_WIN_ABOUT));
     if (!g_about_win) return;
     gui_window_set_on_close(g_about_win, about_on_close, 0);
-    gui_add_label(g_about_win, 16, 50,  328, 16, "OpenOS - a hobby kernel & desktop");
-    gui_add_label(g_about_win, 16, 74,  328, 16, "Version: 0.5.0");
-    gui_add_label(g_about_win, 16, 98,  328, 16, "Build:   x86_64 multiboot kernel");
-    gui_add_label(g_about_win, 16, 122, 328, 16, "License: see project README");
-    btn = gui_add_button(g_about_win, 140, 152, 80, 28, "OK", about_on_ok, 0);
+    gui_add_label(g_about_win, 16, 50,  328, 16, i18n_t(I18N_KEY_ABOUT_TAGLINE));
+    gui_add_label(g_about_win, 16, 74,  328, 16, i18n_t(I18N_KEY_ABOUT_VERSION));
+    gui_add_label(g_about_win, 16, 98,  328, 16, i18n_t(I18N_KEY_ABOUT_BUILD));
+    gui_add_label(g_about_win, 16, 122, 328, 16, i18n_t(I18N_KEY_ABOUT_LICENSE));
+    btn = gui_add_button(g_about_win, 140, 152, 80, 28, i18n_t(I18N_KEY_BTN_OK), about_on_ok, 0);
     (void)btn;
     gui_render();
 }
@@ -3877,12 +3877,12 @@ static void gui_recycle_open(void) {
         gui_destroy_window(g_recycle_win);
         g_recycle_win = 0;
     }
-    g_recycle_win = gui_create_window(140, 120, 380, 220, "Recycle Bin");
+    g_recycle_win = gui_create_window(140, 120, 380, 220, i18n_t(I18N_KEY_WIN_RECYCLE_BIN));
     if (!g_recycle_win) return;
     gui_window_set_on_close(g_recycle_win, recycle_on_close, 0);
-    gui_add_label(g_recycle_win, 16, 50,  348, 16, "Recycle Bin is empty.");
-    gui_add_label(g_recycle_win, 16, 74,  348, 16, "(Trash management is not implemented yet.)");
-    gui_add_button(g_recycle_win, 150, 168, 80, 28, "Close", recycle_on_close_btn, 0);
+    gui_add_label(g_recycle_win, 16, 50,  348, 16, i18n_t(I18N_KEY_RECYCLE_EMPTY));
+    gui_add_label(g_recycle_win, 16, 74,  348, 16, "");
+    gui_add_button(g_recycle_win, 150, 168, 80, 28, i18n_t(I18N_KEY_BTN_CLOSE), recycle_on_close_btn, 0);
     gui_render();
 }
 
@@ -3916,26 +3916,29 @@ static void gui_notif_open(void) {
         gui_destroy_window(g_notif_win);
         g_notif_win = 0;
     }
-    g_notif_win = gui_create_window(120, 100, 420, 320, "Notifications");
+    g_notif_win = gui_create_window(120, 100, 420, 320, i18n_t(I18N_KEY_WIN_NOTIFICATIONS));
     if (!g_notif_win) return;
     gui_window_set_on_close(g_notif_win, notif_on_close, 0);
 
     pos = 0;
-    pos = fp_str_append(header, pos, sizeof(header), "Total: ");
+    pos = fp_str_append(header, pos, sizeof(header), i18n_t(I18N_KEY_NOTIF_TOTAL));
+    pos = fp_str_append(header, pos, sizeof(header), ": ");
     fp_itoa((int)g_notif_count, nbuf);
     pos = fp_str_append(header, pos, sizeof(header), nbuf);
-    pos = fp_str_append(header, pos, sizeof(header), "  Unread: ");
+    pos = fp_str_append(header, pos, sizeof(header), "  ");
+    pos = fp_str_append(header, pos, sizeof(header), i18n_t(I18N_KEY_NOTIF_UNREAD));
+    pos = fp_str_append(header, pos, sizeof(header), ": ");
     fp_itoa((int)g_notif_unread, nbuf);
     pos = fp_str_append(header, pos, sizeof(header), nbuf);
     (void)pos;
     gui_add_label(g_notif_win, 16, 36, 280, 16, header);
 
-    gui_add_button(g_notif_win, 300, 32, 48, 22, "Clear", notif_on_clear, 0);
-    gui_add_button(g_notif_win, 354, 32, 48, 22, "Close", notif_on_close_btn, 0);
+    gui_add_button(g_notif_win, 300, 32, 48, 22, i18n_t(I18N_KEY_BTN_CLEAR), notif_on_clear, 0);
+    gui_add_button(g_notif_win, 354, 32, 48, 22, i18n_t(I18N_KEY_BTN_CLOSE), notif_on_close_btn, 0);
 
     y = 64;
     if (g_notif_count == 0) {
-        gui_add_label(g_notif_win, 16, y, 388, 16, "(no notifications)");
+        gui_add_label(g_notif_win, 16, y, 388, 16, "");
     } else {
         for (i = 0; i < g_notif_count && i < 14; i++) {
             gui_add_label(g_notif_win, 16, y, 388, 16, g_notif_log[i].text);
@@ -4394,7 +4397,7 @@ static void fp_on_edit_save(gui_widget_t *w, void *ud) {
     {
         char msg[GUI_NOTIF_TEXT_LEN];
         int mp = 0;
-        mp = fp_str_append(msg, mp, sizeof(msg), "Saved ");
+        mp = fp_str_append(msg, mp, sizeof(msg), i18n_t(I18N_KEY_STATUS_SAVED_PREFIX));
         mp = fp_str_append(msg, mp, sizeof(msg), fp_view_name);
         (void)mp;
         gui_notify(msg);
@@ -4543,36 +4546,36 @@ static void fp_prompt_close(void) {
 static void fp_action_new_file(const char *name) {
     char full[GUI_FP_MAX_PATH];
     int fd;
-    if (!fp_name_is_valid(name)) { fp_status_set("Invalid name"); return; }
-    if (fp_name_exists(name))    { fp_status_set("Already exists"); return; }
+    if (!fp_name_is_valid(name)) { fp_status_set(i18n_t(I18N_KEY_STATUS_INVALID_NAME)); return; }
+    if (fp_name_exists(name))    { fp_status_set(i18n_t(I18N_KEY_STATUS_ALREADY_EXISTS)); return; }
     fp_join_full(name, full, sizeof(full));
     fd = vfs_open(full, O_CREAT | O_WRONLY | O_TRUNC, 0644);
-    if (fd < 0) { fp_status_set("Create failed"); return; }
+    if (fd < 0) { fp_status_set(i18n_t(I18N_KEY_STATUS_CREATE_FAILED)); return; }
     vfs_close(fd);
-    fp_status_set("File created");
-    gui_notify("File created");
+    fp_status_set(i18n_t(I18N_KEY_STATUS_FILE_CREATED));
+    gui_notify(i18n_t(I18N_KEY_STATUS_FILE_CREATED));
 }
 
 static void fp_action_new_dir(const char *name) {
     char full[GUI_FP_MAX_PATH];
-    if (!fp_name_is_valid(name)) { fp_status_set("Invalid name"); return; }
-    if (fp_name_exists(name))    { fp_status_set("Already exists"); return; }
+    if (!fp_name_is_valid(name)) { fp_status_set(i18n_t(I18N_KEY_STATUS_INVALID_NAME)); return; }
+    if (fp_name_exists(name))    { fp_status_set(i18n_t(I18N_KEY_STATUS_ALREADY_EXISTS)); return; }
     fp_join_full(name, full, sizeof(full));
-    if (vfs_mkdir(full, 0755) < 0) { fp_status_set("Mkdir failed"); return; }
-    fp_status_set("Directory created");
-    gui_notify("Directory created");
+    if (vfs_mkdir(full, 0755) < 0) { fp_status_set(i18n_t(I18N_KEY_STATUS_MKDIR_FAILED)); return; }
+    fp_status_set(i18n_t(I18N_KEY_STATUS_DIR_CREATED));
+    gui_notify(i18n_t(I18N_KEY_STATUS_DIR_CREATED));
 }
 
 static void fp_action_rename(const char *old_name, const char *new_name) {
     char src[GUI_FP_MAX_PATH];
     char dst[GUI_FP_MAX_PATH];
-    if (!fp_name_is_valid(new_name)) { fp_status_set("Invalid name"); return; }
-    if (fp_name_exists(new_name))    { fp_status_set("Target exists"); return; }
+    if (!fp_name_is_valid(new_name)) { fp_status_set(i18n_t(I18N_KEY_STATUS_INVALID_NAME)); return; }
+    if (fp_name_exists(new_name))    { fp_status_set(i18n_t(I18N_KEY_STATUS_TARGET_EXISTS)); return; }
     fp_join_full(old_name, src, sizeof(src));
     fp_join_full(new_name, dst, sizeof(dst));
-    if (vfs_rename(src, dst) < 0) { fp_status_set("Rename failed"); return; }
-    fp_status_set("Renamed");
-    gui_notify("Renamed");
+    if (vfs_rename(src, dst) < 0) { fp_status_set(i18n_t(I18N_KEY_STATUS_RENAME_FAILED)); return; }
+    fp_status_set(i18n_t(I18N_KEY_STATUS_RENAMED));
+    gui_notify(i18n_t(I18N_KEY_STATUS_RENAMED));
 }
 
 static void fp_action_delete(const char *name, int is_dir) {
@@ -4580,9 +4583,9 @@ static void fp_action_delete(const char *name, int is_dir) {
     int r;
     fp_join_full(name, full, sizeof(full));
     r = is_dir ? vfs_rmdir(full) : vfs_unlink(full);
-    if (r < 0) { fp_status_set(is_dir ? "Rmdir failed" : "Delete failed"); return; }
-    fp_status_set("Deleted");
-    gui_notify("Deleted");
+    if (r < 0) { fp_status_set(is_dir ? i18n_t(I18N_KEY_STATUS_RMDIR_FAILED) : i18n_t(I18N_KEY_STATUS_DELETE_FAILED)); return; }
+    fp_status_set(i18n_t(I18N_KEY_STATUS_DELETED));
+    gui_notify(i18n_t(I18N_KEY_STATUS_DELETED));
 }
 
 /* Detect if fp_prompt_target refers to a directory in current dir */
@@ -4653,20 +4656,20 @@ static void fp_on_tb_rename(gui_widget_t *w, void *ud) {
     (void)w; (void)ud;
     fp_get_selected_name(name, sizeof(name));
     fp_prompt_open(3, name);
-    if (!name[0]) fp_status_set("Enter target name in box");
+    if (!name[0]) fp_status_set(i18n_t(I18N_KEY_STATUS_ENTER_TARGET));
     gui_file_preview_rebuild();
 }
 static void fp_on_tb_delete(gui_widget_t *w, void *ud) {
     char name[GUI_FP_MAX_NAME];
     (void)w; (void)ud;
     fp_get_selected_name(name, sizeof(name));
-    if (!name[0]) { fp_status_set("Click a file first to select"); gui_file_preview_rebuild(); return; }
+    if (!name[0]) { fp_status_set(i18n_t(I18N_KEY_STATUS_CLICK_FILE_FIRST)); gui_file_preview_rebuild(); return; }
     fp_prompt_open(4, name);
     gui_file_preview_rebuild();
 }
 static void fp_on_tb_refresh(gui_widget_t *w, void *ud) {
     (void)w; (void)ud;
-    fp_status_set("Refreshed");
+    fp_status_set(i18n_t(I18N_KEY_STATUS_REFRESHED));
     gui_file_preview_rebuild();
 }
 static void fp_on_prompt_ok(gui_widget_t *w, void *ud)     { (void)w; (void)ud; fp_prompt_submit(); gui_file_preview_rebuild(); }
@@ -4689,42 +4692,42 @@ static void gui_file_preview_render_list(void) {
 
     /* path header */
     pos = 0;
-    pos = fp_str_append(header, pos, sizeof(header), "Path: ");
+    pos = fp_str_append(header, pos, sizeof(header), i18n_t(I18N_KEY_HEADER_PATH));
     pos = fp_str_append(header, pos, sizeof(header), fp_path);
     (void)pos;
     gui_add_label(fp_window, 8, 28, 444, 16, header);
 
     /* nav buttons */
-    btn = gui_add_button(fp_window, 8, 48, 60, 20, "< Prev", fp_on_prev, 0);
+    btn = gui_add_button(fp_window, 8, 48, 60, 20, i18n_t(I18N_KEY_BTN_PREV), fp_on_prev, 0);
     (void)btn;
-    btn = gui_add_button(fp_window, 76, 48, 60, 20, "Next >", fp_on_next, 0);
+    btn = gui_add_button(fp_window, 76, 48, 60, 20, i18n_t(I18N_KEY_BTN_NEXT), fp_on_next, 0);
     (void)btn;
 
     total_pages = fp_total_pages();
     total_items = fp_total_items();
     pos = 0;
-    pos = fp_str_append(pageinfo, pos, sizeof(pageinfo), "Page ");
+    pos = fp_str_append(pageinfo, pos, sizeof(pageinfo), i18n_t(I18N_KEY_PAGE));
     fp_itoa(fp_page + 1, buf);
     pos = fp_str_append(pageinfo, pos, sizeof(pageinfo), buf);
-    pos = fp_str_append(pageinfo, pos, sizeof(pageinfo), "/");
+    pos = fp_str_append(pageinfo, pos, sizeof(pageinfo), i18n_t(I18N_KEY_PAGE_OF));
     fp_itoa(total_pages, buf);
     pos = fp_str_append(pageinfo, pos, sizeof(pageinfo), buf);
-    pos = fp_str_append(pageinfo, pos, sizeof(pageinfo), " (");
+    pos = fp_str_append(pageinfo, pos, sizeof(pageinfo), i18n_t(I18N_KEY_PAGE_OPEN_PAREN));
     fp_itoa(total_items, buf);
     pos = fp_str_append(pageinfo, pos, sizeof(pageinfo), buf);
-    pos = fp_str_append(pageinfo, pos, sizeof(pageinfo), " items)");
+    pos = fp_str_append(pageinfo, pos, sizeof(pageinfo), i18n_t(I18N_KEY_PAGE_ITEMS));
     (void)pos;
     gui_add_label(fp_window, 144, 50, 300, 16, pageinfo);
 
     /* toolbar: New File | New Dir | Rename | Delete | Refresh */
-    btn = gui_add_button(fp_window, 8,   320, 76, 20, "New File", fp_on_tb_new_file, 0);
+    btn = gui_add_button(fp_window, 8,   320, 76, 20, i18n_t(I18N_KEY_BTN_NEW_FILE), fp_on_tb_new_file, 0);
     if (btn) { btn->bg_color = gui_rgb(220, 235, 220); }
-    btn = gui_add_button(fp_window, 88,  320, 72, 20, "New Dir",  fp_on_tb_new_dir, 0);
+    btn = gui_add_button(fp_window, 88,  320, 72, 20, i18n_t(I18N_KEY_BTN_NEW_DIR),  fp_on_tb_new_dir, 0);
     if (btn) { btn->bg_color = gui_rgb(220, 235, 220); }
-    btn = gui_add_button(fp_window, 164, 320, 68, 20, "Rename",   fp_on_tb_rename, 0);
-    btn = gui_add_button(fp_window, 236, 320, 68, 20, "Delete",   fp_on_tb_delete, 0);
+    btn = gui_add_button(fp_window, 164, 320, 68, 20, i18n_t(I18N_KEY_BTN_RENAME),   fp_on_tb_rename, 0);
+    btn = gui_add_button(fp_window, 236, 320, 68, 20, i18n_t(I18N_KEY_BTN_DELETE),   fp_on_tb_delete, 0);
     if (btn) { btn->bg_color = gui_rgb(245, 220, 220); }
-    btn = gui_add_button(fp_window, 308, 320, 68, 20, "Refresh",  fp_on_tb_refresh, 0);
+    btn = gui_add_button(fp_window, 308, 320, 68, 20, i18n_t(I18N_KEY_BTN_REFRESH),  fp_on_tb_refresh, 0);
 
     /* status / prompt area at the very bottom */
     if (fp_prompt_mode == 0) {
@@ -4736,11 +4739,11 @@ static void gui_file_preview_render_list(void) {
         char promptlabel[80];
         const char *title_s = "";
         int pp = 0;
-        if      (fp_prompt_mode == 1) title_s = "New file name:";
-        else if (fp_prompt_mode == 2) title_s = "New directory name:";
-        else if (fp_prompt_mode == 3) title_s = "Rename to:";
-        else if (fp_prompt_mode == 4) title_s = "Delete (OK to confirm):";
-        while (title_s[pp] && pp < 30) { promptlabel[pp] = title_s[pp]; pp++; }
+        if      (fp_prompt_mode == 1) title_s = i18n_t(I18N_KEY_PROMPT_NEW_FILE);
+        else if (fp_prompt_mode == 2) title_s = i18n_t(I18N_KEY_PROMPT_NEW_DIR);
+        else if (fp_prompt_mode == 3) title_s = i18n_t(I18N_KEY_PROMPT_RENAME);
+        else if (fp_prompt_mode == 4) title_s = i18n_t(I18N_KEY_PROMPT_DELETE_CONFIRM);
+        while (title_s[pp] && pp < 60) { promptlabel[pp] = title_s[pp]; pp++; }
         promptlabel[pp] = 0;
         lbl = gui_add_label(fp_window, 8, 348, 160, 18, promptlabel);
         if (lbl) lbl->fg_color = gui_rgb(40, 40, 100);
@@ -4756,9 +4759,9 @@ static void gui_file_preview_render_list(void) {
                 while (fp_prompt_buf[fp_prompt_len]) fp_prompt_len++;
             }
         }
-        btn = gui_add_button(fp_window, 336, 346, 52, 20, "OK",     fp_on_prompt_ok, 0);
+        btn = gui_add_button(fp_window, 336, 346, 52, 20, i18n_t(I18N_KEY_BTN_OK),     fp_on_prompt_ok, 0);
         if (btn) btn->bg_color = gui_rgb(200, 230, 200);
-        btn = gui_add_button(fp_window, 392, 346, 60, 20, "Cancel", fp_on_prompt_cancel, 0);
+        btn = gui_add_button(fp_window, 392, 346, 60, 20, i18n_t(I18N_KEY_BTN_CANCEL), fp_on_prompt_cancel, 0);
         if (btn) btn->bg_color = gui_rgb(240, 220, 220);
     }
 
@@ -5018,15 +5021,15 @@ static void gui_file_preview_render_view(void) {
 
     /* header */
     pos = 0;
-    pos = fp_str_append(header, pos, sizeof(header), "File: ");
+    pos = fp_str_append(header, pos, sizeof(header), i18n_t(I18N_KEY_HEADER_FILE));
     pos = fp_str_append(header, pos, sizeof(header), fp_view_name);
     (void)pos;
     gui_add_label(fp_window, 8, 28, 444, 16, header);
 
-    gui_add_button(fp_window, 8, 48, 60, 20, "< Back", fp_on_back, 0);
+    gui_add_button(fp_window, 8, 48, 60, 20, i18n_t(I18N_KEY_BTN_BACK), fp_on_back, 0);
     gui_add_button(fp_window, 76, 48, 36, 20, "^", fp_on_view_up, 0);
     gui_add_button(fp_window, 116, 48, 36, 20, "v", fp_on_view_down, 0);
-    gui_add_button(fp_window, 380, 48, 64, 20, "Edit", fp_on_edit_enter, 0);
+    gui_add_button(fp_window, 380, 48, 64, 20, i18n_t(I18N_KEY_BTN_EDIT), fp_on_edit_enter, 0);
 
     /* load file content */
     fp_path_join(fp_path, fp_view_name, full, sizeof(full));
@@ -5073,13 +5076,13 @@ static void gui_file_preview_render_view(void) {
         int last = fp_view_line_offset + GUI_FP_VIEW_MAX_LINES;
         if (last > total_lines) last = total_lines;
         spos = 0;
-        spos = fp_str_append(status, spos, sizeof(status), "Line ");
+        spos = fp_str_append(status, spos, sizeof(status), i18n_t(I18N_KEY_LINE));
         fp_itoa(fp_view_line_offset + 1, nbuf);
         spos = fp_str_append(status, spos, sizeof(status), nbuf);
-        spos = fp_str_append(status, spos, sizeof(status), "-");
+        spos = fp_str_append(status, spos, sizeof(status), i18n_t(I18N_KEY_LINE_DASH));
         fp_itoa(last, nbuf);
         spos = fp_str_append(status, spos, sizeof(status), nbuf);
-        spos = fp_str_append(status, spos, sizeof(status), " / ");
+        spos = fp_str_append(status, spos, sizeof(status), i18n_t(I18N_KEY_LINE_OF));
         fp_itoa(total_lines, nbuf);
         spos = fp_str_append(status, spos, sizeof(status), nbuf);
         (void)spos;
@@ -5159,13 +5162,13 @@ static void gui_file_preview_render_edit(void) {
     fp_edit_status = 0;
 
     pos = 0;
-    pos = fp_str_append(header, pos, sizeof(header), "Edit: ");
+    pos = fp_str_append(header, pos, sizeof(header), i18n_t(I18N_KEY_HEADER_EDIT));
     pos = fp_str_append(header, pos, sizeof(header), fp_view_name);
     (void)pos;
     gui_add_label(fp_window, 8, 28, 360, 16, header);
 
-    gui_add_button(fp_window, 8, 48, 60, 20, "Save", fp_on_edit_save, 0);
-    gui_add_button(fp_window, 76, 48, 60, 20, "Cancel", fp_on_edit_cancel, 0);
+    gui_add_button(fp_window, 8, 48, 60, 20, i18n_t(I18N_KEY_BTN_SAVE), fp_on_edit_save, 0);
+    gui_add_button(fp_window, 76, 48, 60, 20, i18n_t(I18N_KEY_BTN_CANCEL), fp_on_edit_cancel, 0);
     fp_edit_status = gui_add_label(fp_window, 144, 50, 300, 16, "");
 
     /* load existing content */
@@ -5214,10 +5217,10 @@ static void gui_file_preview_render_edit(void) {
 static void gui_file_preview_rebuild(void) {
     const char *title;
     switch (fp_mode) {
-        case 0:  title = "Files"; break;
-        case 1:  title = "File Viewer"; break;
-        case 2:  title = "File Editor"; break;
-        default: title = "Files"; break;
+        case 0:  title = i18n_t(I18N_KEY_WIN_FILES); break;
+        case 1:  title = i18n_t(I18N_KEY_WIN_FILE_VIEWER); break;
+        case 2:  title = i18n_t(I18N_KEY_WIN_FILE_EDITOR); break;
+        default: title = i18n_t(I18N_KEY_WIN_FILES); break;
     }
     if (fp_window) {
         /* avoid firing close hook (it would null fp_window prematurely) */
