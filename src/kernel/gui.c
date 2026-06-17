@@ -14,8 +14,10 @@
 #include "string.h"
 #include "heap.h"
 #include "input_buffer.h"
+#include "fs/vfs.h"
 
 static void gui_desktop_run_action(uint32_t action);
+static void gui_file_preview_open(void);
 
 static gui_system_t g_gui;
 static gui_accel_info_t g_gui_accel;
@@ -34,6 +36,7 @@ static gui_accel_info_t g_gui_accel;
 #define GUI_DESKTOP_ACTION_ABOUT    2u
 #define GUI_DESKTOP_ACTION_MENU     3u
 #define GUI_DESKTOP_ACTION_DEMO     4u
+#define GUI_DESKTOP_ACTION_FILES    5u
 static volatile uint32_t g_terminal_out_head = 0;
 static volatile uint32_t g_terminal_out_tail = 0;
 static char g_terminal_out_queue[GUI_TERMINAL_OUTPUT_QUEUE_SIZE];
@@ -1935,6 +1938,8 @@ static void gui_desktop_init(void) {
     g_gui.desktop_start_menu_rect.h = GUI_DESKTOP_MENU_H;
 
     memset(g_gui.desktop_icons, 0, sizeof(g_gui.desktop_icons));
+    gui_desktop_add_icon(0, 32, 72, "Files", gui_rgb(242, 194, 74), GUI_DESKTOP_ACTION_FILES);
+    g_gui.desktop_icon_count = 1;
 }
 
 static void gui_desktop_draw_icon(gui_desktop_icon_t *icon) {
@@ -1949,11 +1954,21 @@ static void gui_desktop_draw_icon(gui_desktop_icon_t *icon) {
     gui_raw_line(icon->rect.x, icon->rect.y + icon->rect.h - 1, icon->rect.x + icon->rect.w - 1, icon->rect.y + icon->rect.h - 1, gui_rgb(14, 20, 32));
     cx = icon->rect.x + (icon->rect.w - 28) / 2;
     iy = icon->rect.y + 8;
-    gui_raw_fill_rect(cx, iy, 28, 28, icon->color);
-    gui_raw_line(cx, iy, cx + 27, iy, gui_rgb(225, 235, 255));
-    gui_raw_line(cx, iy, cx, iy + 27, gui_rgb(225, 235, 255));
-    gui_raw_line(cx + 27, iy, cx + 27, iy + 27, gui_rgb(18, 25, 38));
-    gui_raw_line(cx, iy + 27, cx + 27, iy + 27, gui_rgb(18, 25, 38));
+    if (icon->action == GUI_DESKTOP_ACTION_FILES) {
+        gui_raw_fill_rect(cx + 2, iy + 6, 11, 6, gui_rgb(255, 220, 105));
+        gui_raw_fill_rect(cx, iy + 11, 28, 20, icon->color);
+        gui_raw_fill_rect(cx + 2, iy + 15, 24, 14, gui_rgb(255, 211, 86));
+        gui_raw_line(cx, iy + 11, cx + 27, iy + 11, gui_rgb(255, 238, 160));
+        gui_raw_line(cx, iy + 11, cx, iy + 30, gui_rgb(255, 238, 160));
+        gui_raw_line(cx + 27, iy + 11, cx + 27, iy + 30, gui_rgb(130, 90, 24));
+        gui_raw_line(cx, iy + 30, cx + 27, iy + 30, gui_rgb(130, 90, 24));
+    } else {
+        gui_raw_fill_rect(cx, iy, 28, 28, icon->color);
+        gui_raw_line(cx, iy, cx + 27, iy, gui_rgb(225, 235, 255));
+        gui_raw_line(cx, iy, cx, iy + 27, gui_rgb(225, 235, 255));
+        gui_raw_line(cx + 27, iy, cx + 27, iy + 27, gui_rgb(18, 25, 38));
+        gui_raw_line(cx, iy + 27, cx + 27, iy + 27, gui_rgb(18, 25, 38));
+    }
     gui_draw_text(icon->rect.x + 6, icon->rect.y + 44, icon->label, gui_rgb(232, 240, 255));
 }
 
@@ -2003,6 +2018,10 @@ static void gui_desktop_run_action(uint32_t action) {
     }
     if (action == GUI_DESKTOP_ACTION_DEMO) {
         gui_demo();
+        return;
+    }
+    if (action == GUI_DESKTOP_ACTION_FILES) {
+        gui_file_preview_open();
         return;
     }
     if (action == GUI_DESKTOP_ACTION_MENU) {
@@ -2959,6 +2978,65 @@ static int gui_demo_app_entry(gui_app_t *app, void *user_data) {
     gui_terminal_write("\n[GUI] demo app started\n> ");
 #endif
     return (w1 || w2) ? 0 : -1;
+}
+
+static void gui_file_preview_add_entry(gui_window_t *win, int y, const dentry_t *entry) {
+    char line[64];
+    const char *prefix;
+    const char *name;
+    uint32_t i = 0;
+    uint32_t j = 0;
+    uint32_t mode = 0;
+    gui_widget_t *label;
+
+    if (!win || !entry) return;
+    name = entry->name;
+    if (entry->inode) mode = entry->inode->mode & 0xF000;
+    prefix = (mode == FS_DIR) ? "[DIR]  " : "[FILE] ";
+
+    while (prefix[i] && i + 1 < sizeof(line)) {
+        line[i] = prefix[i];
+        i++;
+    }
+    while (name[j] && i + 1 < sizeof(line)) {
+        line[i++] = name[j++];
+    }
+    line[i] = 0;
+
+    label = gui_add_label(win, 28, y, 360, 18, line);
+    if (label) label->fg_color = mode == FS_DIR ? gui_rgb(255, 223, 122) : gui_rgb(218, 232, 255);
+}
+
+static void gui_file_preview_open(void) {
+    gui_window_t *win;
+    dentry_t *entry;
+    int i;
+    int shown = 0;
+
+    if (!g_gui.initialized) return;
+    win = gui_create_window(150, 105, 430, 360, "File Preview");
+    if (!win) return;
+
+    {
+        gui_widget_t *title = gui_add_label(win, 24, 28, 360, 18, "Folder: /");
+        gui_widget_t *hint = gui_add_label(win, 24, 52, 360, 18, "Preview files and folders");
+        if (title) title->fg_color = gui_rgb(245, 250, 255);
+        if (hint) hint->fg_color = gui_rgb(178, 205, 238);
+    }
+
+    for (i = 0; i < 12; i++) {
+        entry = vfs_readdir("/", i);
+        if (!entry) break;
+        gui_file_preview_add_entry(win, 92 + shown * 20, entry);
+        shown++;
+    }
+
+    if (shown == 0) {
+        gui_widget_t *empty = gui_add_label(win, 28, 92, 360, 18, "This folder is empty.");
+        if (empty) empty->fg_color = gui_rgb(210, 225, 245);
+    }
+
+    gui_render();
 }
 
 void gui_demo(void) {
