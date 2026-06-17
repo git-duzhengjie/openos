@@ -1916,7 +1916,7 @@ static void gui_desktop_draw(void) {
     if (!g_gui.desktop_enabled) return;
     gui_draw_text(116, 72, "Welcome to OpenOS", gui_rgb(235, 242, 255));
     gui_draw_text(116, 104, "Desktop environment is ready.", gui_rgb(205, 220, 245));
-    gui_draw_text(116, 132, "Use Start to launch tools.", gui_rgb(170, 195, 230));
+    gui_draw_text(116, 132, "Use menu icon to launch tools.", gui_rgb(170, 195, 230));
     for (i = 0; i < g_gui.desktop_icon_count && i < GUI_DESKTOP_MAX_ICONS; i++) {
         gui_desktop_draw_icon(&g_gui.desktop_icons[i]);
     }
@@ -2598,6 +2598,23 @@ static void gui_terminal_invalidate_cursor(void) {
     gui_terminal_invalidate_cursor_at(g_gui.terminal.cursor_x, g_gui.terminal.cursor_y);
 }
 
+static void gui_draw_taskbar_start_icon(gui_rect_t rect) {
+    int x = rect.x + (rect.w - 22) / 2;
+    int y = rect.y + (rect.h - 22) / 2;
+    uint32_t border = gui_rgb(205, 225, 255);
+    uint32_t shadow = gui_rgb(60, 76, 110);
+
+    gui_raw_fill_rect(x, y, 22, 22, gui_rgb(12, 18, 30));
+    gui_raw_line(x, y, x + 21, y, border);
+    gui_raw_line(x, y, x, y + 21, border);
+    gui_raw_line(x + 21, y, x + 21, y + 21, shadow);
+    gui_raw_line(x, y + 21, x + 21, y + 21, shadow);
+    gui_raw_fill_rect(x + 5, y + 5, 5, 5, gui_rgb(86, 160, 255));
+    gui_raw_fill_rect(x + 12, y + 5, 5, 5, gui_rgb(120, 255, 160));
+    gui_raw_fill_rect(x + 5, y + 12, 5, 5, gui_rgb(255, 196, 86));
+    gui_raw_fill_rect(x + 12, y + 12, 5, 5, gui_rgb(255, 110, 130));
+}
+
 static void gui_draw_taskbar_terminal_icon(gui_rect_t rect) {
     int x = rect.x + (rect.w - 26) / 2;
     int y = rect.y + (rect.h - 22) / 2;
@@ -2657,7 +2674,7 @@ static void gui_draw_taskbar(void) {
     gui_raw_line(layout.start_button.x, layout.start_button.y, layout.start_button.x, layout.start_button.y + layout.start_button.h - 1, gui_rgb(92, 108, 144));
     gui_raw_line(layout.start_button.x + layout.start_button.w - 1, layout.start_button.y, layout.start_button.x + layout.start_button.w - 1, layout.start_button.y + layout.start_button.h - 1, gui_rgb(8, 10, 16));
     gui_raw_line(layout.start_button.x, layout.start_button.y + layout.start_button.h - 1, layout.start_button.x + layout.start_button.w - 1, layout.start_button.y + layout.start_button.h - 1, gui_rgb(8, 10, 16));
-    gui_draw_text(layout.start_button.x + 18, layout.start_button.y + 7, "Start", gui_rgb(230, 240, 255));
+    gui_draw_taskbar_start_icon(layout.start_button);
 
     gui_draw_taskbar_terminal_icon(layout.terminal_button);
 
