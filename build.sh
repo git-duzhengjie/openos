@@ -168,6 +168,23 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
     objcopy -O pei-x86-64 --subsystem=10 "$ARCH64_BOOT_BUILD/uefi64_loader.elf" "$ARCH64_BOOT_BUILD/BOOTX64.EFI"
     objdump -f "$ARCH64_BOOT_BUILD/BOOTX64.EFI" | grep -q 'pei-x86-64'
 
+    echo "[BIOS] Assembling x86_64 BIOS long-mode boot stub (boot64.asm)..."
+    # 21.1 BIOS long-mode 自举骨架：16->32->64 切换链路。
+    # 当前主启动路径走 GRUB/Multiboot2 + UEFI，本骨架仅做语法 / 字节布局回归，不接入磁盘镜像。
+    nasm -f bin "$ARCH64_SRC/boot/boot64.asm" -o "$ARCH64_BOOT_BUILD/boot64.bin"
+    BOOT64_BYTES=$(stat -c%s "$ARCH64_BOOT_BUILD/boot64.bin")
+    if [ "$BOOT64_BYTES" -ne 512 ]; then
+        echo "ERROR: boot64.bin must be 512 bytes (MBR), got $BOOT64_BYTES" >&2
+        exit 1
+    fi
+    # 校验 0x55AA 启动签名
+    BOOT64_SIG=$(xxd -s 510 -l 2 -p "$ARCH64_BOOT_BUILD/boot64.bin")
+    if [ "$BOOT64_SIG" != "55aa" ]; then
+        echo "ERROR: boot64.bin missing 0x55AA boot signature, got 0x$BOOT64_SIG" >&2
+        exit 1
+    fi
+    echo "  boot64.bin: $BOOT64_BYTES bytes, signature 0x$BOOT64_SIG OK"
+
     echo "x86_64 Build Successful!"
     echo "Output: $ARCH64_BUILD/kernel64.elf"
     echo "Regression: $ARCH64_BIN_BUILD/hello64.elf"

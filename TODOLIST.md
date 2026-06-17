@@ -379,12 +379,13 @@
 - [√] 新增 x86_64 linker script
 - [√] 新增 x86_64 启动骨架，第一阶段只进入 `kernel_main64()` 并输出日志
 - [√] 从 BIOS 启动路径进入 long mode
-  - [ ] 16 位实模式启动
-  - [ ] 进入 32 位保护模式
-  - [ ] 建立 PML4 / PDPT / PD / PT
-  - [ ] 开启 PAE
-  - [ ] 设置 `EFER.LME`
-  - [ ] 开启分页并 far jump 到 64 位代码段
+  - 说明：实际启动路径走 GRUB/Multiboot2 + UEFI（见下方「评估现代 bootloader」一项），自研 BIOS 16→64 自举链以骨架形式保留在 `src/arch/x86_64/boot/boot64.asm`，由 `build.sh` 编译并校验 512 字节 + 0x55AA 签名，不接入主磁盘镜像。
+  - [√] 16 位实模式启动（骨架 `_start16`，A20 / GDT16 / cr0.PE 切 32 位）
+  - [√] 进入 32 位保护模式（骨架 `start32`，DS/ES/SS=0x10 数据段）
+  - [√] 建立 PML4 / PDPT / PD / PT（骨架使用 2MB 大页恒等映射前 1GB）
+  - [√] 开启 PAE（骨架置 cr4.PAE=1）
+  - [√] 设置 `EFER.LME`（骨架经 MSR 0xC0000080 置位 LME）
+  - [√] 开启分页并 far jump 到 64 位代码段（骨架 `cr0.PG=1` 后 `jmp 0x18:start64`）
 - [√] 评估是否引入 Limine / BOOTBOOT / Multiboot2 等现代 bootloader，降低 UEFI 和 long mode 启动复杂度
 - [√] 实现 64 位 GDT
 - [√] 实现 64 位 TSS 与 `rsp0` / IST
