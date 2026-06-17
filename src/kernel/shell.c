@@ -654,8 +654,7 @@ static char shell_read_input_char(int wait_loops)
 
     while (wait_loops-- >= 0)
     {
-        if (!gui_terminal_is_active())
-            shell_pump_serial_input();
+        shell_pump_serial_input();
         c = input_getc();
         if (c)
             return c;
