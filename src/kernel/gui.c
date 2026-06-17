@@ -4720,6 +4720,121 @@ static void gui_file_preview_render_list(void) {
     }
 }
 
+/* Returns 1 if name ends with .md / .MD */
+static int fp_is_markdown(const char *name) {
+    int n = 0;
+    while (name[n]) n++;
+    if (n < 3) return 0;
+    if (name[n-3] == '.' &&
+        (name[n-2] == 'm' || name[n-2] == 'M') &&
+        (name[n-1] == 'd' || name[n-1] == 'D')) return 1;
+    return 0;
+}
+
+/* Format a single raw line as markdown.
+ * Inputs: src (NUL-terminated). Outputs: dst (caller buffer, dst_sz), *out_color.
+ * Returns number of chars written (excluding NUL). */
+static int fp_md_format_line(const char *src, char *dst, int dst_sz, uint32_t *out_color) {
+    int sp = 0, dp = 0;
+    int level = 0;
+    int bullet = 0;
+    int rule = 0;
+    int code = 0;
+    int quote = 0;
+    int i, k, n;
+
+    /* count leading spaces */
+    while (src[sp] == ' ' && sp < 8) sp++;
+
+    /* heading */
+    if (src[sp] == '#') {
+        k = sp;
+        while (src[k] == '#' && level < 6) { level++; k++; }
+        if (src[k] == ' ' || src[k] == 0) {
+            /* skip spaces */
+            while (src[k] == ' ') k++;
+            /* emit prefix */
+            for (i = 0; i < level && dp < dst_sz - 1; i++) dst[dp++] = '#';
+            if (dp < dst_sz - 1) dst[dp++] = ' ';
+            while (src[k] && dp < dst_sz - 1) dst[dp++] = src[k++];
+            dst[dp] = 0;
+            *out_color = (level == 1) ? gui_rgb(180, 60, 40) :
+                         (level == 2) ? gui_rgb(150, 80, 40) :
+                                        gui_rgb(120, 100, 40);
+            return dp;
+        }
+    }
+
+    /* horizontal rule: --- *** ___ */
+    if ((src[sp] == '-' || src[sp] == '*' || src[sp] == '_')) {
+        char ch = src[sp];
+        n = 0;
+        for (k = sp; src[k] == ch; k++) n++;
+        if (n >= 3 && (src[k] == 0 || src[k] == ' ')) rule = 1;
+    }
+    if (rule) {
+        for (i = 0; i < 50 && dp < dst_sz - 1; i++) dst[dp++] = '-';
+        dst[dp] = 0;
+        *out_color = gui_rgb(120, 120, 120);
+        return dp;
+    }
+
+    /* unordered bullet: - or * followed by space */
+    if ((src[sp] == '-' || src[sp] == '*' || src[sp] == '+') && src[sp+1] == ' ') {
+        bullet = 1;
+        k = sp + 2;
+        if (dp < dst_sz - 1) dst[dp++] = ' ';
+        if (dp < dst_sz - 1) dst[dp++] = ' ';
+        if (dp < dst_sz - 1) dst[dp++] = (char)0x95 & 0x7f; /* fallback dot */
+        dp--;
+        if (dp < dst_sz - 1) dst[dp++] = '*';
+        if (dp < dst_sz - 1) dst[dp++] = ' ';
+        while (src[k] && dp < dst_sz - 1) dst[dp++] = src[k++];
+        dst[dp] = 0;
+        *out_color = gui_rgb(40, 100, 40);
+        return dp;
+    }
+
+    /* blockquote: > */
+    if (src[sp] == '>') {
+        quote = 1;
+        k = sp + 1;
+        if (src[k] == ' ') k++;
+        if (dp < dst_sz - 1) dst[dp++] = '|';
+        if (dp < dst_sz - 1) dst[dp++] = ' ';
+        while (src[k] && dp < dst_sz - 1) dst[dp++] = src[k++];
+        dst[dp] = 0;
+        *out_color = gui_rgb(100, 100, 140);
+        return dp;
+    }
+
+    /* code block fence ``` */
+    if (src[sp] == '`' && src[sp+1] == '`' && src[sp+2] == '`') {
+        for (i = 0; i < 40 && dp < dst_sz - 1; i++) dst[dp++] = '=';
+        dst[dp] = 0;
+        *out_color = gui_rgb(80, 80, 80);
+        return dp;
+    }
+
+    /* default: strip simple emphasis * and _ */
+    k = 0;
+    while (src[k] && dp < dst_sz - 1) {
+        char c = src[k];
+        if ((c == '*' || c == '_') &&
+            (k == 0 || src[k-1] != '\\')) {
+            k++;
+            continue;
+        }
+        if (c == '`') { k++; continue; }
+        dst[dp++] = c;
+        k++;
+    }
+    dst[dp] = 0;
+    *out_color = gui_rgb(40, 40, 40);
+    (void)bullet; (void)quote; (void)code;
+    return dp;
+}
+
 /* render view mode ---------------------------------------------- */
 static void gui_file_preview_render_view(void) {
     char header[GUI_FP_MAX_PATH + 16];
@@ -4825,7 +4940,16 @@ static void gui_file_preview_render_view(void) {
         if (flush) {
             line[line_pos] = 0;
             if (line_index >= fp_view_line_offset) {
-                gui_add_label(fp_window, 8, y, 444, 14, line);
+                if (fp_is_markdown(fp_view_name)) {
+                    char md_line[GUI_FP_VIEW_LINE_CHARS + 16];
+                    uint32_t color = gui_rgb(40, 40, 40);
+                    gui_widget_t *mlbl;
+                    fp_md_format_line(line, md_line, (int)sizeof(md_line), &color);
+                    mlbl = gui_add_label(fp_window, 8, y, 444, 14, md_line);
+                    if (mlbl) mlbl->fg_color = color;
+                } else {
+                    gui_add_label(fp_window, 8, y, 444, 14, line);
+                }
                 y += 16;
                 lines++;
             }
