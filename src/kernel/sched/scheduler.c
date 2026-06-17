@@ -241,11 +241,16 @@ uint32_t sched_time_ms(void) {
     return sched.time_ms;
 }
 
+/* PIT 配置为 100Hz，每次中断对应 10ms。
+ * 之前每 tick 只 +1，导致内核时间走得比真实慢 10 倍（1 现实秒 ≈ 0.1 内核秒）。
+ * 修复：按 PIT 实际周期累加。 */
+#define SCHED_TICK_MS 10u
+
 void sched_tick(void) {
-    sync_tick(1);
-    bus_reliable_tick(1);
-    net_tick(1);
-    sched.time_ms++;
+    sync_tick(SCHED_TICK_MS);
+    bus_reliable_tick(SCHED_TICK_MS);
+    net_tick(SCHED_TICK_MS);
+    sched.time_ms += SCHED_TICK_MS;
     proc_check_alarms(sched.time_ms);
     proc_wake_sleepers(sched.time_ms);
     if (!sched.current) return;
