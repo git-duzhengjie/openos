@@ -320,6 +320,31 @@
 - [√] Markdown 渲染窗口（File Preview 自动识别 .md 渲染标题/列表）
 - [√] 内核 tick 时钟 + 任务栏显示真实时间
 
+### 17.4 国际化（i18n / 翻译键）
+
+#### Phase 1：i18n 框架 + 桌面层文字
+
+- [√] 新建 `include/i18n.h`：定义翻译键枚举 `I18N_KEY_*` 与 locale 枚举（`I18N_LOCALE_EN` / `I18N_LOCALE_ZH`）
+- [√] 新建 `kernel/i18n.c`：内置 EN + zh-CN 两套翻译表
+- [√] 提供 API：`i18n_t(key)` / `i18n_set_locale(locale)` / `i18n_current()` / `i18n_init()`
+- [√] 在 `kernel.c` GUI 初始化前调用 `i18n_init()`，默认 locale = EN（保持视觉不变）
+- [√] 替换桌面欢迎语三行文字
+- [√] 替换桌面图标标签：`Files` / `Recycle Bin`
+- [√] 替换 Launcher 标题 `OpenOS Launcher` 与三个内置应用名
+- [√] 替换桌面右键菜单 5 项文字
+- [√] 验证三连 + commit
+
+#### Phase 2：窗口层文字
+
+- [ ] About 对话框文字
+- [ ] Recycle Bin 窗口文字
+- [ ] Terminal 横幅与提示
+- [ ] Files 浏览器按钮 / 提示
+- [ ] 通知中心文字
+- [ ] Demo 窗口文字
+- [ ] 其他散落字符串审计与替换
+- [ ] 验证三连 + commit
+
 ---
 
 ## P7：安全与权限

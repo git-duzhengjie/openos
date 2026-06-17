@@ -953,6 +953,11 @@ gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
     -I $SRC/include \
+    -c $SRC/i18n.c -o $BUILD/i18n.o
+
+gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
+    -I $SRC/include \
     -c $SRC/gui.c -o $BUILD/gui.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
@@ -1107,6 +1112,7 @@ ld -m elf_i386 -T $SRC/linker.ld \
     $BUILD/panic.o \
     $BUILD/vga.o \
     $BUILD/framebuffer.o \
+    $BUILD/i18n.o \
     $BUILD/gui.o \
     $BUILD/image.o \
     $BUILD/window_manager.o \

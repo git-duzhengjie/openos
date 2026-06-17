@@ -1,0 +1,17 @@
+i18n Phase 1: translation framework + desktop layer keys
+
+- new include/i18n.h: I18N_KEY_* enum + I18N_LOCALE_EN/ZH
+- new kernel/i18n.c: lookup table for 17 desktop strings (EN + zh-CN)
+- API: i18n_init() / i18n_t() / i18n_set_locale() / i18n_current()
+- gui_init() now calls i18n_init() at startup (idempotent)
+- replaced 12 hardcoded strings in gui.c:
+  * welcome notify message
+  * 2 desktop icon labels (Files, Recycle Bin)
+  * launcher window title + 3 launcher app names
+  * 3 welcome banner lines
+  * 5 right-click context menu items
+- build.sh: added i18n.o compile + link
+- TODOLIST: 17.4 Phase 1 marked complete
+
+Default locale = EN to preserve current visuals.
+zh-CN strings are stored for Phase 2+ (CJK font work).

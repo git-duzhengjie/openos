@@ -15,6 +15,7 @@
 #include "heap.h"
 #include "input_buffer.h"
 #include "fs/vfs.h"
+#include "i18n.h"
 extern int spawn_user_process(const char *path, char *const argv[]);
 extern uint32_t sched_time_ms(void);
 
@@ -2119,6 +2120,7 @@ static void gui_poll_mouse(void) {
 }
 
 void gui_init(void) {
+    i18n_init();
     memset(&g_gui, 0, sizeof(g_gui));
     memset(&g_gui_accel, 0, sizeof(g_gui_accel));
     g_gui_accel.enabled = 1;
@@ -2205,7 +2207,7 @@ int gui_start(uint32_t width, uint32_t height) {
 
     gui_terminal_init();
     gui_desktop_init();
-    gui_notify("Welcome to OpenOS desktop");
+    gui_notify(i18n_t(I18N_KEY_NOTIFY_WELCOME));
     gui_notify("Tip: click Theme icon to switch wallpaper");
     gui_render();
     return 0;
@@ -2274,9 +2276,9 @@ static void gui_launcher_init(void) {
     memset(g_gui.launcher_entries, 0, sizeof(g_gui.launcher_entries));
     g_gui.launcher_enabled = 1;
     g_gui.launcher_app_count = 3;
-    gui_launcher_add(0, "terminal", "Terminal", GUI_DESKTOP_ACTION_TERMINAL, gui_rgb(68, 144, 245));
-    gui_launcher_add(1, "demo", "Window Demo", GUI_DESKTOP_ACTION_DEMO, gui_rgb(170, 112, 235));
-    gui_launcher_add(2, "about", "About OpenOS", GUI_DESKTOP_ACTION_ABOUT, gui_rgb(88, 196, 128));
+    gui_launcher_add(0, "terminal", i18n_t(I18N_KEY_APP_TERMINAL), GUI_DESKTOP_ACTION_TERMINAL, gui_rgb(68, 144, 245));
+    gui_launcher_add(1, "demo", i18n_t(I18N_KEY_APP_WINDOW_DEMO), GUI_DESKTOP_ACTION_DEMO, gui_rgb(170, 112, 235));
+    gui_launcher_add(2, "about", i18n_t(I18N_KEY_APP_ABOUT_OPENOS), GUI_DESKTOP_ACTION_ABOUT, gui_rgb(88, 196, 128));
     /* programs under /bin appear after the 3 built-ins; scan happens lazily */
 }
 
@@ -2322,8 +2324,8 @@ static void gui_desktop_init(void) {
 
     memset(g_gui.desktop_icons, 0, sizeof(g_gui.desktop_icons));
     /* 桌面只保留 Files 和 Recycle Bin，其他入口走开始菜单/任务栏挂件 */
-    gui_desktop_add_icon(0, 32, 72,  "Files",       gui_rgb(242, 194, 74),  GUI_DESKTOP_ACTION_FILES);
-    gui_desktop_add_icon(1, 32, 160, "Recycle Bin", gui_rgb(168, 178, 198), GUI_DESKTOP_ACTION_RECYCLE);
+    gui_desktop_add_icon(0, 32, 72,  i18n_t(I18N_KEY_ICON_FILES),       gui_rgb(242, 194, 74),  GUI_DESKTOP_ACTION_FILES);
+    gui_desktop_add_icon(1, 32, 160, i18n_t(I18N_KEY_ICON_RECYCLE_BIN), gui_rgb(168, 178, 198), GUI_DESKTOP_ACTION_RECYCLE);
     g_gui.desktop_icon_count = 6;
 }
 
@@ -2408,7 +2410,7 @@ static void gui_desktop_draw_start_menu(void) {
     gui_raw_line(r->x, r->y, r->x, r->y + r->h - 1, gui_rgb(112, 146, 198));
     gui_raw_line(r->x + r->w - 1, r->y, r->x + r->w - 1, r->y + r->h - 1, gui_rgb(10, 13, 20));
     gui_raw_line(r->x, r->y + r->h - 1, r->x + r->w - 1, r->y + r->h - 1, gui_rgb(10, 13, 20));
-    gui_draw_text(r->x + 12, r->y + 12, "OpenOS Launcher", gui_rgb(245, 250, 255));
+    gui_draw_text(r->x + 12, r->y + 12, i18n_t(I18N_KEY_LAUNCHER_TITLE), gui_rgb(245, 250, 255));
 
     for (i = 0; i < g_gui.launcher_app_count && i < GUI_LAUNCHER_MAX_APPS; i++) {
         gui_launcher_entry_t *entry = &g_gui.launcher_entries[i];
@@ -2423,9 +2425,9 @@ static void gui_desktop_draw_start_menu(void) {
 static void gui_desktop_draw(void) {
     uint32_t i;
     /* center the 3-line welcome block on screen (above taskbar) */
-    static const char *line0 = "Welcome to OpenOS";
-    static const char *line1 = "Desktop environment is ready.";
-    static const char *line2 = "Use menu icon to launch tools.";
+    const char *line0 = i18n_t(I18N_KEY_BANNER_LINE0);
+    const char *line1 = i18n_t(I18N_KEY_BANNER_LINE1);
+    const char *line2 = i18n_t(I18N_KEY_BANNER_LINE2);
     const int line_gap = 12;                       /* extra gap between lines */
     const int line_step = GUI_CHAR_H + line_gap;   /* full line stride */
     int block_h;
@@ -2709,11 +2711,11 @@ static void gui_handle_mouse_right_down(int x, int y) {
     if (gui_window_at(x, y) != 0) return;
     if (y >= (int)g_gui.height - GUI_TASKBAR_HEIGHT) return;
     gui_ctxmenu_reset();
-    gui_ctxmenu_add("Open Files",        1, 1);
-    gui_ctxmenu_add("Open Terminal",     2, 1);
-    gui_ctxmenu_add("Change Wallpaper",  3, 1);
-    gui_ctxmenu_add("Refresh",           4, 1);
-    gui_ctxmenu_add("About OpenOS...",   5, 1);
+    gui_ctxmenu_add(i18n_t(I18N_KEY_CTXMENU_OPEN_FILES),       1, 1);
+    gui_ctxmenu_add(i18n_t(I18N_KEY_CTXMENU_OPEN_TERMINAL),    2, 1);
+    gui_ctxmenu_add(i18n_t(I18N_KEY_CTXMENU_CHANGE_WALLPAPER), 3, 1);
+    gui_ctxmenu_add(i18n_t(I18N_KEY_CTXMENU_REFRESH),          4, 1);
+    gui_ctxmenu_add(i18n_t(I18N_KEY_CTXMENU_ABOUT),            5, 1);
     gui_ctxmenu_open_at(x, y, gui_ctxmenu_desktop_action, 0);
 }
 
