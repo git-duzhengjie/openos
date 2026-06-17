@@ -11,7 +11,17 @@
 
 #define KEYBOARD_DATA_PORT   0x60
 #define KEYBOARD_STATUS_PORT 0x64
+#define KEYBOARD_CMD_PORT    0x64
 #define KEYBOARD_CMD_LED     0xED
+
+#define KEYBOARD_STATUS_OUTPUT_FULL 0x01
+#define KEYBOARD_STATUS_INPUT_FULL  0x02
+
+#define PS2_CMD_READ_CONFIG         0x20
+#define PS2_CMD_WRITE_CONFIG        0x60
+#define PS2_CMD_ENABLE_FIRST_PORT   0xAE
+#define PS2_CONFIG_IRQ1_ENABLE      0x01
+#define PS2_CONFIG_FIRST_PORT_CLOCK 0x10
 
 static const char scancode_ascii[] = {
     0,0,'1','2','3','4','5','6',
@@ -70,8 +80,49 @@ static void keyboard_put_csi_number_tilde(const char *number) {
 
 static void keyboard_wait_input(void) {
     int timeout = 10000;
-    while (--timeout && (inb(KEYBOARD_STATUS_PORT) & 2) != 0) {
+    while (--timeout && (inb(KEYBOARD_STATUS_PORT) & KEYBOARD_STATUS_INPUT_FULL) != 0) {
     }
+}
+
+static int keyboard_wait_output(void) {
+    int timeout = 10000;
+    while (--timeout) {
+        if (inb(KEYBOARD_STATUS_PORT) & KEYBOARD_STATUS_OUTPUT_FULL) return 1;
+    }
+    return 0;
+}
+
+static void keyboard_flush_output(void) {
+    int guard = 32;
+    while (guard-- && (inb(KEYBOARD_STATUS_PORT) & KEYBOARD_STATUS_OUTPUT_FULL)) {
+        (void)inb(KEYBOARD_DATA_PORT);
+    }
+}
+
+static void keyboard_enable_controller_irq(void) {
+    uint8_t config;
+
+    keyboard_flush_output();
+    keyboard_wait_input();
+    outb(KEYBOARD_CMD_PORT, PS2_CMD_ENABLE_FIRST_PORT);
+    io_wait();
+
+    keyboard_wait_input();
+    outb(KEYBOARD_CMD_PORT, PS2_CMD_READ_CONFIG);
+    io_wait();
+    if (!keyboard_wait_output()) return;
+    config = inb(KEYBOARD_DATA_PORT);
+
+    config |= PS2_CONFIG_IRQ1_ENABLE;
+    config &= (uint8_t)~PS2_CONFIG_FIRST_PORT_CLOCK;
+
+    keyboard_wait_input();
+    outb(KEYBOARD_CMD_PORT, PS2_CMD_WRITE_CONFIG);
+    io_wait();
+    keyboard_wait_input();
+    outb(KEYBOARD_DATA_PORT, config);
+    io_wait();
+    keyboard_flush_output();
 }
 
 static void keyboard_update_leds(void) {
@@ -242,7 +293,8 @@ void keyboard_init(void) {
     kb.irq_count = 0;
     kb.make_count = 0;
     kb.break_count = 0;
-    keyboard_update_leds();
     isr_install_handler(33, keyboard_handler);
+    keyboard_enable_controller_irq();
+    keyboard_update_leds();
     serial_write("[OK] PS/2 keyboard\n");
 }
