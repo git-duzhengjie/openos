@@ -3381,7 +3381,7 @@ static void gui_draw_taskbar(void) {
         bx += gui_taskbar_button_width(w) + 6;
     }
 
-    /* clock display at right side of taskbar */
+    /* clock display pinned to bottom-right of the screen (independent of taskbar position) */
     {
         uint32_t ms = sched_time_ms();
         uint32_t total_sec = ms / 1000u;
@@ -3400,12 +3400,18 @@ static void gui_draw_taskbar(void) {
         clk[p++] = (char)('0' + secs % 10);
         clk[p] = 0;
         {
-            int cw = 8 * 8;
-            int cx = layout.bar.x + layout.bar.w - cw - 12;
-            int cy = layout.bar.y + (layout.bar.h - 12) / 2;
-            gui_raw_fill_rect(cx - 6, cy - 3, cw + 12, 18, gui_rgb(36, 44, 60));
-            gui_raw_line(cx - 6, cy - 3, cx + cw + 5, cy - 3, gui_rgb(80, 92, 120));
-            gui_raw_line(cx - 6, cy + 14, cx + cw + 5, cy + 14, gui_rgb(12, 16, 24));
+            int cw = 8 * 8;                              /* 8 chars * 8px font width */
+            int box_w = cw + 12;                          /* +6px padding each side */
+            int box_h = 18;
+            int box_x = (int)g_gui.width - box_w - 6;     /* 6px gap from right edge */
+            int box_y = (int)g_gui.height - box_h - 3;    /* 3px gap from bottom edge */
+            int cx = box_x + 6;
+            int cy = box_y + 3;
+            gui_raw_fill_rect(box_x, box_y, box_w, box_h, gui_rgb(36, 44, 60));
+            gui_raw_line(box_x, box_y, box_x + box_w - 1, box_y, gui_rgb(80, 92, 120));
+            gui_raw_line(box_x, box_y + box_h - 1, box_x + box_w - 1, box_y + box_h - 1, gui_rgb(12, 16, 24));
+            gui_raw_line(box_x, box_y, box_x, box_y + box_h - 1, gui_rgb(80, 92, 120));
+            gui_raw_line(box_x + box_w - 1, box_y, box_x + box_w - 1, box_y + box_h - 1, gui_rgb(12, 16, 24));
             gui_draw_text(cx, cy, clk, gui_rgb(220, 240, 255));
         }
     }
@@ -3620,10 +3626,13 @@ void gui_poll(void) {
     now_sec = sched_time_ms() / 1000u;
     if (now_sec != clk_last_sec) {
         clk_last_sec = now_sec;
-        if (g_gui.desktop_taskbar_rect.w > 0 && g_gui.desktop_taskbar_rect.h > 0) {
-            gui_rect_t r = g_gui.desktop_taskbar_rect;
-            int cw = 8 * 8 + 12;
-            gui_invalidate_rect(r.x + r.w - cw - 12, r.y, cw + 12, r.h);
+        /* clock lives at bottom-right of the screen, not inside the taskbar rect */
+        if (g_gui.width > 0 && g_gui.height > 0) {
+            int box_w = 8 * 8 + 12;
+            int box_h = 18;
+            int box_x = (int)g_gui.width - box_w - 6;
+            int box_y = (int)g_gui.height - box_h - 3;
+            gui_invalidate_rect(box_x, box_y, box_w, box_h);
         }
     }
     if (gui_has_dirty()) gui_render();
