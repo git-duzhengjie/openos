@@ -1204,6 +1204,7 @@ void gui_hide_window(gui_window_t *window) {
 
 typedef struct gui_taskbar_layout {
     gui_rect_t bar;
+    gui_rect_t start_button;
     gui_rect_t terminal_button;
     int first_window_x;
     int item_y;
@@ -1217,7 +1218,7 @@ static int gui_taskbar_button_width(gui_window_t *window) {
 
 static int gui_taskbar_content_width(void) {
     uint32_t i;
-    int width = GUI_TASKBAR_START_W;
+    int width = GUI_TASKBAR_START_W + 6 + GUI_TASKBAR_START_W;
     for (i = 0; i < g_gui.window_count; i++) {
         uint32_t idx = g_gui.z_order[i];
         gui_window_t *w;
@@ -1244,14 +1245,18 @@ static void gui_taskbar_get_layout(gui_taskbar_layout_t *layout) {
     if (max_w < 0) max_w = (int)g_gui.width;
     bar_w = content_w + padding * 2;
     if (bar_w > max_w) bar_w = max_w;
-    if (bar_w < GUI_TASKBAR_START_W + padding * 2) bar_w = GUI_TASKBAR_START_W + padding * 2;
+    if (bar_w < GUI_TASKBAR_START_W * 2 + 6 + padding * 2) bar_w = GUI_TASKBAR_START_W * 2 + 6 + padding * 2;
     if (bar_w > (int)g_gui.width) bar_w = (int)g_gui.width;
 
     layout->bar.x = ((int)g_gui.width - bar_w) / 2;
     layout->bar.y = y;
     layout->bar.w = bar_w;
     layout->bar.h = GUI_TASKBAR_HEIGHT;
-    layout->terminal_button.x = layout->bar.x + padding;
+    layout->start_button.x = layout->bar.x + padding;
+    layout->start_button.y = y + 3;
+    layout->start_button.w = GUI_TASKBAR_START_W;
+    layout->start_button.h = GUI_TASKBAR_HEIGHT - 6;
+    layout->terminal_button.x = layout->start_button.x + layout->start_button.w + 6;
     layout->terminal_button.y = y + 3;
     layout->terminal_button.w = GUI_TASKBAR_START_W;
     layout->terminal_button.h = GUI_TASKBAR_HEIGHT - 6;
@@ -2645,6 +2650,14 @@ static void gui_draw_taskbar(void) {
     gui_raw_line(layout.bar.x, layout.bar.y, layout.bar.x, layout.bar.y + layout.bar.h - 1, gui_rgb(58, 66, 88));
     gui_raw_line(layout.bar.x + layout.bar.w - 1, layout.bar.y, layout.bar.x + layout.bar.w - 1, layout.bar.y + layout.bar.h - 1, gui_rgb(10, 13, 20));
     gui_raw_line(layout.bar.x, layout.bar.y + layout.bar.h - 1, layout.bar.x + layout.bar.w - 1, layout.bar.y + layout.bar.h - 1, gui_rgb(10, 13, 20));
+
+    g_gui.desktop_start_button_rect = layout.start_button;
+    gui_raw_fill_rect(layout.start_button.x, layout.start_button.y, layout.start_button.w, layout.start_button.h, gui_rgb(40, 48, 68));
+    gui_raw_line(layout.start_button.x, layout.start_button.y, layout.start_button.x + layout.start_button.w - 1, layout.start_button.y, gui_rgb(118, 138, 176));
+    gui_raw_line(layout.start_button.x, layout.start_button.y, layout.start_button.x, layout.start_button.y + layout.start_button.h - 1, gui_rgb(92, 108, 144));
+    gui_raw_line(layout.start_button.x + layout.start_button.w - 1, layout.start_button.y, layout.start_button.x + layout.start_button.w - 1, layout.start_button.y + layout.start_button.h - 1, gui_rgb(8, 10, 16));
+    gui_raw_line(layout.start_button.x, layout.start_button.y + layout.start_button.h - 1, layout.start_button.x + layout.start_button.w - 1, layout.start_button.y + layout.start_button.h - 1, gui_rgb(8, 10, 16));
+    gui_draw_text(layout.start_button.x + 18, layout.start_button.y + 7, "Start", gui_rgb(230, 240, 255));
 
     gui_draw_taskbar_terminal_icon(layout.terminal_button);
 
