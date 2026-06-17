@@ -2422,11 +2422,39 @@ static void gui_desktop_draw_start_menu(void) {
 
 static void gui_desktop_draw(void) {
     uint32_t i;
+    /* center the 3-line welcome block on screen (above taskbar) */
+    static const char *line0 = "Welcome to OpenOS";
+    static const char *line1 = "Desktop environment is ready.";
+    static const char *line2 = "Use menu icon to launch tools.";
+    const int line_gap = 12;                       /* extra gap between lines */
+    const int line_step = GUI_CHAR_H + line_gap;   /* full line stride */
+    int block_h;
+    int avail_h;
+    int top_y;
+    int w0, w1, w2;
+    int x0, x1, x2;
 
     if (!g_gui.desktop_enabled) return;
-    gui_draw_text(116, 72, "Welcome to OpenOS", gui_rgb(235, 242, 255));
-    gui_draw_text(116, 104, "Desktop environment is ready.", gui_rgb(205, 220, 245));
-    gui_draw_text(116, 132, "Use menu icon to launch tools.", gui_rgb(170, 195, 230));
+
+    block_h = GUI_CHAR_H + line_step * 2;          /* 3 lines */
+    avail_h = (int)g_gui.height - GUI_TASKBAR_HEIGHT;
+    if (avail_h < block_h) avail_h = block_h;
+    top_y = (avail_h - block_h) / 2;
+    if (top_y < 16) top_y = 16;
+
+    w0 = (int)strlen(line0) * GUI_CHAR_W;
+    w1 = (int)strlen(line1) * GUI_CHAR_W;
+    w2 = (int)strlen(line2) * GUI_CHAR_W;
+    x0 = ((int)g_gui.width - w0) / 2;
+    x1 = ((int)g_gui.width - w1) / 2;
+    x2 = ((int)g_gui.width - w2) / 2;
+    if (x0 < 0) x0 = 0;
+    if (x1 < 0) x1 = 0;
+    if (x2 < 0) x2 = 0;
+
+    gui_draw_text(x0, top_y,                  line0, gui_rgb(235, 242, 255));
+    gui_draw_text(x1, top_y + line_step,      line1, gui_rgb(205, 220, 245));
+    gui_draw_text(x2, top_y + line_step * 2,  line2, gui_rgb(170, 195, 230));
     for (i = 0; i < g_gui.desktop_icon_count && i < GUI_DESKTOP_MAX_ICONS; i++) {
         gui_desktop_draw_icon(&g_gui.desktop_icons[i]);
     }
