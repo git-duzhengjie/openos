@@ -3352,11 +3352,11 @@ static void gui_draw_taskbar(void) {
     gui_taskbar_get_layout(&layout);
     bx = layout.first_window_x;
 
-    gui_raw_fill_rect(layout.bar.x, layout.bar.y, layout.bar.w, layout.bar.h, gui_rgb(24, 28, 38));
-    /* 顶部高光边框移除：原 gui_rgb(76,86,112) 在窄于全屏的居中任务栏上呈现为贯穿全屏的亮蓝细线 */
-    gui_raw_line(layout.bar.x, layout.bar.y, layout.bar.x, layout.bar.y + layout.bar.h - 1, gui_rgb(40, 46, 60));
-    gui_raw_line(layout.bar.x + layout.bar.w - 1, layout.bar.y, layout.bar.x + layout.bar.w - 1, layout.bar.y + layout.bar.h - 1, gui_rgb(10, 13, 20));
-    gui_raw_line(layout.bar.x, layout.bar.y + layout.bar.h - 1, layout.bar.x + layout.bar.w - 1, layout.bar.y + layout.bar.h - 1, gui_rgb(10, 13, 20));
+    /* 任务栏背景横跨全屏宽度，遮住任务栏左右两侧未绘制的黑底，避免壁纸下沿
+     * 在居中任务栏左右两侧形成贯穿全屏的视觉假性蓝线。图标位置仍按居中布局。 */
+    gui_raw_fill_rect(0, layout.bar.y, (int)g_gui.width, layout.bar.h, gui_rgb(24, 28, 38));
+    /* 全宽底部阴影边收口 */
+    gui_raw_fill_rect(0, layout.bar.y + layout.bar.h - 1, (int)g_gui.width, 1, gui_rgb(10, 13, 20));
 
     g_gui.desktop_start_button_rect = layout.start_button;
     gui_draw_taskbar_start_icon(layout.start_button);
