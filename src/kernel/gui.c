@@ -3535,6 +3535,11 @@ static void gui_draw_wallpaper(void) {
         gui_raw_line(x + 42, horizon + 62, x + 96, base + 10, gui_rgb(42, 76, 98));
     }
 
+    gui_raw_fill_rect(0, taskbar_top - 50, width, 50, gui_rgb(18, 39, 52));
+    for (x = 0; x < width; x += 36) {
+        int wave_y = taskbar_top - 42 + ((x / 36) & 1) * 5;
+        gui_raw_line(x, wave_y, x + 22, wave_y + 3, gui_rgb(67, 116, 136));
+    }
 }
 
 static int gui_has_dirty(void) {
