@@ -912,6 +912,103 @@ static void gui_flush_backbuffer(void) {
     g_gui.dirty_count = 0;
 }
 
+/* 14x14 file/folder icon renderer used by File Preview */
+static void gui_draw_file_icon(gui_icon_id_t id, int x, int y) {
+    uint32_t paper = gui_rgb(252, 252, 250);
+    uint32_t ink   = gui_rgb(70, 70, 80);
+    uint32_t fold  = gui_rgb(220, 180, 70);
+    uint32_t fold2 = gui_rgb(180, 140, 40);
+    int i;
+
+    if (id == GUI_ICON_NONE) return;
+
+    if (id == GUI_ICON_FOLDER || id == GUI_ICON_UPDIR) {
+        /* folder tab */
+        gui_raw_fill_rect(x + 1, y + 3, 5, 2, fold);
+        /* folder body */
+        gui_raw_fill_rect(x + 1, y + 4, 12, 8, fold);
+        /* border */
+        gui_raw_line(x + 1, y + 3, x + 5, y + 3, fold2);
+        gui_raw_line(x + 1, y + 11, x + 12, y + 11, fold2);
+        gui_raw_line(x + 1, y + 4, x + 1, y + 11, fold2);
+        gui_raw_line(x + 12, y + 4, x + 12, y + 11, fold2);
+        if (id == GUI_ICON_UPDIR) {
+            /* up arrow */
+            gui_raw_line(x + 6, y + 5, x + 6, y + 10, ink);
+            gui_raw_line(x + 7, y + 5, x + 7, y + 10, ink);
+            gui_raw_line(x + 4, y + 7, x + 6, y + 5, ink);
+            gui_raw_line(x + 9, y + 7, x + 7, y + 5, ink);
+        }
+        return;
+    }
+
+    /* generic paper sheet with folded corner */
+    gui_raw_fill_rect(x + 2, y + 1, 9, 12, paper);
+    gui_raw_line(x + 2, y + 1, x + 10, y + 1, ink);
+    gui_raw_line(x + 2, y + 12, x + 10, y + 12, ink);
+    gui_raw_line(x + 2, y + 1, x + 2, y + 12, ink);
+    gui_raw_line(x + 10, y + 1, x + 10, y + 12, ink);
+    /* folded corner */
+    gui_raw_line(x + 8, y + 1, x + 10, y + 3, ink);
+    gui_raw_fill_rect(x + 8, y + 1, 2, 2, gui_rgb(225, 225, 225));
+
+    if (id == GUI_ICON_FILE_TEXT) {
+        uint32_t line = gui_rgb(100, 100, 110);
+        for (i = 0; i < 4; i++) {
+            gui_raw_line(x + 4, y + 4 + i * 2, x + 9, y + 4 + i * 2, line);
+        }
+    } else if (id == GUI_ICON_FILE_MARKUP) {
+        /* # symbol */
+        uint32_t line = gui_rgb(0, 120, 200);
+        gui_raw_line(x + 5, y + 4, x + 5, y + 10, line);
+        gui_raw_line(x + 8, y + 4, x + 8, y + 10, line);
+        gui_raw_line(x + 4, y + 6, x + 9, y + 6, line);
+        gui_raw_line(x + 4, y + 9, x + 9, y + 9, line);
+    } else if (id == GUI_ICON_FILE_CODE) {
+        /* < > */
+        uint32_t line = gui_rgb(40, 140, 80);
+        gui_raw_line(x + 5, y + 7, x + 4, y + 8, line);
+        gui_raw_line(x + 4, y + 8, x + 5, y + 9, line);
+        gui_raw_line(x + 8, y + 7, x + 9, y + 8, line);
+        gui_raw_line(x + 9, y + 8, x + 8, y + 9, line);
+    } else if (id == GUI_ICON_FILE_CONFIG) {
+        /* gear-ish dot ring */
+        uint32_t line = gui_rgb(140, 100, 30);
+        gui_raw_fill_rect(x + 6, y + 4, 2, 2, line);
+        gui_raw_fill_rect(x + 4, y + 6, 2, 2, line);
+        gui_raw_fill_rect(x + 8, y + 6, 2, 2, line);
+        gui_raw_fill_rect(x + 6, y + 8, 2, 2, line);
+        gui_raw_fill_rect(x + 6, y + 6, 2, 2, gui_rgb(220, 220, 220));
+    } else if (id == GUI_ICON_FILE_SHELL) {
+        /* >_ */
+        uint32_t line = gui_rgb(30, 30, 30);
+        gui_raw_line(x + 4, y + 5, x + 6, y + 7, line);
+        gui_raw_line(x + 6, y + 7, x + 4, y + 9, line);
+        gui_raw_line(x + 7, y + 10, x + 9, y + 10, line);
+    } else if (id == GUI_ICON_FILE_EXEC) {
+        /* gear/arrow */
+        uint32_t line = gui_rgb(180, 40, 40);
+        gui_raw_fill_rect(x + 4, y + 4, 6, 2, line);
+        gui_raw_fill_rect(x + 4, y + 7, 6, 2, line);
+        gui_raw_fill_rect(x + 4, y + 10, 6, 2, line);
+    } else if (id == GUI_ICON_FILE_IMAGE) {
+        uint32_t sky = gui_rgb(120, 180, 230);
+        uint32_t mtn = gui_rgb(70, 130, 80);
+        uint32_t sun = gui_rgb(240, 200, 60);
+        gui_raw_fill_rect(x + 3, y + 3, 7, 8, sky);
+        gui_raw_fill_rect(x + 8, y + 4, 1, 1, sun);
+        gui_raw_line(x + 3, y + 9, x + 6, y + 6, mtn);
+        gui_raw_line(x + 6, y + 6, x + 9, y + 9, mtn);
+    } else if (id == GUI_ICON_FILE_ARCHIVE) {
+        uint32_t box = gui_rgb(150, 110, 60);
+        gui_raw_fill_rect(x + 3, y + 3, 7, 9, box);
+        gui_raw_fill_rect(x + 6, y + 3, 1, 9, gui_rgb(80, 60, 30));
+        gui_raw_fill_rect(x + 5, y + 6, 3, 2, gui_rgb(230, 220, 180));
+    }
+    /* GUI_ICON_FILE_GENERIC: just the blank paper above */
+    (void)i;
+}
+
 static void gui_draw_widget(gui_widget_t *wg) {
     uint32_t bg, fg;
     if (!wg || !wg->visible || !wg->owner) return;
@@ -919,7 +1016,12 @@ static void gui_draw_widget(gui_widget_t *wg) {
     int ay = wg->owner->rect.y + GUI_TITLE_HEIGHT + wg->rect.y;
 
     if (wg->type == GUI_WIDGET_LABEL) {
-        gui_draw_text(ax, ay + 3, wg->text, wg->fg_color ? wg->fg_color : g_gui.colors.text_fg);
+        int text_off = 0;
+        if (wg->icon != GUI_ICON_NONE) {
+            gui_draw_file_icon(wg->icon, ax, ay + (wg->rect.h - 14) / 2);
+            text_off = 14 + 4;
+        }
+        gui_draw_text(ax + text_off, ay + 3, wg->text, wg->fg_color ? wg->fg_color : g_gui.colors.text_fg);
     } else if (wg->type == GUI_WIDGET_BUTTON) {
         uint32_t light = g_gui.colors.button_border;
         uint32_t shadow = gui_rgb(20, 20, 20);
@@ -953,6 +1055,10 @@ static void gui_draw_widget(gui_widget_t *wg) {
             gui_raw_line(ax + 3, ay + wg->rect.h - 4, ax + wg->rect.w - 4, ay + wg->rect.h - 4, focus);
             gui_raw_line(ax + 3, ay + 3, ax + 3, ay + wg->rect.h - 4, focus);
             gui_raw_line(ax + wg->rect.w - 4, ay + 3, ax + wg->rect.w - 4, ay + wg->rect.h - 4, focus);
+        }
+        if (wg->icon != GUI_ICON_NONE) {
+            gui_draw_file_icon(wg->icon, ax + text_dx, ay + (wg->rect.h - 14) / 2 + text_dy);
+            text_dx += 14 + 4;
         }
         gui_draw_text(ax + text_dx, ay + (wg->rect.h - GUI_CHAR_H) / 2 + text_dy, wg->text, fg);
     } else if (wg->type == GUI_WIDGET_PANEL) {
@@ -2992,10 +3098,18 @@ static int gui_demo_app_entry(gui_app_t *app, void *user_data) {
 
 #define GUI_FP_MAX_PATH        256
 #define GUI_FP_MAX_NAME        64
-#define GUI_FP_LIST_PER_PAGE   12
+#define GUI_FP_LIST_PER_PAGE   11
 #define GUI_FP_VIEW_MAX_LINES  13
 #define GUI_FP_VIEW_LINE_CHARS 56
 #define GUI_FP_VIEW_BUF_SIZE   2048
+
+/* enhanced list layout: name | mtime | type | size */
+#define GUI_FP_COL_NAME_X      28   /* after 18px icon + 4px gap */
+#define GUI_FP_COL_MTIME_X     200
+#define GUI_FP_COL_TYPE_X      300
+#define GUI_FP_COL_SIZE_X      350
+#define GUI_FP_ROW_HEIGHT      20
+#define GUI_FP_ICON_SIZE       14
 
 static gui_window_t *fp_window = 0;
 static char          fp_path[GUI_FP_MAX_PATH];
@@ -3071,6 +3185,131 @@ static int fp_entry_is_dot(const dentry_t *e) {
 
 static int fp_entry_is_dir(const dentry_t *e) {
     return e && e->inode && (e->inode->mode & FS_DIR);
+}
+
+/* lowercase compare last suffix; returns 1 if match */
+static int fp_str_ieq(const char *a, const char *b) {
+    while (*a && *b) {
+        char ca = *a, cb = *b;
+        if (ca >= 'A' && ca <= 'Z') ca = (char)(ca + 32);
+        if (cb >= 'A' && cb <= 'Z') cb = (char)(cb + 32);
+        if (ca != cb) return 0;
+        a++; b++;
+    }
+    return *a == 0 && *b == 0;
+}
+
+static const char *fp_ext(const char *name) {
+    const char *dot = 0;
+    const char *p = name;
+    while (*p) { if (*p == '.') dot = p; p++; }
+    return dot ? dot + 1 : "";
+}
+
+static gui_icon_id_t fp_pick_icon(const dentry_t *e) {
+    const char *ext;
+    if (!e) return GUI_ICON_FILE_GENERIC;
+    if (fp_entry_is_dir(e)) return GUI_ICON_FOLDER;
+    ext = fp_ext(e->name);
+    if (!*ext) return GUI_ICON_FILE_GENERIC;
+    if (fp_str_ieq(ext, "c") || fp_str_ieq(ext, "h") ||
+        fp_str_ieq(ext, "cpp") || fp_str_ieq(ext, "hpp") ||
+        fp_str_ieq(ext, "js") || fp_str_ieq(ext, "ts") ||
+        fp_str_ieq(ext, "py") || fp_str_ieq(ext, "go") ||
+        fp_str_ieq(ext, "rs") || fp_str_ieq(ext, "asm")) return GUI_ICON_FILE_CODE;
+    if (fp_str_ieq(ext, "md")) return GUI_ICON_FILE_MARKUP;
+    if (fp_str_ieq(ext, "txt") || fp_str_ieq(ext, "log") ||
+        fp_str_ieq(ext, "readme")) return GUI_ICON_FILE_TEXT;
+    if (fp_str_ieq(ext, "sh") || fp_str_ieq(ext, "bash")) return GUI_ICON_FILE_SHELL;
+    if (fp_str_ieq(ext, "conf") || fp_str_ieq(ext, "cfg") ||
+        fp_str_ieq(ext, "ini") || fp_str_ieq(ext, "json") ||
+        fp_str_ieq(ext, "yaml") || fp_str_ieq(ext, "yml") ||
+        fp_str_ieq(ext, "toml")) return GUI_ICON_FILE_CONFIG;
+    if (fp_str_ieq(ext, "png") || fp_str_ieq(ext, "jpg") ||
+        fp_str_ieq(ext, "jpeg") || fp_str_ieq(ext, "bmp") ||
+        fp_str_ieq(ext, "gif") || fp_str_ieq(ext, "ico")) return GUI_ICON_FILE_IMAGE;
+    if (fp_str_ieq(ext, "zip") || fp_str_ieq(ext, "tar") ||
+        fp_str_ieq(ext, "gz") || fp_str_ieq(ext, "bz2") ||
+        fp_str_ieq(ext, "xz") || fp_str_ieq(ext, "7z")) return GUI_ICON_FILE_ARCHIVE;
+    if (fp_str_ieq(ext, "elf") || fp_str_ieq(ext, "exe") ||
+        fp_str_ieq(ext, "bin") || fp_str_ieq(ext, "o") ||
+        fp_str_ieq(ext, "a") || fp_str_ieq(ext, "so")) return GUI_ICON_FILE_EXEC;
+    return GUI_ICON_FILE_GENERIC;
+}
+
+static const char *fp_type_label(const dentry_t *e) {
+    const char *ext;
+    if (!e) return "";
+    if (fp_entry_is_dir(e)) return "Folder";
+    ext = fp_ext(e->name);
+    if (!*ext) return "File";
+    if (fp_str_ieq(ext, "c") || fp_str_ieq(ext, "h")) return "C Src";
+    if (fp_str_ieq(ext, "md")) return "Markdown";
+    if (fp_str_ieq(ext, "txt") || fp_str_ieq(ext, "log")) return "Text";
+    if (fp_str_ieq(ext, "sh") || fp_str_ieq(ext, "bash")) return "Shell";
+    if (fp_str_ieq(ext, "json")) return "JSON";
+    if (fp_str_ieq(ext, "conf") || fp_str_ieq(ext, "cfg") ||
+        fp_str_ieq(ext, "ini")) return "Config";
+    if (fp_str_ieq(ext, "yaml") || fp_str_ieq(ext, "yml")) return "YAML";
+    if (fp_str_ieq(ext, "png") || fp_str_ieq(ext, "jpg") ||
+        fp_str_ieq(ext, "bmp") || fp_str_ieq(ext, "gif")) return "Image";
+    if (fp_str_ieq(ext, "zip") || fp_str_ieq(ext, "tar") ||
+        fp_str_ieq(ext, "gz")) return "Archive";
+    if (fp_str_ieq(ext, "elf") || fp_str_ieq(ext, "bin")) return "Exec";
+    return "File";
+}
+
+/* format file size like "1.2K", "3M" etc */
+static void fp_format_size(uint32_t bytes, char *out) {
+    char tmp[12];
+    int i = 0, j = 0;
+    uint32_t n;
+    const char *unit = "B";
+    if (bytes < 1024) {
+        n = bytes;
+        unit = "B";
+    } else if (bytes < 1024u * 1024u) {
+        n = bytes / 1024u;
+        unit = "K";
+    } else if (bytes < 1024u * 1024u * 1024u) {
+        n = bytes / (1024u * 1024u);
+        unit = "M";
+    } else {
+        n = bytes / (1024u * 1024u * 1024u);
+        unit = "G";
+    }
+    if (n == 0) tmp[i++] = '0';
+    while (n > 0) { tmp[i++] = (char)('0' + (n % 10)); n /= 10; }
+    while (i > 0) out[j++] = tmp[--i];
+    while (*unit) out[j++] = *unit++;
+    out[j] = 0;
+}
+
+static void fp_pad2(char *out, int *pos, int v) {
+    out[(*pos)++] = (char)('0' + ((v / 10) % 10));
+    out[(*pos)++] = (char)('0' + (v % 10));
+}
+
+/* format mtime like "2026-06-17 16:44" or "--" if not set */
+static void fp_format_mtime(const vfs_time_t *t, char *out) {
+    int pos = 0;
+    if (!t || t->year == 0) {
+        out[0] = '-'; out[1] = '-'; out[2] = 0;
+        return;
+    }
+    out[pos++] = (char)('0' + ((t->year / 1000) % 10));
+    out[pos++] = (char)('0' + ((t->year / 100) % 10));
+    out[pos++] = (char)('0' + ((t->year / 10) % 10));
+    out[pos++] = (char)('0' + (t->year % 10));
+    out[pos++] = '-';
+    fp_pad2(out, &pos, t->month);
+    out[pos++] = '-';
+    fp_pad2(out, &pos, t->day);
+    out[pos++] = ' ';
+    fp_pad2(out, &pos, t->hour);
+    out[pos++] = ':';
+    fp_pad2(out, &pos, t->minute);
+    out[pos] = 0;
 }
 
 /* count real entries (skipping . and ..) ------------------------- */
@@ -3177,6 +3416,7 @@ static void gui_file_preview_render_list(void) {
     char pageinfo[32];
     char buf[12];
     gui_widget_t *btn;
+    gui_widget_t *lbl;
     int y, slot, total_pages, total_items, base;
     int pos;
 
@@ -3187,7 +3427,7 @@ static void gui_file_preview_render_list(void) {
     pos = fp_str_append(header, pos, sizeof(header), "Path: ");
     pos = fp_str_append(header, pos, sizeof(header), fp_path);
     (void)pos;
-    gui_add_label(fp_window, 8, 28, 384, 16, header);
+    gui_add_label(fp_window, 8, 28, 444, 16, header);
 
     /* nav buttons */
     btn = gui_add_button(fp_window, 8, 48, 60, 20, "< Prev", fp_on_prev, 0);
@@ -3209,44 +3449,93 @@ static void gui_file_preview_render_list(void) {
     pos = fp_str_append(pageinfo, pos, sizeof(pageinfo), buf);
     pos = fp_str_append(pageinfo, pos, sizeof(pageinfo), " items)");
     (void)pos;
-    gui_add_label(fp_window, 144, 50, 240, 16, pageinfo);
+    gui_add_label(fp_window, 144, 50, 300, 16, pageinfo);
+
+    /* column header row: Name | Modified | Type | Size */
+    {
+        char head[80];
+        int hp = 0;
+        /* manually pad columns to align with item rows */
+        head[hp++] = 'N'; head[hp++] = 'a'; head[hp++] = 'm'; head[hp++] = 'e';
+        while (hp < 22) head[hp++] = ' ';
+        head[hp++] = 'M'; head[hp++] = 'o'; head[hp++] = 'd'; head[hp++] = 'i';
+        head[hp++] = 'f'; head[hp++] = 'i'; head[hp++] = 'e'; head[hp++] = 'd';
+        while (hp < 39) head[hp++] = ' ';
+        head[hp++] = 'T'; head[hp++] = 'y'; head[hp++] = 'p'; head[hp++] = 'e';
+        while (hp < 49) head[hp++] = ' ';
+        head[hp++] = 'S'; head[hp++] = 'i'; head[hp++] = 'z'; head[hp++] = 'e';
+        head[hp] = 0;
+        lbl = gui_add_label(fp_window, 8, 72, 444, 16, head);
+        if (lbl) lbl->fg_color = gui_rgb(80, 80, 90);
+    }
 
     /* entries */
-    y = 76;
+    y = 92;
     base = fp_page * GUI_FP_LIST_PER_PAGE;
     for (slot = 0; slot < GUI_FP_LIST_PER_PAGE; slot++) {
         char line[80];
-        const char *prefix;
+        char sizebuf[12];
+        char mtimebuf[24];
+        const char *type_str;
+        const char *display_name;
         int gidx = base + slot;
         int real_index;
-        dentry_t *e;
+        dentry_t *e = 0;
+        gui_icon_id_t icon;
+        uint32_t fsize = 0;
+        const vfs_time_t *mt = 0;
+        int p = 0;
+        int col;
+        int is_parent = 0;
 
         if (gidx >= total_items) break;
 
         if (!fp_is_root() && gidx == 0) {
-            prefix = "[..]   ";
-            pos = 0;
-            pos = fp_str_append(line, pos, sizeof(line), prefix);
-            pos = fp_str_append(line, pos, sizeof(line), "parent directory");
-            (void)pos;
-            gui_add_button(fp_window, 8, y, 384, 18, line,
-                           fp_on_entry, (void *)(intptr_t)slot);
-            y += 20;
-            continue;
+            is_parent = 1;
+            icon = GUI_ICON_UPDIR;
+            display_name = "..";
+            type_str = "Up";
+            mtimebuf[0] = '-'; mtimebuf[1] = '-'; mtimebuf[2] = 0;
+            sizebuf[0] = '-'; sizebuf[1] = '-'; sizebuf[2] = 0;
+        } else {
+            real_index = fp_is_root() ? gidx : (gidx - 1);
+            e = fp_get_real_entry(real_index);
+            if (!e) break;
+            icon = fp_pick_icon(e);
+            display_name = e->name;
+            type_str = fp_type_label(e);
+            if (e->inode) {
+                fsize = e->inode->size;
+                mt = &e->inode->mtime;
+            }
+            if (fp_entry_is_dir(e)) {
+                sizebuf[0] = '-'; sizebuf[1] = '-'; sizebuf[2] = 0;
+            } else {
+                fp_format_size(fsize, sizebuf);
+            }
+            fp_format_mtime(mt, mtimebuf);
         }
 
-        real_index = fp_is_root() ? gidx : (gidx - 1);
-        e = fp_get_real_entry(real_index);
-        if (!e) break;
+        /* compose: name (truncate to 20 chars) | mtime | type | size */
+        col = 0;
+        while (display_name[p] && col < 20) { line[col++] = display_name[p++]; }
+        if (display_name[p] && col >= 20) { line[col - 1] = '~'; }
+        while (col < 22) line[col++] = ' ';
+        p = 0;
+        while (mtimebuf[p] && col < 38) line[col++] = mtimebuf[p++];
+        while (col < 39) line[col++] = ' ';
+        p = 0;
+        while (type_str[p] && col < 48) line[col++] = type_str[p++];
+        while (col < 49) line[col++] = ' ';
+        p = 0;
+        while (sizebuf[p] && col < 79) line[col++] = sizebuf[p++];
+        line[col] = 0;
 
-        prefix = fp_entry_is_dir(e) ? "[DIR]  " : "[FILE] ";
-        pos = 0;
-        pos = fp_str_append(line, pos, sizeof(line), prefix);
-        pos = fp_str_append(line, pos, sizeof(line), e->name);
-        (void)pos;
-        gui_add_button(fp_window, 8, y, 384, 18, line,
-                       fp_on_entry, (void *)(intptr_t)slot);
-        y += 20;
+        btn = gui_add_button(fp_window, 8, y, 444, GUI_FP_ROW_HEIGHT - 2, line,
+                             fp_on_entry, (void *)(intptr_t)slot);
+        if (btn) gui_widget_set_icon(btn, icon);
+        y += GUI_FP_ROW_HEIGHT;
+        (void)is_parent;
     }
 }
 
@@ -3267,7 +3556,7 @@ static void gui_file_preview_render_view(void) {
     pos = fp_str_append(header, pos, sizeof(header), "File: ");
     pos = fp_str_append(header, pos, sizeof(header), fp_view_name);
     (void)pos;
-    gui_add_label(fp_window, 8, 28, 384, 16, header);
+    gui_add_label(fp_window, 8, 28, 444, 16, header);
 
     gui_add_button(fp_window, 8, 48, 60, 20, "< Back", fp_on_back, 0);
 
@@ -3275,7 +3564,7 @@ static void gui_file_preview_render_view(void) {
     fp_path_join(fp_path, fp_view_name, full, sizeof(full));
     fd = vfs_open(full, O_RDONLY, 0);
     if (fd < 0) {
-        gui_add_label(fp_window, 8, 76, 384, 16,
+        gui_add_label(fp_window, 8, 76, 444, 16,
                       "(cannot open file)");
         return;
     }
@@ -3306,7 +3595,7 @@ static void gui_file_preview_render_view(void) {
 
         if (flush) {
             line[line_pos] = 0;
-            gui_add_label(fp_window, 8, y, 384, 14, line);
+            gui_add_label(fp_window, 8, y, 444, 14, line);
             y += 16;
             lines++;
             line_pos = 0;
@@ -3337,7 +3626,7 @@ static void gui_file_preview_rebuild(void) {
         gui_destroy_window(fp_window);
         fp_window = 0;
     }
-    fp_window = gui_create_window(60, 60, 400, 360, title);
+    fp_window = gui_create_window(60, 60, 460, 360, title);
     if (!fp_window) return;
     if (fp_mode == 0) {
         gui_file_preview_render_list();
