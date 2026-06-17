@@ -3098,6 +3098,7 @@ static int gui_demo_app_entry(gui_app_t *app, void *user_data) {
 
 #define GUI_FP_MAX_PATH        256
 #define GUI_FP_MAX_NAME        64
+#define GUI_FP_MAX_ENTRIES     256
 #define GUI_FP_LIST_PER_PAGE   11
 #define GUI_FP_VIEW_MAX_LINES  13
 #define GUI_FP_VIEW_LINE_CHARS 56
@@ -3116,6 +3117,10 @@ static char          fp_path[GUI_FP_MAX_PATH];
 static int           fp_page = 0;
 static int           fp_mode = 0;            /* 0=list, 1=view */
 static char          fp_view_name[GUI_FP_MAX_NAME];
+static int           fp_sort_key  = 0;        /* 0=name, 1=mtime, 2=size */
+static int           fp_sort_desc = 0;        /* 0=asc, 1=desc */
+static int           fp_sorted_idx[GUI_FP_MAX_ENTRIES];
+static int           fp_sorted_count = 0;
 
 /* path helpers --------------------------------------------------- */
 static int fp_is_root(void) {
@@ -3350,6 +3355,85 @@ static dentry_t *fp_get_real_entry(int target) {
     }
 }
 
+/* string compare, case-insensitive ------------------------------- */
+static int fp_str_cmp_ci(const char *a, const char *b) {
+    while (*a && *b) {
+        char ca = *a, cb = *b;
+        if (ca >= 'A' && ca <= 'Z') ca = (char)(ca - 'A' + 'a');
+        if (cb >= 'A' && cb <= 'Z') cb = (char)(cb - 'A' + 'a');
+        if (ca != cb) return (int)(unsigned char)ca - (int)(unsigned char)cb;
+        a++; b++;
+    }
+    return (int)(unsigned char)*a - (int)(unsigned char)*b;
+}
+
+/* vfs_time compare: returns negative/0/positive -------------------- */
+static int fp_time_cmp(const vfs_time_t *a, const vfs_time_t *b) {
+    if (a->year   != b->year)   return (int)a->year   - (int)b->year;
+    if (a->month  != b->month)  return (int)a->month  - (int)b->month;
+    if (a->day    != b->day)    return (int)a->day    - (int)b->day;
+    if (a->hour   != b->hour)   return (int)a->hour   - (int)b->hour;
+    if (a->minute != b->minute) return (int)a->minute - (int)b->minute;
+    return (int)a->second - (int)b->second;
+}
+
+/* compare two real entries by current sort key -------------------- */
+static int fp_compare_real(int ia, int ib) {
+    dentry_t *ea = fp_get_real_entry(ia);
+    dentry_t *eb = fp_get_real_entry(ib);
+    int da, db, r = 0;
+    if (!ea || !eb) return 0;
+    /* directories always come before files */
+    da = fp_entry_is_dir(ea) ? 1 : 0;
+    db = fp_entry_is_dir(eb) ? 1 : 0;
+    if (da != db) return db - da;  /* dir(1) before file(0) */
+    switch (fp_sort_key) {
+    case 1: /* mtime */
+        if (ea->inode && eb->inode) {
+            r = fp_time_cmp(&ea->inode->mtime, &eb->inode->mtime);
+        }
+        if (r == 0) r = fp_str_cmp_ci(ea->name, eb->name);
+        break;
+    case 2: /* size */
+        if (ea->inode && eb->inode) {
+            if (ea->inode->size < eb->inode->size) r = -1;
+            else if (ea->inode->size > eb->inode->size) r = 1;
+            else r = 0;
+        }
+        if (r == 0) r = fp_str_cmp_ci(ea->name, eb->name);
+        break;
+    default: /* name */
+        r = fp_str_cmp_ci(ea->name, eb->name);
+        break;
+    }
+    return fp_sort_desc ? -r : r;
+}
+
+/* build sorted index over real entries (excludes leading "..") --- */
+static void fp_build_sorted_index(void) {
+    int n = fp_count_entries();
+    int i, j;
+    if (n > GUI_FP_MAX_ENTRIES) n = GUI_FP_MAX_ENTRIES;
+    for (i = 0; i < n; i++) fp_sorted_idx[i] = i;
+    /* simple insertion sort, stable, fine for n <= 256 */
+    for (i = 1; i < n; i++) {
+        int key = fp_sorted_idx[i];
+        j = i - 1;
+        while (j >= 0 && fp_compare_real(fp_sorted_idx[j], key) > 0) {
+            fp_sorted_idx[j + 1] = fp_sorted_idx[j];
+            j--;
+        }
+        fp_sorted_idx[j + 1] = key;
+    }
+    fp_sorted_count = n;
+}
+
+/* fetch the Nth real entry under current sort order --------------- */
+static dentry_t *fp_get_sorted_real_entry(int target) {
+    if (target < 0 || target >= fp_sorted_count) return 0;
+    return fp_get_real_entry(fp_sorted_idx[target]);
+}
+
 /* callbacks ------------------------------------------------------ */
 static void fp_on_back(gui_widget_t *w, void *ud) {
     (void)w; (void)ud;
@@ -3391,7 +3475,7 @@ static void fp_on_entry(gui_widget_t *w, void *ud) {
     }
 
     real_index = fp_is_root() ? global_index : (global_index - 1);
-    e = fp_get_real_entry(real_index);
+    e = fp_get_sorted_real_entry(real_index);
     if (!e) return;
 
     if (fp_entry_is_dir(e)) {
@@ -3410,6 +3494,20 @@ static void fp_on_entry(gui_widget_t *w, void *ud) {
     }
 }
 
+/* sort column click: same column -> toggle direction; new column -> reset to asc */
+static void fp_on_sort(gui_widget_t *w, void *ud) {
+    int key = (int)(intptr_t)ud;
+    (void)w;
+    if (key == fp_sort_key) {
+        fp_sort_desc = !fp_sort_desc;
+    } else {
+        fp_sort_key = key;
+        fp_sort_desc = 0;
+    }
+    fp_page = 0;
+    gui_file_preview_rebuild();
+}
+
 /* render list mode ---------------------------------------------- */
 static void gui_file_preview_render_list(void) {
     char header[GUI_FP_MAX_PATH + 16];
@@ -3421,6 +3519,9 @@ static void gui_file_preview_render_list(void) {
     int pos;
 
     if (!fp_window) return;
+
+    /* build sorted index for current directory */
+    fp_build_sorted_index();
 
     /* path header */
     pos = 0;
@@ -3451,22 +3552,57 @@ static void gui_file_preview_render_list(void) {
     (void)pos;
     gui_add_label(fp_window, 144, 50, 300, 16, pageinfo);
 
-    /* column header row: Name | Modified | Type | Size */
+    /* column header row: clickable sort buttons | separators */
     {
-        char head[80];
-        int hp = 0;
-        /* manually pad columns to align with item rows */
-        head[hp++] = 'N'; head[hp++] = 'a'; head[hp++] = 'm'; head[hp++] = 'e';
-        while (hp < 22) head[hp++] = ' ';
-        head[hp++] = 'M'; head[hp++] = 'o'; head[hp++] = 'd'; head[hp++] = 'i';
-        head[hp++] = 'f'; head[hp++] = 'i'; head[hp++] = 'e'; head[hp++] = 'd';
-        while (hp < 39) head[hp++] = ' ';
-        head[hp++] = 'T'; head[hp++] = 'y'; head[hp++] = 'p'; head[hp++] = 'e';
-        while (hp < 49) head[hp++] = ' ';
-        head[hp++] = 'S'; head[hp++] = 'i'; head[hp++] = 'z'; head[hp++] = 'e';
-        head[hp] = 0;
-        lbl = gui_add_label(fp_window, 8, 72, 444, 16, head);
-        if (lbl) lbl->fg_color = gui_rgb(80, 80, 90);
+        char hname[24], hmod[20], htype[12], hsize[12];
+        const char *arrow_up = " \x1e"; /* placeholder; we use ASCII below */
+        const char *arrow_dn = " v";
+        const char *arrow_no = "  ";
+        int hp;
+        const char *suf_n, *suf_m, *suf_t, *suf_s;
+        uint32_t hdr_fg = gui_rgb(80, 80, 90);
+        uint32_t hdr_bg = gui_rgb(232, 232, 240);
+        uint32_t sel_bg = gui_rgb(208, 220, 244);
+        uint32_t sep_color = gui_rgb(200, 200, 210);
+        (void)arrow_up;
+        /* ascii arrows: ^ down, v up; use ASCII to avoid font issues */
+        suf_n = (fp_sort_key == 0) ? (fp_sort_desc ? " v" : " ^") : arrow_no;
+        suf_m = (fp_sort_key == 1) ? (fp_sort_desc ? " v" : " ^") : arrow_no;
+        suf_t = arrow_no;
+        suf_s = (fp_sort_key == 2) ? (fp_sort_desc ? " v" : " ^") : arrow_no;
+
+        hp = 0;
+        hname[hp++] = 'N'; hname[hp++] = 'a'; hname[hp++] = 'm'; hname[hp++] = 'e';
+        hname[hp++] = suf_n[0]; hname[hp++] = suf_n[1]; hname[hp] = 0;
+        hp = 0;
+        hmod[hp++] = 'M'; hmod[hp++] = 'o'; hmod[hp++] = 'd'; hmod[hp++] = 'i';
+        hmod[hp++] = 'f'; hmod[hp++] = 'i'; hmod[hp++] = 'e'; hmod[hp++] = 'd';
+        hmod[hp++] = suf_m[0]; hmod[hp++] = suf_m[1]; hmod[hp] = 0;
+        hp = 0;
+        htype[hp++] = 'T'; htype[hp++] = 'y'; htype[hp++] = 'p'; htype[hp++] = 'e';
+        htype[hp++] = suf_t[0]; htype[hp++] = suf_t[1]; htype[hp] = 0;
+        hp = 0;
+        hsize[hp++] = 'S'; hsize[hp++] = 'i'; hsize[hp++] = 'z'; hsize[hp++] = 'e';
+        hsize[hp++] = suf_s[0]; hsize[hp++] = suf_s[1]; hsize[hp] = 0;
+
+        /* column header buttons (x positions matching item-row text columns) */
+        btn = gui_add_button(fp_window, 8,   70, 168, 18, hname, fp_on_sort, (void *)(intptr_t)0);
+        if (btn) { btn->bg_color = (fp_sort_key == 0) ? sel_bg : hdr_bg; btn->fg_color = hdr_fg; }
+        btn = gui_add_button(fp_window, 178, 70, 128, 18, hmod,  fp_on_sort, (void *)(intptr_t)1);
+        if (btn) { btn->bg_color = (fp_sort_key == 1) ? sel_bg : hdr_bg; btn->fg_color = hdr_fg; }
+        /* type column is not sortable: render as flat label-like panel */
+        lbl = gui_add_label(fp_window, 314, 72, 72, 16, htype);
+        if (lbl) lbl->fg_color = hdr_fg;
+        btn = gui_add_button(fp_window, 388, 70, 64, 18, hsize, fp_on_sort, (void *)(intptr_t)2);
+        if (btn) { btn->bg_color = (fp_sort_key == 2) ? sel_bg : hdr_bg; btn->fg_color = hdr_fg; }
+
+        /* horizontal separator under header (1px) */
+        gui_add_panel(fp_window, 8, 89, 444, 1, sep_color);
+
+        /* vertical column separators (1px, span header + rows area) */
+        gui_add_panel(fp_window, 176, 70, 1, 240, sep_color);
+        gui_add_panel(fp_window, 312, 70, 1, 240, sep_color);
+        gui_add_panel(fp_window, 386, 70, 1, 240, sep_color);
     }
 
     /* entries */
@@ -3499,7 +3635,7 @@ static void gui_file_preview_render_list(void) {
             sizebuf[0] = '-'; sizebuf[1] = '-'; sizebuf[2] = 0;
         } else {
             real_index = fp_is_root() ? gidx : (gidx - 1);
-            e = fp_get_real_entry(real_index);
+            e = fp_get_sorted_real_entry(real_index);
             if (!e) break;
             icon = fp_pick_icon(e);
             display_name = e->name;

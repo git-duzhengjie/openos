@@ -9,7 +9,7 @@
 
 #define GUI_MAX_WINDOWS          16u
 #define GUI_MAX_APPS             16u
-#define GUI_MAX_WIDGETS_PER_WIN  16u
+#define GUI_MAX_WIDGETS_PER_WIN  32u
 #define GUI_APP_NAME_LEN         32u
 #define GUI_TITLE_HEIGHT         22
 #define GUI_BORDER_SIZE          2
