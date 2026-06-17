@@ -3529,7 +3529,12 @@ static void gui_draw_wallpaper(void) {
         gui_raw_fill_rect(0, y, width, 1, color);
     }
 
-    (void)x;
+    for (x = -80; x < width + 120; x += 92) {
+        int base = taskbar_top - 28 - ((x * 7) & 23);
+        gui_raw_line(x, base, x + 42, horizon + 62, gui_rgb(74, 112, 132));
+        gui_raw_line(x + 42, horizon + 62, x + 96, base + 10, gui_rgb(42, 76, 98));
+    }
+
 }
 
 static int gui_has_dirty(void) {
