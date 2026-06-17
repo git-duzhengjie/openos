@@ -483,6 +483,15 @@ static gui_rect_t gui_min_rect(gui_window_t *w) {
     return r;
 }
 
+static gui_rect_t gui_resize_grip_rect(gui_window_t *w) {
+    gui_rect_t r;
+    r.w = 14;
+    r.h = 14;
+    r.x = w->rect.x + w->rect.w - r.w - 1;
+    r.y = w->rect.y + w->rect.h - r.h - 1;
+    return r;
+}
+
 static int gui_window_index(gui_window_t *window) {
     uint32_t idx;
     if (!window) return -1;
@@ -1157,6 +1166,16 @@ static void gui_draw_window(gui_window_t *w) {
         }
         gui_clear_clip_rect();
     }
+
+    if (w->flags & GUI_WINDOW_FLAG_RESIZABLE) {
+        gui_rect_t g = gui_resize_grip_rect(w);
+        uint32_t gc = w->active ? gui_rgb(190, 200, 220) : gui_rgb(110, 118, 132);
+        int k;
+        for (k = 0; k < g.w; k += 3) {
+            gui_raw_line(g.x + g.w - 1 - k, g.y + g.h - 1,
+                         g.x + g.w - 1,     g.y + g.h - 1 - k, gc);
+        }
+    }
 }
 
 void gui_event_push(gui_event_t event) {
@@ -1307,6 +1326,7 @@ void gui_minimize_window(gui_window_t *window) {
     window->visible = 1;
     window->active = 0;
     window->dragging = 0;
+    window->resizing = 0;
 
     if (window == g_gui.terminal.window) gui_terminal_set_input_focus(0);
     if (g_gui.active_window == window) g_gui.active_window = 0;
@@ -1734,6 +1754,20 @@ static void gui_handle_mouse_down(int x, int y) {
             return;
         }
 
+        if (w->flags & GUI_WINDOW_FLAG_RESIZABLE) {
+            gui_rect_t gr = gui_resize_grip_rect(w);
+            if (gui_rect_contains(&gr, x, y)) {
+                gui_set_focused_widget(0);
+                w->resizing = 1;
+                w->resize_start_mx = x;
+                w->resize_start_my = y;
+                w->resize_start_w = w->rect.w;
+                w->resize_start_h = w->rect.h;
+                g_gui.drag_window = w;
+                return;
+            }
+        }
+
         gui_rect_t tr = gui_title_rect(w);
         if (gui_rect_contains(&tr, x, y)) {
             gui_set_focused_widget(0);
@@ -1775,6 +1809,7 @@ static void gui_handle_mouse_up(int x, int y) {
     }
     if (g_gui.drag_window) {
         g_gui.drag_window->dragging = 0;
+        g_gui.drag_window->resizing = 0;
         g_gui.drag_window = 0;
     }
     if (g_gui.pressed_widget) {
@@ -1808,6 +1843,19 @@ static void gui_handle_mouse_move(int x, int y) {
         if (w->rect.y < 0) w->rect.y = 0;
         if (w->rect.x + w->rect.w > (int)g_gui.width) w->rect.x = (int)g_gui.width - w->rect.w;
         if (w->rect.y + w->rect.h > (int)g_gui.height - GUI_TASKBAR_HEIGHT) w->rect.y = (int)g_gui.height - GUI_TASKBAR_HEIGHT - w->rect.h;
+        gui_invalidate_all();
+    } else if (g_gui.drag_window && g_gui.drag_window->resizing) {
+        gui_window_t *w = g_gui.drag_window;
+        int nw = w->resize_start_w + (x - w->resize_start_mx);
+        int nh = w->resize_start_h + (y - w->resize_start_my);
+        int max_w = (int)g_gui.width - w->rect.x;
+        int max_h = (int)g_gui.height - GUI_TASKBAR_HEIGHT - w->rect.y;
+        if (nw < 160) nw = 160;
+        if (nh < 100) nh = 100;
+        if (nw > max_w) nw = max_w;
+        if (nh > max_h) nh = max_h;
+        w->rect.w = nw;
+        w->rect.h = nh;
         gui_invalidate_all();
     } else {
         gui_invalidate_rect(x - 18, y - 18, 36, 36);
@@ -2483,7 +2531,7 @@ gui_window_t *gui_create_window(int x, int y, int w, int h, const char *title) {
     win->rect.x = x; win->rect.y = y; win->rect.w = w; win->rect.h = h;
     gui_copy_text(win->title, title ? title : "Window", sizeof(win->title));
     win->bg_color = g_gui.colors.window_bg;
-    win->flags = GUI_WINDOW_FLAG_CLOSABLE | GUI_WINDOW_FLAG_MINIMIZABLE;
+    win->flags = GUI_WINDOW_FLAG_CLOSABLE | GUI_WINDOW_FLAG_MINIMIZABLE | GUI_WINDOW_FLAG_RESIZABLE;
     win->visible = 1;
     owner = g_gui.launching_app;
     if (owner && owner->used) {

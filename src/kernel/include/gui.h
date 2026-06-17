@@ -36,6 +36,7 @@
 #define GUI_WINDOW_FLAG_MINIMIZED 0x00000002u
 #define GUI_WINDOW_FLAG_TERMINAL  0x00000004u
 #define GUI_WINDOW_FLAG_MINIMIZABLE 0x00000008u
+#define GUI_WINDOW_FLAG_RESIZABLE 0x00000010u
 
 #define GUI_KEY_BACKSPACE  8
 #define GUI_KEY_TAB        9
@@ -156,6 +157,11 @@ struct gui_window {
     int dragging;
     int drag_offset_x;
     int drag_offset_y;
+    int resizing;
+    int resize_start_mx;
+    int resize_start_my;
+    int resize_start_w;
+    int resize_start_h;
     gui_app_t *owner_app;
     void (*on_close)(struct gui_window *win, void *user_data);
     void *close_user_data;
