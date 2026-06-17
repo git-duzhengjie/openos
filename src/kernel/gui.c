@@ -2815,15 +2815,6 @@ static void gui_draw_wallpaper(void) {
         }
     }
 
-    {
-        int sun_x = width * 78 / 100;
-        int sun_y = horizon - 80;
-        int r;
-        for (r = 46; r > 0; r -= 8) {
-            uint32_t color = gui_mix_rgb(gui_rgb(248, 198, 128), gui_rgb(255, 238, 185), (uint32_t)(r * 4));
-            gui_raw_fill_rect(sun_x - r, sun_y - r / 2, r * 2, r, color);
-        }
-    }
 
     for (y = horizon - 112; y < taskbar_top; y++) {
         int left_peak = horizon - 72 - y;
