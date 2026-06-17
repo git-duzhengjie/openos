@@ -109,6 +109,22 @@ typedef struct gui_event {
     gui_widget_t *widget;
 } gui_event_t;
 
+typedef enum gui_icon_id {
+    GUI_ICON_NONE = 0,
+    GUI_ICON_FOLDER,
+    GUI_ICON_UPDIR,
+    GUI_ICON_FILE_GENERIC,
+    GUI_ICON_FILE_TEXT,
+    GUI_ICON_FILE_CODE,
+    GUI_ICON_FILE_CONFIG,
+    GUI_ICON_FILE_SHELL,
+    GUI_ICON_FILE_EXEC,
+    GUI_ICON_FILE_IMAGE,
+    GUI_ICON_FILE_ARCHIVE,
+    GUI_ICON_FILE_MARKUP,
+    GUI_ICON_COUNT
+} gui_icon_id_t;
+
 struct gui_widget {
     uint32_t id;
     gui_widget_type_t type;
@@ -125,6 +141,7 @@ struct gui_widget {
     int hovered;
     int focused;
     uint32_t cursor;
+    gui_icon_id_t icon;
 };
 
 struct gui_window {
@@ -351,6 +368,7 @@ void gui_widget_set_text(gui_widget_t *widget, const char *text);
 const char *gui_widget_get_text(const gui_widget_t *widget);
 void gui_widget_set_colors(gui_widget_t *widget, uint32_t bg_color, uint32_t fg_color);
 void gui_widget_set_on_click(gui_widget_t *widget, gui_widget_callback_t cb, void *user_data);
+void gui_widget_set_icon(gui_widget_t *widget, gui_icon_id_t icon);
 void gui_widget_focus(gui_widget_t *widget);
 
 void gui_event_push(gui_event_t event);

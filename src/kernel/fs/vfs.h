@@ -107,6 +107,17 @@ typedef struct file_ops {
     poll_fn_t     poll;
 } file_ops_t;
 
+/* ---- 文件时间戳 (UTC, 经 RTC 读取) ---- */
+typedef struct vfs_time {
+    uint16_t year;   /* 公元年, 例如 2026, 0=未设置 */
+    uint8_t  month;  /* 1-12 */
+    uint8_t  day;    /* 1-31 */
+    uint8_t  hour;   /* 0-23 */
+    uint8_t  minute; /* 0-59 */
+    uint8_t  second; /* 0-59 */
+    uint8_t  _pad;
+} vfs_time_t;
+
 /* ---- inode ---- */
 typedef struct inode {
     uint32_t ino;           /* inode 号 */
@@ -120,7 +131,16 @@ typedef struct inode {
     void     *fs_data;      /* 文件系统私有数据 */
     inode_ops_t *iops;      /* inode 操作 */
     file_ops_t *ops;        /* 文件操作 */
+    vfs_time_t ctime;       /* 创建时间 */
+    vfs_time_t mtime;       /* 最后修改时间 */
+    vfs_time_t atime;       /* 最后访问时间 */
 } inode_t;
+
+/* 取当前 wall-clock 时间填入 *out (返回 0 成功, <0 RTC 不可用) */
+int vfs_now(vfs_time_t *out);
+/* 标记 mtime/atime 为当前时间 (NULL 安全) */
+void vfs_touch_mtime(inode_t *ip);
+void vfs_touch_atime(inode_t *ip);
 
 /* ---- 目录项 ---- */
 typedef struct dentry {

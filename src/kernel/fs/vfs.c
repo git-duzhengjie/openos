@@ -13,6 +13,7 @@
 #include "blockdev.h"
 #include "process.h"
 #include "input_buffer.h"
+#include "rtc.h"
 
 #ifndef NULL
 #define NULL ((void*)0)
@@ -159,6 +160,42 @@ static void vfs_repair_memory_inode(inode_t *ip, inode_t *parent) {
  * inode / dentry / mount 分配
  * ============================================================ */
 
+/* ============================================================
+ * wall-clock 时间辅助 (依赖 CMOS RTC)
+ * ============================================================ */
+
+int vfs_now(vfs_time_t *out) {
+    rtc_time_t rt;
+    if (!out) return -1;
+    if (rtc_read_time(&rt) != 0) {
+        /* RTC 不可用, 填 0 表示未知 */
+        out->year = 0; out->month = 0; out->day = 0;
+        out->hour = 0; out->minute = 0; out->second = 0;
+        out->_pad = 0;
+        return -1;
+    }
+    out->year   = rt.year;
+    out->month  = rt.month;
+    out->day    = rt.day;
+    out->hour   = rt.hour;
+    out->minute = rt.minute;
+    out->second = rt.second;
+    out->_pad   = 0;
+    return 0;
+}
+
+void vfs_touch_mtime(inode_t *ip) {
+    if (!ip) return;
+    vfs_now(&ip->mtime);
+    /* mtime 变动也算 atime 变动 */
+    ip->atime = ip->mtime;
+}
+
+void vfs_touch_atime(inode_t *ip) {
+    if (!ip) return;
+    vfs_now(&ip->atime);
+}
+
 static inode_t *alloc_inode(void) {
     for (int i = 0; i < MAX_INODES; i++) {
         if (inode_pool[i].ref_count == 0) {
@@ -167,6 +204,10 @@ static inode_t *alloc_inode(void) {
             ip->ino = next_ino++;
             ip->ref_count = 1;
             ip->nlinks = 1;
+            /* 新 inode 默认以当前时间为 ctime/mtime/atime */
+            vfs_now(&ip->ctime);
+            ip->mtime = ip->ctime;
+            ip->atime = ip->ctime;
             return ip;
         }
     }
@@ -1144,7 +1185,9 @@ int vfs_read(int fd, void *buf, uint32_t count) {
     if (vfs_is_dir(f->inode)) return -1;
     if (vfs_can_read(f->inode) < 0) return -1;
     if (!f->ops || !f->ops->read) return -1;
-    return f->ops->read(f, buf, count);
+    int n = f->ops->read(f, buf, count);
+    if (n > 0) vfs_touch_atime(f->inode);
+    return n;
 }
 
 int vfs_write(int fd, const void *buf, uint32_t count) {
@@ -1209,6 +1252,8 @@ int vfs_write(int fd, const void *buf, uint32_t count) {
         serial_write(" write=");
         serial_write_hex((uint32_t)((f->ops && f->ops->write) ? f->ops->write : 0));
         serial_write("\n");
+    } else if (ret > 0) {
+        vfs_touch_mtime(f->inode);
     }
     return ret;
 }
@@ -1268,14 +1313,18 @@ int vfs_truncate(const char *path, uint32_t size) {
     if (!vfs_is_file(d->inode)) return -1;
     if (vfs_can_write(d->inode) < 0) return -1;
     if (!d->inode->ops || !d->inode->ops->truncate) return -1;
-    return d->inode->ops->truncate(d->inode, size);
+    int rc = d->inode->ops->truncate(d->inode, size);
+    if (rc >= 0) vfs_touch_mtime(d->inode);
+    return rc;
 }
 
 static int vfs_try_truncate_inode(inode_t *inode, uint32_t size) {
     if (!inode || !vfs_is_file(inode)) return -1;
     if (vfs_can_write(inode) < 0) return -1;
     if (!inode->ops || !inode->ops->truncate) return -1;
-    return inode->ops->truncate(inode, size);
+    int rc = inode->ops->truncate(inode, size);
+    if (rc >= 0) vfs_touch_mtime(inode);
+    return rc;
 }
 
 /* ============================================================

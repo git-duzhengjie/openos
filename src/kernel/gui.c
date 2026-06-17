@@ -2404,6 +2404,11 @@ void gui_widget_set_on_click(gui_widget_t *widget, gui_widget_callback_t cb, voi
     widget->user_data = user_data;
 }
 
+void gui_widget_set_icon(gui_widget_t *widget, gui_icon_id_t icon) {
+    if (!widget) return;
+    widget->icon = icon;
+}
+
 void gui_widget_focus(gui_widget_t *widget) {
     gui_set_focused_widget(widget);
 }
