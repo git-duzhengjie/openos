@@ -16,6 +16,7 @@
 #include "input_buffer.h"
 #include "fs/vfs.h"
 extern int spawn_user_process(const char *path, char *const argv[]);
+extern uint32_t sched_time_ms(void);
 
 static void gui_desktop_run_action(uint32_t action);
 static void gui_handle_mouse_right_down(int x, int y);
@@ -3379,6 +3380,35 @@ static void gui_draw_taskbar(void) {
         gui_draw_taskbar_window_icon(button, (w->flags & GUI_WINDOW_FLAG_MINIMIZED) != 0);
         bx += gui_taskbar_button_width(w) + 6;
     }
+
+    /* clock display at right side of taskbar */
+    {
+        uint32_t ms = sched_time_ms();
+        uint32_t total_sec = ms / 1000u;
+        uint32_t hours = (total_sec / 3600u) % 24u;
+        uint32_t mins  = (total_sec / 60u) % 60u;
+        uint32_t secs  = total_sec % 60u;
+        char clk[16];
+        int p = 0;
+        clk[p++] = (char)('0' + (hours / 10) % 10);
+        clk[p++] = (char)('0' + hours % 10);
+        clk[p++] = ':';
+        clk[p++] = (char)('0' + (mins / 10) % 10);
+        clk[p++] = (char)('0' + mins % 10);
+        clk[p++] = ':';
+        clk[p++] = (char)('0' + (secs / 10) % 10);
+        clk[p++] = (char)('0' + secs % 10);
+        clk[p] = 0;
+        {
+            int cw = 8 * 8;
+            int cx = layout.bar.x + layout.bar.w - cw - 12;
+            int cy = layout.bar.y + (layout.bar.h - 12) / 2;
+            gui_raw_fill_rect(cx - 6, cy - 3, cw + 12, 18, gui_rgb(36, 44, 60));
+            gui_raw_line(cx - 6, cy - 3, cx + cw + 5, cy - 3, gui_rgb(80, 92, 120));
+            gui_raw_line(cx - 6, cy + 14, cx + cw + 5, cy + 14, gui_rgb(12, 16, 24));
+            gui_draw_text(cx, cy, clk, gui_rgb(220, 240, 255));
+        }
+    }
 }
 
 static void gui_draw_wallpaper_day(int width, int taskbar_top) {
@@ -3579,11 +3609,23 @@ void gui_render(void) {
 }
 
 void gui_poll(void) {
+    static uint32_t clk_last_sec = 0xFFFFFFFFu;
+    uint32_t now_sec;
     if (!g_gui.initialized) return;
     gui_poll_mouse();
     gui_process_events();
     gui_terminal_drain_output_queue();
     gui_terminal_tick_cursor();
+    /* clock tick: invalidate taskbar clock area once per second */
+    now_sec = sched_time_ms() / 1000u;
+    if (now_sec != clk_last_sec) {
+        clk_last_sec = now_sec;
+        if (g_gui.desktop_taskbar_rect.w > 0 && g_gui.desktop_taskbar_rect.h > 0) {
+            gui_rect_t r = g_gui.desktop_taskbar_rect;
+            int cw = 8 * 8 + 12;
+            gui_invalidate_rect(r.x + r.w - cw - 12, r.y, cw + 12, r.h);
+        }
+    }
     if (gui_has_dirty()) gui_render();
 }
 
