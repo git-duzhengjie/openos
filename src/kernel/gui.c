@@ -2599,20 +2599,13 @@ static void gui_terminal_invalidate_cursor(void) {
 }
 
 static void gui_draw_taskbar_start_icon(gui_rect_t rect) {
-    int x = rect.x + (rect.w - 22) / 2;
-    int y = rect.y + (rect.h - 22) / 2;
-    uint32_t border = gui_rgb(205, 225, 255);
-    uint32_t shadow = gui_rgb(60, 76, 110);
+    int x = rect.x + (rect.w - 17) / 2;
+    int y = rect.y + (rect.h - 17) / 2;
 
-    gui_raw_fill_rect(x, y, 22, 22, gui_rgb(12, 18, 30));
-    gui_raw_line(x, y, x + 21, y, border);
-    gui_raw_line(x, y, x, y + 21, border);
-    gui_raw_line(x + 21, y, x + 21, y + 21, shadow);
-    gui_raw_line(x, y + 21, x + 21, y + 21, shadow);
-    gui_raw_fill_rect(x + 5, y + 5, 5, 5, gui_rgb(86, 160, 255));
-    gui_raw_fill_rect(x + 12, y + 5, 5, 5, gui_rgb(120, 255, 160));
-    gui_raw_fill_rect(x + 5, y + 12, 5, 5, gui_rgb(255, 196, 86));
-    gui_raw_fill_rect(x + 12, y + 12, 5, 5, gui_rgb(255, 110, 130));
+    gui_raw_fill_rect(x, y, 7, 7, gui_rgb(86, 160, 255));
+    gui_raw_fill_rect(x + 10, y, 7, 7, gui_rgb(120, 255, 160));
+    gui_raw_fill_rect(x, y + 10, 7, 7, gui_rgb(255, 196, 86));
+    gui_raw_fill_rect(x + 10, y + 10, 7, 7, gui_rgb(255, 110, 130));
 }
 
 static void gui_draw_taskbar_terminal_icon(gui_rect_t rect) {
@@ -2669,11 +2662,6 @@ static void gui_draw_taskbar(void) {
     gui_raw_line(layout.bar.x, layout.bar.y + layout.bar.h - 1, layout.bar.x + layout.bar.w - 1, layout.bar.y + layout.bar.h - 1, gui_rgb(10, 13, 20));
 
     g_gui.desktop_start_button_rect = layout.start_button;
-    gui_raw_fill_rect(layout.start_button.x, layout.start_button.y, layout.start_button.w, layout.start_button.h, gui_rgb(40, 48, 68));
-    gui_raw_line(layout.start_button.x, layout.start_button.y, layout.start_button.x + layout.start_button.w - 1, layout.start_button.y, gui_rgb(118, 138, 176));
-    gui_raw_line(layout.start_button.x, layout.start_button.y, layout.start_button.x, layout.start_button.y + layout.start_button.h - 1, gui_rgb(92, 108, 144));
-    gui_raw_line(layout.start_button.x + layout.start_button.w - 1, layout.start_button.y, layout.start_button.x + layout.start_button.w - 1, layout.start_button.y + layout.start_button.h - 1, gui_rgb(8, 10, 16));
-    gui_raw_line(layout.start_button.x, layout.start_button.y + layout.start_button.h - 1, layout.start_button.x + layout.start_button.w - 1, layout.start_button.y + layout.start_button.h - 1, gui_rgb(8, 10, 16));
     gui_draw_taskbar_start_icon(layout.start_button);
 
     gui_draw_taskbar_terminal_icon(layout.terminal_button);
