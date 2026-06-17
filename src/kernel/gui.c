@@ -3823,6 +3823,15 @@ static int           fp_sort_desc = 0;        /* 0=asc, 1=desc */
 static int           fp_sorted_idx[GUI_FP_MAX_ENTRIES];
 static int           fp_sorted_count = 0;
 
+/* Prompt overlay: 0=hidden, 1=new file, 2=new dir, 3=rename, 4=confirm delete */
+static int           fp_prompt_mode = 0;
+static char          fp_prompt_buf[GUI_FP_MAX_NAME];
+static int           fp_prompt_len = 0;
+static char          fp_prompt_target[GUI_FP_MAX_NAME]; /* original name for rename / delete */
+static char          fp_status[80] = {0};
+static int           fp_selected = -1;             /* index within fp_sorted_idx of selected row */
+static gui_widget_t *fp_prompt_textbox = 0;        /* prompt input textbox */
+
 /* path helpers --------------------------------------------------- */
 static int fp_is_root(void) {
     return fp_path[0] == '/' && fp_path[1] == 0;
@@ -4252,6 +4261,9 @@ static void fp_on_entry(gui_widget_t *w, void *ud) {
     dentry_t *e;
     (void)w;
 
+    /* remember selection for toolbar Rename/Delete */
+    fp_selected = slot;
+
     global_index = fp_page * GUI_FP_LIST_PER_PAGE + slot;
 
     /* slot 0 of page 0 in non-root is the ".." shortcut */
@@ -4298,6 +4310,203 @@ static void fp_on_sort(gui_widget_t *w, void *ud) {
     gui_file_preview_rebuild();
 }
 
+/* ---- File operation helpers ---------------------------------- */
+static void fp_status_set(const char *s) {
+    int i;
+    for (i = 0; i < 79 && s[i]; i++) fp_status[i] = s[i];
+    fp_status[i] = 0;
+}
+
+static void fp_join_full(const char *name, char *out, int out_sz) {
+    int i = 0, j;
+    while (i < out_sz - 1 && fp_path[i]) { out[i] = fp_path[i]; i++; }
+    if (i > 0 && out[i-1] != '/' && i < out_sz - 1) out[i++] = '/';
+    for (j = 0; name[j] && i < out_sz - 1; j++) out[i++] = name[j];
+    out[i] = 0;
+}
+
+static int fp_name_exists(const char *name) {
+    dentry_t *e;
+    int i = 0;
+    if (!name[0]) return 1;
+    while ((e = vfs_readdir(fp_path, i++)) != 0) {
+        const char *n = e->name;
+        int k;
+        for (k = 0; n[k] && name[k] && n[k] == name[k]; k++) {}
+        if (n[k] == 0 && name[k] == 0) return 1;
+    }
+    return 0;
+}
+
+static int fp_name_is_valid(const char *name) {
+    int i;
+    if (!name[0]) return 0;
+    if (name[0] == '.' && (name[1] == 0 || (name[1] == '.' && name[2] == 0))) return 0;
+    for (i = 0; name[i]; i++) {
+        char c = name[i];
+        if (c == '/' || c == 0 || (unsigned char)c < 32) return 0;
+    }
+    return 1;
+}
+
+static void fp_prompt_open(int mode, const char *initial) {
+    int i;
+    fp_prompt_mode = mode;
+    fp_prompt_len = 0;
+    fp_prompt_buf[0] = 0;
+    fp_prompt_target[0] = 0;
+    if (initial) {
+        for (i = 0; i < GUI_FP_MAX_NAME - 1 && initial[i]; i++) {
+            fp_prompt_buf[i] = initial[i];
+            fp_prompt_target[i] = initial[i];
+        }
+        fp_prompt_buf[i] = 0;
+        fp_prompt_target[i] = 0;
+        fp_prompt_len = i;
+    }
+    gui_file_preview_rebuild();
+}
+
+static void fp_prompt_close(void) {
+    fp_prompt_mode = 0;
+    fp_prompt_len = 0;
+    fp_prompt_buf[0] = 0;
+    fp_prompt_target[0] = 0;
+    gui_file_preview_rebuild();
+}
+
+static void fp_action_new_file(const char *name) {
+    char full[GUI_FP_MAX_PATH];
+    int fd;
+    if (!fp_name_is_valid(name)) { fp_status_set("Invalid name"); return; }
+    if (fp_name_exists(name))    { fp_status_set("Already exists"); return; }
+    fp_join_full(name, full, sizeof(full));
+    fd = vfs_open(full, O_CREAT | O_WRONLY | O_TRUNC, 0644);
+    if (fd < 0) { fp_status_set("Create failed"); return; }
+    vfs_close(fd);
+    fp_status_set("File created");
+    gui_notify("File created");
+}
+
+static void fp_action_new_dir(const char *name) {
+    char full[GUI_FP_MAX_PATH];
+    if (!fp_name_is_valid(name)) { fp_status_set("Invalid name"); return; }
+    if (fp_name_exists(name))    { fp_status_set("Already exists"); return; }
+    fp_join_full(name, full, sizeof(full));
+    if (vfs_mkdir(full, 0755) < 0) { fp_status_set("Mkdir failed"); return; }
+    fp_status_set("Directory created");
+    gui_notify("Directory created");
+}
+
+static void fp_action_rename(const char *old_name, const char *new_name) {
+    char src[GUI_FP_MAX_PATH];
+    char dst[GUI_FP_MAX_PATH];
+    if (!fp_name_is_valid(new_name)) { fp_status_set("Invalid name"); return; }
+    if (fp_name_exists(new_name))    { fp_status_set("Target exists"); return; }
+    fp_join_full(old_name, src, sizeof(src));
+    fp_join_full(new_name, dst, sizeof(dst));
+    if (vfs_rename(src, dst) < 0) { fp_status_set("Rename failed"); return; }
+    fp_status_set("Renamed");
+    gui_notify("Renamed");
+}
+
+static void fp_action_delete(const char *name, int is_dir) {
+    char full[GUI_FP_MAX_PATH];
+    int r;
+    fp_join_full(name, full, sizeof(full));
+    r = is_dir ? vfs_rmdir(full) : vfs_unlink(full);
+    if (r < 0) { fp_status_set(is_dir ? "Rmdir failed" : "Delete failed"); return; }
+    fp_status_set("Deleted");
+    gui_notify("Deleted");
+}
+
+/* Detect if fp_prompt_target refers to a directory in current dir */
+static int fp_target_is_dir(void) {
+    int i;
+    dentry_t *e;
+    for (i = 0; ; i++) {
+        e = vfs_readdir(fp_path, i);
+        if (!e) break;
+        if (e->name[0]) {
+            const char *a = e->name;
+            const char *b = fp_prompt_target;
+            int k;
+            for (k = 0; a[k] && b[k] && a[k] == b[k]; k++) {}
+            if (a[k] == 0 && b[k] == 0) {
+                return (e->inode && (e->inode->mode & FS_DIR)) ? 1 : 0;
+            }
+        }
+    }
+    return 0;
+}
+
+static void fp_prompt_submit(void) {
+    int mode = fp_prompt_mode;
+    /* sync textbox content -> fp_prompt_buf */
+    if (fp_prompt_textbox && (mode == 1 || mode == 2 || mode == 3)) {
+        int i;
+        for (i = 0; i < (int)sizeof(fp_prompt_buf) - 1 && fp_prompt_textbox->text[i]; i++) {
+            fp_prompt_buf[i] = fp_prompt_textbox->text[i];
+        }
+        fp_prompt_buf[i] = 0;
+        fp_prompt_len = i;
+    }
+    if (mode == 4) {
+        /* delete confirm: target already set */
+        if (fp_prompt_target[0]) fp_action_delete(fp_prompt_target, fp_target_is_dir());
+        fp_prompt_close();
+        return;
+    }
+    if (!fp_prompt_buf[0]) { fp_prompt_close(); return; }
+    if      (mode == 1) fp_action_new_file(fp_prompt_buf);
+    else if (mode == 2) fp_action_new_dir(fp_prompt_buf);
+    else if (mode == 3) fp_action_rename(fp_prompt_target, fp_prompt_buf);
+    fp_prompt_close();
+}
+
+/* Toolbar callbacks ---------------------------------------------- */
+static void fp_get_selected_name(char *out, int out_sz) {
+    int gidx, real_index;
+    dentry_t *e;
+    int i;
+    out[0] = 0;
+    if (fp_selected < 0) return;
+    gidx = fp_page * GUI_FP_LIST_PER_PAGE + fp_selected;
+    if (gidx >= fp_total_items()) return;
+    if (!fp_is_root() && gidx == 0) return; /* '..' not selectable */
+    real_index = fp_is_root() ? gidx : (gidx - 1);
+    e = fp_get_sorted_real_entry(real_index);
+    if (!e || !e->name[0]) return;
+    for (i = 0; e->name[i] && i < out_sz - 1; i++) out[i] = e->name[i];
+    out[i] = 0;
+}
+
+static void fp_on_tb_new_file(gui_widget_t *w, void *ud) { (void)w; (void)ud; fp_prompt_open(1, ""); gui_file_preview_rebuild(); }
+static void fp_on_tb_new_dir(gui_widget_t *w, void *ud)  { (void)w; (void)ud; fp_prompt_open(2, ""); gui_file_preview_rebuild(); }
+static void fp_on_tb_rename(gui_widget_t *w, void *ud) {
+    char name[GUI_FP_MAX_NAME];
+    (void)w; (void)ud;
+    fp_get_selected_name(name, sizeof(name));
+    fp_prompt_open(3, name);
+    if (!name[0]) fp_status_set("Enter target name in box");
+    gui_file_preview_rebuild();
+}
+static void fp_on_tb_delete(gui_widget_t *w, void *ud) {
+    char name[GUI_FP_MAX_NAME];
+    (void)w; (void)ud;
+    fp_get_selected_name(name, sizeof(name));
+    if (!name[0]) { fp_status_set("Click a file first to select"); gui_file_preview_rebuild(); return; }
+    fp_prompt_open(4, name);
+    gui_file_preview_rebuild();
+}
+static void fp_on_tb_refresh(gui_widget_t *w, void *ud) {
+    (void)w; (void)ud;
+    fp_status_set("Refreshed");
+    gui_file_preview_rebuild();
+}
+static void fp_on_prompt_ok(gui_widget_t *w, void *ud)     { (void)w; (void)ud; fp_prompt_submit(); gui_file_preview_rebuild(); }
+static void fp_on_prompt_cancel(gui_widget_t *w, void *ud) { (void)w; (void)ud; fp_prompt_close(); gui_file_preview_rebuild(); }
+
 /* render list mode ---------------------------------------------- */
 static void gui_file_preview_render_list(void) {
     char header[GUI_FP_MAX_PATH + 16];
@@ -4341,6 +4550,52 @@ static void gui_file_preview_render_list(void) {
     pos = fp_str_append(pageinfo, pos, sizeof(pageinfo), " items)");
     (void)pos;
     gui_add_label(fp_window, 144, 50, 300, 16, pageinfo);
+
+    /* toolbar: New File | New Dir | Rename | Delete | Refresh */
+    btn = gui_add_button(fp_window, 8,   320, 76, 20, "New File", fp_on_tb_new_file, 0);
+    if (btn) { btn->bg_color = gui_rgb(220, 235, 220); }
+    btn = gui_add_button(fp_window, 88,  320, 72, 20, "New Dir",  fp_on_tb_new_dir, 0);
+    if (btn) { btn->bg_color = gui_rgb(220, 235, 220); }
+    btn = gui_add_button(fp_window, 164, 320, 68, 20, "Rename",   fp_on_tb_rename, 0);
+    btn = gui_add_button(fp_window, 236, 320, 68, 20, "Delete",   fp_on_tb_delete, 0);
+    if (btn) { btn->bg_color = gui_rgb(245, 220, 220); }
+    btn = gui_add_button(fp_window, 308, 320, 68, 20, "Refresh",  fp_on_tb_refresh, 0);
+
+    /* status / prompt area at the very bottom */
+    if (fp_prompt_mode == 0) {
+        if (fp_status[0]) {
+            lbl = gui_add_label(fp_window, 8, 348, 444, 16, fp_status);
+            if (lbl) lbl->fg_color = gui_rgb(80, 80, 120);
+        }
+    } else {
+        char promptlabel[80];
+        const char *title_s = "";
+        int pp = 0;
+        if      (fp_prompt_mode == 1) title_s = "New file name:";
+        else if (fp_prompt_mode == 2) title_s = "New directory name:";
+        else if (fp_prompt_mode == 3) title_s = "Rename to:";
+        else if (fp_prompt_mode == 4) title_s = "Delete (OK to confirm):";
+        while (title_s[pp] && pp < 30) { promptlabel[pp] = title_s[pp]; pp++; }
+        promptlabel[pp] = 0;
+        lbl = gui_add_label(fp_window, 8, 348, 160, 18, promptlabel);
+        if (lbl) lbl->fg_color = gui_rgb(40, 40, 100);
+        if (fp_prompt_mode == 4) {
+            /* delete confirm: show name as readonly label */
+            lbl = gui_add_label(fp_window, 170, 348, 160, 18, fp_prompt_target);
+            if (lbl) lbl->fg_color = gui_rgb(180, 60, 60);
+        } else {
+            fp_prompt_textbox = gui_add_textbox(fp_window, 170, 346, 160, 20, fp_prompt_buf);
+            if (fp_prompt_textbox) {
+                /* sync displayed text into buf via length */
+                fp_prompt_len = 0;
+                while (fp_prompt_buf[fp_prompt_len]) fp_prompt_len++;
+            }
+        }
+        btn = gui_add_button(fp_window, 336, 346, 52, 20, "OK",     fp_on_prompt_ok, 0);
+        if (btn) btn->bg_color = gui_rgb(200, 230, 200);
+        btn = gui_add_button(fp_window, 392, 346, 60, 20, "Cancel", fp_on_prompt_cancel, 0);
+        if (btn) btn->bg_color = gui_rgb(240, 220, 220);
+    }
 
     /* column header row: clickable sort buttons | separators */
     {
@@ -4681,7 +4936,7 @@ static void gui_file_preview_rebuild(void) {
         gui_destroy_window(fp_window);
         fp_window = 0;
     }
-    fp_window = gui_create_window(60, 60, 460, 360, title);
+    fp_window = gui_create_window(60, 60, 460, 400, title);
     if (!fp_window) return;
     gui_window_set_on_close(fp_window, fp_on_window_close, 0);
     if (fp_mode == 0) {
