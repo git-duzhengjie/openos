@@ -43,7 +43,7 @@ static void usage(void)
 {
     printf("usage:\n");
     printf("  ifconfig\n");
-    printf("  ifconfig <dev> up|down\n");
+    printf("  ifconfig <dev> up|down|dhcp|renew|release\n");
     printf("  ifconfig <ip> [netmask <mask>] [gateway <gw>]\n");
 }
 
@@ -75,6 +75,12 @@ static int handle_dev_control(const char *name, const char *op)
         ctl = NETDEV_CTL_SET_UP;
     } else if (openos_strcmp(op, "down") == 0) {
         ctl = NETDEV_CTL_SET_DOWN;
+    } else if (openos_strcmp(op, "dhcp") == 0) {
+        ctl = NETDEV_CTL_DHCP_START;
+    } else if (openos_strcmp(op, "renew") == 0) {
+        ctl = NETDEV_CTL_DHCP_RENEW;
+    } else if (openos_strcmp(op, "release") == 0) {
+        ctl = NETDEV_CTL_DHCP_RELEASE;
     } else {
         usage();
         return 1;
@@ -101,7 +107,11 @@ int main(int argc, char **argv)
     }
 
     if (argc == 3 &&
-        (openos_strcmp(argv[2], "up") == 0 || openos_strcmp(argv[2], "down") == 0)) {
+        (openos_strcmp(argv[2], "up") == 0 ||
+         openos_strcmp(argv[2], "down") == 0 ||
+         openos_strcmp(argv[2], "dhcp") == 0 ||
+         openos_strcmp(argv[2], "renew") == 0 ||
+         openos_strcmp(argv[2], "release") == 0)) {
         if (handle_dev_control(argv[1], argv[2]) != 0)
             return 1;
         if (netinfo(&info) < 0) {

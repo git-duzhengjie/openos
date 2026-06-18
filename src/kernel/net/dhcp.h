@@ -16,6 +16,8 @@ typedef enum dhcp_state {
 
 void dhcp_init(void);
 int dhcp_start(void);
+int dhcp_renew(void);
+int dhcp_release(void);
 void dhcp_print_info(void);
 uint32_t dhcp_get_dns_server(void);
 dhcp_state_t dhcp_get_state(void);

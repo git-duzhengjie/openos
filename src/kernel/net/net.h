@@ -108,8 +108,11 @@ typedef struct net_device_info {
 #define NET_DEVICE_FLAG_DEFAULT 0x00000010u
 #define NET_DEVICE_FLAG_STATIC  0x00000020u
 
-#define NETDEV_CTL_SET_DOWN 0u
-#define NETDEV_CTL_SET_UP   1u
+#define NETDEV_CTL_SET_DOWN    0u
+#define NETDEV_CTL_SET_UP      1u
+#define NETDEV_CTL_DHCP_START  2u
+#define NETDEV_CTL_DHCP_RENEW  3u
+#define NETDEV_CTL_DHCP_RELEASE 4u
 
 typedef void (*udp_recv_func_t)(uint32_t src_ip, uint16_t src_port,
                                 uint16_t dst_port, const uint8_t *data,

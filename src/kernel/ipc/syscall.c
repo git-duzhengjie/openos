@@ -18,6 +18,7 @@
 #include "../include/ai.h"
 #include "../net/socket.h"
 #include "../net/net.h"
+#include "../net/dhcp.h"
 #include <stddef.h>  /* NULL */
 
 /* VGA */
@@ -1952,6 +1953,12 @@ uint32_t syscall_dispatch(uint32_t num,
                 return (uint32_t)net_set_device_admin_up(dev_name, 1);
             if ((uint32_t)b == NETDEV_CTL_SET_DOWN)
                 return (uint32_t)net_set_device_admin_up(dev_name, 0);
+            if ((uint32_t)b == NETDEV_CTL_DHCP_START)
+                return (uint32_t)dhcp_start();
+            if ((uint32_t)b == NETDEV_CTL_DHCP_RENEW)
+                return (uint32_t)dhcp_renew();
+            if ((uint32_t)b == NETDEV_CTL_DHCP_RELEASE)
+                return (uint32_t)dhcp_release();
             return (uint32_t)-1;
         }
 

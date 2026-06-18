@@ -253,7 +253,28 @@ int dhcp_start(void) {
     dev->ip = 0;
     dev->netmask = 0;
     dev->gateway = 0;
+    dev->dns = 0;
     return dhcp_send_discover();
+}
+
+int dhcp_renew(void) {
+    return dhcp_start();
+}
+
+int dhcp_release(void) {
+    net_device_t *dev = net_get_default_device();
+    memset(&dhcp, 0, sizeof(dhcp));
+    dhcp.state = DHCP_STATE_INIT;
+    dhcp.xid = 0x4F504448U;
+    if (!dev) return -1;
+    if (dev->config_mode == NET_CONFIG_MODE_DHCP) {
+        dev->ip = 0;
+        dev->netmask = 0;
+        dev->gateway = 0;
+        dev->dns = 0;
+        dev->config_mode = NET_CONFIG_MODE_NONE;
+    }
+    return 0;
 }
 
 dhcp_state_t dhcp_get_state(void) {
