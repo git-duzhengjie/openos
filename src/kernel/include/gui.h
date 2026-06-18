@@ -95,7 +95,8 @@ typedef enum gui_event_type {
     GUI_EVENT_WINDOW_CLOSE,
     GUI_EVENT_WINDOW_MINIMIZE,
     GUI_EVENT_WINDOW_DRAG,
-    GUI_EVENT_KEY_DOWN
+    GUI_EVENT_KEY_DOWN,
+    GUI_EVENT_MOUSE_WHEEL
 } gui_event_type_t;
 
 typedef struct gui_window gui_window_t;
@@ -329,6 +330,7 @@ typedef struct gui_system {
 
     int desktop_enabled;
     int desktop_start_menu_open;
+    int desktop_start_menu_scroll;
     gui_rect_t desktop_taskbar_rect;
     gui_rect_t desktop_start_button_rect;
     gui_rect_t desktop_start_menu_rect;

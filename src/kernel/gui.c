@@ -32,6 +32,7 @@ static void gui_file_preview_render_edit(void);
 static void gui_file_preview_rebuild(void);
 static void gui_about_open(void);
 static void gui_recycle_open(void);
+static void gui_settings_open(void);
 static void gui_notif_open(void);
 static void gui_launcher_scan_bin(uint32_t start_index);
 static void gui_notify(const char *text);
@@ -59,6 +60,7 @@ static gui_accel_info_t g_gui_accel;
 #define GUI_DESKTOP_ACTION_RECYCLE  6u
 #define GUI_DESKTOP_ACTION_THEME    7u
 #define GUI_DESKTOP_ACTION_NOTIF    8u
+#define GUI_DESKTOP_ACTION_SETTINGS 9u
 #define GUI_DESKTOP_ACTION_LAUNCH_BIN_BASE 0x1000u  /* +index into binlist */
 static volatile uint32_t g_terminal_out_head = 0;
 static volatile uint32_t g_terminal_out_tail = 0;
@@ -377,6 +379,8 @@ void gui_draw_text(int x, int y, const char *text, uint32_t color) {
 }
 
 static void gui_title_rect_px(int x, int y, int w, int h, uint32_t color, const gui_rect_t *clip);
+static void gui_update_start_menu_layout(void);
+static void gui_start_menu_scroll_by(int delta_items);
 
 static uint8_t gui_glyph5x7_row(char ch, int row) {
     if (ch >= 'a' && ch <= 'z') {
@@ -1458,7 +1462,9 @@ void gui_alt_tab_cycle(void) {
 void gui_toggle_start_menu(void) {
     g_gui.desktop_start_menu_open = g_gui.desktop_start_menu_open ? 0 : 1;
     if (g_gui.desktop_start_menu_open) {
-        gui_launcher_scan_bin(3);
+        g_gui.desktop_start_menu_scroll = 0;
+        gui_launcher_scan_bin(2);
+        gui_update_start_menu_layout();
     }
     gui_invalidate_all();
 }
@@ -2139,6 +2145,10 @@ void gui_process_events(void) {
             if (ev.button & 1u) gui_handle_mouse_up(ev.x, ev.y);
         } else if (ev.type == GUI_EVENT_MOUSE_MOVE) {
             gui_handle_mouse_move(ev.x, ev.y);
+        } else if (ev.type == GUI_EVENT_MOUSE_WHEEL) {
+            if (g_gui.desktop_start_menu_open && gui_rect_contains(&g_gui.desktop_start_menu_rect, ev.x, ev.y)) {
+                gui_start_menu_scroll_by(ev.dy > 0 ? 1 : -1);
+            }
         } else if (ev.type == GUI_EVENT_BUTTON_CLICK) {
             if (ev.widget && gui_widget_is_clickable(ev.widget)) {
                 if (ev.widget->on_click) {
@@ -2195,6 +2205,18 @@ static void gui_poll_mouse(void) {
         ev.x = ms.x;
         ev.y = ms.y;
         ev.button = 2u;
+        ev.window = gui_window_at(ms.x, ms.y);
+        ev.widget = gui_widget_at_screen(ms.x, ms.y);
+        gui_event_push(ev);
+    }
+
+    if (ms.wheel != 0) {
+        gui_event_t ev;
+        memset(&ev, 0, sizeof(ev));
+        ev.type = GUI_EVENT_MOUSE_WHEEL;
+        ev.x = ms.x;
+        ev.y = ms.y;
+        ev.dy = ms.wheel;
         ev.window = gui_window_at(ms.x, ms.y);
         ev.widget = gui_widget_at_screen(ms.x, ms.y);
         gui_event_push(ev);
@@ -2325,9 +2347,17 @@ int gui_start(uint32_t width, uint32_t height) {
     return 0;
 }
 
+static void gui_copy_cached_text(char *dst, uint32_t dst_size, const char *src) {
+    uint32_t i;
+
+    if (!dst || dst_size == 0) return;
+    if (!src) src = "";
+    for (i = 0; i < dst_size - 1 && src[i]; i++) dst[i] = src[i];
+    dst[i] = 0;
+}
+
 static void gui_launcher_add(uint32_t index, const char *name, const char *title, uint32_t action, uint32_t color) {
     gui_launcher_entry_t *entry;
-    uint32_t i;
 
     if (index >= GUI_LAUNCHER_MAX_APPS || !name || !title) return;
     entry = &g_gui.launcher_entries[index];
@@ -2335,10 +2365,8 @@ static void gui_launcher_add(uint32_t index, const char *name, const char *title
     entry->used = 1;
     entry->action = action;
     entry->color = color;
-    for (i = 0; i < sizeof(entry->name) - 1 && name[i]; i++) entry->name[i] = name[i];
-    entry->name[i] = 0;
-    for (i = 0; i < sizeof(entry->title) - 1 && title[i]; i++) entry->title[i] = title[i];
-    entry->title[i] = 0;
+    gui_copy_cached_text(entry->name, sizeof(entry->name), name);
+    gui_copy_cached_text(entry->title, sizeof(entry->title), title);
 }
 
 /* like gui_launcher_add, but also records an executable path so the launcher
@@ -2355,7 +2383,34 @@ static void gui_launcher_add_with_path(uint32_t index, const char *name, const c
     entry->path[i] = 0;
 }
 
-/* scan /bin via vfs_readdir and append each non-dot entry to launcher list */
+static int gui_string_equals(const char *a, const char *b) {
+    uint32_t i = 0;
+
+    if (!a || !b) return 0;
+    while (a[i] && b[i]) {
+        if (a[i] != b[i]) return 0;
+        i++;
+    }
+    return a[i] == b[i];
+}
+
+static int gui_launcher_is_system_bin(const char *name) {
+    static const char *system_bins[] = {
+        "sh", "pwd", "ls", "cat", "echo", "ai", "grep", "wc", "mkdir", "rm", "touch",
+        "cp", "mv", "tee", "head", "tail", "sort", "env", "rmdir", "ln", "kill",
+        "alarmtest", "mmaptest", "sbrktest", "ping", "ifconfig", "netstat", "firewall",
+        "id", "groups", "cap", "sandbox"
+    };
+    uint32_t i;
+
+    if (!name) return 1;
+    for (i = 0; i < sizeof(system_bins) / sizeof(system_bins[0]); i++) {
+        if (gui_string_equals(name, system_bins[i])) return 1;
+    }
+    return 0;
+}
+
+/* scan /bin via vfs_readdir and append user-installed programs to launcher list */
 static void gui_launcher_scan_bin(uint32_t start_index) {
     int i;
     uint32_t idx = start_index;
@@ -2369,9 +2424,10 @@ static void gui_launcher_scan_bin(uint32_t start_index) {
         int p, k;
         uint32_t color;
         if (!e) break;
-        /* skip ., .., directories */
+        /* skip ., .., directories, and built-in system commands */
         if (e->name[0] == '.' && (e->name[1] == 0 || (e->name[1] == '.' && e->name[2] == 0))) continue;
         if (e->inode && (e->inode->mode & FS_DIR)) continue;
+        if (gui_launcher_is_system_bin(e->name)) continue;
         /* build path "/bin/<name>" */
         path[0] = '/'; path[1] = 'b'; path[2] = 'i'; path[3] = 'n'; path[4] = '/'; p = 5;
         for (k = 0; k < (int)(sizeof(path) - 6) && e->name[k]; k++) path[p++] = e->name[k];
@@ -2387,11 +2443,10 @@ static void gui_launcher_scan_bin(uint32_t start_index) {
 static void gui_launcher_init(void) {
     memset(g_gui.launcher_entries, 0, sizeof(g_gui.launcher_entries));
     g_gui.launcher_enabled = 1;
-    g_gui.launcher_app_count = 3;
+    g_gui.launcher_app_count = 2;
     gui_launcher_add(0, "terminal", i18n_t(I18N_KEY_APP_TERMINAL), GUI_DESKTOP_ACTION_TERMINAL, gui_rgb(68, 144, 245));
-    gui_launcher_add(1, "demo", i18n_t(I18N_KEY_APP_WINDOW_DEMO), GUI_DESKTOP_ACTION_DEMO, gui_rgb(170, 112, 235));
-    gui_launcher_add(2, "about", i18n_t(I18N_KEY_APP_ABOUT_OPENOS), GUI_DESKTOP_ACTION_ABOUT, gui_rgb(88, 196, 128));
-    /* programs under /bin appear after the 3 built-ins; scan happens lazily */
+    gui_launcher_add(1, "settings", i18n_t(I18N_KEY_APP_SETTINGS), GUI_DESKTOP_ACTION_SETTINGS, gui_rgb(230, 160, 70));
+    /* programs under /bin appear after the 2 built-ins; scan happens lazily */
 }
 
 static int      g_desktop_selected_icon = -1;
@@ -2406,7 +2461,6 @@ static void gui_desktop_clear_icon_click_state(void) {
 
 static void gui_desktop_add_icon(uint32_t index, int x, int y, const char *label, uint32_t color, uint32_t action) {
     gui_desktop_icon_t *icon;
-    uint32_t i;
 
     if (index >= GUI_DESKTOP_MAX_ICONS || !label) return;
     icon = &g_gui.desktop_icons[index];
@@ -2418,8 +2472,23 @@ static void gui_desktop_add_icon(uint32_t index, int x, int y, const char *label
     icon->rect.h = GUI_DESKTOP_ICON_H;
     icon->color = color;
     icon->action = action;
-    for (i = 0; i < sizeof(icon->label) - 1 && label[i]; i++) icon->label[i] = label[i];
-    icon->label[i] = 0;
+    gui_copy_cached_text(icon->label, sizeof(icon->label), label);
+}
+
+static void gui_desktop_refresh_i18n_labels(void) {
+    if (g_gui.desktop_icons[0].used) {
+        gui_copy_cached_text(g_gui.desktop_icons[0].label, sizeof(g_gui.desktop_icons[0].label), i18n_t(I18N_KEY_ICON_FILES));
+    }
+    if (g_gui.desktop_icons[1].used) {
+        gui_copy_cached_text(g_gui.desktop_icons[1].label, sizeof(g_gui.desktop_icons[1].label), i18n_t(I18N_KEY_ICON_RECYCLE_BIN));
+    }
+
+    if (g_gui.launcher_entries[0].used) {
+        gui_copy_cached_text(g_gui.launcher_entries[0].title, sizeof(g_gui.launcher_entries[0].title), i18n_t(I18N_KEY_APP_TERMINAL));
+    }
+    if (g_gui.launcher_entries[1].used) {
+        gui_copy_cached_text(g_gui.launcher_entries[1].title, sizeof(g_gui.launcher_entries[1].title), i18n_t(I18N_KEY_APP_SETTINGS));
+    }
 }
 
 static void gui_desktop_init(void) {
@@ -2439,6 +2508,7 @@ static void gui_desktop_init(void) {
     g_gui.desktop_start_button_rect.y = (int)top + 4;
     g_gui.desktop_start_button_rect.w = 86;
     g_gui.desktop_start_button_rect.h = 24;
+    g_gui.desktop_start_menu_scroll = 0;
     g_gui.desktop_start_menu_rect.x = 6;
     g_gui.desktop_start_menu_rect.y = (int)top - GUI_DESKTOP_MENU_H - 4;
     g_gui.desktop_start_menu_rect.w = GUI_DESKTOP_MENU_W;
@@ -2536,10 +2606,185 @@ static void gui_desktop_draw_icon(gui_desktop_icon_t *icon) {
     gui_draw_text(text_x, text_y, icon->label, gui_rgb(232, 240, 255));
 }
 
+static int gui_start_menu_item_height(void) {
+    int h = font_get_line_height(font_get_default()) + font_scale_value(14);
+    if (h < GUI_LAUNCHER_ITEM_H) h = GUI_LAUNCHER_ITEM_H;
+    return h;
+}
+
+static int gui_start_menu_header_height(void) {
+    int h = font_get_line_height(font_get_default()) + font_scale_value(24);
+    if (h < 36) h = 36;
+    return h;
+}
+
+static int gui_start_menu_visible_count(void) {
+    int item_h = gui_start_menu_item_height();
+    int header_h = gui_start_menu_header_height();
+    int usable_h = g_gui.desktop_start_menu_rect.h - header_h - 8;
+    int count;
+    if (item_h <= 0) return 0;
+    count = usable_h / item_h;
+    if (count < 1 && g_gui.launcher_app_count > 0) count = 1;
+    if (count > (int)g_gui.launcher_app_count) count = (int)g_gui.launcher_app_count;
+    return count;
+}
+
+static int gui_start_menu_max_scroll(void) {
+    int visible = gui_start_menu_visible_count();
+    int max = (int)g_gui.launcher_app_count - visible;
+    return max > 0 ? max : 0;
+}
+
+static int gui_start_menu_has_scrollbar(void) {
+    return gui_start_menu_max_scroll() > 0;
+}
+
+static void gui_start_menu_clamp_scroll(void) {
+    int max = gui_start_menu_max_scroll();
+    if (g_gui.desktop_start_menu_scroll < 0) g_gui.desktop_start_menu_scroll = 0;
+    if (g_gui.desktop_start_menu_scroll > max) g_gui.desktop_start_menu_scroll = max;
+}
+
+static void gui_update_start_menu_layout(void) {
+    int line_h = font_get_line_height(font_get_default());
+    int item_h = gui_start_menu_item_height();
+    int header_h = gui_start_menu_header_height();
+    int title_w = (int)font_measure_text_width(font_get_default(), i18n_t(I18N_KEY_LAUNCHER_TITLE));
+    int max_title_w = title_w;
+    int desired_w;
+    int max_w;
+    int content_h;
+    int desired_h;
+    int max_h;
+    uint32_t i;
+
+    for (i = 0; i < g_gui.launcher_app_count && i < GUI_LAUNCHER_MAX_APPS; i++) {
+        gui_launcher_entry_t *entry = &g_gui.launcher_entries[i];
+        int w;
+        if (!entry->used) continue;
+        w = (int)font_measure_text_width(font_get_default(), entry->title);
+        if (w > max_title_w) max_title_w = w;
+    }
+
+    desired_w = max_title_w + 72;
+    if (desired_w < GUI_DESKTOP_MENU_W) desired_w = GUI_DESKTOP_MENU_W;
+    max_w = (int)g_gui.width - 12;
+    if (max_w < 120) max_w = 120;
+    if (desired_w > max_w) desired_w = max_w;
+
+    content_h = header_h + 8 + (int)g_gui.launcher_app_count * item_h;
+    desired_h = content_h + 8;
+    max_h = (int)g_gui.height - GUI_TASKBAR_HEIGHT - 12;
+    if (max_h < header_h + item_h + 12) max_h = header_h + item_h + 12;
+    if (desired_h > max_h) desired_h = max_h;
+    if (desired_h < header_h + item_h + 12 && g_gui.launcher_app_count > 0) {
+        desired_h = header_h + item_h + 12;
+    }
+    if (line_h > 0 && desired_h < line_h + item_h + 28) {
+        desired_h = line_h + item_h + 28;
+    }
+
+    g_gui.desktop_start_menu_rect.x = 6;
+    g_gui.desktop_start_menu_rect.w = desired_w;
+    g_gui.desktop_start_menu_rect.h = desired_h;
+    g_gui.desktop_start_menu_rect.y = g_gui.desktop_taskbar_rect.y - desired_h - 4;
+    if (g_gui.desktop_start_menu_rect.y < 2) g_gui.desktop_start_menu_rect.y = 2;
+    gui_start_menu_clamp_scroll();
+}
+
+static void gui_start_menu_scroll_by(int delta_items) {
+    if (delta_items == 0) return;
+    g_gui.desktop_start_menu_scroll += delta_items;
+    gui_start_menu_clamp_scroll();
+    gui_invalidate_all();
+}
+
+static void gui_draw_launcher_terminal_icon(int x, int y) {
+    uint32_t bg = gui_rgb(18, 24, 32);
+    uint32_t edge = gui_rgb(92, 126, 172);
+    uint32_t hi = gui_rgb(145, 192, 255);
+    uint32_t text = gui_rgb(124, 238, 156);
+    gui_raw_fill_rect_alpha(x + 2, y + 3, 13, 12, gui_rgb(0, 0, 0), 70u);
+    gui_raw_fill_rect(x + 1, y + 1, 14, 12, bg);
+    gui_raw_line(x + 1, y + 1, x + 14, y + 1, hi);
+    gui_raw_line(x + 1, y + 1, x + 1, y + 12, edge);
+    gui_raw_line(x + 1, y + 12, x + 14, y + 12, gui_rgb(8, 12, 18));
+    gui_raw_line(x + 14, y + 1, x + 14, y + 12, gui_rgb(8, 12, 18));
+    gui_raw_line(x + 4, y + 5, x + 6, y + 7, text);
+    gui_raw_line(x + 6, y + 7, x + 4, y + 9, text);
+    gui_raw_line(x + 8, y + 10, x + 11, y + 10, gui_rgb(205, 230, 255));
+}
+
+static void gui_draw_launcher_settings_icon(int x, int y) {
+    uint32_t gear = gui_rgb(202, 216, 232);
+    uint32_t dark = gui_rgb(70, 88, 112);
+    uint32_t center = gui_rgb(68, 142, 238);
+    gui_raw_fill_rect_alpha(x + 3, y + 4, 11, 11, gui_rgb(0, 0, 0), 58u);
+    gui_raw_fill_rect(x + 7, y + 1, 2, 3, gear);
+    gui_raw_fill_rect(x + 7, y + 12, 2, 3, gear);
+    gui_raw_fill_rect(x + 1, y + 7, 3, 2, gear);
+    gui_raw_fill_rect(x + 12, y + 7, 3, 2, gear);
+    gui_raw_fill_rect(x + 4, y + 4, 2, 2, gear);
+    gui_raw_fill_rect(x + 10, y + 4, 2, 2, gear);
+    gui_raw_fill_rect(x + 4, y + 10, 2, 2, gear);
+    gui_raw_fill_rect(x + 10, y + 10, 2, 2, gear);
+    gui_raw_fill_rect(x + 5, y + 5, 6, 6, dark);
+    gui_raw_fill_rect(x + 6, y + 6, 4, 4, gear);
+    gui_raw_fill_rect(x + 7, y + 7, 2, 2, center);
+}
+
+static void gui_draw_launcher_app_icon(int x, int y, uint32_t accent) {
+    uint32_t paper = gui_rgb(244, 248, 252);
+    uint32_t edge = gui_rgb(88, 104, 126);
+    uint32_t shadow = gui_rgb(0, 0, 0);
+    uint32_t fold = gui_rgb(213, 224, 236);
+    gui_raw_fill_rect_alpha(x + 3, y + 3, 11, 12, shadow, 55u);
+    gui_raw_fill_rect(x + 2, y + 1, 10, 13, paper);
+    gui_raw_line(x + 2, y + 1, x + 11, y + 1, edge);
+    gui_raw_line(x + 2, y + 14, x + 11, y + 14, edge);
+    gui_raw_line(x + 2, y + 1, x + 2, y + 14, edge);
+    gui_raw_line(x + 11, y + 1, x + 11, y + 14, edge);
+    gui_raw_fill_rect(x + 9, y + 2, 2, 2, fold);
+    gui_raw_line(x + 9, y + 1, x + 11, y + 3, edge);
+    gui_raw_line(x + 4, y + 5, x + 9, y + 5, accent);
+    gui_raw_line(x + 4, y + 8, x + 9, y + 8, gui_rgb(126, 142, 160));
+    gui_raw_line(x + 4, y + 11, x + 8, y + 11, gui_rgb(126, 142, 160));
+}
+
+static void gui_draw_launcher_icon(const gui_launcher_entry_t *entry, int x, int y) {
+    if (!entry) return;
+    if (entry->action == GUI_DESKTOP_ACTION_TERMINAL) {
+        gui_draw_launcher_terminal_icon(x, y);
+    } else if (entry->action == GUI_DESKTOP_ACTION_SETTINGS) {
+        gui_draw_launcher_settings_icon(x, y);
+    } else {
+        gui_draw_launcher_app_icon(x, y, entry->color);
+    }
+    g_gui_accel.icon_quality_passes++;
+}
+
 static void gui_desktop_draw_start_menu(void) {
     gui_rect_t *r = &g_gui.desktop_start_menu_rect;
     uint32_t i;
+    int item_h;
+    int header_h;
+    int visible;
+    int start;
+    int end;
+    int scrollbar_w;
+    int item_w;
     if (!g_gui.desktop_start_menu_open) return;
+
+    gui_update_start_menu_layout();
+    item_h = gui_start_menu_item_height();
+    header_h = gui_start_menu_header_height();
+    visible = gui_start_menu_visible_count();
+    start = g_gui.desktop_start_menu_scroll;
+    end = start + visible;
+    scrollbar_w = gui_start_menu_has_scrollbar() ? 10 : 0;
+    item_w = r->w - 20 - scrollbar_w;
+    if (item_w < 32) item_w = 32;
 
     gui_raw_fill_rect(r->x, r->y, r->w, r->h, gui_rgb(28, 36, 54));
     gui_raw_line(r->x, r->y, r->x + r->w - 1, r->y, gui_rgb(112, 146, 198));
@@ -2548,13 +2793,53 @@ static void gui_desktop_draw_start_menu(void) {
     gui_raw_line(r->x, r->y + r->h - 1, r->x + r->w - 1, r->y + r->h - 1, gui_rgb(10, 13, 20));
     gui_draw_text(r->x + 12, r->y + 12, i18n_t(I18N_KEY_LAUNCHER_TITLE), gui_rgb(245, 250, 255));
 
-    for (i = 0; i < g_gui.launcher_app_count && i < GUI_LAUNCHER_MAX_APPS; i++) {
+    for (i = (uint32_t)start; i < (uint32_t)end && i < g_gui.launcher_app_count && i < GUI_LAUNCHER_MAX_APPS; i++) {
         gui_launcher_entry_t *entry = &g_gui.launcher_entries[i];
-        int iy = r->y + 36 + (int)i * GUI_LAUNCHER_ITEM_H;
+        int visible_index = (int)i - start;
+        int iy = r->y + header_h + visible_index * item_h;
+        int icon_y;
+        int text_y;
         if (!entry->used) continue;
-        gui_raw_fill_rect(r->x + 10, iy, r->w - 20, GUI_LAUNCHER_ITEM_H - 2, gui_rgb(46, 64, 92));
-        gui_raw_fill_rect(r->x + 14, iy + 5, 12, 12, entry->color);
-        gui_draw_text(r->x + 34, iy + 5, entry->title, gui_rgb(232, 240, 255));
+        gui_raw_fill_rect(r->x + 10, iy, item_w, item_h - 2, gui_rgb(46, 64, 92));
+        icon_y = iy + (item_h - 16) / 2;
+        if (icon_y < iy + 2) icon_y = iy + 2;
+        gui_draw_launcher_icon(entry, r->x + 13, icon_y);
+        text_y = iy + (item_h - font_get_line_height(font_get_default())) / 2;
+        if (text_y < iy + 2) text_y = iy + 2;
+        {
+            font_rect_t clip;
+            clip.x = r->x + 34;
+            clip.y = iy;
+            clip.w = item_w - 28;
+            clip.h = item_h - 2;
+            if (clip.w > 0 && clip.h > 0) {
+                gui_text_soften_ctx_t soft;
+                soft.color = gui_rgb(232, 240, 255);
+                soft.alpha = 58u;
+                font_draw_text_clipped(font_get_default(), gui_font_put_pixel_soft, &soft,
+                                       &clip, r->x + 35, text_y, entry->title, gui_rgb(232, 240, 255));
+                font_draw_text_clipped(font_get_default(), gui_font_put_pixel, 0,
+                                       &clip, r->x + 34, text_y, entry->title, gui_rgb(232, 240, 255));
+            }
+        }
+    }
+
+    if (gui_start_menu_has_scrollbar()) {
+        int track_x = r->x + r->w - 12;
+        int track_y = r->y + header_h;
+        int track_h = r->h - header_h - 8;
+        int thumb_h;
+        int thumb_y;
+        int max_scroll = gui_start_menu_max_scroll();
+        gui_raw_fill_rect(track_x, track_y, 6, track_h, gui_rgb(18, 24, 36));
+        thumb_h = (visible * track_h) / (int)g_gui.launcher_app_count;
+        if (thumb_h < 12) thumb_h = 12;
+        if (thumb_h > track_h) thumb_h = track_h;
+        thumb_y = track_y;
+        if (max_scroll > 0 && track_h > thumb_h) {
+            thumb_y += (g_gui.desktop_start_menu_scroll * (track_h - thumb_h)) / max_scroll;
+        }
+        gui_raw_fill_rect(track_x + 1, thumb_y, 4, thumb_h, gui_rgb(112, 146, 198));
     }
 }
 
@@ -2611,6 +2896,10 @@ static void gui_desktop_run_action(uint32_t action) {
         gui_recycle_open();
         return;
     }
+    if (action == GUI_DESKTOP_ACTION_SETTINGS) {
+        gui_settings_open();
+        return;
+    }
     if (action == GUI_DESKTOP_ACTION_THEME) {
         g_gui.wallpaper_theme = (g_gui.wallpaper_theme + 1u) % 3u;
         gui_invalidate_all();
@@ -2631,8 +2920,10 @@ static void gui_desktop_run_action(uint32_t action) {
     if (action == GUI_DESKTOP_ACTION_MENU) {
         g_gui.desktop_start_menu_open = !g_gui.desktop_start_menu_open;
         if (g_gui.desktop_start_menu_open) {
+            g_gui.desktop_start_menu_scroll = 0;
             /* refresh /bin entries every time menu opens (lazy scan) */
-            gui_launcher_scan_bin(3);
+            gui_launcher_scan_bin(g_gui.launcher_app_count);
+            gui_update_start_menu_layout();
         }
         gui_invalidate_all();
     }
@@ -2672,11 +2963,27 @@ static int gui_desktop_handle_click(int x, int y) {
         return 1;
     }
     if (g_gui.desktop_start_menu_open && gui_rect_contains(&g_gui.desktop_start_menu_rect, x, y)) {
-        for (i = 0; i < g_gui.launcher_app_count && i < GUI_LAUNCHER_MAX_APPS; i++) {
+        int item_h;
+        int header_h;
+        int visible;
+        int start;
+        int end;
+        int scrollbar_w;
+        int item_w;
+        gui_update_start_menu_layout();
+        item_h = gui_start_menu_item_height();
+        header_h = gui_start_menu_header_height();
+        visible = gui_start_menu_visible_count();
+        start = g_gui.desktop_start_menu_scroll;
+        end = start + visible;
+        scrollbar_w = gui_start_menu_has_scrollbar() ? 10 : 0;
+        item_w = g_gui.desktop_start_menu_rect.w - 20 - scrollbar_w;
+        if (item_w < 32) item_w = 32;
+        for (i = (uint32_t)start; i < (uint32_t)end && i < g_gui.launcher_app_count && i < GUI_LAUNCHER_MAX_APPS; i++) {
             item.x = g_gui.desktop_start_menu_rect.x + 10;
-            item.y = g_gui.desktop_start_menu_rect.y + 36 + (int)i * GUI_LAUNCHER_ITEM_H;
-            item.w = g_gui.desktop_start_menu_rect.w - 20;
-            item.h = GUI_LAUNCHER_ITEM_H - 2;
+            item.y = g_gui.desktop_start_menu_rect.y + header_h + ((int)i - start) * item_h;
+            item.w = item_w;
+            item.h = item_h - 2;
             if (gui_rect_contains(&item, x, y)) {
                 g_gui.desktop_start_menu_open = 0;
                 gui_launcher_launch(i);
@@ -2850,6 +3157,7 @@ static void gui_ctxmenu_desktop_action(int id, void *user) {
         case 3: gui_desktop_run_action(GUI_DESKTOP_ACTION_THEME); break;
         case 4: gui_notify(i18n_t(I18N_KEY_NOTIFY_DESKTOP_REFRESHED)); gui_invalidate_all(); break;
         case 5: gui_about_open(); break;
+        case 6: gui_desktop_run_action(GUI_DESKTOP_ACTION_SETTINGS); break;
     }
 }
 
@@ -2868,6 +3176,7 @@ static void gui_handle_mouse_right_down(int x, int y) {
     gui_ctxmenu_add(i18n_t(I18N_KEY_CTXMENU_CHANGE_WALLPAPER), 3, 1);
     gui_ctxmenu_add(i18n_t(I18N_KEY_CTXMENU_REFRESH),          4, 1);
     gui_ctxmenu_add(i18n_t(I18N_KEY_CTXMENU_ABOUT),            5, 1);
+    gui_ctxmenu_add(i18n_t(I18N_KEY_CTXMENU_SETTINGS),         6, 1);
     gui_ctxmenu_open_at(x, y, gui_ctxmenu_desktop_action, 0);
 }
 
@@ -4023,6 +4332,7 @@ static int gui_demo_app_entry(gui_app_t *app, void *user_data) {
 
 static gui_window_t *g_about_win = 0;
 static gui_window_t *g_recycle_win = 0;
+static gui_window_t *g_settings_win = 0;
 static gui_window_t *g_notif_win = 0;
 
 #define GUI_NOTIF_MAX        16
@@ -4107,6 +4417,130 @@ static void gui_recycle_open(void) {
     if (!g_recycle_win) return;
     gui_window_set_on_close(g_recycle_win, recycle_on_close, 0);
     gui_render();
+}
+
+static const char *gui_settings_language_name(void) {
+    return (i18n_current() == I18N_LOCALE_ZH) ? i18n_t(I18N_KEY_SETTINGS_LANGUAGE_CHINESE)
+                                             : i18n_t(I18N_KEY_SETTINGS_LANGUAGE_ENGLISH);
+}
+
+static const char *gui_settings_font_size_name(void) {
+    switch (font_get_size()) {
+        case FONT_SIZE_SMALL: return i18n_t(I18N_KEY_SETTINGS_TEXT_SIZE_SMALL);
+        case FONT_SIZE_LARGE: return i18n_t(I18N_KEY_SETTINGS_TEXT_SIZE_LARGE);
+        case FONT_SIZE_MEDIUM:
+        default: return i18n_t(I18N_KEY_SETTINGS_TEXT_SIZE_MEDIUM);
+    }
+}
+
+static void settings_on_close(gui_window_t *win, void *ud) {
+    (void)win;
+    (void)ud;
+    g_settings_win = 0;
+}
+
+static void gui_settings_build(int show_notice);
+
+static void settings_apply_language_en(gui_widget_t *w, void *ud) {
+    (void)w;
+    (void)ud;
+    i18n_set_locale(I18N_LOCALE_EN);
+    gui_desktop_refresh_i18n_labels();
+    gui_settings_build(1);
+}
+
+static void settings_apply_language_zh(gui_widget_t *w, void *ud) {
+    (void)w;
+    (void)ud;
+    i18n_set_locale(I18N_LOCALE_ZH);
+    gui_desktop_refresh_i18n_labels();
+    gui_settings_build(1);
+}
+
+static void settings_apply_font_small(gui_widget_t *w, void *ud) {
+    (void)w;
+    (void)ud;
+    font_set_size(FONT_SIZE_SMALL);
+    gui_settings_build(1);
+}
+
+static void settings_apply_font_medium(gui_widget_t *w, void *ud) {
+    (void)w;
+    (void)ud;
+    font_set_size(FONT_SIZE_MEDIUM);
+    gui_settings_build(1);
+}
+
+static void settings_apply_font_large(gui_widget_t *w, void *ud) {
+    (void)w;
+    (void)ud;
+    font_set_size(FONT_SIZE_LARGE);
+    gui_settings_build(1);
+}
+
+static void gui_settings_build(int show_notice) {
+    const font_renderer_t *font = font_get_default();
+    int line_h = (int)font_get_line_height(font);
+    int margin = (int)font_scale_value(14);
+    int row_h = line_h + (int)font_scale_value(14);
+    int button_h = line_h + (int)font_scale_value(12);
+    int button_w = (int)font_scale_value(82);
+    int label_w = (int)font_scale_value(130);
+    int gap = (int)font_scale_value(8);
+    int win_w = (int)font_scale_value(430);
+    int win_h = margin * 2 + row_h * 5 + 40;
+    int x;
+    int y;
+    int pos;
+    char status[160];
+
+    if (win_w < 430) win_w = 430;
+    if (win_h < 260) win_h = 260;
+
+    if (g_settings_win) {
+        gui_window_set_on_close(g_settings_win, 0, 0);
+        gui_destroy_window(g_settings_win);
+        g_settings_win = 0;
+    }
+
+    g_settings_win = gui_create_window(190, 110, win_w, win_h, i18n_t(I18N_KEY_WIN_SETTINGS));
+    if (!g_settings_win) return;
+    gui_window_set_on_close(g_settings_win, settings_on_close, 0);
+
+    x = margin;
+    y = 36;
+    gui_add_label(g_settings_win, x, y, win_w - margin * 2, line_h + 4, i18n_t(I18N_KEY_SETTINGS_LANGUAGE));
+    y += row_h;
+    gui_add_label(g_settings_win, x, y + (button_h - line_h) / 2, label_w, line_h + 4, i18n_t(I18N_KEY_SETTINGS_CURRENT_LANGUAGE));
+    gui_add_button(g_settings_win, x + label_w + gap, y, button_w, button_h, i18n_t(I18N_KEY_BTN_ENGLISH), settings_apply_language_en, 0);
+    gui_add_button(g_settings_win, x + label_w + gap * 2 + button_w, y, button_w, button_h, i18n_t(I18N_KEY_BTN_CHINESE), settings_apply_language_zh, 0);
+
+    y += row_h + gap;
+    gui_add_label(g_settings_win, x, y, win_w - margin * 2, line_h + 4, i18n_t(I18N_KEY_SETTINGS_TEXT_SIZE));
+    y += row_h;
+    gui_add_label(g_settings_win, x, y + (button_h - line_h) / 2, label_w, line_h + 4, i18n_t(I18N_KEY_SETTINGS_CURRENT_TEXT_SIZE));
+    gui_add_button(g_settings_win, x + label_w + gap, y, button_w, button_h, i18n_t(I18N_KEY_BTN_FONT_SMALL), settings_apply_font_small, 0);
+    gui_add_button(g_settings_win, x + label_w + gap * 2 + button_w, y, button_w, button_h, i18n_t(I18N_KEY_BTN_FONT_MEDIUM), settings_apply_font_medium, 0);
+    gui_add_button(g_settings_win, x + label_w + gap * 3 + button_w * 2, y, button_w, button_h, i18n_t(I18N_KEY_BTN_FONT_LARGE), settings_apply_font_large, 0);
+
+    y += row_h + gap;
+    pos = 0;
+    pos = fp_str_append(status, pos, sizeof(status), i18n_t(I18N_KEY_SETTINGS_CURRENT_LANGUAGE));
+    pos = fp_str_append(status, pos, sizeof(status), ": ");
+    pos = fp_str_append(status, pos, sizeof(status), gui_settings_language_name());
+    pos = fp_str_append(status, pos, sizeof(status), "  |  ");
+    pos = fp_str_append(status, pos, sizeof(status), i18n_t(I18N_KEY_SETTINGS_CURRENT_TEXT_SIZE));
+    pos = fp_str_append(status, pos, sizeof(status), ": ");
+    pos = fp_str_append(status, pos, sizeof(status), gui_settings_font_size_name());
+    (void)pos;
+    gui_add_label(g_settings_win, x, y, win_w - margin * 2, line_h + 6, status);
+
+    if (show_notice) gui_notify(i18n_t(I18N_KEY_SETTINGS_APPLIED));
+    gui_render();
+}
+
+static void gui_settings_open(void) {
+    gui_settings_build(0);
 }
 
 /* === Notification Center === */

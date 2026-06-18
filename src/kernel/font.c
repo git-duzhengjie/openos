@@ -195,20 +195,6 @@ static int g_font8x8_ready = 0;
 static font_size_t g_font_size = FONT_SIZE_MEDIUM;
 static int g_font_size_ready = 0;
 
-#ifndef OPENOS_FONT_SIZE
-#define OPENOS_FONT_SIZE 1
-#endif
-
-static font_size_t font_size_from_build_config(void) {
-#if OPENOS_FONT_SIZE == 0
-    return FONT_SIZE_SMALL;
-#elif OPENOS_FONT_SIZE == 2
-    return FONT_SIZE_LARGE;
-#else
-    return FONT_SIZE_MEDIUM;
-#endif
-}
-
 static uint32_t font_scale_percent_for_size(font_size_t size) {
     switch (size) {
         case FONT_SIZE_SMALL: return 75;
@@ -227,7 +213,7 @@ static uint32_t font_scale_dimension(uint32_t value, uint32_t percent) {
 
 static void font_init_size_once(void) {
     if (g_font_size_ready) return;
-    g_font_size = font_size_from_build_config();
+    g_font_size = FONT_SIZE_MEDIUM;
     g_font_size_ready = 1;
 }
 

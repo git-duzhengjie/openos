@@ -351,8 +351,8 @@
 - [√] 新增生成字库数据：`generated/cjk_font.c`（由真实 Windows 中文字体生成，覆盖当前 zh-CN UI）
 - [√] `font.c` 接入 generated CJK 字库查询，UTF-8 中文文本可绘制
 - [√] 新增字库生成脚本：`scripts/generate_cjk_font.py` / `scripts/generate_cjk_font.ps1`
-- [√] `build.sh` 编译链接 CJK 字库，并支持 `OPENOS_LOCALE=zh-CN`
-- [√] `OPENOS_LOCALE=zh-CN bash build.sh` 中文镜像构建通过
+- [√] `build.sh` 编译链接 CJK 字库，语言改为设置面板运行时切换
+- [√] 默认镜像构建通过，中文通过设置面板切换验证
 - [√] 验证三连 + commit
 
 #### Phase 4：字体大小三档控制
@@ -360,8 +360,8 @@
 - [√] 新增字体大小枚举与 API：`FONT_SIZE_SMALL` / `FONT_SIZE_MEDIUM` / `FONT_SIZE_LARGE`
 - [√] 字体测量、行高、ASCII/CJK 绘制统一按字号缩放
 - [√] GUI 字符宽高、标题栏高度、文字居中布局改为动态字体度量
-- [√] `build.sh` 支持 `OPENOS_FONT_SIZE=small|medium|large`
-- [√] 小 / 中 / 大三档构建验证通过，默认 medium 保持原视觉兼容
+- [√] 设置面板支持小 / 中 / 大三档运行时切换
+- [√] 默认 medium 保持原视觉兼容
 
 ---
 

@@ -17,16 +17,7 @@
 
 #include "i18n.h"
 
-#ifndef OPENOS_DEFAULT_LOCALE_ZH
-#define OPENOS_DEFAULT_LOCALE_ZH 0
-#endif
-
-static i18n_locale_t g_i18n_locale =
-#if OPENOS_DEFAULT_LOCALE_ZH
-    I18N_LOCALE_ZH;
-#else
-    I18N_LOCALE_EN;
-#endif
+static i18n_locale_t g_i18n_locale = I18N_LOCALE_EN;
 static int g_i18n_inited = 0;
 
 /* English (default, ASCII) -------------------------------------------------- */
@@ -43,6 +34,7 @@ static const char *const k_strings_en[I18N_KEY_COUNT] = {
     /* launcher */
     [I18N_KEY_LAUNCHER_TITLE]            = "OpenOS Launcher",
     [I18N_KEY_APP_TERMINAL]              = "Terminal",
+    [I18N_KEY_APP_SETTINGS]              = "Settings",
     [I18N_KEY_APP_WINDOW_DEMO]           = "Window Demo",
     [I18N_KEY_APP_ABOUT_OPENOS]          = "About OpenOS",
 
@@ -56,6 +48,7 @@ static const char *const k_strings_en[I18N_KEY_COUNT] = {
     [I18N_KEY_CTXMENU_OPEN_TERMINAL]     = "Open Terminal",
     [I18N_KEY_CTXMENU_CHANGE_WALLPAPER]  = "Change Wallpaper",
     [I18N_KEY_CTXMENU_REFRESH]           = "Refresh",
+    [I18N_KEY_CTXMENU_SETTINGS]          = "Settings",
     [I18N_KEY_CTXMENU_ABOUT]             = "About OpenOS",
 
     /* Phase 2: Window layer ------------------------------------------------ */
@@ -76,6 +69,19 @@ static const char *const k_strings_en[I18N_KEY_COUNT] = {
     [I18N_KEY_ABOUT_VERSION]             = "Version: 0.17.x",
     [I18N_KEY_ABOUT_BUILD]                = "Build: dev",
     [I18N_KEY_ABOUT_LICENSE]             = "License: MIT",
+
+    /* settings */
+    [I18N_KEY_WIN_SETTINGS]              = "Settings",
+    [I18N_KEY_SETTINGS_LANGUAGE]          = "Language",
+    [I18N_KEY_SETTINGS_TEXT_SIZE]         = "Text size",
+    [I18N_KEY_SETTINGS_CURRENT_LANGUAGE]  = "Current language",
+    [I18N_KEY_SETTINGS_CURRENT_TEXT_SIZE] = "Current text size",
+    [I18N_KEY_SETTINGS_LANGUAGE_ENGLISH]  = "English",
+    [I18N_KEY_SETTINGS_LANGUAGE_CHINESE]  = "Chinese",
+    [I18N_KEY_SETTINGS_TEXT_SIZE_SMALL]   = "Small",
+    [I18N_KEY_SETTINGS_TEXT_SIZE_MEDIUM]  = "Medium",
+    [I18N_KEY_SETTINGS_TEXT_SIZE_LARGE]   = "Large",
+    [I18N_KEY_SETTINGS_APPLIED]           = "Settings applied",
 
     /* recycle */
     [I18N_KEY_WIN_RECYCLE_BIN]           = "Recycle Bin",
@@ -109,6 +115,11 @@ static const char *const k_strings_en[I18N_KEY_COUNT] = {
     [I18N_KEY_BTN_NEXT]                  = "Next >",
     [I18N_KEY_BTN_PREV]                  = "< Prev",
     [I18N_KEY_BTN_BACK]                  = "< Back",
+    [I18N_KEY_BTN_ENGLISH]               = "English",
+    [I18N_KEY_BTN_CHINESE]               = "Chinese",
+    [I18N_KEY_BTN_FONT_SMALL]            = "Small",
+    [I18N_KEY_BTN_FONT_MEDIUM]           = "Medium",
+    [I18N_KEY_BTN_FONT_LARGE]            = "Large",
     [I18N_KEY_BTN_NEW_FILE]              = "New File",
     [I18N_KEY_BTN_NEW_DIR]               = "New Dir",
     [I18N_KEY_BTN_RENAME]                = "Rename",
@@ -158,6 +169,7 @@ static const char *const k_strings_zh[I18N_KEY_COUNT] = {
     /* launcher */
     [I18N_KEY_LAUNCHER_TITLE]            = "OpenOS 应用启动器",
     [I18N_KEY_APP_TERMINAL]              = "终端",
+    [I18N_KEY_APP_SETTINGS]              = "设置",
     [I18N_KEY_APP_WINDOW_DEMO]           = "窗口演示",
     [I18N_KEY_APP_ABOUT_OPENOS]          = "关于 OpenOS",
 
@@ -171,6 +183,7 @@ static const char *const k_strings_zh[I18N_KEY_COUNT] = {
     [I18N_KEY_CTXMENU_OPEN_TERMINAL]     = "打开终端",
     [I18N_KEY_CTXMENU_CHANGE_WALLPAPER]  = "更换壁纸",
     [I18N_KEY_CTXMENU_REFRESH]           = "刷新",
+    [I18N_KEY_CTXMENU_SETTINGS]          = "设置",
     [I18N_KEY_CTXMENU_ABOUT]             = "关于 OpenOS",
 
     /* Phase 2: Window layer ------------------------------------------------ */
@@ -191,6 +204,19 @@ static const char *const k_strings_zh[I18N_KEY_COUNT] = {
     [I18N_KEY_ABOUT_VERSION]             = "版本：0.17.x",
     [I18N_KEY_ABOUT_BUILD]               = "构建：dev",
     [I18N_KEY_ABOUT_LICENSE]             = "许可证：MIT",
+
+    /* settings */
+    [I18N_KEY_WIN_SETTINGS]              = "设置",
+    [I18N_KEY_SETTINGS_LANGUAGE]          = "语言",
+    [I18N_KEY_SETTINGS_TEXT_SIZE]         = "文字大小",
+    [I18N_KEY_SETTINGS_CURRENT_LANGUAGE]  = "当前语言",
+    [I18N_KEY_SETTINGS_CURRENT_TEXT_SIZE] = "当前文字大小",
+    [I18N_KEY_SETTINGS_LANGUAGE_ENGLISH]  = "英文",
+    [I18N_KEY_SETTINGS_LANGUAGE_CHINESE]  = "中文",
+    [I18N_KEY_SETTINGS_TEXT_SIZE_SMALL]   = "小",
+    [I18N_KEY_SETTINGS_TEXT_SIZE_MEDIUM]  = "中",
+    [I18N_KEY_SETTINGS_TEXT_SIZE_LARGE]   = "大",
+    [I18N_KEY_SETTINGS_APPLIED]           = "设置已应用",
 
     /* recycle */
     [I18N_KEY_WIN_RECYCLE_BIN]           = "回收站",
@@ -224,6 +250,11 @@ static const char *const k_strings_zh[I18N_KEY_COUNT] = {
     [I18N_KEY_BTN_NEXT]                  = "下一页 >",
     [I18N_KEY_BTN_PREV]                  = "< 上一页",
     [I18N_KEY_BTN_BACK]                  = "< 返回",
+    [I18N_KEY_BTN_ENGLISH]               = "英文",
+    [I18N_KEY_BTN_CHINESE]               = "中文",
+    [I18N_KEY_BTN_FONT_SMALL]            = "小",
+    [I18N_KEY_BTN_FONT_MEDIUM]           = "中",
+    [I18N_KEY_BTN_FONT_LARGE]            = "大",
     [I18N_KEY_BTN_NEW_FILE]              = "新建文件",
     [I18N_KEY_BTN_NEW_DIR]               = "新建目录",
     [I18N_KEY_BTN_RENAME]                = "重命名",
@@ -265,11 +296,7 @@ static const char *const *k_locale_tables[I18N_LOCALE_COUNT] = {
 
 void i18n_init(void) {
     if (g_i18n_inited) return;
-#if OPENOS_DEFAULT_LOCALE_ZH
-    g_i18n_locale = I18N_LOCALE_ZH;
-#else
     g_i18n_locale = I18N_LOCALE_EN;
-#endif
     g_i18n_inited = 1;
 }
 
