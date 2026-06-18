@@ -1078,6 +1078,97 @@ net_device_t *net_get_default_device(void) {
     return default_dev;
 }
 
+static void net_copy_text(char *dst, uint32_t dst_size, const char *src) {
+    uint32_t i = 0;
+    if (!dst || dst_size == 0) return;
+    if (!src) {
+        dst[0] = '\0';
+        return;
+    }
+    for (; i + 1 < dst_size && src[i]; i++) {
+        dst[i] = src[i];
+    }
+    dst[i] = '\0';
+}
+
+static int net_name_has_prefix(const char *name, const char *prefix) {
+    uint32_t i = 0;
+    if (!name || !prefix) return 0;
+    while (prefix[i]) {
+        if (name[i] != prefix[i]) return 0;
+        i++;
+    }
+    return 1;
+}
+
+static const char *net_infer_driver_name(const net_device_t *dev) {
+    if (!dev || !dev->name[0]) return "unknown";
+    if (net_name_has_prefix(dev->name, "e1000")) return "e1000";
+    if (net_name_has_prefix(dev->name, "rtl8139")) return "rtl8139";
+    if (net_name_has_prefix(dev->name, "virtio")) return "virtio-net";
+    return "unknown";
+}
+
+uint32_t net_device_count(void) {
+    uint32_t total = 0;
+    uint32_t i;
+    for (i = 0; i < devmgr_count(); i++) {
+        devmgr_device_t *entry = devmgr_get_by_index(i);
+        if (entry && entry->type == DEVMGR_TYPE_NET && entry->device_ref) {
+            total++;
+        }
+    }
+    return total;
+}
+
+net_device_t *net_get_device_by_index(uint32_t index) {
+    uint32_t seen = 0;
+    uint32_t i;
+    for (i = 0; i < devmgr_count(); i++) {
+        devmgr_device_t *entry = devmgr_get_by_index(i);
+        if (!entry || entry->type != DEVMGR_TYPE_NET || !entry->device_ref) continue;
+        if (seen == index) return (net_device_t *)entry->device_ref;
+        seen++;
+    }
+    return 0;
+}
+
+net_device_t *net_find_device(const char *name) {
+    devmgr_device_t *entry;
+    if (!name) return 0;
+    entry = devmgr_find(name);
+    if (!entry || entry->type != DEVMGR_TYPE_NET) return 0;
+    return (net_device_t *)entry->device_ref;
+}
+
+static int net_fill_device_info(net_device_t *dev, net_device_info_t *out) {
+    if (!dev || !out) return -1;
+    memset(out, 0, sizeof(net_device_info_t));
+    net_copy_text(out->name, NET_DEVICE_NAME_MAX, dev->name);
+    net_copy_text(out->driver, NET_DRIVER_NAME_MAX, net_infer_driver_name(dev));
+    memcpy(out->mac, dev->mac, NET_ETH_ADDR_LEN);
+    out->mtu = NET_ETH_MTU;
+    out->flags = NET_DEVICE_FLAG_PRESENT | NET_DEVICE_FLAG_UP | NET_DEVICE_FLAG_LINK_UP;
+    if (dev == default_dev) out->flags |= NET_DEVICE_FLAG_DEFAULT;
+    out->ip = dev->ip;
+    out->netmask = dev->netmask;
+    out->gateway = dev->gateway;
+    out->dns = NET_IP4(8, 8, 8, 8);
+    out->rx_packets = dev->rx_packets;
+    out->tx_packets = dev->tx_packets;
+    out->rx_dropped = dev->rx_dropped;
+    out->tx_dropped = dev->tx_dropped;
+    return 0;
+}
+
+int net_get_device_info(uint32_t index, net_device_info_t *out) {
+    return net_fill_device_info(net_get_device_by_index(index), out);
+}
+
+int net_get_device_info_by_name(const char *name, net_device_info_t *out) {
+    return net_fill_device_info(net_find_device(name), out);
+}
+
 void net_set_default_ipv4(uint32_t ip, uint32_t netmask, uint32_t gateway) {
     if (!default_dev) return;
     default_dev->ip = ip;
