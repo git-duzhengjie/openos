@@ -247,12 +247,12 @@
   - [√] 触发 DHCP 获取 / 续租 / 释放（已支持 ifconfig <dev> dhcp/renew/release）
   - [√] 设置静态 IP、掩码、网关、DNS（ifconfig 已支持 dns 参数，SYS_NETCONFIG 扩展 DNS 配置）
   - [√] 刷新设备状态与链路状态（已提供 NETDEV_CTL_REFRESH、net_refresh_device_status()、ifconfig <dev> refresh）
-- [ ] GUI 网络设置窗口
-  - [ ] 在 Settings / 设置中增加 Network / 网络入口
-  - [ ] 显示网卡列表与当前连接状态
-  - [ ] 显示 MAC、IP、网关、DNS、DHCP 状态和收发统计
-  - [ ] 提供 DHCP / 静态 IP 切换 UI
-  - [ ] 提供启用 / 禁用网卡、刷新状态按钮
+- [√] GUI 网络设置窗口
+  - [√] 在 Settings / 设置中增加 Network / 网络入口
+  - [√] 显示网卡列表与当前连接状态
+  - [√] 显示 MAC、IP、网关、DNS、DHCP 状态和收发统计
+  - [√] 提供 DHCP / 静态 IP 切换 UI
+  - [√] 提供启用 / 禁用网卡、刷新状态按钮
 - [ ] 启动菜单与用户体验整理
   - [ ] 避免将纯命令行网络工具当作普通桌面应用展示
   - [ ] 可选：将 `ifconfig`、`ping`、`netstat`、`firewall` 等归类到系统工具 / 开发工具

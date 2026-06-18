@@ -16,6 +16,8 @@
 #include "input_buffer.h"
 #include "fs/vfs.h"
 #include "i18n.h"
+#include "net/net.h"
+#include "net/dhcp.h"
 extern int spawn_user_process(const char *path, char *const argv[]);
 extern uint32_t sched_time_ms(void);
 
@@ -38,6 +40,10 @@ static void gui_launcher_scan_bin(uint32_t start_index);
 static void gui_notify(const char *text);
 static int  fp_str_append(char *dst, int pos, int cap, const char *src);
 static void fp_itoa(int n, char *buf);
+static int gui_append_uint(char *dst, int pos, int cap, uint32_t v);
+static void gui_format_ipv4_inline(uint32_t ip, char *buf, int cap);
+static void gui_format_mac_inline(const uint8_t mac[6], char *buf, int cap);
+static int gui_settings_append_field(char *dst, int pos, int cap, i18n_key_t key, const char *value);
 
 static gui_system_t g_gui;
 static gui_accel_info_t g_gui_accel;
@@ -4333,6 +4339,10 @@ static int gui_demo_app_entry(gui_app_t *app, void *user_data) {
 static gui_window_t *g_about_win = 0;
 static gui_window_t *g_recycle_win = 0;
 static gui_window_t *g_settings_win = 0;
+static gui_widget_t *g_settings_ip_box = 0;
+static gui_widget_t *g_settings_mask_box = 0;
+static gui_widget_t *g_settings_gateway_box = 0;
+static gui_widget_t *g_settings_dns_box = 0;
 static gui_window_t *g_notif_win = 0;
 
 #define GUI_NOTIF_MAX        16
@@ -4478,6 +4488,81 @@ static void settings_apply_font_large(gui_widget_t *w, void *ud) {
     gui_settings_build(1);
 }
 
+static void settings_network_refresh(gui_widget_t *w, void *ud) {
+    net_device_info_t info;
+    (void)w;
+    (void)ud;
+    if (net_get_device_info(0, &info) == 0) net_refresh_device_status(info.name);
+    gui_settings_build(1);
+}
+
+static void settings_network_up(gui_widget_t *w, void *ud) {
+    net_device_info_t info;
+    (void)w;
+    (void)ud;
+    if (net_get_device_info(0, &info) == 0) net_set_device_admin_up(info.name, 1);
+    gui_settings_build(1);
+}
+
+static void settings_network_down(gui_widget_t *w, void *ud) {
+    net_device_info_t info;
+    (void)w;
+    (void)ud;
+    if (net_get_device_info(0, &info) == 0) net_set_device_admin_up(info.name, 0);
+    gui_settings_build(1);
+}
+
+static void settings_network_dhcp(gui_widget_t *w, void *ud) {
+    (void)w;
+    (void)ud;
+    dhcp_start();
+    gui_settings_build(1);
+}
+
+static int settings_parse_ipv4(const char *text, uint32_t *out) {
+    uint32_t parts[4];
+    int part = 0;
+    uint32_t value = 0;
+    int has_digit = 0;
+    const char *p = text;
+    if (!text || !out) return -1;
+    while (*p) {
+        if (*p >= '0' && *p <= '9') {
+            value = value * 10u + (uint32_t)(*p - '0');
+            if (value > 255u) return -1;
+            has_digit = 1;
+        } else if (*p == '.') {
+            if (!has_digit || part >= 3) return -1;
+            parts[part++] = value;
+            value = 0;
+            has_digit = 0;
+        } else {
+            return -1;
+        }
+        p++;
+    }
+    if (!has_digit || part != 3) return -1;
+    parts[part] = value;
+    *out = NET_IP4(parts[0], parts[1], parts[2], parts[3]);
+    return 0;
+}
+
+static void settings_network_apply_static(gui_widget_t *w, void *ud) {
+    uint32_t ip;
+    uint32_t mask;
+    uint32_t gateway;
+    uint32_t dns;
+    (void)w;
+    (void)ud;
+    if (!g_settings_ip_box || !g_settings_mask_box || !g_settings_gateway_box || !g_settings_dns_box) return;
+    if (settings_parse_ipv4(g_settings_ip_box->text, &ip) != 0) return;
+    if (settings_parse_ipv4(g_settings_mask_box->text, &mask) != 0) return;
+    if (settings_parse_ipv4(g_settings_gateway_box->text, &gateway) != 0) return;
+    if (settings_parse_ipv4(g_settings_dns_box->text, &dns) != 0) return;
+    net_config_ipv4(ip, mask, gateway, dns);
+    gui_settings_build(1);
+}
+
 static void gui_settings_build(int show_notice) {
     const font_renderer_t *font = font_get_default();
     int line_h = (int)font_get_line_height(font);
@@ -4487,23 +4572,42 @@ static void gui_settings_build(int show_notice) {
     int button_w = (int)font_scale_value(82);
     int label_w = (int)font_scale_value(130);
     int gap = (int)font_scale_value(8);
-    int win_w = (int)font_scale_value(430);
-    int win_h = margin * 2 + row_h * 5 + 40;
+    int win_w = (int)font_scale_value(640);
+    int win_h = margin * 2 + row_h * 18 + 56;
     int x;
     int y;
     int pos;
-    char status[160];
+    net_device_info_t net_info;
+    net_device_info_t list_info;
+    int has_net;
+    int dev_index;
+    char status[192];
+    char line[224];
+    char ip_buf[24];
+    char mask_buf[24];
+    char gw_buf[24];
+    char dns_buf[24];
+    char mac_buf[32];
+    char rx_buf[16];
+    char tx_buf[16];
+    const char *mode_text;
+    const char *up_text;
+    const char *link_text;
 
-    if (win_w < 430) win_w = 430;
-    if (win_h < 260) win_h = 260;
+    if (win_w < 640) win_w = 640;
+    if (win_h < 560) win_h = 560;
 
     if (g_settings_win) {
         gui_window_set_on_close(g_settings_win, 0, 0);
         gui_destroy_window(g_settings_win);
         g_settings_win = 0;
     }
+    g_settings_ip_box = 0;
+    g_settings_mask_box = 0;
+    g_settings_gateway_box = 0;
+    g_settings_dns_box = 0;
 
-    g_settings_win = gui_create_window(190, 110, win_w, win_h, i18n_t(I18N_KEY_WIN_SETTINGS));
+    g_settings_win = gui_create_window(190, 70, win_w, win_h, i18n_t(I18N_KEY_WIN_SETTINGS));
     if (!g_settings_win) return;
     gui_window_set_on_close(g_settings_win, settings_on_close, 0);
 
@@ -4534,6 +4638,104 @@ static void gui_settings_build(int show_notice) {
     pos = fp_str_append(status, pos, sizeof(status), gui_settings_font_size_name());
     (void)pos;
     gui_add_label(g_settings_win, x, y, win_w - margin * 2, line_h + 6, status);
+
+    y += row_h + gap;
+    gui_add_label(g_settings_win, x, y, win_w - margin * 2, line_h + 4, i18n_t(I18N_KEY_SETTINGS_NETWORK));
+    y += row_h;
+
+    for (dev_index = 0; dev_index < 4; dev_index++) {
+        if (net_get_device_info((uint32_t)dev_index, &list_info) != 0) break;
+        pos = 0;
+        pos = gui_settings_append_field(line, pos, sizeof(line), I18N_KEY_SETTINGS_NETWORK_DEVICE, list_info.name);
+        pos = fp_str_append(line, pos, sizeof(line), "  ");
+        pos = fp_str_append(line, pos, sizeof(line), list_info.driver);
+        pos = fp_str_append(line, pos, sizeof(line), "  ");
+        pos = fp_str_append(line, pos, sizeof(line), (list_info.flags & NET_DEVICE_FLAG_UP) ? i18n_t(I18N_KEY_SETTINGS_NETWORK_UP) : i18n_t(I18N_KEY_SETTINGS_NETWORK_DOWN));
+        pos = fp_str_append(line, pos, sizeof(line), "/");
+        pos = fp_str_append(line, pos, sizeof(line), (list_info.flags & NET_DEVICE_FLAG_LINK_UP) ? i18n_t(I18N_KEY_SETTINGS_NETWORK_LINK_UP) : i18n_t(I18N_KEY_SETTINGS_NETWORK_LINK_DOWN));
+        (void)pos;
+        gui_add_label(g_settings_win, x, y, win_w - margin * 2, line_h + 6, line);
+        y += row_h;
+    }
+
+    has_net = (net_get_device_info(0, &net_info) == 0);
+    if (!has_net) {
+        gui_add_label(g_settings_win, x, y, win_w - margin * 2, line_h + 6, i18n_t(I18N_KEY_SETTINGS_NETWORK_NO_DEVICE));
+    } else {
+        gui_format_ipv4_inline(net_info.ip, ip_buf, sizeof(ip_buf));
+        gui_format_ipv4_inline(net_info.netmask, mask_buf, sizeof(mask_buf));
+        gui_format_ipv4_inline(net_info.gateway, gw_buf, sizeof(gw_buf));
+        gui_format_ipv4_inline(net_info.dns, dns_buf, sizeof(dns_buf));
+        gui_format_mac_inline(net_info.mac, mac_buf, sizeof(mac_buf));
+        mode_text = (net_info.config_mode == NET_CONFIG_MODE_DHCP) ? i18n_t(I18N_KEY_SETTINGS_NETWORK_DHCP) : i18n_t(I18N_KEY_SETTINGS_NETWORK_STATIC);
+        up_text = (net_info.flags & NET_DEVICE_FLAG_UP) ? i18n_t(I18N_KEY_SETTINGS_NETWORK_UP) : i18n_t(I18N_KEY_SETTINGS_NETWORK_DOWN);
+        link_text = (net_info.flags & NET_DEVICE_FLAG_LINK_UP) ? i18n_t(I18N_KEY_SETTINGS_NETWORK_LINK_UP) : i18n_t(I18N_KEY_SETTINGS_NETWORK_LINK_DOWN);
+
+        pos = 0;
+        pos = gui_settings_append_field(line, pos, sizeof(line), I18N_KEY_SETTINGS_NETWORK_DEVICE, net_info.name);
+        pos = fp_str_append(line, pos, sizeof(line), "  ");
+        pos = fp_str_append(line, pos, sizeof(line), net_info.driver);
+        (void)pos;
+        gui_add_label(g_settings_win, x, y, win_w - margin * 2, line_h + 6, line);
+        y += row_h;
+
+        pos = 0;
+        pos = gui_settings_append_field(line, pos, sizeof(line), I18N_KEY_SETTINGS_NETWORK_STATUS, up_text);
+        pos = fp_str_append(line, pos, sizeof(line), " / ");
+        pos = fp_str_append(line, pos, sizeof(line), link_text);
+        (void)pos;
+        gui_add_label(g_settings_win, x, y, win_w - margin * 2, line_h + 6, line);
+        y += row_h;
+
+        pos = 0;
+        pos = gui_settings_append_field(line, pos, sizeof(line), I18N_KEY_SETTINGS_NETWORK_MAC, mac_buf);
+        pos = fp_str_append(line, pos, sizeof(line), "  ");
+        pos = gui_settings_append_field(line, pos, sizeof(line), I18N_KEY_SETTINGS_NETWORK_MODE, mode_text);
+        (void)pos;
+        gui_add_label(g_settings_win, x, y, win_w - margin * 2, line_h + 6, line);
+        y += row_h;
+
+        pos = 0;
+        pos = gui_settings_append_field(line, pos, sizeof(line), I18N_KEY_SETTINGS_NETWORK_IP, ip_buf);
+        pos = fp_str_append(line, pos, sizeof(line), "  ");
+        pos = gui_settings_append_field(line, pos, sizeof(line), I18N_KEY_SETTINGS_NETWORK_GATEWAY, gw_buf);
+        (void)pos;
+        gui_add_label(g_settings_win, x, y, win_w - margin * 2, line_h + 6, line);
+        y += row_h;
+
+        pos = 0;
+        pos = gui_settings_append_field(line, pos, sizeof(line), I18N_KEY_SETTINGS_NETWORK_DNS, dns_buf);
+        pos = fp_str_append(line, pos, sizeof(line), "  ");
+        pos = gui_settings_append_field(line, pos, sizeof(line), I18N_KEY_SETTINGS_NETWORK_TRAFFIC, "RX/TX ");
+        pos = gui_append_uint(line, pos, sizeof(line), net_info.rx_packets);
+        pos = fp_str_append(line, pos, sizeof(line), "/");
+        pos = gui_append_uint(line, pos, sizeof(line), net_info.tx_packets);
+        (void)rx_buf;
+        (void)tx_buf;
+        (void)pos;
+        gui_add_label(g_settings_win, x, y, win_w - margin * 2, line_h + 6, line);
+        y += row_h;
+
+        gui_add_button(g_settings_win, x, y, button_w, button_h, i18n_t(I18N_KEY_BTN_REFRESH), settings_network_refresh, 0);
+        gui_add_button(g_settings_win, x + button_w + gap, y, button_w, button_h, i18n_t(I18N_KEY_SETTINGS_NETWORK_UP), settings_network_up, 0);
+        gui_add_button(g_settings_win, x + (button_w + gap) * 2, y, button_w, button_h, i18n_t(I18N_KEY_SETTINGS_NETWORK_DOWN), settings_network_down, 0);
+        gui_add_button(g_settings_win, x + (button_w + gap) * 3, y, button_w, button_h, i18n_t(I18N_KEY_SETTINGS_NETWORK_DHCP), settings_network_dhcp, 0);
+        y += row_h;
+
+        gui_add_label(g_settings_win, x, y + (button_h - line_h) / 2, label_w, line_h + 4, i18n_t(I18N_KEY_SETTINGS_NETWORK_IP));
+        g_settings_ip_box = gui_add_textbox(g_settings_win, x + label_w + gap, y, button_w * 2, button_h, ip_buf);
+        gui_add_label(g_settings_win, x + label_w + gap + button_w * 2 + gap, y + (button_h - line_h) / 2, label_w / 2, line_h + 4, i18n_t(I18N_KEY_SETTINGS_NETWORK_NETMASK));
+        g_settings_mask_box = gui_add_textbox(g_settings_win, x + label_w + gap + button_w * 2 + gap + label_w / 2, y, button_w * 2, button_h, mask_buf);
+        y += row_h;
+
+        gui_add_label(g_settings_win, x, y + (button_h - line_h) / 2, label_w, line_h + 4, i18n_t(I18N_KEY_SETTINGS_NETWORK_GATEWAY));
+        g_settings_gateway_box = gui_add_textbox(g_settings_win, x + label_w + gap, y, button_w * 2, button_h, gw_buf);
+        gui_add_label(g_settings_win, x + label_w + gap + button_w * 2 + gap, y + (button_h - line_h) / 2, label_w / 2, line_h + 4, i18n_t(I18N_KEY_SETTINGS_NETWORK_DNS));
+        g_settings_dns_box = gui_add_textbox(g_settings_win, x + label_w + gap + button_w * 2 + gap + label_w / 2, y, button_w * 2, button_h, dns_buf);
+        y += row_h;
+
+        gui_add_button(g_settings_win, x, y, button_w * 2, button_h, i18n_t(I18N_KEY_SETTINGS_NETWORK_APPLY_STATIC), settings_network_apply_static, 0);
+    }
 
     if (show_notice) gui_notify(i18n_t(I18N_KEY_SETTINGS_APPLIED));
     gui_render();
@@ -4777,6 +4979,62 @@ static void fp_itoa(int n, char *buf) {
 static int fp_str_append(char *dst, int pos, int cap, const char *src) {
     while (*src && pos < cap - 1) dst[pos++] = *src++;
     dst[pos] = 0;
+    return pos;
+}
+
+static int gui_append_uint(char *dst, int pos, int cap, uint32_t v) {
+    char tmp[16];
+    int i = 0;
+    int j;
+    if (cap <= 0) return pos;
+    if (v == 0) return fp_str_append(dst, pos, cap, "0");
+    while (v && i < (int)sizeof(tmp)) {
+        tmp[i++] = (char)('0' + (v % 10));
+        v /= 10;
+    }
+    for (j = i - 1; j >= 0; j--) {
+        if (pos >= cap - 1) break;
+        dst[pos++] = tmp[j];
+    }
+    dst[pos] = 0;
+    return pos;
+}
+
+static int gui_append_hex_byte(char *dst, int pos, int cap, uint8_t v) {
+    static const char hex[] = "0123456789ABCDEF";
+    if (pos < cap - 1) dst[pos++] = hex[(v >> 4) & 0x0f];
+    if (pos < cap - 1) dst[pos++] = hex[v & 0x0f];
+    if (cap > 0) dst[pos] = 0;
+    return pos;
+}
+
+static void gui_format_ipv4_inline(uint32_t ip, char *buf, int cap) {
+    int pos = 0;
+    if (!buf || cap <= 0) return;
+    pos = gui_append_uint(buf, pos, cap, (ip >> 24) & 0xffu);
+    pos = fp_str_append(buf, pos, cap, ".");
+    pos = gui_append_uint(buf, pos, cap, (ip >> 16) & 0xffu);
+    pos = fp_str_append(buf, pos, cap, ".");
+    pos = gui_append_uint(buf, pos, cap, (ip >> 8) & 0xffu);
+    pos = fp_str_append(buf, pos, cap, ".");
+    pos = gui_append_uint(buf, pos, cap, ip & 0xffu);
+    (void)pos;
+}
+
+static void gui_format_mac_inline(const uint8_t mac[6], char *buf, int cap) {
+    int pos = 0;
+    int i;
+    if (!buf || cap <= 0) return;
+    for (i = 0; i < 6; i++) {
+        if (i) pos = fp_str_append(buf, pos, cap, ":");
+        pos = gui_append_hex_byte(buf, pos, cap, mac[i]);
+    }
+}
+
+static int gui_settings_append_field(char *dst, int pos, int cap, i18n_key_t key, const char *value) {
+    pos = fp_str_append(dst, pos, cap, i18n_t(key));
+    pos = fp_str_append(dst, pos, cap, ": ");
+    pos = fp_str_append(dst, pos, cap, value ? value : "");
     return pos;
 }
 
