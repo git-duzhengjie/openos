@@ -11,7 +11,7 @@
 
 #define GUI_MAX_WINDOWS          16u
 #define GUI_MAX_APPS             16u
-#define GUI_MAX_WIDGETS_PER_WIN  32u
+#define GUI_MAX_WIDGETS_PER_WIN  64u
 #define GUI_APP_NAME_LEN         32u
 #define GUI_BORDER_SIZE          2
 #define GUI_CHAR_W               ((int)font_get_ascii_width(font_get_default()))

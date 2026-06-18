@@ -531,8 +531,34 @@ static void gui_title_rect_px(int x, int y, int w, int h, uint32_t color, const 
     gui_raw_fill_rect(x, y, w, h, color);
 }
 
+static int gui_text_line_height_px(void) {
+    int h = (int)font_get_line_height(font_get_default());
+    return h > 0 ? h : GUI_CHAR_H;
+}
+
+static int gui_text_glyph_height_px(void) {
+    int ascii_h = (int)font_get_ascii_height(font_get_default());
+    int unicode_h = (int)font_get_unicode_height();
+    int h = ascii_h > unicode_h ? ascii_h : unicode_h;
+    return h > 0 ? h : gui_text_line_height_px();
+}
+
+static int gui_text_center_y(int top, int height) {
+    int text_h = gui_text_glyph_height_px();
+    int y = top + (height - text_h) / 2;
+    return y < top ? top : y;
+}
+
 static void gui_draw_window_title_text(int x, int y, const char *text, uint32_t color, const gui_rect_t *clip) {
-    gui_draw_text_clipped_direct(x, y, text, color, clip);
+    gui_rect_t old_clip;
+    int old_enabled;
+    if (!text || !clip || clip->w <= 0 || clip->h <= 0) return;
+    old_clip = g_gui.clip_rect;
+    old_enabled = g_gui.clip_enabled;
+    gui_set_clip_rect(clip);
+    gui_draw_text(x, y, text, color);
+    g_gui.clip_rect = old_clip;
+    g_gui.clip_enabled = old_enabled;
 }
 static int gui_rect_contains(const gui_rect_t *r, int x, int y) {
     return r && x >= r->x && y >= r->y && x < r->x + r->w && y < r->y + r->h;
@@ -1135,7 +1161,9 @@ static void gui_draw_widget(gui_widget_t *wg) {
             gui_draw_file_icon(wg->icon, ax, ay + (wg->rect.h - 14) / 2);
             text_off = 14 + 4;
         }
-        gui_draw_text(ax + text_off, ay + 3, wg->text, wg->fg_color ? wg->fg_color : g_gui.colors.text_fg);
+        gui_rect_t clip = { ax + text_off, ay, wg->rect.w - text_off, wg->rect.h };
+        gui_draw_window_title_text(ax + text_off, gui_text_center_y(ay, wg->rect.h), wg->text,
+                                   wg->fg_color ? wg->fg_color : g_gui.colors.text_fg, &clip);
     } else if (wg->type == GUI_WIDGET_BUTTON) {
         uint32_t light = g_gui.colors.button_border;
         uint32_t shadow = gui_rgb(20, 20, 20);
@@ -1174,19 +1202,27 @@ static void gui_draw_widget(gui_widget_t *wg) {
             gui_draw_file_icon(wg->icon, ax + text_dx, ay + (wg->rect.h - 14) / 2 + text_dy);
             text_dx += 14 + 4;
         }
-        gui_draw_text(ax + text_dx, ay + (wg->rect.h - GUI_CHAR_H) / 2 + text_dy, wg->text, fg);
+        {
+            gui_rect_t clip = { ax + text_dx, ay + 2, wg->rect.w - text_dx - 3, wg->rect.h - 4 };
+            gui_draw_window_title_text(ax + text_dx, gui_text_center_y(ay, wg->rect.h) + text_dy,
+                                       wg->text, fg, &clip);
+        }
     } else if (wg->type == GUI_WIDGET_PANEL) {
         gui_raw_fill_rect(ax, ay, wg->rect.w, wg->rect.h, wg->bg_color);
     } else if (wg->type == GUI_WIDGET_TEXTBOX) {
         uint32_t border = wg->focused ? g_gui.colors.accent : g_gui.colors.button_border;
         uint32_t text_x = (uint32_t)(ax + 4);
-        uint32_t text_y = (uint32_t)(ay + (wg->rect.h - GUI_CHAR_H) / 2);
+        uint32_t text_y = (uint32_t)gui_text_center_y(ay, wg->rect.h);
         gui_raw_fill_rect(ax, ay, wg->rect.w, wg->rect.h, wg->bg_color ? wg->bg_color : gui_rgb(250, 250, 250));
         gui_raw_line(ax, ay, ax + wg->rect.w - 1, ay, border);
         gui_raw_line(ax, ay, ax, ay + wg->rect.h - 1, border);
         gui_raw_line(ax + wg->rect.w - 1, ay, ax + wg->rect.w - 1, ay + wg->rect.h - 1, border);
         gui_raw_line(ax, ay + wg->rect.h - 1, ax + wg->rect.w - 1, ay + wg->rect.h - 1, border);
-        gui_draw_text((int)text_x, (int)text_y, wg->text, wg->fg_color ? wg->fg_color : gui_rgb(20, 20, 20));
+        {
+            gui_rect_t clip = { ax + 4, ay + 2, wg->rect.w - 8, wg->rect.h - 4 };
+            gui_draw_window_title_text((int)text_x, (int)text_y, wg->text,
+                                       wg->fg_color ? wg->fg_color : gui_rgb(20, 20, 20), &clip);
+        }
         if (wg->focused) {
             int cx = ax + 4 + (int)(wg->cursor * GUI_CHAR_W);
             if (cx < ax + wg->rect.w - 3) gui_raw_line(cx, ay + 4, cx, ay + wg->rect.h - 5, gui_rgb(20, 20, 20));
@@ -1259,7 +1295,7 @@ static void gui_draw_window(gui_window_t *w) {
     {
         gui_rect_t title_clip;
         int title_x = w->rect.x + 8;
-        int title_y = w->rect.y + (GUI_TITLE_HEIGHT - GUI_TEXT_LINE_H) / 2;
+        int title_y = gui_text_center_y(w->rect.y, GUI_TITLE_HEIGHT);
         int title_right = w->rect.x + w->rect.w - GUI_BORDER_SIZE - 6;
         if (w->flags & GUI_WINDOW_FLAG_CLOSABLE) {
             gui_rect_t c = gui_close_rect(w);
@@ -4120,7 +4156,7 @@ static void notif_on_clear(gui_widget_t *w, void *ud) {
 #define GUI_FP_MAX_PATH        256
 #define GUI_FP_MAX_NAME        64
 #define GUI_FP_MAX_ENTRIES     256
-#define GUI_FP_LIST_PER_PAGE   11
+#define GUI_FP_LIST_PER_PAGE   8
 #define GUI_FP_VIEW_MAX_LINES  12
 #define GUI_FP_VIEW_LINE_CHARS 56
 #define GUI_FP_VIEW_BUF_SIZE   8192
@@ -4372,10 +4408,121 @@ static int fp_total_items(void) {
     return n;
 }
 
+static int fp_row_height(void) {
+    int text_h = gui_text_line_height_px();
+    int h = text_h + 6;
+    if (h < GUI_FP_ROW_HEIGHT) h = GUI_FP_ROW_HEIGHT;
+    return h;
+}
+
+static int fp_list_per_page(void) {
+    int text_h = gui_text_line_height_px();
+    int label_h = text_h + 2;
+    int button_h = text_h + 6;
+    int header_h;
+    int row_h = fp_row_height();
+    int path_y = 28;
+    int nav_y;
+    int header_y;
+    int sep_y;
+    int list_y;
+    int prompt_h;
+    int usable_h;
+    int window_h;
+    int rows;
+
+    if (button_h < 20) button_h = 20;
+    header_h = button_h;
+    nav_y = path_y + label_h + 4;
+    header_y = nav_y + button_h + 4;
+    sep_y = header_y + header_h + 1;
+    list_y = sep_y + 3;
+    prompt_h = (fp_prompt_mode == 0) ? label_h : button_h;
+    window_h = fp_window ? fp_window->rect.h : 430;
+
+    /* Leave room for toolbar, status/prompt controls and a bottom margin.
+     * New File/New Directory/Rename prompts add a textbox plus OK/Cancel
+     * buttons at the bottom, so fixed list height can push them outside the
+     * window when the default font is scaled up. */
+    usable_h = window_h - list_y - button_h - prompt_h - 30;
+    if (usable_h < row_h * 3) usable_h = row_h * 3;
+
+    rows = usable_h / row_h;
+    if (rows < 3) rows = 3;
+    if (rows > GUI_FP_LIST_PER_PAGE) rows = GUI_FP_LIST_PER_PAGE;
+    return rows;
+}
+
+typedef struct fp_list_layout {
+    int x;
+    int w;
+    int name_x;
+    int name_w;
+    int mtime_x;
+    int mtime_w;
+    int type_x;
+    int type_w;
+    int size_x;
+    int size_w;
+    int sep_name;
+    int sep_mtime;
+    int sep_type;
+} fp_list_layout_t;
+
+static int gui_text_width_px(const char *text) {
+    int w;
+    if (!text) return 0;
+    w = (int)font_measure_text_width(font_get_default(), text);
+    return w > 0 ? w : (int)strlen(text) * GUI_CHAR_W;
+}
+
+static int fp_button_width_for(const char *text, int min_w) {
+    int w = gui_text_width_px(text) + 18;
+    return w < min_w ? min_w : w;
+}
+
+static void fp_compute_list_layout(fp_list_layout_t *l) {
+    int inner_w;
+    int icon_gap = 24;
+    int type_min;
+    int size_min;
+    int mtime_min;
+    int remaining;
+    if (!l) return;
+    l->x = 8;
+    inner_w = fp_window ? fp_window->rect.w - 16 : 544;
+    if (inner_w < 544) inner_w = 544;
+    l->w = inner_w;
+
+    mtime_min = gui_text_width_px("2026-06-18 09:00") + 14;
+    type_min = gui_text_width_px("Folder") + 16;
+    size_min = gui_text_width_px("999K") + 16;
+    if (mtime_min < 170) mtime_min = 170;
+    if (type_min < 82) type_min = 82;
+    if (size_min < 78) size_min = 78;
+
+    remaining = inner_w - icon_gap - mtime_min - type_min - size_min;
+    if (remaining < 220) remaining = 220;
+
+    l->name_x = l->x + 4;
+    l->name_w = remaining;
+    l->sep_name = l->x + icon_gap + l->name_w;
+    l->mtime_x = l->sep_name + 8;
+    l->mtime_w = mtime_min - 10;
+    l->sep_mtime = l->mtime_x + l->mtime_w + 8;
+    l->type_x = l->sep_mtime + 8;
+    l->type_w = type_min - 10;
+    l->sep_type = l->type_x + l->type_w + 8;
+    l->size_x = l->sep_type + 8;
+    l->size_w = l->x + l->w - l->size_x - 6;
+    if (l->size_w < 40) l->size_w = 40;
+}
+
 static int fp_total_pages(void) {
     int n = fp_total_items();
+    int per_page = fp_list_per_page();
     if (n <= 0) return 1;
-    return (n + GUI_FP_LIST_PER_PAGE - 1) / GUI_FP_LIST_PER_PAGE;
+    return (n + per_page - 1) / per_page;
 }
 
 /* fetch the Nth real entry (N=0 = first non-dot child) ---------- */
@@ -4590,7 +4737,7 @@ static void fp_on_entry(gui_widget_t *w, void *ud) {
     /* remember selection for toolbar Rename/Delete */
     fp_selected = slot;
 
-    global_index = fp_page * GUI_FP_LIST_PER_PAGE + slot;
+    global_index = fp_page * fp_list_per_page() + slot;
 
     /* slot 0 of page 0 in non-root is the ".." shortcut */
     if (!fp_is_root() && global_index == 0) {
@@ -4797,7 +4944,7 @@ static void fp_get_selected_name(char *out, int out_sz) {
     int i;
     out[0] = 0;
     if (fp_selected < 0) return;
-    gidx = fp_page * GUI_FP_LIST_PER_PAGE + fp_selected;
+    gidx = fp_page * fp_list_per_page() + fp_selected;
     if (gidx >= fp_total_items()) return;
     if (!fp_is_root() && gidx == 0) return; /* '..' not selectable */
     real_index = fp_is_root() ? gidx : (gidx - 1);
@@ -4842,24 +4989,49 @@ static void gui_file_preview_render_list(void) {
     gui_widget_t *lbl;
     int y, slot, total_pages, total_items, base;
     int pos;
+    int text_h, label_h, button_h, header_h, row_h, list_count;
+    int path_y, nav_y, page_y, header_y, sep_y, list_y, toolbar_y, status_y;
+    fp_list_layout_t layout;
 
     if (!fp_window) return;
 
     /* build sorted index for current directory */
     fp_build_sorted_index();
 
+    text_h = gui_text_line_height_px();
+    label_h = text_h + 2;
+    button_h = text_h + 6;
+    if (button_h < 20) button_h = 20;
+    header_h = button_h;
+    row_h = fp_row_height();
+    list_count = fp_list_per_page();
+    path_y = 28;
+    nav_y = path_y + label_h + 4;
+    page_y = gui_text_center_y(nav_y, button_h);
+    header_y = nav_y + button_h + 4;
+    sep_y = header_y + header_h + 1;
+    list_y = sep_y + 3;
+    toolbar_y = list_y + list_count * row_h + 8;
+    status_y = toolbar_y + button_h + 6;
+    fp_compute_list_layout(&layout);
+
     /* path header */
     pos = 0;
     pos = fp_str_append(header, pos, sizeof(header), i18n_t(I18N_KEY_HEADER_PATH));
     pos = fp_str_append(header, pos, sizeof(header), fp_path);
     (void)pos;
-    gui_add_label(fp_window, 8, 28, 444, 16, header);
+    gui_add_label(fp_window, layout.x, path_y, layout.w, label_h, header);
 
     /* nav buttons */
-    btn = gui_add_button(fp_window, 8, 48, 60, 20, i18n_t(I18N_KEY_BTN_PREV), fp_on_prev, 0);
-    (void)btn;
-    btn = gui_add_button(fp_window, 76, 48, 60, 20, i18n_t(I18N_KEY_BTN_NEXT), fp_on_next, 0);
-    (void)btn;
+    {
+        int prev_w = fp_button_width_for(i18n_t(I18N_KEY_BTN_PREV), 60);
+        int next_w = fp_button_width_for(i18n_t(I18N_KEY_BTN_NEXT), 60);
+        int nav_gap = 8;
+        btn = gui_add_button(fp_window, layout.x, nav_y, prev_w, button_h, i18n_t(I18N_KEY_BTN_PREV), fp_on_prev, 0);
+        (void)btn;
+        btn = gui_add_button(fp_window, layout.x + prev_w + nav_gap, nav_y, next_w, button_h, i18n_t(I18N_KEY_BTN_NEXT), fp_on_next, 0);
+        (void)btn;
+    }
 
     total_pages = fp_total_pages();
     total_items = fp_total_items();
@@ -4875,22 +5047,43 @@ static void gui_file_preview_render_list(void) {
     pos = fp_str_append(pageinfo, pos, sizeof(pageinfo), buf);
     pos = fp_str_append(pageinfo, pos, sizeof(pageinfo), i18n_t(I18N_KEY_PAGE_ITEMS));
     (void)pos;
-    gui_add_label(fp_window, 144, 50, 300, 16, pageinfo);
+    {
+        int prev_w = fp_button_width_for(i18n_t(I18N_KEY_BTN_PREV), 60);
+        int next_w = fp_button_width_for(i18n_t(I18N_KEY_BTN_NEXT), 60);
+        int nav_gap = 8;
+        int page_x = layout.x + prev_w + next_w + nav_gap * 2;
+        int page_w = layout.x + layout.w - page_x;
+        if (page_w < 80) page_w = 80;
+        gui_add_label(fp_window, page_x, page_y, page_w, label_h, pageinfo);
+    }
 
     /* toolbar: New File | New Dir | Rename | Delete | Refresh */
-    btn = gui_add_button(fp_window, 8,   320, 76, 20, i18n_t(I18N_KEY_BTN_NEW_FILE), fp_on_tb_new_file, 0);
-    if (btn) { btn->bg_color = gui_rgb(220, 235, 220); }
-    btn = gui_add_button(fp_window, 88,  320, 72, 20, i18n_t(I18N_KEY_BTN_NEW_DIR),  fp_on_tb_new_dir, 0);
-    if (btn) { btn->bg_color = gui_rgb(220, 235, 220); }
-    btn = gui_add_button(fp_window, 164, 320, 68, 20, i18n_t(I18N_KEY_BTN_RENAME),   fp_on_tb_rename, 0);
-    btn = gui_add_button(fp_window, 236, 320, 68, 20, i18n_t(I18N_KEY_BTN_DELETE),   fp_on_tb_delete, 0);
-    if (btn) { btn->bg_color = gui_rgb(245, 220, 220); }
-    btn = gui_add_button(fp_window, 308, 320, 68, 20, i18n_t(I18N_KEY_BTN_REFRESH),  fp_on_tb_refresh, 0);
+    {
+        int tx = layout.x;
+        int gap = 5;
+        int w_new_file = fp_button_width_for(i18n_t(I18N_KEY_BTN_NEW_FILE), 84);
+        int w_new_dir = fp_button_width_for(i18n_t(I18N_KEY_BTN_NEW_DIR), 84);
+        int w_rename = fp_button_width_for(i18n_t(I18N_KEY_BTN_RENAME), 72);
+        int w_delete = fp_button_width_for(i18n_t(I18N_KEY_BTN_DELETE), 72);
+        int w_refresh = fp_button_width_for(i18n_t(I18N_KEY_BTN_REFRESH), 84);
+        btn = gui_add_button(fp_window, tx, toolbar_y, w_new_file, button_h, i18n_t(I18N_KEY_BTN_NEW_FILE), fp_on_tb_new_file, 0);
+        if (btn) { btn->bg_color = gui_rgb(220, 235, 220); }
+        tx += w_new_file + gap;
+        btn = gui_add_button(fp_window, tx, toolbar_y, w_new_dir, button_h, i18n_t(I18N_KEY_BTN_NEW_DIR),  fp_on_tb_new_dir, 0);
+        if (btn) { btn->bg_color = gui_rgb(220, 235, 220); }
+        tx += w_new_dir + gap;
+        btn = gui_add_button(fp_window, tx, toolbar_y, w_rename, button_h, i18n_t(I18N_KEY_BTN_RENAME),   fp_on_tb_rename, 0);
+        tx += w_rename + gap;
+        btn = gui_add_button(fp_window, tx, toolbar_y, w_delete, button_h, i18n_t(I18N_KEY_BTN_DELETE),   fp_on_tb_delete, 0);
+        if (btn) { btn->bg_color = gui_rgb(245, 220, 220); }
+        tx += w_delete + gap;
+        btn = gui_add_button(fp_window, tx, toolbar_y, w_refresh, button_h, i18n_t(I18N_KEY_BTN_REFRESH),  fp_on_tb_refresh, 0);
+    }
 
     /* status / prompt area at the very bottom */
     if (fp_prompt_mode == 0) {
         if (fp_status[0]) {
-            lbl = gui_add_label(fp_window, 8, 348, 444, 16, fp_status);
+            lbl = gui_add_label(fp_window, layout.x, status_y, layout.w, label_h, fp_status);
             if (lbl) lbl->fg_color = gui_rgb(80, 80, 120);
         }
     } else {
@@ -4903,24 +5096,37 @@ static void gui_file_preview_render_list(void) {
         else if (fp_prompt_mode == 4) title_s = i18n_t(I18N_KEY_PROMPT_DELETE_CONFIRM);
         while (title_s[pp] && pp < 60) { promptlabel[pp] = title_s[pp]; pp++; }
         promptlabel[pp] = 0;
-        lbl = gui_add_label(fp_window, 8, 348, 160, 18, promptlabel);
-        if (lbl) lbl->fg_color = gui_rgb(40, 40, 100);
-        if (fp_prompt_mode == 4) {
-            /* delete confirm: show name as readonly label */
-            lbl = gui_add_label(fp_window, 170, 348, 160, 18, fp_prompt_target);
-            if (lbl) lbl->fg_color = gui_rgb(180, 60, 60);
-        } else {
-            fp_prompt_textbox = gui_add_textbox(fp_window, 170, 346, 160, 20, fp_prompt_buf);
-            if (fp_prompt_textbox) {
-                /* sync displayed text into buf via length */
-                fp_prompt_len = 0;
-                while (fp_prompt_buf[fp_prompt_len]) fp_prompt_len++;
+        {
+            int ok_w = fp_button_width_for(i18n_t(I18N_KEY_BTN_OK), 56);
+            int cancel_w = fp_button_width_for(i18n_t(I18N_KEY_BTN_CANCEL), 72);
+            int prompt_w = gui_text_width_px(promptlabel) + 10;
+            int buttons_w = ok_w + cancel_w + 8;
+            int field_x;
+            int field_w;
+            if (prompt_w < 160) prompt_w = 160;
+            if (prompt_w > layout.w / 3) prompt_w = layout.w / 3;
+            field_x = layout.x + prompt_w + 8;
+            field_w = layout.x + layout.w - field_x - buttons_w - 12;
+            if (field_w < 120) field_w = 120;
+            lbl = gui_add_label(fp_window, layout.x, status_y, prompt_w, label_h, promptlabel);
+            if (lbl) lbl->fg_color = gui_rgb(40, 40, 100);
+            if (fp_prompt_mode == 4) {
+                /* delete confirm: show name as readonly label */
+                lbl = gui_add_label(fp_window, field_x, status_y, field_w, label_h, fp_prompt_target);
+                if (lbl) lbl->fg_color = gui_rgb(180, 60, 60);
+            } else {
+                fp_prompt_textbox = gui_add_textbox(fp_window, field_x, status_y - 2, field_w, button_h, fp_prompt_buf);
+                if (fp_prompt_textbox) {
+                    /* sync displayed text into buf via length */
+                    fp_prompt_len = 0;
+                    while (fp_prompt_buf[fp_prompt_len]) fp_prompt_len++;
+                }
             }
+            btn = gui_add_button(fp_window, layout.x + layout.w - buttons_w, status_y - 2, ok_w, button_h, i18n_t(I18N_KEY_BTN_OK),     fp_on_prompt_ok, 0);
+            if (btn) btn->bg_color = gui_rgb(200, 230, 200);
+            btn = gui_add_button(fp_window, layout.x + layout.w - cancel_w, status_y - 2, cancel_w, button_h, i18n_t(I18N_KEY_BTN_CANCEL), fp_on_prompt_cancel, 0);
+            if (btn) btn->bg_color = gui_rgb(240, 220, 220);
         }
-        btn = gui_add_button(fp_window, 336, 346, 52, 20, i18n_t(I18N_KEY_BTN_OK),     fp_on_prompt_ok, 0);
-        if (btn) btn->bg_color = gui_rgb(200, 230, 200);
-        btn = gui_add_button(fp_window, 392, 346, 60, 20, i18n_t(I18N_KEY_BTN_CANCEL), fp_on_prompt_cancel, 0);
-        if (btn) btn->bg_color = gui_rgb(240, 220, 220);
     }
 
     /* column header row: clickable sort buttons | separators */
@@ -4957,29 +5163,29 @@ static void gui_file_preview_render_list(void) {
         hsize[hp++] = suf_s[0]; hsize[hp++] = suf_s[1]; hsize[hp] = 0;
 
         /* column header buttons (x positions matching item-row text columns) */
-        btn = gui_add_button(fp_window, 8,   70, 168, 18, hname, fp_on_sort, (void *)(intptr_t)0);
+        btn = gui_add_button(fp_window, layout.x, header_y, layout.sep_name - layout.x, header_h, hname, fp_on_sort, (void *)(intptr_t)0);
         if (btn) { btn->bg_color = (fp_sort_key == 0) ? sel_bg : hdr_bg; btn->fg_color = hdr_fg; }
-        btn = gui_add_button(fp_window, 178, 70, 128, 18, hmod,  fp_on_sort, (void *)(intptr_t)1);
+        btn = gui_add_button(fp_window, layout.mtime_x - 4, header_y, layout.sep_mtime - layout.mtime_x + 4, header_h, hmod,  fp_on_sort, (void *)(intptr_t)1);
         if (btn) { btn->bg_color = (fp_sort_key == 1) ? sel_bg : hdr_bg; btn->fg_color = hdr_fg; }
         /* type column is not sortable: render as flat label-like panel */
-        lbl = gui_add_label(fp_window, 314, 72, 72, 16, htype);
+        lbl = gui_add_label(fp_window, layout.type_x, gui_text_center_y(header_y, header_h), layout.type_w, label_h, htype);
         if (lbl) lbl->fg_color = hdr_fg;
-        btn = gui_add_button(fp_window, 388, 70, 64, 18, hsize, fp_on_sort, (void *)(intptr_t)2);
+        btn = gui_add_button(fp_window, layout.size_x - 4, header_y, layout.x + layout.w - layout.size_x + 4, header_h, hsize, fp_on_sort, (void *)(intptr_t)2);
         if (btn) { btn->bg_color = (fp_sort_key == 2) ? sel_bg : hdr_bg; btn->fg_color = hdr_fg; }
 
         /* horizontal separator under header (1px) */
-        gui_add_panel(fp_window, 8, 89, 444, 1, sep_color);
+        gui_add_panel(fp_window, layout.x, sep_y, layout.w, 1, sep_color);
 
         /* vertical column separators (1px, span header + rows area) */
-        gui_add_panel(fp_window, 176, 70, 1, 240, sep_color);
-        gui_add_panel(fp_window, 312, 70, 1, 240, sep_color);
-        gui_add_panel(fp_window, 386, 70, 1, 240, sep_color);
+        gui_add_panel(fp_window, layout.sep_name, header_y, 1, sep_y + 1 + list_count * row_h - header_y, sep_color);
+        gui_add_panel(fp_window, layout.sep_mtime, header_y, 1, sep_y + 1 + list_count * row_h - header_y, sep_color);
+        gui_add_panel(fp_window, layout.sep_type, header_y, 1, sep_y + 1 + list_count * row_h - header_y, sep_color);
     }
 
     /* entries */
-    y = 92;
-    base = fp_page * GUI_FP_LIST_PER_PAGE;
-    for (slot = 0; slot < GUI_FP_LIST_PER_PAGE; slot++) {
+    y = list_y;
+    base = fp_page * list_count;
+    for (slot = 0; slot < list_count; slot++) {
         char line[80];
         char sizebuf[12];
         char mtimebuf[24];
@@ -5023,26 +5229,43 @@ static void gui_file_preview_render_list(void) {
             fp_format_mtime(mt, mtimebuf);
         }
 
-        /* compose: name (truncate to 20 chars) | mtime | type | size */
-        col = 0;
-        while (display_name[p] && col < 20) { line[col++] = display_name[p++]; }
-        if (display_name[p] && col >= 20) { line[col - 1] = '~'; }
-        while (col < 22) line[col++] = ' ';
-        p = 0;
-        while (mtimebuf[p] && col < 38) line[col++] = mtimebuf[p++];
-        while (col < 39) line[col++] = ' ';
-        p = 0;
-        while (type_str[p] && col < 48) line[col++] = type_str[p++];
-        while (col < 49) line[col++] = ' ';
-        p = 0;
-        while (sizebuf[p] && col < 79) line[col++] = sizebuf[p++];
-        line[col] = 0;
-
-        btn = gui_add_button(fp_window, 8, y, 444, GUI_FP_ROW_HEIGHT - 2, line,
+        /* One click target spans the row; individual columns are clipped labels.
+         * This avoids the old fixed-character table string overlapping when the
+         * default font is scaled up or CJK glyphs are wider than ASCII glyphs. */
+        line[0] = 0;
+        btn = gui_add_button(fp_window, layout.x, y, layout.w, row_h - 2, line,
                              fp_on_entry, (void *)(intptr_t)slot);
-        if (btn) gui_widget_set_icon(btn, icon);
-        y += GUI_FP_ROW_HEIGHT;
+        if (btn) {
+            btn->bg_color = (slot == fp_selected) ? gui_rgb(218, 230, 250) : gui_rgb(246, 247, 250);
+        }
+
+        {
+            int bottom_pad = font_scale_value(2);
+            int label_h = gui_text_glyph_height_px();
+            int label_y;
+            if (bottom_pad < 1) bottom_pad = 1;
+            if (label_h > row_h - 2) label_h = row_h - 2;
+            if (label_h < 1) label_h = 1;
+            label_y = y + row_h - label_h - bottom_pad;
+            if (label_y < y + 1) label_y = y + 1;
+
+            /* File rows intentionally place text close to the lower edge.
+             * This matches the visual baseline of the bitmap font better than
+             * mathematical vertical centering in the tall row background. */
+            lbl = gui_add_label(fp_window, layout.name_x, label_y, layout.name_w, label_h, display_name);
+            if (lbl) { gui_widget_set_icon(lbl, icon); lbl->fg_color = gui_rgb(24, 28, 34); }
+            lbl = gui_add_label(fp_window, layout.mtime_x, label_y, layout.mtime_w, label_h, mtimebuf);
+            if (lbl) lbl->fg_color = gui_rgb(42, 46, 54);
+            lbl = gui_add_label(fp_window, layout.type_x, label_y, layout.type_w, label_h, type_str);
+            if (lbl) lbl->fg_color = gui_rgb(42, 46, 54);
+            lbl = gui_add_label(fp_window, layout.size_x, label_y, layout.size_w, label_h, sizebuf);
+            if (lbl) lbl->fg_color = gui_rgb(42, 46, 54);
+        }
+
+        y += row_h;
         (void)is_parent;
+        (void)p;
+        (void)col;
     }
 }
 
@@ -5386,7 +5609,7 @@ static void gui_file_preview_rebuild(void) {
         gui_destroy_window(fp_window);
         fp_window = 0;
     }
-    fp_window = gui_create_window(60, 60, 460, 400, title);
+    fp_window = gui_create_window(60, 60, 560, 430, title);
     if (!fp_window) return;
     gui_window_set_on_close(fp_window, fp_on_window_close, 0);
     if (fp_mode == 0) {
