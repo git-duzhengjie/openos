@@ -4095,14 +4095,8 @@ static void recycle_on_close(gui_window_t *win, void *ud) {
 }
 
 static void gui_recycle_open(void) {
-    int text_h = gui_text_glyph_height_px();
-    int label_h = text_h + 6;
-    int margin = 18;
-    int content_y = 50;
     int win_w = 420;
     int win_h = 240;
-
-    if (label_h < 22) label_h = 22;
 
     if (g_recycle_win) {
         gui_window_set_on_close(g_recycle_win, 0, 0);
@@ -4112,8 +4106,6 @@ static void gui_recycle_open(void) {
     g_recycle_win = gui_create_window(140, 120, win_w, win_h, i18n_t(I18N_KEY_WIN_RECYCLE_BIN));
     if (!g_recycle_win) return;
     gui_window_set_on_close(g_recycle_win, recycle_on_close, 0);
-    gui_add_label(g_recycle_win, margin, content_y, win_w - margin * 2, label_h,
-                  i18n_t(I18N_KEY_RECYCLE_EMPTY));
     gui_render();
 }
 
