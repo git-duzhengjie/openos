@@ -1179,6 +1179,13 @@ int net_set_device_admin_up(const char *name, int up) {
     net_device_t *dev = net_find_device(name);
     if (!dev) return -1;
     dev->admin_up = up ? 1u : 0u;
+    return net_refresh_device_status(name);
+}
+
+int net_refresh_device_status(const char *name) {
+    net_device_t *dev = net_find_device(name);
+    if (!dev) return -1;
+    dev->link_up = (dev->admin_up && dev->transmit) ? 1u : 0u;
     return 0;
 }
 

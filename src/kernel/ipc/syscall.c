@@ -1959,6 +1959,8 @@ uint32_t syscall_dispatch(uint32_t num,
                 return (uint32_t)dhcp_renew();
             if ((uint32_t)b == NETDEV_CTL_DHCP_RELEASE)
                 return (uint32_t)dhcp_release();
+            if ((uint32_t)b == NETDEV_CTL_REFRESH)
+                return (uint32_t)net_refresh_device_status(dev_name);
             return (uint32_t)-1;
         }
 

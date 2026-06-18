@@ -154,6 +154,7 @@ typedef struct openos_sockaddr_in {
 #define NETDEV_CTL_DHCP_START   2u
 #define NETDEV_CTL_DHCP_RENEW   3u
 #define NETDEV_CTL_DHCP_RELEASE 4u
+#define NETDEV_CTL_REFRESH      5u
 
 typedef struct openos_netinfo {
     char name[16];

@@ -242,11 +242,11 @@
   - [√] 查询设备名称、驱动类型、MAC 地址、MTU、link 状态
   - [√] 查询设备 up/down、DHCP/static 配置模式、IP、掩码、网关、DNS
   - [√] 查询 RX/TX 包计数、字节数、错误数、丢包数等统计信息
-- [ ] 网络设备控制能力
+- [√] 网络设备控制能力
   - [√] 启用 / 禁用网卡设备（已提供内核 admin_up 状态、SYS_NETDEVCTL、ifconfig <dev> up/down）
   - [√] 触发 DHCP 获取 / 续租 / 释放（已支持 ifconfig <dev> dhcp/renew/release）
   - [√] 设置静态 IP、掩码、网关、DNS（ifconfig 已支持 dns 参数，SYS_NETCONFIG 扩展 DNS 配置）
-  - [ ] 刷新设备状态与链路状态
+  - [√] 刷新设备状态与链路状态（已提供 NETDEV_CTL_REFRESH、net_refresh_device_status()、ifconfig <dev> refresh）
 - [ ] GUI 网络设置窗口
   - [ ] 在 Settings / 设置中增加 Network / 网络入口
   - [ ] 显示网卡列表与当前连接状态

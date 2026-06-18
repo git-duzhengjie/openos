@@ -110,9 +110,10 @@ typedef struct net_device_info {
 
 #define NETDEV_CTL_SET_DOWN    0u
 #define NETDEV_CTL_SET_UP      1u
-#define NETDEV_CTL_DHCP_START  2u
-#define NETDEV_CTL_DHCP_RENEW  3u
+#define NETDEV_CTL_DHCP_START   2u
+#define NETDEV_CTL_DHCP_RENEW   3u
 #define NETDEV_CTL_DHCP_RELEASE 4u
+#define NETDEV_CTL_REFRESH      5u
 
 typedef void (*udp_recv_func_t)(uint32_t src_ip, uint16_t src_port,
                                 uint16_t dst_port, const uint8_t *data,
@@ -143,6 +144,7 @@ net_device_t *net_find_device(const char *name);
 int net_get_device_info(uint32_t index, net_device_info_t *out);
 int net_get_device_info_by_name(const char *name, net_device_info_t *out);
 int net_set_device_admin_up(const char *name, int up);
+int net_refresh_device_status(const char *name);
 void net_set_default_ipv4(uint32_t ip, uint32_t netmask, uint32_t gateway, uint32_t dns);
 void net_set_default_ipv4_dhcp(uint32_t ip, uint32_t netmask, uint32_t gateway, uint32_t dns);
 void net_input(net_device_t *dev, const uint8_t *frame, uint16_t len);
