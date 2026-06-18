@@ -2402,10 +2402,20 @@ static int gui_string_equals(const char *a, const char *b) {
 
 static int gui_launcher_is_system_bin(const char *name) {
     static const char *system_bins[] = {
+        /* Shell and command-line utilities stay available from Terminal, but are
+         * hidden from the desktop launcher so the menu only shows user-facing apps. */
         "sh", "pwd", "ls", "cat", "echo", "ai", "grep", "wc", "mkdir", "rm", "touch",
         "cp", "mv", "tee", "head", "tail", "sort", "env", "rmdir", "ln", "kill",
-        "alarmtest", "mmaptest", "sbrktest", "ping", "ifconfig", "netstat", "firewall",
-        "id", "groups", "cap", "sandbox"
+        "ping", "ifconfig", "netstat", "firewall",
+        "id", "groups", "cap", "sandbox",
+
+        /* User-mode smoke/regression tests are developer tools, not launcher apps. */
+        "hello", "fault", "alarmtest", "mmaptest", "sbrktest", "argtest", "condtest",
+        "envtest", "errnotest", "eventfdtest", "exit42", "forktest", "fstest",
+        "futextest", "isotest", "kaddrtest", "libctest", "maintest", "malloctest",
+        "micromsgtest", "mqtest", "mutextest", "nicetest", "orphan", "semtest",
+        "servicetest", "shmtest", "socketpairtest", "stdiotest", "systest",
+        "threadtest", "user_test", "waittest"
     };
     uint32_t i;
 
