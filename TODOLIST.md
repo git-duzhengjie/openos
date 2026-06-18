@@ -345,6 +345,16 @@
 - [√] 其他散落字符串审计与替换
 - [√] 验证三连 + commit
 
+#### Phase 3：中文显示 / CJK 字体后端
+
+- [√] 新增生成式 16x16 CJK 点阵字库 ABI：`generated/cjk_font.h`
+- [√] 新增生成字库数据：`generated/cjk_font.c`（由真实 Windows 中文字体生成，覆盖当前 zh-CN UI）
+- [√] `font.c` 接入 generated CJK 字库查询，UTF-8 中文文本可绘制
+- [√] 新增字库生成脚本：`scripts/generate_cjk_font.py` / `scripts/generate_cjk_font.ps1`
+- [√] `build.sh` 编译链接 CJK 字库，并支持 `OPENOS_LOCALE=zh-CN`
+- [√] `OPENOS_LOCALE=zh-CN bash build.sh` 中文镜像构建通过
+- [√] 验证三连 + commit
+
 ---
 
 ## P7：安全与权限

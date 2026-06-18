@@ -17,7 +17,16 @@
 
 #include "i18n.h"
 
-static i18n_locale_t g_i18n_locale = I18N_LOCALE_EN;
+#ifndef OPENOS_DEFAULT_LOCALE_ZH
+#define OPENOS_DEFAULT_LOCALE_ZH 0
+#endif
+
+static i18n_locale_t g_i18n_locale =
+#if OPENOS_DEFAULT_LOCALE_ZH
+    I18N_LOCALE_ZH;
+#else
+    I18N_LOCALE_EN;
+#endif
 static int g_i18n_inited = 0;
 
 /* English (default, ASCII) -------------------------------------------------- */
@@ -135,29 +144,118 @@ static const char *const k_strings_en[I18N_KEY_COUNT] = {
 };
 
 /* Simplified Chinese (UTF-8) ----------------------------------------------- */
-/* Stored for later use; current renderer is ASCII-only.                     */
+/* Rendered by the generated 16x16 CJK bitmap font backend.                  */
 static const char *const k_strings_zh[I18N_KEY_COUNT] = {
-    [I18N_KEY_NOTIFY_WELCOME]            = "\xe6\xac\xa2\xe8\xbf\x8e\xe4\xbd\xbf\xe7\x94\xa8 OpenOS \xe6\xa1\x8c\xe9\x9d\xa2",
-    [I18N_KEY_NOTIFY_THEME_TIP]          = "\xe6\x8f\x90\xe7\xa4\xba\xef\xbc\x9a\xe7\x82\xb9\xe5\x87\xbb\xe4\xb8\xbb\xe9\xa2\x98\xe5\x9b\xbe\xe6\xa0\x87\xe5\x88\x87\xe6\x8d\xa2\xe5\xa3\x81\xe7\xba\xb8",
-    [I18N_KEY_NOTIFY_DESKTOP_REFRESHED]  = "\xe6\xa1\x8c\xe9\x9d\xa2\xe5\xb7\xb2\xe5\x88\xb7\xe6\x96\xb0",
+    /* notifications */
+    [I18N_KEY_NOTIFY_WELCOME]            = "欢迎使用 OpenOS 桌面",
+    [I18N_KEY_NOTIFY_THEME_TIP]          = "提示：点击主题图标切换壁纸",
+    [I18N_KEY_NOTIFY_DESKTOP_REFRESHED]  = "桌面已刷新",
 
-    [I18N_KEY_ICON_FILES]                = "\xe6\x96\x87\xe4\xbb\xb6",          /* 文件 */
-    [I18N_KEY_ICON_RECYCLE_BIN]          = "\xe5\x9b\x9e\xe6\x94\xb6\xe7\xab\x99", /* 回收站 */
+    /* desktop icons */
+    [I18N_KEY_ICON_FILES]                = "文件",
+    [I18N_KEY_ICON_RECYCLE_BIN]          = "回收站",
 
-    [I18N_KEY_LAUNCHER_TITLE]            = "OpenOS \xe5\xba\x94\xe7\x94\xa8\xe5\x90\xaf\xe5\x8a\xa8\xe5\x99\xa8",
-    [I18N_KEY_APP_TERMINAL]              = "\xe7\xbb\x88\xe7\xab\xaf",          /* 终端 */
-    [I18N_KEY_APP_WINDOW_DEMO]           = "\xe7\xaa\x97\xe5\x8f\xa3\xe6\xbc\x94\xe7\xa4\xba",
-    [I18N_KEY_APP_ABOUT_OPENOS]          = "\xe5\x85\xb3\xe4\xba\x8e OpenOS",
+    /* launcher */
+    [I18N_KEY_LAUNCHER_TITLE]            = "OpenOS 应用启动器",
+    [I18N_KEY_APP_TERMINAL]              = "终端",
+    [I18N_KEY_APP_WINDOW_DEMO]           = "窗口演示",
+    [I18N_KEY_APP_ABOUT_OPENOS]          = "关于 OpenOS",
 
-    [I18N_KEY_BANNER_LINE0]              = "\xe6\xac\xa2\xe8\xbf\x8e\xe6\x9d\xa5\xe5\x88\xb0 OpenOS",
-    [I18N_KEY_BANNER_LINE1]              = "\xe6\xa1\x8c\xe9\x9d\xa2\xe7\x8e\xaf\xe5\xa2\x83\xe5\xb7\xb2\xe5\xb0\xb1\xe7\xbb\xaa\xe3\x80\x82",
-    [I18N_KEY_BANNER_LINE2]              = "\xe7\x82\xb9\xe5\x87\xbb\xe8\x8f\x9c\xe5\x8d\x95\xe5\x9b\xbe\xe6\xa0\x87\xe5\x90\xaf\xe5\x8a\xa8\xe5\xba\x94\xe7\x94\xa8\xe3\x80\x82",
+    /* welcome banner */
+    [I18N_KEY_BANNER_LINE0]              = "欢迎来到 OpenOS",
+    [I18N_KEY_BANNER_LINE1]              = "桌面环境已就绪。",
+    [I18N_KEY_BANNER_LINE2]              = "点击菜单图标启动应用。",
 
-    [I18N_KEY_CTXMENU_OPEN_FILES]        = "\xe6\x89\x93\xe5\xbc\x80\xe6\x96\x87\xe4\xbb\xb6\xe7\xae\xa1\xe7\x90\x86",
-    [I18N_KEY_CTXMENU_OPEN_TERMINAL]     = "\xe6\x89\x93\xe5\xbc\x80\xe7\xbb\x88\xe7\xab\xaf",
-    [I18N_KEY_CTXMENU_CHANGE_WALLPAPER]  = "\xe6\x9b\xb4\xe6\x8d\xa2\xe5\xa3\x81\xe7\xba\xb8",
-    [I18N_KEY_CTXMENU_REFRESH]           = "\xe5\x88\xb7\xe6\x96\xb0",
-    [I18N_KEY_CTXMENU_ABOUT]             = "\xe5\x85\xb3\xe4\xba\x8e OpenOS",
+    /* context menu */
+    [I18N_KEY_CTXMENU_OPEN_FILES]        = "打开文件",
+    [I18N_KEY_CTXMENU_OPEN_TERMINAL]     = "打开终端",
+    [I18N_KEY_CTXMENU_CHANGE_WALLPAPER]  = "更换壁纸",
+    [I18N_KEY_CTXMENU_REFRESH]           = "刷新",
+    [I18N_KEY_CTXMENU_ABOUT]             = "关于 OpenOS",
+
+    /* Phase 2: Window layer ------------------------------------------------ */
+    [I18N_KEY_WINDOW_DEFAULT]            = "窗口",
+
+    /* demo window */
+    [I18N_KEY_WIN_CONTROL_CENTER]        = "OpenOS 控制中心",
+    [I18N_KEY_DEMO_WELCOME]              = "欢迎使用 OpenOS 窗口",
+    [I18N_KEY_DEMO_DRAG_HINT]            = "拖动标题栏可以移动窗口",
+    [I18N_KEY_DEMO_BTN_CLICK]            = "点击",
+    [I18N_KEY_DEMO_BTN_MINIMIZE]         = "最小化",
+    [I18N_KEY_DEMO_MVP]                  = "轻量级窗口管理器（MVP）",
+    [I18N_KEY_DEMO_FRAMEBUFFER]          = "帧缓冲合成",
+
+    /* about */
+    [I18N_KEY_WIN_ABOUT]                 = "关于 OpenOS",
+    [I18N_KEY_ABOUT_TAGLINE]             = "OpenOS - 轻量级桌面内核",
+    [I18N_KEY_ABOUT_VERSION]             = "版本：0.17.x",
+    [I18N_KEY_ABOUT_BUILD]               = "构建：dev",
+    [I18N_KEY_ABOUT_LICENSE]             = "许可证：MIT",
+
+    /* recycle */
+    [I18N_KEY_WIN_RECYCLE_BIN]           = "回收站",
+    [I18N_KEY_RECYCLE_EMPTY]             = "回收站为空",
+
+    /* notifications window */
+    [I18N_KEY_WIN_NOTIFICATIONS]         = "通知",
+    [I18N_KEY_NOTIF_TOTAL]               = "总计",
+    [I18N_KEY_NOTIF_UNREAD]              = "未读",
+    [I18N_KEY_BTN_CLEAR]                 = "清空",
+
+    /* terminal */
+    [I18N_KEY_WIN_TERMINAL]              = "终端",
+
+    /* files browser */
+    [I18N_KEY_WIN_FILES]                 = "文件",
+    [I18N_KEY_WIN_FILE_VIEWER]           = "文件查看器",
+    [I18N_KEY_WIN_FILE_EDITOR]           = "文件编辑器",
+    [I18N_KEY_HEADER_PATH]               = "路径：",
+    [I18N_KEY_HEADER_FILE]               = "文件：",
+    [I18N_KEY_HEADER_EDIT]               = "编辑：",
+    [I18N_KEY_PAGE]                      = "第 ",
+    [I18N_KEY_PAGE_OF]                   = " / ",
+    [I18N_KEY_PAGE_OPEN_PAREN]           = "（",
+    [I18N_KEY_PAGE_ITEMS]                = " 项）",
+    [I18N_KEY_LINE]                      = "第 ",
+    [I18N_KEY_LINE_DASH]                 = "-",
+    [I18N_KEY_LINE_OF]                   = " / ",
+    [I18N_KEY_TYPE_UP]                   = "<上级>",
+    [I18N_KEY_TYPE_FILE]                 = "<文件>",
+    [I18N_KEY_BTN_NEXT]                  = "下一页 >",
+    [I18N_KEY_BTN_PREV]                  = "< 上一页",
+    [I18N_KEY_BTN_BACK]                  = "< 返回",
+    [I18N_KEY_BTN_NEW_FILE]              = "新建文件",
+    [I18N_KEY_BTN_NEW_DIR]               = "新建目录",
+    [I18N_KEY_BTN_RENAME]                = "重命名",
+    [I18N_KEY_BTN_DELETE]                = "删除",
+    [I18N_KEY_BTN_REFRESH]               = "刷新",
+    [I18N_KEY_BTN_EDIT]                  = "编辑",
+    [I18N_KEY_BTN_SAVE]                  = "保存",
+    [I18N_KEY_BTN_CANCEL]                = "取消",
+    [I18N_KEY_BTN_OK]                    = "确定",
+    [I18N_KEY_BTN_CLOSE]                 = "关闭",
+    [I18N_KEY_PROMPT_NEW_FILE]           = "请输入文件名：",
+    [I18N_KEY_PROMPT_NEW_DIR]            = "请输入目录名：",
+    [I18N_KEY_PROMPT_RENAME]             = "重命名为：",
+    [I18N_KEY_PROMPT_DELETE_CONFIRM]     = "确定删除所选项目？",
+    [I18N_KEY_STATUS_INVALID_NAME]       = "名称无效",
+    [I18N_KEY_STATUS_ALREADY_EXISTS]     = "已存在",
+    [I18N_KEY_STATUS_CREATE_FAILED]      = "创建失败",
+    [I18N_KEY_STATUS_FILE_CREATED]       = "文件已创建",
+    [I18N_KEY_STATUS_MKDIR_FAILED]       = "创建目录失败",
+    [I18N_KEY_STATUS_DIR_CREATED]        = "目录已创建",
+    [I18N_KEY_STATUS_TARGET_EXISTS]      = "目标已存在",
+    [I18N_KEY_STATUS_RENAME_FAILED]      = "重命名失败",
+    [I18N_KEY_STATUS_RENAMED]            = "已重命名",
+    [I18N_KEY_STATUS_RMDIR_FAILED]       = "删除目录失败",
+    [I18N_KEY_STATUS_DELETE_FAILED]      = "删除失败",
+    [I18N_KEY_STATUS_DELETED]            = "已删除",
+    [I18N_KEY_STATUS_ENTER_TARGET]       = "请在对话框中输入目标",
+    [I18N_KEY_STATUS_CLICK_FILE_FIRST]   = "请先点击一个文件",
+    [I18N_KEY_STATUS_REFRESHED]          = "已刷新",
+    [I18N_KEY_STATUS_SAVED_PREFIX]       = "已保存：",
+
+    [I18N_KEY_APP_DEMO_NAME]             = "窗口演示",
 };
 
 static const char *const *k_locale_tables[I18N_LOCALE_COUNT] = {
@@ -167,7 +265,11 @@ static const char *const *k_locale_tables[I18N_LOCALE_COUNT] = {
 
 void i18n_init(void) {
     if (g_i18n_inited) return;
+#if OPENOS_DEFAULT_LOCALE_ZH
+    g_i18n_locale = I18N_LOCALE_ZH;
+#else
     g_i18n_locale = I18N_LOCALE_EN;
+#endif
     g_i18n_inited = 1;
 }
 

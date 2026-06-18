@@ -11,9 +11,23 @@ fi
 BUILD=target
 SRC=src/kernel
 BUILD_ARCH="${ARCH:-i386}"
+OPENOS_LOCALE="${OPENOS_LOCALE:-en}"
+LOCALE_CFLAGS=""
+case "$OPENOS_LOCALE" in
+    en|en-US|C)
+        ;;
+    zh|zh-CN|zh_CN)
+        LOCALE_CFLAGS="-DOPENOS_DEFAULT_LOCALE_ZH=1"
+        ;;
+    *)
+        echo "Unsupported OPENOS_LOCALE=$OPENOS_LOCALE" >&2
+        usage >&2
+        exit 1
+        ;;
+esac
 
 usage() {
-    echo "Usage: ARCH=i386|x86_64 ./build.sh [clean|test]"
+    echo "Usage: ARCH=i386|x86_64 OPENOS_LOCALE=en|zh-CN ./build.sh [clean|test]"
     echo "       ./build.sh [i386|x86_64] [clean|test]"
 }
 
@@ -952,6 +966,7 @@ gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
+    $LOCALE_CFLAGS \
     -I $SRC/include \
     -c $SRC/i18n.c -o $BUILD/i18n.o
 
@@ -974,6 +989,11 @@ gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
     -I $SRC/include \
     -c $SRC/font.c -o $BUILD/font.o
+
+gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
+    -I $SRC/include \
+    -c $SRC/generated/cjk_font.c -o $BUILD/cjk_font.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
@@ -1117,6 +1137,7 @@ ld -m elf_i386 -T $SRC/linker.ld \
     $BUILD/image.o \
     $BUILD/window_manager.o \
     $BUILD/font.o \
+    $BUILD/cjk_font.o \
     $BUILD/string.o \
     $BUILD/keyboard.o \
     $BUILD/mouse.o \
