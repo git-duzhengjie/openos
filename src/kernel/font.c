@@ -362,14 +362,15 @@ void font_draw_char(const font_renderer_t *renderer, font_put_pixel_fn put_pixel
     font_draw_char_clipped(renderer, put_pixel, ctx, 0, x, y, ch, color);
 }
 
-void font_draw_codepoint_clipped(const font_renderer_t *renderer, font_put_pixel_fn put_pixel, void *ctx,
-                                 const font_rect_t *clip, int x, int y, uint32_t codepoint, uint32_t color) {
+static void font_draw_codepoint_at_y_clipped(const font_renderer_t *renderer, font_put_pixel_fn put_pixel, void *ctx,
+                                             const font_rect_t *clip, int x, int y, uint32_t codepoint,
+                                             uint32_t color, int ascii_baseline_shift) {
     const font_renderer_t *r = font_resolve_renderer(renderer);
     const uint16_t *cjk_rows;
     int row, col;
     if (!r || !put_pixel) return;
     if (codepoint < 0x80u) {
-        font_draw_char_clipped(r, put_pixel, ctx, clip, x, y, (char)codepoint, color);
+        font_draw_char_clipped(r, put_pixel, ctx, clip, x, y + ascii_baseline_shift, (char)codepoint, color);
         return;
     }
 
@@ -394,12 +395,36 @@ void font_draw_codepoint_clipped(const font_renderer_t *renderer, font_put_pixel
     }
 }
 
+void font_draw_codepoint_clipped(const font_renderer_t *renderer, font_put_pixel_fn put_pixel, void *ctx,
+                                 const font_rect_t *clip, int x, int y, uint32_t codepoint, uint32_t color) {
+    font_draw_codepoint_at_y_clipped(renderer, put_pixel, ctx, clip, x, y, codepoint, color, 0);
+}
+
+static int font_line_contains_wide_glyph(const char *text) {
+    const char *scan = text;
+    if (!scan) return 0;
+    while (*scan && *scan != '\n') {
+        uint32_t cp;
+        if (!font_decode_utf8(&scan, &cp)) break;
+        if (cp >= 0x80u) return 1;
+    }
+    return 0;
+}
+
+static int font_ascii_baseline_shift_for_line(const font_renderer_t *renderer, const char *line) {
+    const font_renderer_t *r = font_resolve_renderer(renderer);
+    if (!r || r->height >= FONT_UNICODE_HEIGHT || !font_line_contains_wide_glyph(line)) return 0;
+    return (int)((FONT_UNICODE_HEIGHT - r->height) / 2u);
+}
+
 void font_draw_text_clipped(const font_renderer_t *renderer, font_put_pixel_fn put_pixel, void *ctx,
                             const font_rect_t *clip, int x, int y, const char *text, uint32_t color) {
     const font_renderer_t *r = font_resolve_renderer(renderer);
     int cx = x;
     int cy = y;
+    int ascii_shift;
     if (!r || !put_pixel || !text) return;
+    ascii_shift = font_ascii_baseline_shift_for_line(r, text);
 
     while (*text) {
         uint32_t cp;
@@ -407,10 +432,12 @@ void font_draw_text_clipped(const font_renderer_t *renderer, font_put_pixel_fn p
         if (cp == '\n') {
             cy += (int)font_get_line_height(r);
             cx = x;
+            ascii_shift = font_ascii_baseline_shift_for_line(r, text);
         } else if (cp == '\t') {
             cx += (int)font_measure_codepoint_width(r, cp);
         } else {
-            font_draw_codepoint_clipped(r, put_pixel, ctx, clip, cx, cy, cp, color);
+            int cp_shift = (cp < 0x80u) ? ascii_shift : 0;
+            font_draw_codepoint_at_y_clipped(r, put_pixel, ctx, clip, cx, cy, cp, color, cp_shift);
             cx += (int)font_measure_codepoint_width(r, cp);
         }
     }
