@@ -978,7 +978,7 @@ gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -I $SRC/include \
     -c $SRC/vga.c -o $BUILD/vga.o
 
-gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
+gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -Os \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
     -I $SRC/include \
     -c $SRC/framebuffer.c -o $BUILD/framebuffer.o
@@ -989,7 +989,7 @@ gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -I $SRC/include \
     -c $SRC/i18n.c -o $BUILD/i18n.o
 
-gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
+gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -Os \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
     -I $SRC/include \
     -c $SRC/gui.c -o $BUILD/gui.o

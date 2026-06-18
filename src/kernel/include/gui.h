@@ -7,6 +7,7 @@
 
 #include "types.h"
 #include "font.h"
+#include "framebuffer.h"
 
 #define GUI_MAX_WINDOWS          16u
 #define GUI_MAX_APPS             16u
@@ -221,7 +222,9 @@ typedef struct gui_compositor_info {
     uint32_t height;
     uint32_t backbuffer_pixels;
     uint32_t dirty_count;
+    uint32_t dirty_rect_capacity;
     int full_dirty;
+    uint32_t flush_generation;
 } gui_compositor_info_t;
 
 typedef struct gui_accel_info {
@@ -239,6 +242,10 @@ typedef struct gui_accel_info {
     uint32_t flush_rects;
     uint32_t flush_pixels;
     uint32_t flush_rows;
+    framebuffer_backend_type_t backend;
+    uint32_t backend_caps;
+    uint32_t alpha_pixels;
+    uint32_t icon_quality_passes;
 } gui_accel_info_t;
 
 typedef struct gui_desktop_icon {
@@ -312,7 +319,9 @@ typedef struct gui_system {
     int compositor_enabled;
     gui_rect_t dirty_rects[GUI_MAX_DIRTY_RECTS];
     uint32_t dirty_count;
+    uint32_t dirty_rect_capacity;
     int full_dirty;
+    uint32_t flush_generation;
     int clip_enabled;
     gui_rect_t clip_rect;
     int render_clip_enabled;

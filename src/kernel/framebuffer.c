@@ -51,6 +51,16 @@ static framebuffer_info_t g_fb_info;
 static framebuffer_driver_t g_bga_driver;
 static framebuffer_driver_t *g_active_driver = 0;
 
+static void framebuffer_set_caps(framebuffer_backend_type_t backend, const char *name, uint32_t flags,
+                                 uint32_t max_width, uint32_t max_height, uint32_t preferred_bpp) {
+    g_fb_info.caps.backend = backend;
+    g_fb_info.caps.name = name;
+    g_fb_info.caps.flags = flags;
+    g_fb_info.caps.max_width = max_width;
+    g_fb_info.caps.max_height = max_height;
+    g_fb_info.caps.preferred_bpp = preferred_bpp;
+}
+
 static void fb_serial_write_dec(uint32_t value) {
     char buf[11];
     int i = 0;
@@ -372,9 +382,14 @@ void framebuffer_init(void) {
     g_fb_info.available = 0;
     g_fb_info.mode_set = 0;
     g_fb_info.driver_name = 0;
+    framebuffer_set_caps(FRAMEBUFFER_BACKEND_NONE, "none", 0, 0, 0, 0);
 
     if (bga_probe(&g_bga_driver) == 0) {
         g_active_driver = &g_bga_driver;
+        framebuffer_set_caps(FRAMEBUFFER_BACKEND_BGA, "bochs-bga",
+                             FRAMEBUFFER_CAP_LINEAR | FRAMEBUFFER_CAP_MODESET |
+                             FRAMEBUFFER_CAP_SOFTWARE_2D | FRAMEBUFFER_CAP_ALPHA_BLEND,
+                             4096u, 2160u, 32u);
         serial_write("[OK] framebuffer driver ready\n");
         return;
     }
@@ -397,6 +412,21 @@ const framebuffer_info_t *framebuffer_get_info(void) {
     return &g_fb_info;
 }
 
+const framebuffer_caps_t *framebuffer_get_caps(void) {
+    return &g_fb_info.caps;
+}
+
+const char *framebuffer_backend_name(framebuffer_backend_type_t backend) {
+    switch (backend) {
+        case FRAMEBUFFER_BACKEND_BGA: return "bochs-bga";
+        case FRAMEBUFFER_BACKEND_VESA: return "vesa";
+        case FRAMEBUFFER_BACKEND_EFI_GOP: return "efi-gop";
+        case FRAMEBUFFER_BACKEND_VIRTIO_GPU: return "virtio-gpu";
+        case FRAMEBUFFER_BACKEND_NONE:
+        default: return "none";
+    }
+}
+
 void framebuffer_clear(uint32_t color) {
     if (g_active_driver && g_fb_info.available) {
         bga_clear(&g_bga_driver, color);
@@ -409,9 +439,65 @@ void framebuffer_put_pixel(uint32_t x, uint32_t y, uint32_t color) {
     }
 }
 
+uint32_t framebuffer_get_pixel(uint32_t x, uint32_t y) {
+    if (!g_active_driver || !g_fb_info.available || !g_fb_info.mode_set ||
+        x >= g_fb_info.width || y >= g_fb_info.height) {
+        return 0;
+    }
+    return *(volatile uint32_t *)(g_fb_info.virt_addr + y * g_fb_info.pitch + x * 4u);
+}
+
+uint32_t framebuffer_blend_color(uint32_t dst, uint32_t src, uint8_t alpha) {
+    uint32_t inv;
+    uint32_t sr;
+    uint32_t sg;
+    uint32_t sb;
+    uint32_t dr;
+    uint32_t dg;
+    uint32_t db;
+    if (alpha == 0u) return dst;
+    if (alpha == 255u) return src;
+    inv = 255u - alpha;
+    sr = (src >> 16) & 0xFFu;
+    sg = (src >> 8) & 0xFFu;
+    sb = src & 0xFFu;
+    dr = (dst >> 16) & 0xFFu;
+    dg = (dst >> 8) & 0xFFu;
+    db = dst & 0xFFu;
+    return (((sr * alpha + dr * inv + 127u) / 255u) << 16) |
+           (((sg * alpha + dg * inv + 127u) / 255u) << 8) |
+           ((sb * alpha + db * inv + 127u) / 255u);
+}
+
+void framebuffer_put_pixel_alpha(uint32_t x, uint32_t y, uint32_t color, uint8_t alpha) {
+    uint32_t dst;
+    if (alpha == 0u) return;
+    if (alpha == 255u) {
+        framebuffer_put_pixel(x, y, color);
+        return;
+    }
+    dst = framebuffer_get_pixel(x, y);
+    framebuffer_put_pixel(x, y, framebuffer_blend_color(dst, color, alpha));
+}
+
 void framebuffer_fill_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t color) {
     if (g_active_driver && g_fb_info.available) {
         bga_fill_rect(&g_bga_driver, x, y, w, h, color);
+    }
+}
+
+void framebuffer_fill_rect_alpha(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t color, uint8_t alpha) {
+    uint32_t yy;
+    uint32_t xx;
+    if (alpha == 0u) return;
+    if (alpha == 255u) {
+        framebuffer_fill_rect(x, y, w, h, color);
+        return;
+    }
+    for (yy = 0; yy < h; yy++) {
+        for (xx = 0; xx < w; xx++) {
+            framebuffer_put_pixel_alpha(x + xx, y + yy, color, alpha);
+        }
     }
 }
 

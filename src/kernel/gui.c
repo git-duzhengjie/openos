@@ -74,8 +74,14 @@ int gui_accel_is_enabled(void) {
 }
 
 void gui_get_accel_info(gui_accel_info_t *info) {
+    const framebuffer_caps_t *caps;
     if (!info) return;
     *info = g_gui_accel;
+    caps = framebuffer_get_caps();
+    if (caps) {
+        info->backend = caps->backend;
+        info->backend_caps = caps->flags;
+    }
 }
 
 int gui_get_desktop_info(gui_desktop_info_t *info) {
@@ -122,6 +128,7 @@ static int gui_terminal_point_to_cell(int x, int y, uint32_t *col, uint32_t *row
 static void gui_terminal_update_selection(uint32_t col, uint32_t row);
 static int gui_terminal_cell_selected(uint32_t col, uint32_t row);
 void gui_terminal_set_input_focus(int focused);
+static void gui_raw_fill_rect(int x, int y, int w, int h, uint32_t color);
 
 static uint32_t gui_rgb(uint8_t r, uint8_t g, uint8_t b) {
     return ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
@@ -183,6 +190,44 @@ static void gui_put_pixel_unclipped(int x, int y, uint32_t color) {
 static void gui_raw_put_pixel(int x, int y, uint32_t color) {
     if (g_gui.clip_enabled && !gui_rect_contains(&g_gui.clip_rect, x, y)) return;
     gui_put_pixel_unclipped(x, y, color);
+}
+
+static void gui_raw_put_pixel_alpha(int x, int y, uint32_t color, uint8_t alpha) {
+    uint32_t *dst;
+    if (alpha == 0u) return;
+    if (g_gui.clip_enabled && !gui_rect_contains(&g_gui.clip_rect, x, y)) return;
+    if (x < 0 || y < 0 || x >= (int)g_gui.width || y >= (int)g_gui.height) return;
+    if (alpha == 255u) {
+        gui_put_pixel_unclipped(x, y, color);
+        return;
+    }
+    if (gui_compositor_active()) {
+        dst = &g_gui.backbuffer[(uint32_t)y * g_gui.width + (uint32_t)x];
+        *dst = framebuffer_blend_color(*dst, color, alpha);
+    } else {
+        framebuffer_put_pixel_alpha((uint32_t)x, (uint32_t)y, color, alpha);
+    }
+    g_gui_accel.alpha_pixels++;
+}
+
+static void gui_font_put_pixel_alpha(void *ctx, int x, int y, uint32_t color, uint8_t alpha) {
+    (void)ctx;
+    gui_raw_put_pixel_alpha(x, y, color, alpha);
+}
+
+static void gui_raw_fill_rect_alpha(int x, int y, int w, int h, uint32_t color, uint8_t alpha) {
+    int yy;
+    int xx;
+    if (w <= 0 || h <= 0 || alpha == 0u) return;
+    if (alpha == 255u) {
+        gui_raw_fill_rect(x, y, w, h, color);
+        return;
+    }
+    for (yy = 0; yy < h; yy++) {
+        for (xx = 0; xx < w; xx++) {
+            gui_raw_put_pixel_alpha(x + xx, y + yy, color, alpha);
+        }
+    }
 }
 
 static void gui_raw_fill_rect(int x, int y, int w, int h, uint32_t color) {
@@ -301,11 +346,33 @@ static void gui_font_put_pixel(void *ctx, int x, int y, uint32_t color) {
     gui_raw_put_pixel(x, y, color);
 }
 
+typedef struct gui_text_soften_ctx {
+    uint32_t color;
+    uint8_t alpha;
+} gui_text_soften_ctx_t;
+
+static void gui_font_put_pixel_soft(void *ctx, int x, int y, uint32_t color) {
+    gui_text_soften_ctx_t *soft = (gui_text_soften_ctx_t *)ctx;
+    if (soft) {
+        gui_raw_put_pixel_alpha(x, y, soft->color, soft->alpha);
+    } else {
+        gui_raw_put_pixel_alpha(x, y, color, 72u);
+    }
+}
+
 void gui_draw_char(int x, int y, char ch, uint32_t color) {
+    gui_text_soften_ctx_t soft;
+    soft.color = color;
+    soft.alpha = 64u;
+    font_draw_char(font_get_default(), gui_font_put_pixel_soft, &soft, x + 1, y, ch, color);
     font_draw_char(font_get_default(), gui_font_put_pixel, 0, x, y, ch, color);
 }
 
 void gui_draw_text(int x, int y, const char *text, uint32_t color) {
+    gui_text_soften_ctx_t soft;
+    soft.color = color;
+    soft.alpha = 58u;
+    font_draw_text(font_get_default(), gui_font_put_pixel_soft, &soft, x + 1, y, text, color);
     font_draw_text(font_get_default(), gui_font_put_pixel, 0, x, y, text, color);
 }
 
@@ -948,6 +1015,7 @@ static void gui_flush_backbuffer(void) {
 
     g_gui.full_dirty = 0;
     g_gui.dirty_count = 0;
+    g_gui.flush_generation++;
 }
 
 /* 14x14 file/folder icon renderer used by File Preview */
@@ -955,16 +1023,23 @@ static void gui_draw_file_icon(gui_icon_id_t id, int x, int y) {
     uint32_t paper = gui_rgb(252, 252, 250);
     uint32_t ink   = gui_rgb(70, 70, 80);
     uint32_t fold  = gui_rgb(220, 180, 70);
+    uint32_t fold_hi = gui_rgb(246, 216, 110);
     uint32_t fold2 = gui_rgb(180, 140, 40);
+    uint32_t shadow = gui_rgb(55, 55, 60);
     int i;
 
     if (id == GUI_ICON_NONE) return;
 
+    gui_raw_fill_rect_alpha(x + 3, y + 3, 11, 11, shadow, 54u);
+    g_gui_accel.icon_quality_passes++;
+
     if (id == GUI_ICON_FOLDER || id == GUI_ICON_UPDIR) {
         /* folder tab */
         gui_raw_fill_rect(x + 1, y + 3, 5, 2, fold);
+        gui_raw_line(x + 2, y + 3, x + 5, y + 3, fold_hi);
         /* folder body */
         gui_raw_fill_rect(x + 1, y + 4, 12, 8, fold);
+        gui_raw_line(x + 2, y + 5, x + 11, y + 5, fold_hi);
         /* border */
         gui_raw_line(x + 1, y + 3, x + 5, y + 3, fold2);
         gui_raw_line(x + 1, y + 11, x + 12, y + 11, fold2);
@@ -982,6 +1057,7 @@ static void gui_draw_file_icon(gui_icon_id_t id, int x, int y) {
 
     /* generic paper sheet with folded corner */
     gui_raw_fill_rect(x + 2, y + 1, 9, 12, paper);
+    gui_raw_line(x + 3, y + 2, x + 9, y + 2, gui_rgb(255, 255, 255));
     gui_raw_line(x + 2, y + 1, x + 10, y + 1, ink);
     gui_raw_line(x + 2, y + 12, x + 10, y + 12, ink);
     gui_raw_line(x + 2, y + 1, x + 2, y + 12, ink);
@@ -2798,7 +2874,9 @@ void gui_get_compositor_info(gui_compositor_info_t *info) {
     info->height = g_gui.height;
     info->backbuffer_pixels = g_gui.backbuffer_pixels;
     info->dirty_count = g_gui.dirty_count;
+    info->dirty_rect_capacity = GUI_MAX_DIRTY_RECTS;
     info->full_dirty = g_gui.full_dirty;
+    info->flush_generation = g_gui.flush_generation;
 }
 
 int gui_compositor_is_active(void) {
@@ -3423,6 +3501,76 @@ static void gui_draw_taskbar_window_icon(gui_rect_t rect, int minimized) {
     }
 }
 
+static int gui_clock_padding_x(void) {
+    uint32_t pad = font_scale_value(6);
+    if (pad < 6U) {
+        pad = 6U;
+    }
+    return (int)pad;
+}
+
+static int gui_clock_text_height(void) {
+    uint32_t text_h = font_get_ascii_height(font_get_default());
+
+    if (text_h == 0U) {
+        text_h = font_get_line_height(font_get_default());
+    }
+    return (int)text_h;
+}
+
+static int gui_clock_widget_height(void) {
+    uint32_t text_h = (uint32_t)gui_clock_text_height();
+    uint32_t vertical_pad = font_scale_value(8);
+    uint32_t h = text_h + vertical_pad;
+
+    if (h < 18U) {
+        h = 18U;
+    }
+    if (h > GUI_TASKBAR_HEIGHT - 4U) {
+        h = GUI_TASKBAR_HEIGHT - 4U;
+    }
+    return (int)h;
+}
+
+static gui_rect_t gui_get_clock_rect(const char *time_str) {
+    int padding_x = gui_clock_padding_x();
+    int text_w = (int)font_measure_text_width(font_get_default(), time_str);
+    int h = gui_clock_widget_height();
+    int w = text_w + padding_x * 2;
+    int min_w = (int)font_measure_text_width(font_get_default(), "00:00:00") + padding_x * 2;
+
+    if (w < min_w) {
+        w = min_w;
+    }
+    if (w > (int)g_gui.width - 12) {
+        w = (int)g_gui.width - 12;
+    }
+
+    return (gui_rect_t){
+        (int)g_gui.width - w - 6,
+        (int)g_gui.height - h - 3,
+        w,
+        h,
+    };
+}
+
+static gui_rect_t gui_get_notification_widget_rect(const gui_rect_t *clock_rect) {
+    int h = gui_clock_widget_height();
+    int w = h + 12;
+    int gap = 4;
+
+    if (w < 30) {
+        w = 30;
+    }
+
+    return (gui_rect_t){
+        clock_rect->x - w - gap,
+        (int)g_gui.height - h - 3,
+        w,
+        h,
+    };
+}
+
 static void gui_draw_taskbar(void) {
     uint32_t i;
     gui_taskbar_layout_t layout;
@@ -3468,6 +3616,11 @@ static void gui_draw_taskbar(void) {
         uint32_t secs  = total_sec % 60u;
         char clk[16];
         int p = 0;
+        gui_rect_t clock_rect;
+        gui_rect_t notif_rect;
+        int padding_x = gui_clock_padding_x();
+        int text_h = gui_clock_text_height();
+        int text_y;
         clk[p++] = (char)('0' + (hours / 10) % 10);
         clk[p++] = (char)('0' + hours % 10);
         clk[p++] = ':';
@@ -3477,57 +3630,51 @@ static void gui_draw_taskbar(void) {
         clk[p++] = (char)('0' + (secs / 10) % 10);
         clk[p++] = (char)('0' + secs % 10);
         clk[p] = 0;
+
+        clock_rect = gui_get_clock_rect(clk);
+        notif_rect = gui_get_notification_widget_rect(&clock_rect);
+        text_y = clock_rect.y + (clock_rect.h - text_h) / 2;
+
+        gui_raw_fill_rect(clock_rect.x, clock_rect.y, clock_rect.w, clock_rect.h, gui_rgb(36, 44, 60));
+        gui_raw_line(clock_rect.x, clock_rect.y, clock_rect.x + clock_rect.w - 1, clock_rect.y, gui_rgb(80, 92, 120));
+        gui_raw_line(clock_rect.x, clock_rect.y + clock_rect.h - 1, clock_rect.x + clock_rect.w - 1,
+                     clock_rect.y + clock_rect.h - 1, gui_rgb(12, 16, 24));
+        gui_raw_line(clock_rect.x, clock_rect.y, clock_rect.x, clock_rect.y + clock_rect.h - 1, gui_rgb(80, 92, 120));
+        gui_raw_line(clock_rect.x + clock_rect.w - 1, clock_rect.y, clock_rect.x + clock_rect.w - 1,
+                     clock_rect.y + clock_rect.h - 1, gui_rgb(12, 16, 24));
+        gui_draw_text(clock_rect.x + padding_x, text_y, clk, gui_rgb(220, 240, 255));
+
         {
-            int cw = 8 * 8;                              /* 8 chars * 8px font width */
-            int box_w = cw + 12;                          /* +6px padding each side */
-            int box_h = 18;
-            int box_x = (int)g_gui.width - box_w - 6;     /* 6px gap from right edge */
-            int box_y = (int)g_gui.height - box_h - 3;    /* 3px gap from bottom edge */
-            int cx = box_x + 6;
-            int cy = box_y + 3;
-            gui_raw_fill_rect(box_x, box_y, box_w, box_h, gui_rgb(36, 44, 60));
-            gui_raw_line(box_x, box_y, box_x + box_w - 1, box_y, gui_rgb(80, 92, 120));
-            gui_raw_line(box_x, box_y + box_h - 1, box_x + box_w - 1, box_y + box_h - 1, gui_rgb(12, 16, 24));
-            gui_raw_line(box_x, box_y, box_x, box_y + box_h - 1, gui_rgb(80, 92, 120));
-            gui_raw_line(box_x + box_w - 1, box_y, box_x + box_w - 1, box_y + box_h - 1, gui_rgb(12, 16, 24));
-            gui_draw_text(cx, cy, clk, gui_rgb(220, 240, 255));
+            char cbuf[8];
+            int n = (int)g_notif_count;
+            int cp = 0;
+            int glyph_y = notif_rect.y + (notif_rect.h - 8) / 2;
+            int count_text_y = notif_rect.y + (notif_rect.h - text_h) / 2;
+            if (n > 99) n = 99;
+            if (n >= 10) cbuf[cp++] = (char)('0' + (n / 10) % 10);
+            cbuf[cp++] = (char)('0' + n % 10);
+            cbuf[cp] = 0;
+
+            gui_raw_fill_rect(notif_rect.x, notif_rect.y, notif_rect.w, notif_rect.h, gui_rgb(36, 44, 60));
+            gui_raw_line(notif_rect.x, notif_rect.y, notif_rect.x + notif_rect.w - 1, notif_rect.y, gui_rgb(80, 92, 120));
+            gui_raw_line(notif_rect.x, notif_rect.y + notif_rect.h - 1, notif_rect.x + notif_rect.w - 1,
+                         notif_rect.y + notif_rect.h - 1, gui_rgb(12, 16, 24));
+            gui_raw_line(notif_rect.x, notif_rect.y, notif_rect.x, notif_rect.y + notif_rect.h - 1, gui_rgb(80, 92, 120));
+            gui_raw_line(notif_rect.x + notif_rect.w - 1, notif_rect.y, notif_rect.x + notif_rect.w - 1,
+                         notif_rect.y + notif_rect.h - 1, gui_rgb(12, 16, 24));
+            {
+                int gx = notif_rect.x + 4;
+                int gy = glyph_y;
+                uint32_t bc = (n > 0) ? gui_rgb(255, 210, 90) : gui_rgb(160, 180, 210);
+                gui_raw_fill_rect(gx + 1, gy,     3, 1, bc);
+                gui_raw_fill_rect(gx,     gy + 1, 5, 4, bc);
+                gui_raw_fill_rect(gx + 1, gy + 5, 3, 1, bc);
+                gui_raw_fill_rect(gx + 2, gy + 6, 1, 1, bc);
+            }
+            gui_draw_text(notif_rect.x + 12, count_text_y, cbuf,
+                          (n > 0) ? gui_rgb(255, 220, 120) : gui_rgb(200, 220, 240));
+            g_notif_widget_rect = notif_rect;
         }
-    }
-    /* notification widget pinned just left of the clock (independent of taskbar position) */
-    {
-        int box_w = 30;
-        int box_h = 18;
-        int clock_box_w = 8 * 8 + 12;
-        int box_x = (int)g_gui.width - clock_box_w - 6 - box_w - 4; /* clock_x - box_w - 4px gap */
-        int box_y = (int)g_gui.height - box_h - 3;
-        char cbuf[8];
-        int n = (int)g_notif_count;
-        int p = 0;
-        if (n > 99) n = 99;
-        if (n >= 10) cbuf[p++] = (char)('0' + (n / 10) % 10);
-        cbuf[p++] = (char)('0' + n % 10);
-        cbuf[p] = 0;
-        gui_raw_fill_rect(box_x, box_y, box_w, box_h, gui_rgb(36, 44, 60));
-        gui_raw_line(box_x, box_y, box_x + box_w - 1, box_y, gui_rgb(80, 92, 120));
-        gui_raw_line(box_x, box_y + box_h - 1, box_x + box_w - 1, box_y + box_h - 1, gui_rgb(12, 16, 24));
-        gui_raw_line(box_x, box_y, box_x, box_y + box_h - 1, gui_rgb(80, 92, 120));
-        gui_raw_line(box_x + box_w - 1, box_y, box_x + box_w - 1, box_y + box_h - 1, gui_rgb(12, 16, 24));
-        /* bell glyph: 3x5 bell-ish shape */
-        {
-            int gx = box_x + 4;
-            int gy = box_y + 5;
-            uint32_t bc = (n > 0) ? gui_rgb(255, 210, 90) : gui_rgb(160, 180, 210);
-            gui_raw_fill_rect(gx + 1, gy,     3, 1, bc);
-            gui_raw_fill_rect(gx,     gy + 1, 5, 4, bc);
-            gui_raw_fill_rect(gx + 1, gy + 5, 3, 1, bc);
-            gui_raw_fill_rect(gx + 2, gy + 6, 1, 1, bc);
-        }
-        gui_draw_text(box_x + 12, box_y + 5, cbuf,
-                      (n > 0) ? gui_rgb(255, 220, 120) : gui_rgb(200, 220, 240));
-        g_notif_widget_rect.x = box_x;
-        g_notif_widget_rect.y = box_y;
-        g_notif_widget_rect.w = box_w;
-        g_notif_widget_rect.h = box_h;
     }
 }
 
@@ -3742,11 +3889,22 @@ void gui_poll(void) {
         clk_last_sec = now_sec;
         /* clock lives at bottom-right of the screen, not inside the taskbar rect */
         if (g_gui.width > 0 && g_gui.height > 0) {
-            int box_w = 8 * 8 + 12;
-            int box_h = 18;
-            int box_x = (int)g_gui.width - box_w - 6;
-            int box_y = (int)g_gui.height - box_h - 3;
-            gui_invalidate_rect(box_x, box_y, box_w, box_h);
+            char time_buf[9];
+            gui_rect_t clock_rect;
+            uint32_t hours = (now_sec / 3600u) % 24u;
+            uint32_t mins = (now_sec / 60u) % 60u;
+            uint32_t secs = now_sec % 60u;
+            time_buf[0] = (char)('0' + (hours / 10u) % 10u);
+            time_buf[1] = (char)('0' + hours % 10u);
+            time_buf[2] = ':';
+            time_buf[3] = (char)('0' + (mins / 10u) % 10u);
+            time_buf[4] = (char)('0' + mins % 10u);
+            time_buf[5] = ':';
+            time_buf[6] = (char)('0' + (secs / 10u) % 10u);
+            time_buf[7] = (char)('0' + secs % 10u);
+            time_buf[8] = 0;
+            clock_rect = gui_get_clock_rect(time_buf);
+            gui_invalidate_rect(clock_rect.x, clock_rect.y, clock_rect.w, clock_rect.h);
         }
     }
     if (gui_has_dirty()) gui_render();
