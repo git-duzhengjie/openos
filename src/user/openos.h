@@ -490,9 +490,9 @@ static inline int openos_ping(unsigned int ip)
     return openos_syscall_result(openos_syscall1(SYS_PING, (int)ip));
 }
 
-static inline int openos_netconfig(unsigned int ip, unsigned int netmask, unsigned int gateway)
+static inline int openos_netconfig(unsigned int ip, unsigned int netmask, unsigned int gateway, unsigned int dns)
 {
-    return openos_syscall_result(openos_syscall3(SYS_NETCONFIG, (int)ip, (int)netmask, (int)gateway));
+    return openos_syscall_result(openos_syscall4(SYS_NETCONFIG, (int)ip, (int)netmask, (int)gateway, (int)dns));
 }
 
 static inline int openos_netdevctl(const char *name, unsigned int op)
@@ -2151,7 +2151,7 @@ static inline void openos_clearerr(openos_FILE *stream)
 #define snprintf(buf, size, fmt, ...) openos_snprintf((buf), (size), (fmt), ##__VA_ARGS__)
 #define netinfo(info)          openos_netinfo((info))
 #define ping(ip)               openos_ping((ip))
-#define netconfig(ip, mask, gw) openos_netconfig((ip), (mask), (gw))
+#define netconfig(ip, mask, gw, dns) openos_netconfig((ip), (mask), (gw), (dns))
 #define netdevctl(name, op)    openos_netdevctl((name), (op))
 #define firewall(op, index, rule) openos_firewall((op), (index), (rule))
 #define socket(domain, type, protocol) openos_socket((domain), (type), (protocol))

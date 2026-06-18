@@ -245,7 +245,7 @@
 - [ ] 网络设备控制能力
   - [√] 启用 / 禁用网卡设备（已提供内核 admin_up 状态、SYS_NETDEVCTL、ifconfig <dev> up/down）
   - [√] 触发 DHCP 获取 / 续租 / 释放（已支持 ifconfig <dev> dhcp/renew/release）
-  - [ ] 设置静态 IP、掩码、网关、DNS
+  - [√] 设置静态 IP、掩码、网关、DNS（ifconfig 已支持 dns 参数，SYS_NETCONFIG 扩展 DNS 配置）
   - [ ] 刷新设备状态与链路状态
 - [ ] GUI 网络设置窗口
   - [ ] 在 Settings / 设置中增加 Network / 网络入口

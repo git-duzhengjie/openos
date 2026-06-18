@@ -1182,11 +1182,12 @@ int net_set_device_admin_up(const char *name, int up) {
     return 0;
 }
 
-void net_set_default_ipv4(uint32_t ip, uint32_t netmask, uint32_t gateway) {
+void net_set_default_ipv4(uint32_t ip, uint32_t netmask, uint32_t gateway, uint32_t dns) {
     if (!default_dev) return;
     default_dev->ip = ip;
     default_dev->netmask = netmask;
     default_dev->gateway = gateway;
+    default_dev->dns = dns;
     default_dev->config_mode = NET_CONFIG_MODE_STATIC;
     default_dev->link_up = 1;
 }
@@ -1201,14 +1202,14 @@ void net_set_default_ipv4_dhcp(uint32_t ip, uint32_t netmask, uint32_t gateway, 
     default_dev->link_up = 1;
 }
 
-int net_config_ipv4(uint32_t ip, uint32_t netmask, uint32_t gateway) {
+int net_config_ipv4(uint32_t ip, uint32_t netmask, uint32_t gateway, uint32_t dns) {
     if (!default_dev) return -1;
     if (netmask == 0 || netmask == 0xffffffffU) return -1;
     if (ip == 0 || ip == 0xffffffffU) return -1;
     default_dev->ip = ip;
     default_dev->netmask = netmask;
     default_dev->gateway = gateway;
-    default_dev->dns = NET_IP4(8, 8, 8, 8);
+    default_dev->dns = dns ? dns : NET_IP4(8, 8, 8, 8);
     default_dev->config_mode = NET_CONFIG_MODE_STATIC;
     default_dev->link_up = 1;
     return 0;

@@ -1938,7 +1938,7 @@ uint32_t syscall_dispatch(uint32_t num,
     case SYS_NETCONFIG:
         if (syscall_require_cap(OPENOS_CAP_NET_ADMIN) < 0)
             return (uint32_t)-1;
-        return (uint32_t)net_config_ipv4((uint32_t)a, (uint32_t)b, (uint32_t)c);
+        return (uint32_t)net_config_ipv4((uint32_t)a, (uint32_t)b, (uint32_t)c, (uint32_t)d);
 
     case SYS_NETDEVCTL:
         {

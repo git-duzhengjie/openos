@@ -44,7 +44,7 @@ static void usage(void)
     printf("usage:\n");
     printf("  ifconfig\n");
     printf("  ifconfig <dev> up|down|dhcp|renew|release\n");
-    printf("  ifconfig <ip> [netmask <mask>] [gateway <gw>]\n");
+    printf("  ifconfig <ip> [netmask <mask>] [gateway <gw>] [dns <server>]\n");
 }
 
 static const char *config_mode_name(unsigned int mode)
@@ -99,6 +99,7 @@ int main(int argc, char **argv)
     unsigned int ip;
     unsigned int mask;
     unsigned int gw;
+    unsigned int dns;
     int i;
 
     if (netinfo(&info) < 0) {
@@ -122,6 +123,7 @@ int main(int argc, char **argv)
         ip = info.ip;
         mask = info.netmask;
         gw = info.gateway;
+        dns = info.dns;
 
         if (parse_ip(argv[1], &ip) < 0) {
             usage();
@@ -142,13 +144,19 @@ int main(int argc, char **argv)
                     return 1;
                 }
                 i += 2;
+            } else if (openos_strcmp(argv[i], "dns") == 0 && i + 1 < argc) {
+                if (parse_ip(argv[i + 1], &dns) < 0) {
+                    usage();
+                    return 1;
+                }
+                i += 2;
             } else {
                 usage();
                 return 1;
             }
         }
 
-        if (netconfig(ip, mask, gw) < 0) {
+        if (netconfig(ip, mask, gw, dns) < 0) {
             printf("ifconfig: failed to configure network\n");
             return 1;
         }
