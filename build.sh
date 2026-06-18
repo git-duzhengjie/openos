@@ -1063,6 +1063,11 @@ gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
     -I $SRC/include -I $SRC/net \
+    -c $SRC/net/net_config.c -o $BUILD/net_config.o
+
+gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
+    -I $SRC/include -I $SRC/net \
     -c $SRC/net/discovery.c -o $BUILD/discovery.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
@@ -1158,6 +1163,7 @@ ld -m elf_i386 -T $SRC/linker.ld \
     $BUILD/socket.o \
     $BUILD/dhcp.o \
     $BUILD/dns.o \
+    $BUILD/net_config.o \
     $BUILD/discovery.o \
     $BUILD/sync.o \
     $BUILD/account.o \

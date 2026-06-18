@@ -18,6 +18,7 @@
 #include "i18n.h"
 #include "net/net.h"
 #include "net/dhcp.h"
+#include "net/net_config.h"
 extern int spawn_user_process(const char *path, char *const argv[]);
 extern uint32_t sched_time_ms(void);
 
@@ -4526,6 +4527,7 @@ static void settings_network_dhcp(gui_widget_t *w, void *ud) {
     (void)w;
     (void)ud;
     dhcp_start();
+    (void)net_config_save_dhcp();
     gui_settings_build(1);
 }
 
@@ -4570,6 +4572,7 @@ static void settings_network_apply_static(gui_widget_t *w, void *ud) {
     if (settings_parse_ipv4(g_settings_gateway_box->text, &gateway) != 0) return;
     if (settings_parse_ipv4(g_settings_dns_box->text, &dns) != 0) return;
     net_config_ipv4(ip, mask, gateway, dns);
+    (void)net_config_save_static(ip, mask, gateway, dns);
     gui_settings_build(1);
 }
 
