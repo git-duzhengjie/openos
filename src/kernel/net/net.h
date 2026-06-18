@@ -56,12 +56,21 @@ typedef struct net_firewall_rule {
 
 typedef int (*net_tx_func_t)(net_device_t *dev, const uint8_t *frame, uint16_t len);
 
+typedef enum net_config_mode {
+    NET_CONFIG_MODE_NONE = 0,
+    NET_CONFIG_MODE_STATIC = 1,
+    NET_CONFIG_MODE_DHCP = 2
+} net_config_mode_t;
+
 struct net_device {
     char name[16];
     uint8_t mac[NET_ETH_ADDR_LEN];
     uint32_t ip;
     uint32_t netmask;
     uint32_t gateway;
+    uint32_t dns;
+    net_config_mode_t config_mode;
+    uint32_t link_up;
     net_tx_func_t transmit;
     uint32_t rx_packets;
     uint32_t tx_packets;
@@ -80,6 +89,7 @@ typedef struct net_device_info {
     uint32_t netmask;
     uint32_t gateway;
     uint32_t dns;
+    uint32_t config_mode;
     uint32_t rx_packets;
     uint32_t tx_packets;
     uint32_t rx_dropped;
@@ -95,6 +105,7 @@ typedef struct net_device_info {
 #define NET_DEVICE_FLAG_LINK_UP 0x00000004u
 #define NET_DEVICE_FLAG_DHCP    0x00000008u
 #define NET_DEVICE_FLAG_DEFAULT 0x00000010u
+#define NET_DEVICE_FLAG_STATIC  0x00000020u
 
 typedef void (*udp_recv_func_t)(uint32_t src_ip, uint16_t src_port,
                                 uint16_t dst_port, const uint8_t *data,
@@ -125,6 +136,7 @@ net_device_t *net_find_device(const char *name);
 int net_get_device_info(uint32_t index, net_device_info_t *out);
 int net_get_device_info_by_name(const char *name, net_device_info_t *out);
 void net_set_default_ipv4(uint32_t ip, uint32_t netmask, uint32_t gateway);
+void net_set_default_ipv4_dhcp(uint32_t ip, uint32_t netmask, uint32_t gateway, uint32_t dns);
 void net_input(net_device_t *dev, const uint8_t *frame, uint16_t len);
 int net_send_ipv4(uint32_t dst_ip, uint8_t protocol, const uint8_t *payload, uint16_t payload_len);
 int net_send_udp(uint32_t dst_ip, uint16_t src_port, uint16_t dst_port,

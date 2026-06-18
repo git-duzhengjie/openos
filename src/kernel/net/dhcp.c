@@ -219,7 +219,7 @@ static void dhcp_handle_packet(uint32_t src_ip, uint16_t src_port,
         if (dhcp.subnet_mask == 0) dhcp.subnet_mask = NET_IP4(255, 255, 255, 0);
         dev = net_get_default_device();
         if (dev) {
-            net_set_default_ipv4(dhcp.offered_ip, dhcp.subnet_mask, dhcp.router);
+            net_set_default_ipv4_dhcp(dhcp.offered_ip, dhcp.subnet_mask, dhcp.router, dhcp.dns_server);
             dhcp.state = DHCP_STATE_BOUND;
             vga_write("dhcp: bound ");
             dhcp_print_ip(dhcp.offered_ip);

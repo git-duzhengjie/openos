@@ -381,6 +381,9 @@ static void rtl8139_register(uint8_t bus, uint8_t dev, uint8_t func, uint16_t de
     netdev->ip = NET_IP4(10, 0, 2, (uint8_t)(50u + index));
     netdev->netmask = NET_IP4(255, 255, 255, 0);
     netdev->gateway = NET_IP4(10, 0, 2, 2);
+    netdev->dns = NET_IP4(8, 8, 8, 8);
+    netdev->config_mode = NET_CONFIG_MODE_STATIC;
+    netdev->link_up = 1;
     netdev->transmit = rtl8139_transmit;
     netdev->driver_data = rdev;
 
