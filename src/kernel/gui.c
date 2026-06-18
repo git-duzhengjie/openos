@@ -4620,10 +4620,10 @@ static void notif_on_clear(gui_widget_t *w, void *ud) {
 #define GUI_FP_MAX_NAME        64
 #define GUI_FP_MAX_ENTRIES     256
 #define GUI_FP_LIST_PER_PAGE   8
-#define GUI_FP_VIEW_MAX_LINES  12
+#define GUI_FP_VIEW_MAX_LINES  18
 #define GUI_FP_VIEW_LINE_CHARS 56
 #define GUI_FP_VIEW_BUF_SIZE   8192
-#define GUI_FP_EDIT_MAX_LINES  8
+#define GUI_FP_EDIT_MAX_LINES  16
 #define GUI_FP_EDIT_LINE_CHARS 56
 
 /* enhanced list layout: name | mtime | type | size */
@@ -4658,6 +4658,67 @@ static int           fp_selected = -1;             /* index within current page 
 static int           fp_last_click_global = -1;    /* double-click target in global item index */
 static uint32_t      fp_last_click_frame = 0;
 static gui_widget_t *fp_prompt_textbox = 0;        /* prompt input textbox */
+
+static int fp_scale_i(int value) {
+    return (int)font_scale_value((uint32_t)value);
+}
+
+static int fp_line_h(void) {
+    int h = (int)font_get_line_height(font_get_default());
+    return h > 0 ? h : 10;
+}
+
+static int fp_text_row_h(void) {
+    return fp_line_h() + fp_scale_i(4);
+}
+
+static int fp_button_h(void) {
+    int h = fp_line_h() + fp_scale_i(10);
+    return h < 22 ? 22 : h;
+}
+
+static int fp_panel_gap(void) {
+    int gap = fp_scale_i(8);
+    return gap < 6 ? 6 : gap;
+}
+
+static int fp_view_window_h(void) {
+    int h = fp_scale_i(500);
+    if (h < 430) h = 430;
+    if (h > 560) h = 560;
+    return h;
+}
+
+static int fp_edit_window_h(void) {
+    int h = fp_scale_i(520);
+    if (h < 440) h = 440;
+    if (h > 580) h = 580;
+    return h;
+}
+
+static int fp_view_visible_lines(void) {
+    int title = fp_line_h() + fp_scale_i(8);
+    int nav = fp_button_h();
+    int footer = fp_button_h() + fp_panel_gap();
+    int available = fp_view_window_h() - GUI_TITLE_HEIGHT - fp_scale_i(16) - title - nav - footer;
+    int row_h = fp_text_row_h();
+    int lines = available / (row_h > 0 ? row_h : 1);
+    if (lines < 4) lines = 4;
+    if (lines > GUI_FP_VIEW_MAX_LINES) lines = GUI_FP_VIEW_MAX_LINES;
+    return lines;
+}
+
+static int fp_edit_visible_lines(void) {
+    int title = fp_line_h() + fp_scale_i(8);
+    int status = fp_line_h() + fp_panel_gap();
+    int footer = fp_button_h() + fp_panel_gap();
+    int available = fp_edit_window_h() - GUI_TITLE_HEIGHT - fp_scale_i(16) - title - status - footer;
+    int row_h = fp_text_row_h();
+    int lines = available / (row_h > 0 ? row_h : 1);
+    if (lines < 4) lines = 4;
+    if (lines > GUI_FP_EDIT_MAX_LINES) lines = GUI_FP_EDIT_MAX_LINES;
+    return lines;
+}
 
 /* path helpers --------------------------------------------------- */
 static int fp_is_root(void) {
@@ -5093,18 +5154,20 @@ static void fp_on_back(gui_widget_t *w, void *ud) {
 }
 
 static void fp_on_view_up(gui_widget_t *w, void *ud) {
+    int visible = fp_view_visible_lines();
     (void)w; (void)ud;
     if (fp_view_line_offset > 0) {
-        fp_view_line_offset -= GUI_FP_VIEW_MAX_LINES;
+        fp_view_line_offset -= visible;
         if (fp_view_line_offset < 0) fp_view_line_offset = 0;
         gui_file_preview_rebuild();
     }
 }
 
 static void fp_on_view_down(gui_widget_t *w, void *ud) {
+    int visible = fp_view_visible_lines();
     (void)w; (void)ud;
-    if (fp_view_line_offset + GUI_FP_VIEW_MAX_LINES < fp_view_total_lines) {
-        fp_view_line_offset += GUI_FP_VIEW_MAX_LINES;
+    if (fp_view_line_offset + visible < fp_view_total_lines) {
+        fp_view_line_offset += visible;
         gui_file_preview_rebuild();
     }
 }
@@ -5885,30 +5948,56 @@ static void gui_file_preview_render_view(void) {
     char line[GUI_FP_VIEW_LINE_CHARS + 1];
     int fd, total, i, pos, lines, n;
     int line_pos;
-    int y;
+    int x, y, content_w;
     int line_index;
     int total_lines;
     int spos;
+    int margin;
+    int gap;
+    int label_h;
+    int row_h;
+    int button_h;
+    int header_y;
+    int nav_y;
+    int body_y;
+    int visible_lines;
 
     if (!fp_window) return;
+
+    margin = fp_scale_i(8);
+    if (margin < 8) margin = 8;
+    gap = fp_panel_gap();
+    label_h = fp_line_h() + fp_scale_i(4);
+    row_h = fp_text_row_h();
+    button_h = fp_button_h();
+    visible_lines = fp_view_visible_lines();
+    content_w = fp_window->rect.w - margin * 2;
+    if (content_w < 120) content_w = 120;
+    header_y = GUI_TITLE_HEIGHT + gap;
+    nav_y = header_y + label_h + gap;
+    body_y = nav_y + button_h + gap;
 
     /* header */
     pos = 0;
     pos = fp_str_append(header, pos, sizeof(header), i18n_t(I18N_KEY_HEADER_FILE));
     pos = fp_str_append(header, pos, sizeof(header), fp_view_name);
     (void)pos;
-    gui_add_label(fp_window, 8, 28, 444, 16, header);
+    gui_add_label(fp_window, margin, header_y, content_w, label_h, header);
 
-    gui_add_button(fp_window, 8, 48, 60, 20, i18n_t(I18N_KEY_BTN_BACK), fp_on_back, 0);
-    gui_add_button(fp_window, 76, 48, 36, 20, "^", fp_on_view_up, 0);
-    gui_add_button(fp_window, 116, 48, 36, 20, "v", fp_on_view_down, 0);
-    gui_add_button(fp_window, 380, 48, 64, 20, i18n_t(I18N_KEY_BTN_EDIT), fp_on_edit_enter, 0);
+    x = margin;
+    gui_add_button(fp_window, x, nav_y, fp_scale_i(72), button_h, i18n_t(I18N_KEY_BTN_BACK), fp_on_back, 0);
+    x += fp_scale_i(72) + gap;
+    gui_add_button(fp_window, x, nav_y, fp_scale_i(40), button_h, "^", fp_on_view_up, 0);
+    x += fp_scale_i(40) + gap;
+    gui_add_button(fp_window, x, nav_y, fp_scale_i(40), button_h, "v", fp_on_view_down, 0);
+    gui_add_button(fp_window, fp_window->rect.w - margin - fp_scale_i(76), nav_y,
+                   fp_scale_i(76), button_h, i18n_t(I18N_KEY_BTN_EDIT), fp_on_edit_enter, 0);
 
     /* load file content */
     fp_path_join(fp_path, fp_view_name, full, sizeof(full));
     fd = vfs_open(full, O_RDONLY, 0);
     if (fd < 0) {
-        gui_add_label(fp_window, 8, 76, 444, 16,
+        gui_add_label(fp_window, margin, body_y, content_w, label_h,
                       "(cannot open file)");
         return;
     }
@@ -5938,19 +6027,19 @@ static void gui_file_preview_render_view(void) {
     }
     fp_view_total_lines = total_lines;
     if (fp_view_line_offset >= total_lines) {
-        fp_view_line_offset = total_lines > GUI_FP_VIEW_MAX_LINES
-                              ? total_lines - GUI_FP_VIEW_MAX_LINES : 0;
+        fp_view_line_offset = total_lines > visible_lines
+                              ? total_lines - visible_lines : 0;
     }
     if (fp_view_line_offset < 0) fp_view_line_offset = 0;
 
     /* status label: "Line a-b / total" */
     {
         char nbuf[16];
-        int last = fp_view_line_offset + GUI_FP_VIEW_MAX_LINES;
+        int last = fp_view_line_offset + visible_lines;
         if (last > total_lines) last = total_lines;
         spos = 0;
         spos = fp_str_append(status, spos, sizeof(status), i18n_t(I18N_KEY_LINE));
-        fp_itoa(fp_view_line_offset + 1, nbuf);
+        fp_itoa(total_lines > 0 ? fp_view_line_offset + 1 : 0, nbuf);
         spos = fp_str_append(status, spos, sizeof(status), nbuf);
         spos = fp_str_append(status, spos, sizeof(status), i18n_t(I18N_KEY_LINE_DASH));
         fp_itoa(last, nbuf);
@@ -5959,16 +6048,17 @@ static void gui_file_preview_render_view(void) {
         fp_itoa(total_lines, nbuf);
         spos = fp_str_append(status, spos, sizeof(status), nbuf);
         (void)spos;
-        gui_add_label(fp_window, 160, 50, 200, 16, status);
+        gui_add_label(fp_window, margin + fp_scale_i(172), nav_y + (button_h - label_h) / 2,
+                      fp_scale_i(190), label_h, status);
     }
 
     /* second pass: walk and emit visible lines */
-    y = 76;
+    y = body_y;
     lines = 0;
     line_index = 0;
     i = 0;
     line_pos = 0;
-    while (i <= total && lines < GUI_FP_VIEW_MAX_LINES) {
+    while (i <= total && lines < visible_lines) {
         char c = (i < total) ? buf[i] : '\n';
         int flush = 0;
 
@@ -5986,12 +6076,12 @@ static void gui_file_preview_render_view(void) {
                     uint32_t color = gui_rgb(40, 40, 40);
                     gui_widget_t *mlbl;
                     fp_md_format_line(line, md_line, (int)sizeof(md_line), &color);
-                    mlbl = gui_add_label(fp_window, 8, y, 444, 14, md_line);
+                    mlbl = gui_add_label(fp_window, margin, y, content_w, row_h, md_line);
                     if (mlbl) mlbl->fg_color = color;
                 } else {
-                    gui_add_label(fp_window, 8, y, 444, 14, line);
+                    gui_add_label(fp_window, margin, y, content_w, row_h, line);
                 }
-                y += 16;
+                y += row_h;
                 lines++;
             }
             line_index++;
@@ -6028,8 +6118,31 @@ static void gui_file_preview_render_edit(void) {
     int fd, total, i, pos, n;
     int line_pos;
     int line_idx;
+    int margin;
+    int gap;
+    int label_h;
+    int row_h;
+    int button_h;
+    int content_w;
+    int header_y;
+    int nav_y;
+    int body_y;
+    int visible_lines;
 
     if (!fp_window) return;
+
+    margin = fp_scale_i(8);
+    if (margin < 8) margin = 8;
+    gap = fp_panel_gap();
+    label_h = fp_line_h() + fp_scale_i(4);
+    row_h = fp_text_row_h() + fp_scale_i(4);
+    button_h = fp_button_h();
+    visible_lines = fp_edit_visible_lines();
+    content_w = fp_window->rect.w - margin * 2;
+    if (content_w < 120) content_w = 120;
+    header_y = GUI_TITLE_HEIGHT + gap;
+    nav_y = header_y + label_h + gap;
+    body_y = nav_y + button_h + gap;
 
     for (i = 0; i < GUI_FP_EDIT_MAX_LINES; i++) fp_edit_widgets[i] = 0;
     fp_edit_status = 0;
@@ -6038,11 +6151,15 @@ static void gui_file_preview_render_edit(void) {
     pos = fp_str_append(header, pos, sizeof(header), i18n_t(I18N_KEY_HEADER_EDIT));
     pos = fp_str_append(header, pos, sizeof(header), fp_view_name);
     (void)pos;
-    gui_add_label(fp_window, 8, 28, 360, 16, header);
+    gui_add_label(fp_window, margin, header_y, content_w, label_h, header);
 
-    gui_add_button(fp_window, 8, 48, 60, 20, i18n_t(I18N_KEY_BTN_SAVE), fp_on_edit_save, 0);
-    gui_add_button(fp_window, 76, 48, 60, 20, i18n_t(I18N_KEY_BTN_CANCEL), fp_on_edit_cancel, 0);
-    fp_edit_status = gui_add_label(fp_window, 144, 50, 300, 16, "");
+    gui_add_button(fp_window, margin, nav_y, fp_scale_i(72), button_h,
+                   i18n_t(I18N_KEY_BTN_SAVE), fp_on_edit_save, 0);
+    gui_add_button(fp_window, margin + fp_scale_i(72) + gap, nav_y,
+                   fp_scale_i(82), button_h, i18n_t(I18N_KEY_BTN_CANCEL), fp_on_edit_cancel, 0);
+    fp_edit_status = gui_add_label(fp_window, margin + fp_scale_i(172),
+                                   nav_y + (button_h - label_h) / 2,
+                                   fp_window->rect.w - margin * 2 - fp_scale_i(172), label_h, "");
 
     /* load existing content */
     fp_path_join(fp_path, fp_view_name, full, sizeof(full));
@@ -6058,10 +6175,10 @@ static void gui_file_preview_render_edit(void) {
     }
     buf[total] = 0;
 
-    /* split into lines, fill GUI_FP_EDIT_MAX_LINES textboxes */
+    /* split into lines, fill visible textboxes */
     line_idx = 0;
     line_pos = 0;
-    for (i = 0; i <= total && line_idx < GUI_FP_EDIT_MAX_LINES; i++) {
+    for (i = 0; i <= total && line_idx < visible_lines; i++) {
         char c = (i < total) ? buf[i] : '\n';
         int flush = 0;
         if (c == '\n') flush = 1;
@@ -6069,7 +6186,9 @@ static void gui_file_preview_render_edit(void) {
 
         if (flush) {
             line[line_pos] = 0;
-            fp_edit_widgets[line_idx] = gui_add_textbox(fp_window, 8, 76 + line_idx * 26, 444, 22, line);
+            fp_edit_widgets[line_idx] = gui_add_textbox(fp_window, margin,
+                                                        body_y + line_idx * row_h,
+                                                        content_w, row_h - fp_scale_i(3), line);
             line_idx++;
             line_pos = 0;
             if (c == '\n') continue;
@@ -6080,9 +6199,11 @@ static void gui_file_preview_render_edit(void) {
             line[line_pos++] = c;
         }
     }
-    /* fill remaining slots with empty textboxes so user can append */
-    for (; line_idx < GUI_FP_EDIT_MAX_LINES; line_idx++) {
-        fp_edit_widgets[line_idx] = gui_add_textbox(fp_window, 8, 76 + line_idx * 26, 444, 22, "");
+    /* fill remaining visible slots with empty textboxes so user can append */
+    for (; line_idx < visible_lines; line_idx++) {
+        fp_edit_widgets[line_idx] = gui_add_textbox(fp_window, margin,
+                                                    body_y + line_idx * row_h,
+                                                    content_w, row_h - fp_scale_i(3), "");
     }
 }
 
@@ -6101,7 +6222,12 @@ static void gui_file_preview_rebuild(void) {
         gui_destroy_window(fp_window);
         fp_window = 0;
     }
-    fp_window = gui_create_window(60, 60, 560, 430, title);
+    {
+        int win_h = 430;
+        if (fp_mode == 1) win_h = fp_view_window_h();
+        else if (fp_mode == 2) win_h = fp_edit_window_h();
+        fp_window = gui_create_window(60, 60, 560, win_h, title);
+    }
     if (!fp_window) return;
     gui_window_set_on_close(fp_window, fp_on_window_close, 0);
     if (fp_mode == 0) {

@@ -327,7 +327,7 @@
 - [√] 新建 `include/i18n.h`：定义翻译键枚举 `I18N_KEY_*` 与 locale 枚举（`I18N_LOCALE_EN` / `I18N_LOCALE_ZH`）
 - [√] 新建 `kernel/i18n.c`：内置 EN + zh-CN 两套翻译表
 - [√] 提供 API：`i18n_t(key)` / `i18n_set_locale(locale)` / `i18n_current()` / `i18n_init()`
-- [√] 在 `kernel.c` GUI 初始化前调用 `i18n_init()`，默认 locale = EN（保持视觉不变）
+- [√] 在 `kernel.c` GUI 初始化前调用 `i18n_init()`，默认 locale = zh-CN（启动默认中文）
 - [√] 替换桌面欢迎语三行文字
 - [√] 替换桌面图标标签：`Files` / `Recycle Bin`
 - [√] 替换 Launcher 标题 `OpenOS Launcher` 与三个内置应用名
@@ -352,7 +352,7 @@
 - [√] `font.c` 接入 generated CJK 字库查询，UTF-8 中文文本可绘制
 - [√] 新增字库生成脚本：`scripts/generate_cjk_font.py` / `scripts/generate_cjk_font.ps1`
 - [√] `build.sh` 编译链接 CJK 字库，语言改为设置面板运行时切换
-- [√] 默认镜像构建通过，中文通过设置面板切换验证
+- [√] 默认镜像构建通过，启动默认中文，并可通过设置面板切换语言
 - [√] 验证三连 + commit
 
 #### Phase 4：字体大小三档控制
@@ -361,7 +361,7 @@
 - [√] 字体测量、行高、ASCII/CJK 绘制统一按字号缩放
 - [√] GUI 字符宽高、标题栏高度、文字居中布局改为动态字体度量
 - [√] 设置面板支持小 / 中 / 大三档运行时切换
-- [√] 默认 medium 保持原视觉兼容
+- [√] 默认 medium / 中号字体保持原视觉兼容
 
 ---
 

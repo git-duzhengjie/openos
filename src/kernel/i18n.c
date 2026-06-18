@@ -2,11 +2,9 @@
  * openos - i18n (Internationalization) - Phase 1
  *
  * Lookup table based translation. Two locales bundled:
- *   - EN (English)   : default, used at boot to preserve existing visuals
- *   - ZH (Simplified Chinese): stored for future use; current bitmap
- *                              font is ASCII-only so non-ASCII glyphs
- *                              will not render until a CJK font is
- *                              wired in (Phase 2+).
+ *   - EN (English)   : fallback locale for missing keys
+ *   - ZH (Simplified Chinese): default locale at boot, rendered through
+ *                              the generated CJK font backend.
  *
  * Design rules:
  *   - i18n_t() always returns a non-NULL string.
@@ -17,10 +15,10 @@
 
 #include "i18n.h"
 
-static i18n_locale_t g_i18n_locale = I18N_LOCALE_EN;
+static i18n_locale_t g_i18n_locale = I18N_LOCALE_ZH;
 static int g_i18n_inited = 0;
 
-/* English (default, ASCII) -------------------------------------------------- */
+/* English (fallback, ASCII) ------------------------------------------------- */
 static const char *const k_strings_en[I18N_KEY_COUNT] = {
     /* notifications */
     [I18N_KEY_NOTIFY_WELCOME]            = "Welcome to OpenOS desktop",
@@ -296,7 +294,7 @@ static const char *const *k_locale_tables[I18N_LOCALE_COUNT] = {
 
 void i18n_init(void) {
     if (g_i18n_inited) return;
-    g_i18n_locale = I18N_LOCALE_EN;
+    g_i18n_locale = I18N_LOCALE_ZH;
     g_i18n_inited = 1;
 }
 
