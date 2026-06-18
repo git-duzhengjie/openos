@@ -1190,6 +1190,7 @@ void net_set_default_ipv4(uint32_t ip, uint32_t netmask, uint32_t gateway, uint3
     default_dev->dns = dns;
     default_dev->config_mode = NET_CONFIG_MODE_STATIC;
     default_dev->link_up = 1;
+    default_dev->admin_up = 1;
 }
 
 void net_set_default_ipv4_dhcp(uint32_t ip, uint32_t netmask, uint32_t gateway, uint32_t dns) {
@@ -1200,6 +1201,7 @@ void net_set_default_ipv4_dhcp(uint32_t ip, uint32_t netmask, uint32_t gateway, 
     default_dev->dns = dns;
     default_dev->config_mode = NET_CONFIG_MODE_DHCP;
     default_dev->link_up = 1;
+    default_dev->admin_up = 1;
 }
 
 int net_config_ipv4(uint32_t ip, uint32_t netmask, uint32_t gateway, uint32_t dns) {
@@ -1212,6 +1214,7 @@ int net_config_ipv4(uint32_t ip, uint32_t netmask, uint32_t gateway, uint32_t dn
     default_dev->dns = dns ? dns : NET_IP4(8, 8, 8, 8);
     default_dev->config_mode = NET_CONFIG_MODE_STATIC;
     default_dev->link_up = 1;
+    default_dev->admin_up = 1;
     return 0;
 }
 

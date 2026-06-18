@@ -383,6 +383,7 @@ static void virtio_net_register(uint8_t bus, uint8_t dev, uint8_t func,
     netdev->dns = NET_IP4(8, 8, 8, 8);
     netdev->config_mode = NET_CONFIG_MODE_STATIC;
     netdev->link_up = 1;
+    netdev->admin_up = 1;
     netdev->transmit = virtio_net_transmit;
     netdev->driver_data = vdev;
 
