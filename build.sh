@@ -12,7 +12,9 @@ BUILD=target
 SRC=src/kernel
 BUILD_ARCH="${ARCH:-i386}"
 OPENOS_LOCALE="${OPENOS_LOCALE:-en}"
+OPENOS_FONT_SIZE="${OPENOS_FONT_SIZE:-medium}"
 LOCALE_CFLAGS=""
+FONT_SIZE_CFLAGS=""
 case "$OPENOS_LOCALE" in
     en|en-US|C)
         ;;
@@ -27,9 +29,26 @@ case "$OPENOS_LOCALE" in
 esac
 
 usage() {
-    echo "Usage: ARCH=i386|x86_64 OPENOS_LOCALE=en|zh-CN ./build.sh [clean|test]"
+    echo "Usage: ARCH=i386|x86_64 OPENOS_LOCALE=en|zh-CN OPENOS_FONT_SIZE=small|medium|large ./build.sh [clean|test]"
     echo "       ./build.sh [i386|x86_64] [clean|test]"
 }
+
+case "$OPENOS_FONT_SIZE" in
+    small|s|0)
+        FONT_SIZE_CFLAGS="-DOPENOS_FONT_SIZE=0"
+        ;;
+    medium|m|1)
+        FONT_SIZE_CFLAGS="-DOPENOS_FONT_SIZE=1"
+        ;;
+    large|l|2)
+        FONT_SIZE_CFLAGS="-DOPENOS_FONT_SIZE=2"
+        ;;
+    *)
+        echo "Unsupported OPENOS_FONT_SIZE=$OPENOS_FONT_SIZE" >&2
+        usage >&2
+        exit 1
+        ;;
+esac
 
 case "${1:-}" in
     test)
@@ -987,6 +1006,7 @@ gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
+    $FONT_SIZE_CFLAGS \
     -I $SRC/include \
     -c $SRC/font.c -o $BUILD/font.o
 

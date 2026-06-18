@@ -1183,7 +1183,7 @@ static void gui_draw_window(gui_window_t *w) {
     {
         gui_rect_t title_clip;
         int title_x = w->rect.x + 8;
-        int title_y = w->rect.y + 7;
+        int title_y = w->rect.y + (GUI_TITLE_HEIGHT - GUI_TEXT_LINE_H) / 2;
         int title_right = w->rect.x + w->rect.w - GUI_BORDER_SIZE - 6;
         if (w->flags & GUI_WINDOW_FLAG_CLOSABLE) {
             gui_rect_t c = gui_close_rect(w);
@@ -2393,7 +2393,7 @@ static void gui_desktop_draw_icon(gui_desktop_icon_t *icon) {
         gui_raw_line(cx + 27, iy, cx + 27, iy + 27, gui_rgb(18, 25, 38));
         gui_raw_line(cx, iy + 27, cx + 27, iy + 27, gui_rgb(18, 25, 38));
     }
-    text_w = (int)strlen(icon->label) * GUI_CHAR_W;
+    text_w = (int)font_measure_text_width(font_get_default(), icon->label);
     text_x = icon->rect.x + (icon->rect.w - text_w) / 2;
     if (text_x < icon->rect.x) text_x = icon->rect.x;
     text_y = iy + art_h + gap;
@@ -2444,9 +2444,9 @@ static void gui_desktop_draw(void) {
     top_y = (avail_h - block_h) / 2;
     if (top_y < 16) top_y = 16;
 
-    w0 = (int)strlen(line0) * GUI_CHAR_W;
-    w1 = (int)strlen(line1) * GUI_CHAR_W;
-    w2 = (int)strlen(line2) * GUI_CHAR_W;
+    w0 = (int)font_measure_text_width(font_get_default(), line0);
+    w1 = (int)font_measure_text_width(font_get_default(), line1);
+    w2 = (int)font_measure_text_width(font_get_default(), line2);
     x0 = ((int)g_gui.width - w0) / 2;
     x1 = ((int)g_gui.width - w1) / 2;
     x2 = ((int)g_gui.width - w2) / 2;

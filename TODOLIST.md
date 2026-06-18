@@ -355,6 +355,14 @@
 - [√] `OPENOS_LOCALE=zh-CN bash build.sh` 中文镜像构建通过
 - [√] 验证三连 + commit
 
+#### Phase 4：字体大小三档控制
+
+- [√] 新增字体大小枚举与 API：`FONT_SIZE_SMALL` / `FONT_SIZE_MEDIUM` / `FONT_SIZE_LARGE`
+- [√] 字体测量、行高、ASCII/CJK 绘制统一按字号缩放
+- [√] GUI 字符宽高、标题栏高度、文字居中布局改为动态字体度量
+- [√] `build.sh` 支持 `OPENOS_FONT_SIZE=small|medium|large`
+- [√] 小 / 中 / 大三档构建验证通过，默认 medium 保持原视觉兼容
+
 ---
 
 ## P7：安全与权限

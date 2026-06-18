@@ -14,6 +14,12 @@
 #define FONT_DEFAULT_LINE_GAP    2
 #define FONT_DEFAULT_TAB_SPACES  4
 
+typedef enum font_size {
+    FONT_SIZE_SMALL = 0,
+    FONT_SIZE_MEDIUM = 1,
+    FONT_SIZE_LARGE = 2
+} font_size_t;
+
 typedef struct font_renderer font_renderer_t;
 
 typedef uint8_t (*font_get_glyph_row_fn)(const font_renderer_t *renderer, char ch, int row);
@@ -44,6 +50,14 @@ typedef struct font_text_metrics {
 } font_text_metrics_t;
 
 const font_renderer_t *font_get_default(void);
+void font_set_size(font_size_t size);
+font_size_t font_get_size(void);
+uint32_t font_get_scale_percent(void);
+uint32_t font_scale_value(uint32_t value);
+uint32_t font_get_ascii_width(const font_renderer_t *renderer);
+uint32_t font_get_ascii_height(const font_renderer_t *renderer);
+uint32_t font_get_unicode_width(void);
+uint32_t font_get_unicode_height(void);
 uint8_t font_get_glyph_row(const font_renderer_t *renderer, char ch, int row);
 uint32_t font_get_line_height(const font_renderer_t *renderer);
 int font_decode_utf8(const char **text, uint32_t *codepoint);

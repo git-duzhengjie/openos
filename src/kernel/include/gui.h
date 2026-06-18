@@ -6,15 +6,17 @@
 #define OPENOS_GUI_H
 
 #include "types.h"
+#include "font.h"
 
 #define GUI_MAX_WINDOWS          16u
 #define GUI_MAX_APPS             16u
 #define GUI_MAX_WIDGETS_PER_WIN  32u
 #define GUI_APP_NAME_LEN         32u
-#define GUI_TITLE_HEIGHT         22
 #define GUI_BORDER_SIZE          2
-#define GUI_CHAR_W               8
-#define GUI_CHAR_H               8
+#define GUI_CHAR_W               ((int)font_get_ascii_width(font_get_default()))
+#define GUI_CHAR_H               ((int)font_get_ascii_height(font_get_default()))
+#define GUI_TEXT_LINE_H          ((int)font_get_line_height(font_get_default()))
+#define GUI_TITLE_HEIGHT         ((GUI_TEXT_LINE_H + 4 < 22) ? 22 : (GUI_TEXT_LINE_H + 4))
 #define GUI_TERM_COLS            128u
 #define GUI_TERM_ROWS            48u
 #define GUI_TERM_CLIPBOARD_SIZE  1024u

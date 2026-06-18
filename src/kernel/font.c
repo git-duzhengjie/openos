@@ -192,6 +192,46 @@ static uint8_t font8x8_get_glyph_row(const font_renderer_t *renderer, char ch, i
 static font_renderer_ops_t g_font8x8_ops;
 static font_renderer_t g_font8x8;
 static int g_font8x8_ready = 0;
+static font_size_t g_font_size = FONT_SIZE_MEDIUM;
+static int g_font_size_ready = 0;
+
+#ifndef OPENOS_FONT_SIZE
+#define OPENOS_FONT_SIZE 1
+#endif
+
+static font_size_t font_size_from_build_config(void) {
+#if OPENOS_FONT_SIZE == 0
+    return FONT_SIZE_SMALL;
+#elif OPENOS_FONT_SIZE == 2
+    return FONT_SIZE_LARGE;
+#else
+    return FONT_SIZE_MEDIUM;
+#endif
+}
+
+static uint32_t font_scale_percent_for_size(font_size_t size) {
+    switch (size) {
+        case FONT_SIZE_SMALL: return 75;
+        case FONT_SIZE_LARGE: return 150;
+        case FONT_SIZE_MEDIUM:
+        default: return 100;
+    }
+}
+
+static uint32_t font_scale_dimension(uint32_t value, uint32_t percent) {
+    uint32_t scaled;
+    if (value == 0) return 0;
+    scaled = (value * percent + 50u) / 100u;
+    return scaled ? scaled : 1u;
+}
+
+static void font_init_size_once(void) {
+    if (g_font_size_ready) return;
+    g_font_size = font_size_from_build_config();
+    g_font_size_ready = 1;
+}
+
+static const font_renderer_t *font_resolve_renderer(const font_renderer_t *renderer);
 
 static void font8x8_refresh(void) {
     g_font8x8_ops.get_glyph_row = font8x8_get_glyph_row;
@@ -203,11 +243,53 @@ static void font8x8_refresh(void) {
 }
 
 const font_renderer_t *font_get_default(void) {
+    font_init_size_once();
     if (!g_font8x8_ready || !g_font8x8.ops || !g_font8x8.ops->get_glyph_row ||
         g_font8x8.width != FONT_DEFAULT_WIDTH || g_font8x8.height != FONT_DEFAULT_HEIGHT) {
         font8x8_refresh();
     }
     return &g_font8x8;
+}
+
+void font_set_size(font_size_t size) {
+    if (size < FONT_SIZE_SMALL || size > FONT_SIZE_LARGE) {
+        size = FONT_SIZE_MEDIUM;
+    }
+    g_font_size = size;
+    g_font_size_ready = 1;
+}
+
+font_size_t font_get_size(void) {
+    font_init_size_once();
+    return g_font_size;
+}
+
+uint32_t font_get_scale_percent(void) {
+    return font_scale_percent_for_size(font_get_size());
+}
+
+uint32_t font_scale_value(uint32_t value) {
+    return font_scale_dimension(value, font_get_scale_percent());
+}
+
+uint32_t font_get_ascii_width(const font_renderer_t *renderer) {
+    const font_renderer_t *r = font_resolve_renderer(renderer);
+    if (!r) return 0;
+    return font_scale_value(r->width);
+}
+
+uint32_t font_get_ascii_height(const font_renderer_t *renderer) {
+    const font_renderer_t *r = font_resolve_renderer(renderer);
+    if (!r) return 0;
+    return font_scale_value(r->height);
+}
+
+uint32_t font_get_unicode_width(void) {
+    return font_scale_value(FONT_UNICODE_WIDTH);
+}
+
+uint32_t font_get_unicode_height(void) {
+    return font_scale_value(FONT_UNICODE_HEIGHT);
 }
 
 static const font_renderer_t *font_resolve_renderer(const font_renderer_t *renderer) {
@@ -270,9 +352,9 @@ int font_decode_utf8(const char **text, uint32_t *codepoint) {
 uint32_t font_measure_codepoint_width(const font_renderer_t *renderer, uint32_t codepoint) {
     const font_renderer_t *r = font_resolve_renderer(renderer);
     if (!r) return 0;
-    if (codepoint == '\t') return (uint32_t)r->width * FONT_DEFAULT_TAB_SPACES;
-    if (codepoint < 0x80u) return (uint32_t)r->width;
-    return FONT_UNICODE_WIDTH;
+    if (codepoint == '\t') return font_get_ascii_width(r) * FONT_DEFAULT_TAB_SPACES;
+    if (codepoint < 0x80u) return font_get_ascii_width(r);
+    return font_get_unicode_width();
 }
 
 uint8_t font_get_glyph_row(const font_renderer_t *renderer, char ch, int row) {
@@ -284,9 +366,13 @@ uint8_t font_get_glyph_row(const font_renderer_t *renderer, char ch, int row) {
 uint32_t font_get_line_height(const font_renderer_t *renderer) {
     const font_renderer_t *r = font_resolve_renderer(renderer);
     uint32_t glyph_height;
+    uint32_t ascii_height;
+    uint32_t unicode_height;
     if (!r) return 0;
-    glyph_height = (r->height < FONT_UNICODE_HEIGHT) ? FONT_UNICODE_HEIGHT : r->height;
-    return glyph_height + FONT_DEFAULT_LINE_GAP;
+    ascii_height = font_get_ascii_height(r);
+    unicode_height = font_get_unicode_height();
+    glyph_height = (ascii_height < unicode_height) ? unicode_height : ascii_height;
+    return glyph_height + font_scale_value(FONT_DEFAULT_LINE_GAP);
 }
 
 uint32_t font_measure_text_width(const font_renderer_t *renderer, const char *text) {
@@ -344,15 +430,23 @@ void font_draw_char_clipped(const font_renderer_t *renderer, font_put_pixel_fn p
     if (!r || !put_pixel) return;
     if ((uint8_t)ch < 32 || ch == ' ' || ch == '\t' || ch == '\n') return;
 
-    for (row = 0; row < (int)r->height; row++) {
-        uint8_t bits = font_get_glyph_row(r, ch, row);
-        for (col = 0; col < (int)r->width && col < 8; col++) {
-            int px;
-            int py;
-            if ((bits & (uint8_t)(0x80u >> col)) == 0) continue;
-            px = x + col;
-            py = y + row;
-            if (font_rect_contains(clip, px, py)) put_pixel(ctx, px, py, color);
+    {
+        uint32_t scaled_w = font_get_ascii_width(r);
+        uint32_t scaled_h = font_get_ascii_height(r);
+        if (!scaled_w || !scaled_h) return;
+        for (row = 0; row < (int)scaled_h; row++) {
+            int src_row = (int)((uint32_t)row * r->height / scaled_h);
+            uint8_t bits = font_get_glyph_row(r, ch, src_row);
+            for (col = 0; col < (int)scaled_w; col++) {
+                int src_col = (int)((uint32_t)col * r->width / scaled_w);
+                int px;
+                int py;
+                if (src_col >= 8) continue;
+                if ((bits & (uint8_t)(0x80u >> src_col)) == 0) continue;
+                px = x + col;
+                py = y + row;
+                if (font_rect_contains(clip, px, py)) put_pixel(ctx, px, py, color);
+            }
         }
     }
 }
@@ -375,22 +469,30 @@ static void font_draw_codepoint_at_y_clipped(const font_renderer_t *renderer, fo
     }
 
     cjk_rows = font_find_cjk_rows(codepoint);
-    for (row = 0; row < FONT_UNICODE_HEIGHT; row++) {
-        uint16_t bits;
-        if (cjk_rows) {
-            bits = cjk_rows[row];
-        } else if (font_codepoint_is_cjk(codepoint)) {
-            bits = font_missing_cjk_row(codepoint, row);
-        } else {
-            bits = font_unicode_fallback_row(codepoint, row);
-        }
-        for (col = 0; col < FONT_UNICODE_WIDTH; col++) {
-            int px;
-            int py;
-            if ((bits & (uint16_t)(0x8000u >> col)) == 0) continue;
-            px = x + col;
-            py = y + row;
-            if (font_rect_contains(clip, px, py)) put_pixel(ctx, px, py, color);
+    {
+        uint32_t scaled_w = font_get_unicode_width();
+        uint32_t scaled_h = font_get_unicode_height();
+        if (!scaled_w || !scaled_h) return;
+        for (row = 0; row < (int)scaled_h; row++) {
+            int src_row = (int)((uint32_t)row * FONT_UNICODE_HEIGHT / scaled_h);
+            uint16_t bits;
+            if (cjk_rows) {
+                bits = cjk_rows[src_row];
+            } else if (font_codepoint_is_cjk(codepoint)) {
+                bits = font_missing_cjk_row(codepoint, src_row);
+            } else {
+                bits = font_unicode_fallback_row(codepoint, src_row);
+            }
+            for (col = 0; col < (int)scaled_w; col++) {
+                int src_col = (int)((uint32_t)col * FONT_UNICODE_WIDTH / scaled_w);
+                int px;
+                int py;
+                if (src_col >= FONT_UNICODE_WIDTH) continue;
+                if ((bits & (uint16_t)(0x8000u >> src_col)) == 0) continue;
+                px = x + col;
+                py = y + row;
+                if (font_rect_contains(clip, px, py)) put_pixel(ctx, px, py, color);
+            }
         }
     }
 }
@@ -413,8 +515,13 @@ static int font_line_contains_wide_glyph(const char *text) {
 
 static int font_ascii_baseline_shift_for_line(const font_renderer_t *renderer, const char *line) {
     const font_renderer_t *r = font_resolve_renderer(renderer);
-    if (!r || r->height >= FONT_UNICODE_HEIGHT || !font_line_contains_wide_glyph(line)) return 0;
-    return (int)((FONT_UNICODE_HEIGHT - r->height) / 2u);
+    uint32_t ascii_h;
+    uint32_t unicode_h;
+    if (!r || !font_line_contains_wide_glyph(line)) return 0;
+    ascii_h = font_get_ascii_height(r);
+    unicode_h = font_get_unicode_height();
+    if (ascii_h >= unicode_h) return 0;
+    return (int)((unicode_h - ascii_h) / 2u);
 }
 
 void font_draw_text_clipped(const font_renderer_t *renderer, font_put_pixel_fn put_pixel, void *ctx,
