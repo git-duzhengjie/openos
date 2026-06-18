@@ -2394,6 +2394,16 @@ static void gui_launcher_init(void) {
     /* programs under /bin appear after the 3 built-ins; scan happens lazily */
 }
 
+static int      g_desktop_selected_icon = -1;
+static int      g_desktop_last_click_icon = -1;
+static uint32_t g_desktop_last_click_frame = 0;
+
+static void gui_desktop_clear_icon_click_state(void) {
+    g_desktop_selected_icon = -1;
+    g_desktop_last_click_icon = -1;
+    g_desktop_last_click_frame = 0;
+}
+
 static void gui_desktop_add_icon(uint32_t index, int x, int y, const char *label, uint32_t color, uint32_t action) {
     gui_desktop_icon_t *icon;
     uint32_t i;
@@ -2435,6 +2445,7 @@ static void gui_desktop_init(void) {
     g_gui.desktop_start_menu_rect.h = GUI_DESKTOP_MENU_H;
 
     memset(g_gui.desktop_icons, 0, sizeof(g_gui.desktop_icons));
+    gui_desktop_clear_icon_click_state();
     /* 桌面只保留 Files 和 Recycle Bin，其他入口走开始菜单/任务栏挂件 */
     gui_desktop_add_icon(0, 32, 72,  i18n_t(I18N_KEY_ICON_FILES),       gui_rgb(242, 194, 74),  GUI_DESKTOP_ACTION_FILES);
     gui_desktop_add_icon(1, 32, 160, i18n_t(I18N_KEY_ICON_RECYCLE_BIN), gui_rgb(168, 178, 198), GUI_DESKTOP_ACTION_RECYCLE);
@@ -2458,6 +2469,19 @@ static void gui_desktop_draw_icon(gui_desktop_icon_t *icon) {
     int top_pad;
 
     if (!icon || !icon->used) return;
+    if (g_desktop_selected_icon >= 0 &&
+        g_desktop_selected_icon < (int)GUI_DESKTOP_MAX_ICONS &&
+        icon == &g_gui.desktop_icons[g_desktop_selected_icon]) {
+        gui_raw_fill_rect(icon->rect.x + 2, icon->rect.y + 2,
+                          icon->rect.w - 4, icon->rect.h - 4,
+                          gui_rgb(42, 84, 144));
+        gui_raw_line(icon->rect.x + 2, icon->rect.y + 2,
+                     icon->rect.x + icon->rect.w - 3, icon->rect.y + 2,
+                     gui_rgb(126, 166, 226));
+        gui_raw_line(icon->rect.x + 2, icon->rect.y + icon->rect.h - 3,
+                     icon->rect.x + icon->rect.w - 3, icon->rect.y + icon->rect.h - 3,
+                     gui_rgb(20, 42, 80));
+    }
     /* no background plate / border — let the icon art sit directly on wallpaper */
     cx = icon->rect.x + (icon->rect.w - 28) / 2;
     top_pad = (icon->rect.h - (art_h + gap + GUI_CHAR_H)) / 2;
@@ -2669,9 +2693,25 @@ static int gui_desktop_handle_click(int x, int y) {
     for (i = 0; i < g_gui.desktop_icon_count && i < GUI_DESKTOP_MAX_ICONS; i++) {
         gui_desktop_icon_t *icon = &g_gui.desktop_icons[i];
         if (icon->used && gui_rect_contains(&icon->rect, x, y)) {
-            gui_desktop_run_action(icon->action);
+            int is_double_click;
+            is_double_click = (g_desktop_last_click_icon == (int)i &&
+                               g_desktop_last_click_frame != 0 &&
+                               (g_gui.frame_counter - g_desktop_last_click_frame) < 18);
+            g_desktop_selected_icon = (int)i;
+            g_desktop_last_click_icon = (int)i;
+            g_desktop_last_click_frame = g_gui.frame_counter;
+            if (is_double_click) {
+                g_desktop_last_click_icon = -1;
+                g_desktop_last_click_frame = 0;
+                gui_desktop_run_action(icon->action);
+            }
+            gui_invalidate_all();
             return 1;
         }
+    }
+    if (g_desktop_selected_icon >= 0) {
+        gui_desktop_clear_icon_click_state();
+        gui_invalidate_all();
     }
     return 0;
 }
@@ -4054,29 +4094,26 @@ static void recycle_on_close(gui_window_t *win, void *ud) {
     g_recycle_win = 0;
 }
 
-static void recycle_on_close_btn(gui_widget_t *w, void *ud) {
-    (void)w; (void)ud;
-    if (g_recycle_win) {
-        gui_window_t *win = g_recycle_win;
-        g_recycle_win = 0;
-        gui_window_set_on_close(win, 0, 0);
-        gui_destroy_window(win);
-        gui_render();
-    }
-}
-
 static void gui_recycle_open(void) {
+    int text_h = gui_text_glyph_height_px();
+    int label_h = text_h + 6;
+    int margin = 18;
+    int content_y = 50;
+    int win_w = 420;
+    int win_h = 240;
+
+    if (label_h < 22) label_h = 22;
+
     if (g_recycle_win) {
         gui_window_set_on_close(g_recycle_win, 0, 0);
         gui_destroy_window(g_recycle_win);
         g_recycle_win = 0;
     }
-    g_recycle_win = gui_create_window(140, 120, 380, 220, i18n_t(I18N_KEY_WIN_RECYCLE_BIN));
+    g_recycle_win = gui_create_window(140, 120, win_w, win_h, i18n_t(I18N_KEY_WIN_RECYCLE_BIN));
     if (!g_recycle_win) return;
     gui_window_set_on_close(g_recycle_win, recycle_on_close, 0);
-    gui_add_label(g_recycle_win, 16, 50,  348, 16, i18n_t(I18N_KEY_RECYCLE_EMPTY));
-    gui_add_label(g_recycle_win, 16, 74,  348, 16, "");
-    gui_add_button(g_recycle_win, 150, 168, 80, 28, i18n_t(I18N_KEY_BTN_CLOSE), recycle_on_close_btn, 0);
+    gui_add_label(g_recycle_win, margin, content_y, win_w - margin * 2, label_h,
+                  i18n_t(I18N_KEY_RECYCLE_EMPTY));
     gui_render();
 }
 
@@ -4191,7 +4228,9 @@ static char          fp_prompt_buf[GUI_FP_MAX_NAME];
 static int           fp_prompt_len = 0;
 static char          fp_prompt_target[GUI_FP_MAX_NAME]; /* original name for rename / delete */
 static char          fp_status[80] = {0};
-static int           fp_selected = -1;             /* index within fp_sorted_idx of selected row */
+static int           fp_selected = -1;             /* index within current page of selected row */
+static int           fp_last_click_global = -1;    /* double-click target in global item index */
+static uint32_t      fp_last_click_frame = 0;
 static gui_widget_t *fp_prompt_textbox = 0;        /* prompt input textbox */
 
 /* path helpers --------------------------------------------------- */
@@ -4712,10 +4751,17 @@ static void fp_on_edit_save(gui_widget_t *w, void *ud) {
     gui_file_preview_rebuild();
 }
 
+static void fp_clear_entry_click_state(void) {
+    fp_selected = -1;
+    fp_last_click_global = -1;
+    fp_last_click_frame = 0;
+}
+
 static void fp_on_prev(gui_widget_t *w, void *ud) {
     (void)w; (void)ud;
     if (fp_page > 0) {
         fp_page--;
+        fp_clear_entry_click_state();
         gui_file_preview_rebuild();
     }
 }
@@ -4724,25 +4770,20 @@ static void fp_on_next(gui_widget_t *w, void *ud) {
     (void)w; (void)ud;
     if (fp_page + 1 < fp_total_pages()) {
         fp_page++;
+        fp_clear_entry_click_state();
         gui_file_preview_rebuild();
     }
 }
 
-static void fp_on_entry(gui_widget_t *w, void *ud) {
-    int slot = (int)(intptr_t)ud;
-    int global_index, real_index;
+static void fp_open_entry_at_global(int global_index) {
+    int real_index;
     dentry_t *e;
-    (void)w;
 
-    /* remember selection for toolbar Rename/Delete */
-    fp_selected = slot;
-
-    global_index = fp_page * fp_list_per_page() + slot;
-
-    /* slot 0 of page 0 in non-root is the ".." shortcut */
+    /* item 0 in non-root is the ".." shortcut */
     if (!fp_is_root() && global_index == 0) {
         fp_path_pop();
         fp_page = 0;
+        fp_clear_entry_click_state();
         gui_file_preview_rebuild();
         return;
     }
@@ -4754,6 +4795,7 @@ static void fp_on_entry(gui_widget_t *w, void *ud) {
     if (fp_entry_is_dir(e)) {
         fp_path_push(e->name);
         fp_page = 0;
+        fp_clear_entry_click_state();
         gui_file_preview_rebuild();
     } else {
         int i = 0;
@@ -4765,6 +4807,30 @@ static void fp_on_entry(gui_widget_t *w, void *ud) {
         fp_mode = 1;
         fp_view_line_offset = 0;
         fp_view_total_lines = 0;
+        fp_last_click_global = -1;
+        fp_last_click_frame = 0;
+        gui_file_preview_rebuild();
+    }
+}
+
+static void fp_on_entry(gui_widget_t *w, void *ud) {
+    int slot = (int)(intptr_t)ud;
+    int global_index;
+    int is_double_click;
+    (void)w;
+
+    /* Single click selects only. Double click opens the selected item. */
+    fp_selected = slot;
+    global_index = fp_page * fp_list_per_page() + slot;
+    is_double_click = (fp_last_click_global == global_index &&
+                       fp_last_click_frame != 0 &&
+                       (g_gui.frame_counter - fp_last_click_frame) < 18);
+    fp_last_click_global = global_index;
+    fp_last_click_frame = g_gui.frame_counter;
+
+    if (is_double_click) {
+        fp_open_entry_at_global(global_index);
+    } else {
         gui_file_preview_rebuild();
     }
 }
@@ -5626,6 +5692,7 @@ static void gui_file_preview_open(void) {
     if (fp_path[0] == 0) fp_path_set_root();
     fp_mode = 0;
     fp_page = 0;
+    fp_clear_entry_click_state();
     gui_file_preview_rebuild();
 }
 
