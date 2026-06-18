@@ -43,7 +43,48 @@ static void usage(void)
 {
     printf("usage:\n");
     printf("  ifconfig\n");
+    printf("  ifconfig <dev> up|down\n");
     printf("  ifconfig <ip> [netmask <mask>] [gateway <gw>]\n");
+}
+
+static const char *config_mode_name(unsigned int mode)
+{
+    if (mode == NET_CONFIG_MODE_DHCP) return "dhcp";
+    if (mode == NET_CONFIG_MODE_STATIC) return "static";
+    return "none";
+}
+
+static void print_flags(unsigned int flags)
+{
+    printf("      flags:");
+    if (flags & NET_DEVICE_FLAG_UP) printf(" UP");
+    else printf(" DOWN");
+    if (flags & NET_DEVICE_FLAG_LINK_UP) printf(" LINK_UP");
+    else printf(" NO_LINK");
+    if (flags & NET_DEVICE_FLAG_DEFAULT) printf(" DEFAULT");
+    if (flags & NET_DEVICE_FLAG_DHCP) printf(" DHCP");
+    if (flags & NET_DEVICE_FLAG_STATIC) printf(" STATIC");
+    printf("\n");
+}
+
+static int handle_dev_control(const char *name, const char *op)
+{
+    unsigned int ctl;
+
+    if (openos_strcmp(op, "up") == 0) {
+        ctl = NETDEV_CTL_SET_UP;
+    } else if (openos_strcmp(op, "down") == 0) {
+        ctl = NETDEV_CTL_SET_DOWN;
+    } else {
+        usage();
+        return 1;
+    }
+
+    if (netdevctl(name, ctl) < 0) {
+        printf("ifconfig: failed to set %s %s\n", name, op);
+        return 1;
+    }
+    return 0;
 }
 
 int main(int argc, char **argv)
@@ -59,7 +100,15 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    if (argc > 1) {
+    if (argc == 3 &&
+        (openos_strcmp(argv[2], "up") == 0 || openos_strcmp(argv[2], "down") == 0)) {
+        if (handle_dev_control(argv[1], argv[2]) != 0)
+            return 1;
+        if (netinfo(&info) < 0) {
+            printf("ifconfig: no network device\n");
+            return 1;
+        }
+    } else if (argc > 1) {
         ip = info.ip;
         mask = info.netmask;
         gw = info.gateway;
@@ -103,12 +152,15 @@ int main(int argc, char **argv)
            info.name,
            info.mac[0], info.mac[1], info.mac[2],
            info.mac[3], info.mac[4], info.mac[5]);
-    printf("      inet addr:");
+    print_flags(info.flags);
+    printf("      mode:%s  inet addr:", config_mode_name(info.config_mode));
     print_ip(info.ip);
     printf("  Mask:");
     print_ip(info.netmask);
     printf("  Gateway:");
     print_ip(info.gateway);
+    printf("  DNS:");
+    print_ip(info.dns);
     printf("\n");
     printf("      RX packets:%u dropped:%u\n", info.rx_packets, info.rx_dropped);
     printf("      TX packets:%u dropped:%u\n", info.tx_packets, info.tx_dropped);

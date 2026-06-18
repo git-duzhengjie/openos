@@ -109,6 +109,7 @@
 #define SYS_SANDBOX_GET  312
 #define SYS_SANDBOX_SET  313
 #define SYS_AI_REQUEST   314
+#define SYS_NETDEVCTL    315
 
 #define OPENOS_CAP_SETUID    (1u << 0)
 #define OPENOS_CAP_SETGID    (1u << 1)
@@ -137,12 +138,29 @@ typedef struct openos_sockaddr_in {
     unsigned char sin_zero[8];
 } openos_sockaddr_in_t;
 
+#define NET_DEVICE_FLAG_PRESENT 0x00000001u
+#define NET_DEVICE_FLAG_UP      0x00000002u
+#define NET_DEVICE_FLAG_LINK_UP 0x00000004u
+#define NET_DEVICE_FLAG_DHCP    0x00000008u
+#define NET_DEVICE_FLAG_DEFAULT 0x00000010u
+#define NET_DEVICE_FLAG_STATIC  0x00000020u
+
+#define NET_CONFIG_MODE_NONE   0u
+#define NET_CONFIG_MODE_STATIC 1u
+#define NET_CONFIG_MODE_DHCP   2u
+
+#define NETDEV_CTL_SET_DOWN 0u
+#define NETDEV_CTL_SET_UP   1u
+
 typedef struct openos_netinfo {
     char name[16];
     unsigned char mac[6];
     unsigned int ip;
     unsigned int netmask;
     unsigned int gateway;
+    unsigned int dns;
+    unsigned int flags;
+    unsigned int config_mode;
     unsigned int rx_packets;
     unsigned int tx_packets;
     unsigned int rx_dropped;
@@ -154,7 +172,6 @@ typedef struct openos_netinfo {
     unsigned int icmp_echo_requests;
     unsigned int icmp_echo_replies;
 } openos_netinfo_t;
-
 typedef struct openos_user {
     unsigned int uid;
     unsigned int gid;
@@ -473,6 +490,11 @@ static inline int openos_ping(unsigned int ip)
 static inline int openos_netconfig(unsigned int ip, unsigned int netmask, unsigned int gateway)
 {
     return openos_syscall_result(openos_syscall3(SYS_NETCONFIG, (int)ip, (int)netmask, (int)gateway));
+}
+
+static inline int openos_netdevctl(const char *name, unsigned int op)
+{
+    return openos_syscall_result(openos_syscall2(SYS_NETDEVCTL, (int)name, (int)op));
 }
 
 static inline int openos_firewall(unsigned int op, unsigned int index, openos_firewall_rule_t *rule)
@@ -2127,6 +2149,7 @@ static inline void openos_clearerr(openos_FILE *stream)
 #define netinfo(info)          openos_netinfo((info))
 #define ping(ip)               openos_ping((ip))
 #define netconfig(ip, mask, gw) openos_netconfig((ip), (mask), (gw))
+#define netdevctl(name, op)    openos_netdevctl((name), (op))
 #define firewall(op, index, rule) openos_firewall((op), (index), (rule))
 #define socket(domain, type, protocol) openos_socket((domain), (type), (protocol))
 #define socketpair(domain, type, protocol, sv) openos_socketpair((domain), (type), (protocol), (sv))

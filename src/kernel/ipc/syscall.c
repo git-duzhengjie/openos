@@ -1897,6 +1897,7 @@ uint32_t syscall_dispatch(uint32_t num,
     case SYS_NETINFO:
         {
             net_diag_stats_t stats;
+            net_device_info_t devinfo;
             openos_netinfo_t info;
             if (!a || !user_ptr_valid((void *)a, sizeof(info), USERMEM_WRITE))
                 return (uint32_t)-1;
@@ -1908,6 +1909,11 @@ uint32_t syscall_dispatch(uint32_t num,
             info.ip = stats.ip;
             info.netmask = stats.netmask;
             info.gateway = stats.gateway;
+            if (net_get_device_info_by_name(stats.name, &devinfo) == 0) {
+                info.dns = devinfo.dns;
+                info.flags = devinfo.flags;
+                info.config_mode = devinfo.config_mode;
+            }
             info.rx_packets = stats.rx_packets;
             info.tx_packets = stats.tx_packets;
             info.rx_dropped = stats.rx_dropped;
@@ -1932,6 +1938,22 @@ uint32_t syscall_dispatch(uint32_t num,
         if (syscall_require_cap(OPENOS_CAP_NET_ADMIN) < 0)
             return (uint32_t)-1;
         return (uint32_t)net_config_ipv4((uint32_t)a, (uint32_t)b, (uint32_t)c);
+
+    case SYS_NETDEVCTL:
+        {
+            char dev_name[16];
+            if (!a || !user_ptr_valid((const void *)a, 1, USERMEM_READ))
+                return (uint32_t)-1;
+            if (strncpy_from_user(dev_name, (const char *)a, sizeof(dev_name)) < 0)
+                return (uint32_t)-1;
+            if (syscall_require_cap(OPENOS_CAP_NET_ADMIN) < 0)
+                return (uint32_t)-1;
+            if ((uint32_t)b == NETDEV_CTL_SET_UP)
+                return (uint32_t)net_set_device_admin_up(dev_name, 1);
+            if ((uint32_t)b == NETDEV_CTL_SET_DOWN)
+                return (uint32_t)net_set_device_admin_up(dev_name, 0);
+            return (uint32_t)-1;
+        }
 
     case SYS_FIREWALL:
         {

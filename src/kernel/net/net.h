@@ -71,6 +71,7 @@ struct net_device {
     uint32_t dns;
     net_config_mode_t config_mode;
     uint32_t link_up;
+    uint32_t admin_up;
     net_tx_func_t transmit;
     uint32_t rx_packets;
     uint32_t tx_packets;
@@ -107,6 +108,9 @@ typedef struct net_device_info {
 #define NET_DEVICE_FLAG_DEFAULT 0x00000010u
 #define NET_DEVICE_FLAG_STATIC  0x00000020u
 
+#define NETDEV_CTL_SET_DOWN 0u
+#define NETDEV_CTL_SET_UP   1u
+
 typedef void (*udp_recv_func_t)(uint32_t src_ip, uint16_t src_port,
                                 uint16_t dst_port, const uint8_t *data,
                                 uint16_t len);
@@ -135,6 +139,7 @@ net_device_t *net_get_device_by_index(uint32_t index);
 net_device_t *net_find_device(const char *name);
 int net_get_device_info(uint32_t index, net_device_info_t *out);
 int net_get_device_info_by_name(const char *name, net_device_info_t *out);
+int net_set_device_admin_up(const char *name, int up);
 void net_set_default_ipv4(uint32_t ip, uint32_t netmask, uint32_t gateway);
 void net_set_default_ipv4_dhcp(uint32_t ip, uint32_t netmask, uint32_t gateway, uint32_t dns);
 void net_input(net_device_t *dev, const uint8_t *frame, uint16_t len);

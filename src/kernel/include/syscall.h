@@ -112,6 +112,7 @@
 #define SYS_SANDBOX_GET  312
 #define SYS_SANDBOX_SET  313
 #define SYS_AI_REQUEST   314
+#define SYS_NETDEVCTL    315
 
 #define OPENOS_CAP_SETUID    (1u << 0)
 #define OPENOS_CAP_SETGID    (1u << 1)
@@ -162,6 +163,9 @@ typedef struct openos_netinfo {
     uint32_t ip;
     uint32_t netmask;
     uint32_t gateway;
+    uint32_t dns;
+    uint32_t flags;
+    uint32_t config_mode;
     uint32_t rx_packets;
     uint32_t tx_packets;
     uint32_t rx_dropped;

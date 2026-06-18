@@ -256,7 +256,7 @@ static int eth_send(net_device_t *dev, const uint8_t *dst, uint16_t type,
     struct eth_header *eth;
     uint16_t frame_len;
 
-    if (!dev || !dev->transmit || payload_len > NET_ETH_MTU) return -1;
+    if (!dev || !dev->transmit || !dev->admin_up || payload_len > NET_ETH_MTU) return -1;
 
     eth = (struct eth_header *)frame;
     copy_mac(eth->dst, dst);
@@ -1055,7 +1055,7 @@ void net_input(net_device_t *dev, const uint8_t *frame, uint16_t len) {
     const struct eth_header *eth;
     uint16_t type;
     uint8_t broadcast[NET_ETH_ADDR_LEN] = {0xff,0xff,0xff,0xff,0xff,0xff};
-    if (!dev || !frame || len < sizeof(struct eth_header)) return;
+    if (!dev || !dev->admin_up || !frame || len < sizeof(struct eth_header)) return;
     eth = (const struct eth_header *)frame;
     if (!same_mac(eth->dst, dev->mac) && !same_mac(eth->dst, broadcast)) return;
     type = ntohs(eth->type);
@@ -1069,6 +1069,7 @@ void net_input(net_device_t *dev, const uint8_t *frame, uint16_t len) {
 
 int net_register_device(net_device_t *dev) {
     if (!dev) return -1;
+    if (!dev->admin_up) dev->admin_up = 1;
     if (!default_dev) default_dev = dev;
     devmgr_register(dev->name, "net", DEVMGR_TYPE_NET, 0, 0, 0, dev);
     return 0;
@@ -1149,7 +1150,7 @@ static int net_fill_device_info(net_device_t *dev, net_device_info_t *out) {
     memcpy(out->mac, dev->mac, NET_ETH_ADDR_LEN);
     out->mtu = NET_ETH_MTU;
     out->flags = NET_DEVICE_FLAG_PRESENT;
-    if (dev->transmit) out->flags |= NET_DEVICE_FLAG_UP;
+    if (dev->transmit && dev->admin_up) out->flags |= NET_DEVICE_FLAG_UP;
     if (dev->link_up) out->flags |= NET_DEVICE_FLAG_LINK_UP;
     if (dev->config_mode == NET_CONFIG_MODE_DHCP) out->flags |= NET_DEVICE_FLAG_DHCP;
     if (dev->config_mode == NET_CONFIG_MODE_STATIC) out->flags |= NET_DEVICE_FLAG_STATIC;
@@ -1172,6 +1173,13 @@ int net_get_device_info(uint32_t index, net_device_info_t *out) {
 
 int net_get_device_info_by_name(const char *name, net_device_info_t *out) {
     return net_fill_device_info(net_find_device(name), out);
+}
+
+int net_set_device_admin_up(const char *name, int up) {
+    net_device_t *dev = net_find_device(name);
+    if (!dev) return -1;
+    dev->admin_up = up ? 1u : 0u;
+    return 0;
 }
 
 void net_set_default_ipv4(uint32_t ip, uint32_t netmask, uint32_t gateway) {
@@ -1350,6 +1358,10 @@ void net_init(void) {
     loopdev.ip = NET_IP4(10, 0, 2, 15);
     loopdev.netmask = NET_IP4(255, 255, 255, 0);
     loopdev.gateway = NET_IP4(10, 0, 2, 2);
+    loopdev.dns = NET_IP4(8, 8, 8, 8);
+    loopdev.config_mode = NET_CONFIG_MODE_STATIC;
+    loopdev.link_up = 1;
+    loopdev.admin_up = 1;
     loopdev.transmit = loopback_transmit;
     default_dev = 0;
     net_register_device(&loopdev);

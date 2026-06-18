@@ -243,7 +243,7 @@
   - [√] 查询设备 up/down、DHCP/static 配置模式、IP、掩码、网关、DNS
   - [√] 查询 RX/TX 包计数、字节数、错误数、丢包数等统计信息
 - [ ] 网络设备控制能力
-  - [ ] 启用 / 禁用网卡设备
+  - [√] 启用 / 禁用网卡设备（已提供内核 admin_up 状态、SYS_NETDEVCTL、ifconfig <dev> up/down）
   - [ ] 触发 DHCP 获取 / 续租 / 释放
   - [ ] 设置静态 IP、掩码、网关、DNS
   - [ ] 刷新设备状态与链路状态
