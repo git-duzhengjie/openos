@@ -15,7 +15,6 @@ cd openos
 ./build.sh
 
 # 运行（需要 QEMU）
-qemu-system-i386 -drive format=raw,file=target/openos.img -m 512M -serial stdio -display gtk,show-cursor=on -device piix3-usb-uhci,id=uhci -device usb-tablet,bus=uhci.0
 qemu-system-i386 -m 512M -drive file=target/openos.img,format=raw -serial stdio -netdev tap,id=net0,ifname='OpenOS-TAP',script=no,downscript=no -device e1000,netdev=net0,mac=52:54:00:12:34:56 -display gtk
 # 启动后在 OpenOS Shell 中执行：guitest
 ```

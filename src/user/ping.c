@@ -46,17 +46,16 @@ static void print_ip(unsigned int ip)
 
 int main(int argc, char **argv)
 {
-    openos_netinfo_t before;
-    openos_netinfo_t after;
+    openos_netinfo_t info;
     unsigned int target;
     const char *target_name = 0;
 
-    if (netinfo(&before) < 0) {
+    if (netinfo(&info) < 0) {
         printf("ping: no network device\n");
         return 1;
     }
 
-    target = before.ip;
+    target = info.ip;
     if (argc > 1) {
         target_name = argv[1];
         if (parse_ip(target_name, &target) < 0) {
@@ -78,25 +77,12 @@ int main(int argc, char **argv)
         printf(")");
     printf(": 4 data bytes\n");
 
-    if (ping(target) < 0) {
-        printf("ping: send failed\n");
-        return 1;
-    }
-
-    {
-        int i;
-        for (i = 0; i < 30; i++) {
-            openos_sleep(100);
-            if (netinfo(&after) < 0)
-                return 1;
-            if (after.icmp_echo_replies > before.icmp_echo_replies) {
-                printf("4 bytes from ");
-                print_ip(target);
-                printf(": icmp_seq=1 ttl=64\n");
-                printf("1 packets transmitted, 1 received, 0%% packet loss\n");
-                return 0;
-            }
-        }
+    if (ping(target) == 0) {
+        printf("4 bytes from ");
+        print_ip(target);
+        printf(": icmp_seq=1 ttl=64\n");
+        printf("1 packets transmitted, 1 received, 0%% packet loss\n");
+        return 0;
     }
 
     printf("1 packets transmitted, 0 received, 100%% packet loss\n");

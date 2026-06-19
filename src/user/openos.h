@@ -176,6 +176,28 @@ typedef struct openos_netinfo {
     unsigned int tcp_connections;
     unsigned int icmp_echo_requests;
     unsigned int icmp_echo_replies;
+    unsigned int last_ipv4_src;
+    unsigned int last_ipv4_dst;
+    unsigned int last_ipv4_protocol;
+    unsigned int last_icmp_src;
+    unsigned int last_icmp_type;
+    unsigned int last_icmp_code;
+    unsigned int ipv4_drop_short;
+    unsigned int ipv4_drop_version;
+    unsigned int ipv4_drop_ihl;
+    unsigned int ipv4_drop_len;
+    unsigned int ipv4_drop_checksum;
+    unsigned int ipv4_drop_dst;
+    unsigned int last_ipv4_tx_src;
+    unsigned int last_ipv4_tx_dst;
+    unsigned int last_ipv4_tx_next_hop;
+    unsigned int last_ipv4_tx_protocol;
+    unsigned int last_ipv4_tx_len;
+    int last_ipv4_tx_result;
+    unsigned int last_ping_dst;
+    unsigned int last_ping_id;
+    unsigned int last_ping_seq;
+    int last_ping_send_result;
 } openos_netinfo_t;
 typedef struct openos_user {
     unsigned int uid;

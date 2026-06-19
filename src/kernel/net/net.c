@@ -5,6 +5,7 @@
 #include "socket.h"
 #include "dhcp.h"
 #include "../include/e1000.h"
+#include "../include/process.h"
 
 #define ETH_TYPE_IPV4 0x0800
 #define ETH_TYPE_ARP  0x0806
@@ -162,6 +163,28 @@ struct tcp_connection {
 static net_device_t *default_dev;
 static uint32_t icmp_echo_requests;
 static uint32_t icmp_echo_replies;
+static uint32_t last_ipv4_src;
+static uint32_t last_ipv4_dst;
+static uint32_t last_ipv4_protocol;
+static uint32_t last_icmp_src;
+static uint32_t last_icmp_type;
+static uint32_t last_icmp_code;
+static uint32_t ipv4_drop_short;
+static uint32_t ipv4_drop_version;
+static uint32_t ipv4_drop_ihl;
+static uint32_t ipv4_drop_len;
+static uint32_t ipv4_drop_checksum;
+static uint32_t ipv4_drop_dst;
+static uint32_t last_ipv4_tx_src;
+static uint32_t last_ipv4_tx_dst;
+static uint32_t last_ipv4_tx_next_hop;
+static uint32_t last_ipv4_tx_protocol;
+static uint32_t last_ipv4_tx_len;
+static int32_t last_ipv4_tx_result;
+static uint32_t last_ping_dst;
+static uint32_t last_ping_id;
+static uint32_t last_ping_seq;
+static int32_t last_ping_send_result;
 static net_firewall_rule_t firewall_rules[NET_FIREWALL_RULES];
 static struct arp_entry arp_cache[ARP_CACHE_SIZE];
 static struct udp_binding udp_bindings[UDP_BIND_SIZE];
@@ -351,6 +374,13 @@ int net_send_ipv4(uint32_t dst_ip, uint8_t protocol, const uint8_t *payload, uin
     uint16_t total_len;
     uint32_t next_hop;
 
+    last_ipv4_tx_src = default_dev ? default_dev->ip : 0;
+    last_ipv4_tx_dst = dst_ip;
+    last_ipv4_tx_next_hop = 0;
+    last_ipv4_tx_protocol = protocol;
+    last_ipv4_tx_len = (uint32_t)payload_len + sizeof(struct ipv4_header);
+    last_ipv4_tx_result = -1;
+
     if (!default_dev || payload_len + sizeof(struct ipv4_header) > NET_ETH_MTU) return -1;
     next_hop = dst_ip;
     if (dst_ip != NET_IPV4_BROADCAST && default_dev->gateway != 0 &&
@@ -364,9 +394,12 @@ int net_send_ipv4(uint32_t dst_ip, uint8_t protocol, const uint8_t *payload, uin
             copy_mac(dst_mac, default_dev->mac);
             arp_insert(next_hop, dst_mac);
         } else if (arp_resolve(next_hop, dst_mac) < 0) {
+            last_ipv4_tx_next_hop = next_hop;
+            last_ipv4_tx_result = -2;
             return -1;
         }
     }
+    last_ipv4_tx_next_hop = next_hop;
 
     memset(packet, 0, sizeof(struct ipv4_header));
     ip = (struct ipv4_header *)packet;
@@ -384,7 +417,8 @@ int net_send_ipv4(uint32_t dst_ip, uint8_t protocol, const uint8_t *payload, uin
     ip->checksum = 0;
     ip->checksum = htons(checksum16(ip, sizeof(struct ipv4_header)));
 
-    return eth_send(default_dev, dst_mac, ETH_TYPE_IPV4, packet, total_len);
+    last_ipv4_tx_result = eth_send(default_dev, dst_mac, ETH_TYPE_IPV4, packet, total_len);
+    return last_ipv4_tx_result;
 }
 
 static int icmp_send_reply(uint32_t dst_ip, const uint8_t *request, uint16_t len) {
@@ -404,6 +438,9 @@ static void handle_icmp(uint32_t src_ip, const uint8_t *payload, uint16_t len) {
     const struct icmp_header *icmp;
     if (len < sizeof(struct icmp_header)) return;
     icmp = (const struct icmp_header *)payload;
+    last_icmp_src = src_ip;
+    last_icmp_type = icmp->type;
+    last_icmp_code = icmp->code;
     if (icmp->type == ICMP_ECHO_REQUEST) {
         icmp_echo_requests++;
         icmp_send_reply(src_ip, payload, len);
@@ -1054,17 +1091,38 @@ static void handle_ipv4(net_device_t *dev, const uint8_t *data, uint16_t len) {
     uint32_t dst;
     const uint8_t *payload;
     uint16_t payload_len;
-    if (len < sizeof(struct ipv4_header)) return;
+    if (len < sizeof(struct ipv4_header)) {
+        ipv4_drop_short++;
+        return;
+    }
     ip = (const struct ipv4_header *)data;
-    if ((ip->ver_ihl >> 4) != 4) return;
+    if ((ip->ver_ihl >> 4) != 4) {
+        ipv4_drop_version++;
+        return;
+    }
     ihl = (uint8_t)((ip->ver_ihl & 0x0f) * 4);
-    if (ihl < sizeof(struct ipv4_header) || ihl > len) return;
+    if (ihl < sizeof(struct ipv4_header) || ihl > len) {
+        ipv4_drop_ihl++;
+        return;
+    }
     total_len = ntohs(ip->total_len);
-    if (total_len < ihl || total_len > len) return;
-    if (checksum16(ip, ihl) != 0) return;
+    if (total_len < ihl || total_len > len) {
+        ipv4_drop_len++;
+        return;
+    }
+    if (checksum16(ip, ihl) != 0) {
+        ipv4_drop_checksum++;
+        return;
+    }
     src = ntohl(ip->src);
     dst = ntohl(ip->dst);
-    if (dev && dst != dev->ip && dst != 0xffffffffU) return;
+    last_ipv4_src = src;
+    last_ipv4_dst = dst;
+    last_ipv4_protocol = ip->protocol;
+    if (dev && dst != dev->ip && dst != 0xffffffffU) {
+        ipv4_drop_dst++;
+        return;
+    }
     payload = data + ihl;
     payload_len = (uint16_t)(total_len - ihl);
 
@@ -1344,10 +1402,16 @@ static int loopback_transmit(net_device_t *dev, const uint8_t *frame, uint16_t l
 }
 
 int net_ping_ipv4(uint32_t dst_ip) {
-    uint8_t payload[sizeof(struct icmp_header) + 4];
+    uint8_t payload[sizeof(struct icmp_header) + 56];
     uint8_t mac[NET_ETH_ADDR_LEN];
     uint32_t next_hop;
+    uint16_t i;
+    uint16_t seq;
     struct icmp_header *icmp = (struct icmp_header *)payload;
+    last_ping_dst = dst_ip;
+    last_ping_id = 1;
+    last_ping_seq = 0;
+    last_ping_send_result = -1;
     if (!default_dev) return -1;
     next_hop = ((dst_ip & default_dev->netmask) == (default_dev->ip & default_dev->netmask)) ? dst_ip : default_dev->gateway;
     if (arp_resolve(next_hop, mac) < 0) return -1;
@@ -1355,13 +1419,32 @@ int net_ping_ipv4(uint32_t dst_ip) {
     icmp->type = ICMP_ECHO_REQUEST;
     icmp->code = 0;
     icmp->ident = htons(1);
-    icmp->seq = htons((uint16_t)(icmp_echo_requests + icmp_echo_replies + 1U));
-    payload[sizeof(struct icmp_header) + 0] = 'p';
-    payload[sizeof(struct icmp_header) + 1] = 'i';
-    payload[sizeof(struct icmp_header) + 2] = 'n';
-    payload[sizeof(struct icmp_header) + 3] = 'g';
+    seq = (uint16_t)(icmp_echo_requests + icmp_echo_replies + 1U);
+    last_ping_seq = seq;
+    icmp->seq = htons(seq);
+    for (i = 0; i < 56; i++) {
+        payload[sizeof(struct icmp_header) + i] = (uint8_t)('a' + (i % 26));
+    }
     icmp->checksum = htons(checksum16(payload, sizeof(payload)));
-    return net_send_ipv4(dst_ip, IP_PROTO_ICMP, payload, sizeof(payload));
+
+    {
+        uint32_t before_replies = icmp_echo_replies;
+        int wait;
+        last_ping_send_result = net_send_ipv4(dst_ip, IP_PROTO_ICMP, payload, sizeof(payload));
+        if (last_ping_send_result != 0) return last_ping_send_result;
+
+        for (wait = 0; wait < 1000; wait++) {
+            net_poll();
+            if (icmp_echo_replies > before_replies) return 0;
+            thread_sleep(1);
+            sched_yield();
+            net_poll();
+            if (icmp_echo_replies > before_replies) return 0;
+        }
+    }
+
+    last_ping_send_result = -3;
+    return -3;
 }
 
 int net_ping_self(void) {
@@ -1398,6 +1481,28 @@ int net_get_diag_stats(net_diag_stats_t *stats) {
     }
     stats->icmp_echo_requests = icmp_echo_requests;
     stats->icmp_echo_replies = icmp_echo_replies;
+    stats->last_ipv4_src = last_ipv4_src;
+    stats->last_ipv4_dst = last_ipv4_dst;
+    stats->last_ipv4_protocol = last_ipv4_protocol;
+    stats->last_icmp_src = last_icmp_src;
+    stats->last_icmp_type = last_icmp_type;
+    stats->last_icmp_code = last_icmp_code;
+    stats->ipv4_drop_short = ipv4_drop_short;
+    stats->ipv4_drop_version = ipv4_drop_version;
+    stats->ipv4_drop_ihl = ipv4_drop_ihl;
+    stats->ipv4_drop_len = ipv4_drop_len;
+    stats->ipv4_drop_checksum = ipv4_drop_checksum;
+    stats->ipv4_drop_dst = ipv4_drop_dst;
+    stats->last_ipv4_tx_src = last_ipv4_tx_src;
+    stats->last_ipv4_tx_dst = last_ipv4_tx_dst;
+    stats->last_ipv4_tx_next_hop = last_ipv4_tx_next_hop;
+    stats->last_ipv4_tx_protocol = last_ipv4_tx_protocol;
+    stats->last_ipv4_tx_len = last_ipv4_tx_len;
+    stats->last_ipv4_tx_result = last_ipv4_tx_result;
+    stats->last_ping_dst = last_ping_dst;
+    stats->last_ping_id = last_ping_id;
+    stats->last_ping_seq = last_ping_seq;
+    stats->last_ping_send_result = last_ping_send_result;
     return 0;
 }
 

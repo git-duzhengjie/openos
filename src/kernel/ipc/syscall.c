@@ -1956,6 +1956,28 @@ uint32_t syscall_dispatch(uint32_t num,
             info.tcp_connections = stats.tcp_connections;
             info.icmp_echo_requests = stats.icmp_echo_requests;
             info.icmp_echo_replies = stats.icmp_echo_replies;
+            info.last_ipv4_src = stats.last_ipv4_src;
+            info.last_ipv4_dst = stats.last_ipv4_dst;
+            info.last_ipv4_protocol = stats.last_ipv4_protocol;
+            info.last_icmp_src = stats.last_icmp_src;
+            info.last_icmp_type = stats.last_icmp_type;
+            info.last_icmp_code = stats.last_icmp_code;
+            info.ipv4_drop_short = stats.ipv4_drop_short;
+            info.ipv4_drop_version = stats.ipv4_drop_version;
+            info.ipv4_drop_ihl = stats.ipv4_drop_ihl;
+            info.ipv4_drop_len = stats.ipv4_drop_len;
+            info.ipv4_drop_checksum = stats.ipv4_drop_checksum;
+            info.ipv4_drop_dst = stats.ipv4_drop_dst;
+            info.last_ipv4_tx_src = stats.last_ipv4_tx_src;
+            info.last_ipv4_tx_dst = stats.last_ipv4_tx_dst;
+            info.last_ipv4_tx_next_hop = stats.last_ipv4_tx_next_hop;
+            info.last_ipv4_tx_protocol = stats.last_ipv4_tx_protocol;
+            info.last_ipv4_tx_len = stats.last_ipv4_tx_len;
+            info.last_ipv4_tx_result = stats.last_ipv4_tx_result;
+            info.last_ping_dst = stats.last_ping_dst;
+            info.last_ping_id = stats.last_ping_id;
+            info.last_ping_seq = stats.last_ping_seq;
+            info.last_ping_send_result = stats.last_ping_send_result;
             if (copy_to_user((void *)a, &info, sizeof(info)) < 0)
                 return (uint32_t)-1;
             return 0;

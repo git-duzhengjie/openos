@@ -32,6 +32,28 @@ typedef struct net_diag_stats {
     uint32_t tcp_connections;
     uint32_t icmp_echo_requests;
     uint32_t icmp_echo_replies;
+    uint32_t last_ipv4_src;
+    uint32_t last_ipv4_dst;
+    uint32_t last_ipv4_protocol;
+    uint32_t last_icmp_src;
+    uint32_t last_icmp_type;
+    uint32_t last_icmp_code;
+    uint32_t ipv4_drop_short;
+    uint32_t ipv4_drop_version;
+    uint32_t ipv4_drop_ihl;
+    uint32_t ipv4_drop_len;
+    uint32_t ipv4_drop_checksum;
+    uint32_t ipv4_drop_dst;
+    uint32_t last_ipv4_tx_src;
+    uint32_t last_ipv4_tx_dst;
+    uint32_t last_ipv4_tx_next_hop;
+    uint32_t last_ipv4_tx_protocol;
+    uint32_t last_ipv4_tx_len;
+    int32_t last_ipv4_tx_result;
+    uint32_t last_ping_dst;
+    uint32_t last_ping_id;
+    uint32_t last_ping_seq;
+    int32_t last_ping_send_result;
 } net_diag_stats_t;
 
 #define NET_FIREWALL_RULES 16u
