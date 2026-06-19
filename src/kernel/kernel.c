@@ -43,6 +43,7 @@
 #include "framebuffer.h"
 #include "gui.h"
 #include "window_manager.h"
+#include "font.h"
 #include "mouse.h"
 #include "usb_tablet.h"
 #include "usb.h"
@@ -622,6 +623,12 @@ void kernel_main(void) {
     ramfs_init();
     tmpfs_init();
     serial_write("[OK] VFS + ramfs + tmpfs\n");
+
+    if (font_load_cjk_resource_from_file("/fonts/cjk.ofnt") == 0) {
+        serial_write("[OK] Loaded external CJK font resource\n");
+    } else {
+        serial_write("[INFO] External CJK font resource unavailable; using built-in fallback\n");
+    }
 
     /* 初始化设备管理器 */
     devmgr_init();

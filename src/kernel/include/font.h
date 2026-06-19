@@ -14,6 +14,19 @@
 #define FONT_DEFAULT_LINE_GAP    2
 #define FONT_DEFAULT_TAB_SPACES  4
 
+#define FONT_CJK_RESOURCE_MAGIC      0x544E464Fu /* "OFNT", little-endian */
+#define FONT_CJK_RESOURCE_VERSION    1u
+#define FONT_CJK_RESOURCE_FLAG_U16_CODEPOINTS 0x00000001u
+#define FONT_CJK_RESOURCE_FLAG_U32_CODEPOINTS 0x00000002u
+
+typedef struct font_cjk_resource_info {
+    uint32_t loaded;
+    uint32_t glyph_count;
+    uint32_t width;
+    uint32_t height;
+    uint32_t flags;
+} font_cjk_resource_info_t;
+
 typedef enum font_size {
     FONT_SIZE_SMALL = 0,
     FONT_SIZE_MEDIUM = 1,
@@ -58,6 +71,10 @@ uint32_t font_get_ascii_width(const font_renderer_t *renderer);
 uint32_t font_get_ascii_height(const font_renderer_t *renderer);
 uint32_t font_get_unicode_width(void);
 uint32_t font_get_unicode_height(void);
+int font_load_cjk_resource_from_memory(const void *data, uint32_t size);
+int font_load_cjk_resource_from_file(const char *path);
+void font_unload_cjk_resource(void);
+void font_get_cjk_resource_info(font_cjk_resource_info_t *out_info);
 uint8_t font_get_glyph_row(const font_renderer_t *renderer, char ch, int row);
 uint32_t font_get_line_height(const font_renderer_t *renderer);
 int font_decode_utf8(const char **text, uint32_t *codepoint);

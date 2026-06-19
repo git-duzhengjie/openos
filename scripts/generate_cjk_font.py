@@ -1,24 +1,40 @@
 #!/usr/bin/env python3
-"""Generate OpenOS 16x16 CJK bitmap glyph table from a real font.
+"""Generate OpenOS 16x16 CJK bitmap glyph tables/resources from a real font.
 
-This is the build-time path for the full CJK font backend.  It renders the
-codepoints used by the zh-CN locale from a TrueType/OpenType/TTC font into a
-compact C source table consumed by src/kernel/font.c.
+The small generated C source remains the always-available kernel fallback.
+For wider Chinese coverage, this script can also emit an external .ofnt bitmap
+resource that the kernel font renderer can load at runtime from VFS/ramfs/disk.
 
 Dependencies:
-  - Pillow when running under Linux/macOS/Windows Python; or
-  - use a pre-generated src/kernel/generated/cjk_font.c checked into the tree.
+  - Pillow when regenerating glyphs; or
+  - use the pre-generated src/kernel/generated/cjk_font.c checked into the tree.
 """
 from __future__ import annotations
 
 import argparse
 import re
+import struct
 import sys
 from pathlib import Path
 from typing import Iterable, List, Sequence, Tuple
 
 WIDTH = 16
 HEIGHT = 16
+OFNT_MAGIC = 0x544E464F  # "OFNT", little-endian
+OFNT_VERSION = 1
+OFNT_FLAG_U16_CODEPOINTS = 0x00000001
+OFNT_FLAG_U32_CODEPOINTS = 0x00000002
+
+
+def is_cjk_resource_codepoint(cp: int) -> bool:
+    return (
+        (0x3400 <= cp <= 0x4DBF)
+        or (0x4E00 <= cp <= 0x9FFF)
+        or (0xF900 <= cp <= 0xFAFF)
+        or (0x20000 <= cp <= 0x2FA1F)
+        or (0x3000 <= cp <= 0x303F)
+        or (0xFF00 <= cp <= 0xFFEF)
+    )
 
 
 def collect_codepoints(paths: Sequence[Path]) -> List[int]:
@@ -26,17 +42,40 @@ def collect_codepoints(paths: Sequence[Path]) -> List[int]:
     for path in paths:
         if path.exists():
             text += path.read_text(encoding="utf-8")
-    cps = {
-        ord(ch)
-        for ch in text
-        if (0x3400 <= ord(ch) <= 0x4DBF)
-        or (0x4E00 <= ord(ch) <= 0x9FFF)
-        or (0xF900 <= ord(ch) <= 0xFAFF)
-        or (0x20000 <= ord(ch) <= 0x2FA1F)
-        or (0x3000 <= ord(ch) <= 0x303F)
-        or (0xFF00 <= ord(ch) <= 0xFFEF)
-    }
+    cps = {ord(ch) for ch in text if is_cjk_resource_codepoint(ord(ch))}
     return sorted(cps)
+
+
+def gb2312_codepoints() -> List[int]:
+    cps = set()
+    for high in range(0xB0, 0xF8):
+        for low in range(0xA1, 0xFF):
+            try:
+                text = bytes((high, low)).decode("gb2312")
+            except UnicodeDecodeError:
+                continue
+            for ch in text:
+                cp = ord(ch)
+                if is_cjk_resource_codepoint(cp):
+                    cps.add(cp)
+    return sorted(cps)
+
+
+def coverage_codepoints(name: str) -> List[int]:
+    if name == "ui":
+        return []
+    if name == "gb2312":
+        return gb2312_codepoints()
+    if name == "cjk-basic":
+        return list(range(0x4E00, 0xA000))
+    if name == "cjk-all":
+        cps: List[int] = []
+        cps.extend(range(0x3400, 0x4DC0))
+        cps.extend(range(0x4E00, 0xA000))
+        cps.extend(range(0xF900, 0xFB00))
+        cps.extend(range(0x20000, 0x2FA20))
+        return cps
+    raise ValueError(f"unknown coverage: {name}")
 
 
 def parse_codepoint_list(value: str) -> List[int]:
@@ -50,6 +89,8 @@ def parse_codepoint_list(value: str) -> List[int]:
             out.append(int(part, 16))
         elif len(part) == 1:
             out.append(ord(part))
+        elif any(ord(ch) > 0x7F for ch in part):
+            out.extend(ord(ch) for ch in part if is_cjk_resource_codepoint(ord(ch)))
         else:
             out.append(int(part, 16))
     return sorted(set(out))
@@ -64,8 +105,6 @@ def render_with_pillow(font_path: Path, codepoints: Iterable[int]) -> List[Tuple
             "Install python3-pil or use the checked-in generated cjk_font.c."
         ) from exc
 
-    # Size 16 keeps the kernel glyph ABI compact.  Try a few sizes to get the
-    # cleanest bounding box, then center into 16x16.
     font = ImageFont.truetype(str(font_path), 16)
     glyphs: List[Tuple[int, List[int]]] = []
     for cp in codepoints:
@@ -114,24 +153,74 @@ def write_c(out_path: Path, font_path: Path, glyphs: Sequence[Tuple[int, Sequenc
     out_path.write_text("\n".join(lines), encoding="utf-8")
 
 
+def write_ofnt(out_path: Path, glyphs: Sequence[Tuple[int, Sequence[int]]]) -> None:
+    if not glyphs:
+        raise ValueError("cannot write empty CJK resource")
+    max_cp = max(cp for cp, _rows in glyphs)
+    use_u16 = max_cp <= 0xFFFF
+    flags = OFNT_FLAG_U16_CODEPOINTS if use_u16 else OFNT_FLAG_U32_CODEPOINTS
+    header_size = 40
+    codepoint_offset = header_size
+    codepoint_data = bytearray()
+    for cp, _rows in glyphs:
+        codepoint_data += struct.pack("<H" if use_u16 else "<I", cp)
+    bitmap_offset = codepoint_offset + len(codepoint_data)
+    bitmap_data = bytearray()
+    for _cp, rows in glyphs:
+        if len(rows) != HEIGHT:
+            raise ValueError("invalid glyph row count")
+        for row in rows:
+            bitmap_data += struct.pack("<H", row & 0xFFFF)
+    header = struct.pack(
+        "<IIIIIIIIII",
+        OFNT_MAGIC,
+        OFNT_VERSION,
+        flags,
+        len(glyphs),
+        WIDTH,
+        HEIGHT,
+        codepoint_offset,
+        bitmap_offset,
+        HEIGHT * 2,
+        0,
+    )
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_bytes(header + codepoint_data + bitmap_data)
+
+
 def main(argv: Sequence[str]) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--font", type=Path, required=True, help="TTF/OTF/TTC font path")
-    parser.add_argument("--out", type=Path, required=True, help="output C source path")
-    parser.add_argument("--scan", type=Path, action="append", default=[], help="UTF-8 file to scan for glyphs")
+    parser.add_argument("--out", type=Path, required=True, help="output fallback C source path")
+    parser.add_argument("--resource-out", type=Path, help="optional external .ofnt resource path")
+    parser.add_argument(
+        "--coverage",
+        choices=("ui", "gb2312", "cjk-basic", "cjk-all"),
+        default="ui",
+        help="additional glyph coverage for --resource-out; fallback C output stays scan/extra based",
+    )
+    parser.add_argument("--scan", type=Path, action="append", default=[], help="UTF-8 file to scan for UI fallback glyphs")
     parser.add_argument("--chars", default="", help="extra characters / U+xxxx / hex codepoints")
     args = parser.parse_args(argv)
 
-    cps = set(collect_codepoints(args.scan))
+    fallback_cps = set(collect_codepoints(args.scan))
     if args.chars:
-        cps.update(parse_codepoint_list(args.chars))
-    if not cps:
+        fallback_cps.update(parse_codepoint_list(args.chars))
+    if not fallback_cps:
         raise SystemExit("no CJK codepoints found")
     if not args.font.exists():
         raise SystemExit(f"font not found: {args.font}")
-    glyphs = render_with_pillow(args.font, sorted(cps))
-    write_c(args.out, args.font, glyphs)
-    print(f"generated {len(glyphs)} glyphs -> {args.out}")
+
+    fallback_glyphs = render_with_pillow(args.font, sorted(fallback_cps))
+    write_c(args.out, args.font, fallback_glyphs)
+    print(f"generated fallback {len(fallback_glyphs)} glyphs -> {args.out}")
+
+    if args.resource_out:
+        resource_cps = set(fallback_cps)
+        resource_cps.update(coverage_codepoints(args.coverage))
+        resource_glyphs = render_with_pillow(args.font, sorted(resource_cps))
+        write_ofnt(args.resource_out, resource_glyphs)
+        print(f"generated resource {len(resource_glyphs)} glyphs -> {args.resource_out}")
     return 0
 
 

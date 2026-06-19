@@ -3,6 +3,9 @@
  * ============================================================ */
 
 #include "font.h"
+#include "heap.h"
+#include "string.h"
+#include "fs/vfs.h"
 
 #define FONT_ROW8(r0, r1, r2, r3, r4, r5, r6, r7) \
     do { \
@@ -26,6 +29,103 @@
 
 #include "generated/cjk_font.h"
 
+typedef struct font_cjk_resource_header {
+    uint32_t magic;
+    uint32_t version;
+    uint32_t flags;
+    uint32_t glyph_count;
+    uint32_t width;
+    uint32_t height;
+    uint32_t codepoint_offset;
+    uint32_t bitmap_offset;
+    uint32_t bitmap_stride;
+    uint32_t reserved;
+} font_cjk_resource_header_t;
+
+typedef struct font_cjk_resource {
+    void *owned_data;
+    uint32_t size;
+    const font_cjk_resource_header_t *header;
+    const uint8_t *codepoints;
+    const uint8_t *bitmaps;
+} font_cjk_resource_t;
+
+static font_cjk_resource_t g_cjk_resource;
+
+static int font_u32_add_overflows(uint32_t a, uint32_t b) {
+    return a > (0xffffffffu - b);
+}
+
+static uint32_t font_external_codepoint_at(const uint8_t *base, uint32_t index, int use_u16) {
+    if (use_u16) {
+        const uint16_t *items = (const uint16_t *)base;
+        return (uint32_t)items[index];
+    } else {
+        const uint32_t *items = (const uint32_t *)base;
+        return items[index];
+    }
+}
+
+static int font_cjk_resource_validate(const font_cjk_resource_header_t *header, uint32_t size) {
+    uint32_t codepoint_width;
+    uint32_t codepoint_bytes;
+    uint32_t bitmap_bytes;
+    uint32_t codepoint_end;
+    uint32_t bitmap_end;
+
+    if (!header) return 0;
+    if (size < sizeof(font_cjk_resource_header_t)) return 0;
+    if (header->magic != FONT_CJK_RESOURCE_MAGIC) return 0;
+    if (header->version != FONT_CJK_RESOURCE_VERSION) return 0;
+    if (header->glyph_count == 0) return 0;
+    if (header->width != FONT_UNICODE_WIDTH || header->height != FONT_UNICODE_HEIGHT) return 0;
+    if (header->bitmap_stride != FONT_UNICODE_HEIGHT * sizeof(uint16_t)) return 0;
+    if ((header->flags & FONT_CJK_RESOURCE_FLAG_U16_CODEPOINTS) != 0) {
+        if ((header->flags & FONT_CJK_RESOURCE_FLAG_U32_CODEPOINTS) != 0) return 0;
+        codepoint_width = sizeof(uint16_t);
+    } else if ((header->flags & FONT_CJK_RESOURCE_FLAG_U32_CODEPOINTS) != 0) {
+        codepoint_width = sizeof(uint32_t);
+    } else {
+        return 0;
+    }
+    if (header->glyph_count > 0xffffffffu / codepoint_width) return 0;
+    if (header->glyph_count > 0xffffffffu / header->bitmap_stride) return 0;
+    codepoint_bytes = header->glyph_count * codepoint_width;
+    bitmap_bytes = header->glyph_count * header->bitmap_stride;
+    if (header->codepoint_offset < sizeof(font_cjk_resource_header_t)) return 0;
+    if (header->bitmap_offset < sizeof(font_cjk_resource_header_t)) return 0;
+    if (font_u32_add_overflows(header->codepoint_offset, codepoint_bytes)) return 0;
+    if (font_u32_add_overflows(header->bitmap_offset, bitmap_bytes)) return 0;
+    codepoint_end = header->codepoint_offset + codepoint_bytes;
+    bitmap_end = header->bitmap_offset + bitmap_bytes;
+    if (codepoint_end > size || bitmap_end > size) return 0;
+    return 1;
+}
+
+static const uint16_t *font_find_external_cjk_rows(uint32_t codepoint) {
+    uint32_t left;
+    uint32_t right;
+    int use_u16;
+
+    if (!g_cjk_resource.header || !g_cjk_resource.codepoints || !g_cjk_resource.bitmaps) return 0;
+    left = 0;
+    right = g_cjk_resource.header->glyph_count;
+    use_u16 = (g_cjk_resource.header->flags & FONT_CJK_RESOURCE_FLAG_U16_CODEPOINTS) != 0;
+    while (left < right) {
+        uint32_t mid = left + ((right - left) / 2u);
+        uint32_t mid_codepoint = font_external_codepoint_at(g_cjk_resource.codepoints, mid, use_u16);
+        if (mid_codepoint == codepoint) {
+            return (const uint16_t *)(g_cjk_resource.bitmaps + mid * g_cjk_resource.header->bitmap_stride);
+        }
+        if (mid_codepoint < codepoint) {
+            left = mid + 1u;
+        } else {
+            right = mid;
+        }
+    }
+    return 0;
+}
+
 static int font_codepoint_is_cjk(uint32_t codepoint) {
     return (codepoint >= 0x3400u && codepoint <= 0x4DBFu) ||
            (codepoint >= 0x4E00u && codepoint <= 0x9FFFu) ||
@@ -34,8 +134,15 @@ static int font_codepoint_is_cjk(uint32_t codepoint) {
 }
 
 static const uint16_t *font_find_cjk_rows(uint32_t codepoint) {
-    uint32_t left = 0;
-    uint32_t right = g_generated_cjk_glyph_count;
+    const uint16_t *rows;
+    uint32_t left;
+    uint32_t right;
+
+    rows = font_find_external_cjk_rows(codepoint);
+    if (rows) return rows;
+
+    left = 0;
+    right = g_generated_cjk_glyph_count;
     while (left < right) {
         uint32_t mid = left + ((right - left) / 2u);
         uint32_t mid_codepoint = g_generated_cjk_glyphs[mid].codepoint;
@@ -47,6 +154,79 @@ static const uint16_t *font_find_cjk_rows(uint32_t codepoint) {
         }
     }
     return 0;
+}
+
+void font_unload_cjk_resource(void) {
+    if (g_cjk_resource.owned_data) {
+        kfree(g_cjk_resource.owned_data);
+    }
+    memset(&g_cjk_resource, 0, sizeof(g_cjk_resource));
+}
+
+int font_load_cjk_resource_from_memory(const void *data, uint32_t size) {
+    const font_cjk_resource_header_t *header;
+    void *copy;
+    font_cjk_resource_t next;
+
+    header = (const font_cjk_resource_header_t *)data;
+    if (!font_cjk_resource_validate(header, size)) return -1;
+    copy = kmalloc(size);
+    if (!copy) return -2;
+    memcpy(copy, data, size);
+
+    header = (const font_cjk_resource_header_t *)copy;
+    memset(&next, 0, sizeof(next));
+    next.owned_data = copy;
+    next.size = size;
+    next.header = header;
+    next.codepoints = (const uint8_t *)copy + header->codepoint_offset;
+    next.bitmaps = (const uint8_t *)copy + header->bitmap_offset;
+
+    font_unload_cjk_resource();
+    g_cjk_resource = next;
+    return 0;
+}
+
+int font_load_cjk_resource_from_file(const char *path) {
+    inode_t st;
+    int fd;
+    int read_bytes;
+    int rc;
+    void *buffer;
+    uint32_t size;
+
+    if (!path) return -1;
+    if (vfs_stat(path, &st) != 0) return -2;
+    size = st.size;
+    if (size < sizeof(font_cjk_resource_header_t)) return -3;
+    buffer = kmalloc(size);
+    if (!buffer) return -4;
+
+    fd = vfs_open(path, O_RDONLY, 0);
+    if (fd < 0) {
+        kfree(buffer);
+        return -5;
+    }
+    read_bytes = vfs_read(fd, buffer, size);
+    vfs_close(fd);
+    if (read_bytes != (int)size) {
+        kfree(buffer);
+        return -6;
+    }
+    rc = font_load_cjk_resource_from_memory(buffer, size);
+    kfree(buffer);
+    return rc;
+}
+
+void font_get_cjk_resource_info(font_cjk_resource_info_t *out_info) {
+    if (!out_info) return;
+    memset(out_info, 0, sizeof(*out_info));
+    if (!g_cjk_resource.header) return;
+    out_info->loaded = 1;
+    out_info->glyph_count = g_cjk_resource.header->glyph_count;
+    out_info->width = g_cjk_resource.header->width;
+    out_info->height = g_cjk_resource.header->height;
+    out_info->flags = g_cjk_resource.header->flags;
 }
 
 static uint16_t font_missing_cjk_row(uint32_t codepoint, int row) {
