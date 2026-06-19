@@ -358,8 +358,7 @@ int net_send_ipv4(uint32_t dst_ip, uint8_t protocol, const uint8_t *payload, uin
         if (next_hop == default_dev->ip) {
             copy_mac(dst_mac, default_dev->mac);
             arp_insert(next_hop, dst_mac);
-        } else {
-            arp_send_request(next_hop);
+        } else if (arp_resolve(next_hop, dst_mac) < 0) {
             return -1;
         }
     }
