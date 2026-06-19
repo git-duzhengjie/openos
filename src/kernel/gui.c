@@ -571,6 +571,15 @@ static void gui_draw_window_title_text(int x, int y, const char *text, uint32_t 
     g_gui.clip_rect = old_clip;
     g_gui.clip_enabled = old_enabled;
 }
+
+static gui_window_t *g_settings_win = 0;
+static gui_widget_t *g_settings_ip_box = 0;
+static gui_widget_t *g_settings_mask_box = 0;
+static gui_widget_t *g_settings_gateway_box = 0;
+static gui_widget_t *g_settings_dns_box = 0;
+static int g_settings_language_dropdown_open = 0;
+static void gui_settings_build(int show_notice);
+
 static int gui_rect_contains(const gui_rect_t *r, int x, int y) {
     return r && x >= r->x && y >= r->y && x < r->x + r->w && y < r->y + r->h;
 }
@@ -692,6 +701,11 @@ static int gui_widget_is_clickable(gui_widget_t *wg) {
     return wg && wg->visible && wg->enabled && wg->type == GUI_WIDGET_BUTTON;
 }
 
+static int gui_widget_is_hoverable(gui_widget_t *wg) {
+    return wg && wg->visible && wg->enabled &&
+           (wg->type == GUI_WIDGET_BUTTON || wg->type == GUI_WIDGET_SLIDER);
+}
+
 static void gui_button_activate(gui_widget_t *wg) {
     gui_event_t ev;
     if (!gui_widget_is_clickable(wg)) return;
@@ -702,8 +716,38 @@ static void gui_button_activate(gui_widget_t *wg) {
     gui_event_push(ev);
 }
 
+static int gui_slider_value_from_screen_x(gui_widget_t *wg, int screen_x) {
+    int min;
+    int max;
+    int track_x;
+    int track_w;
+    int rel;
+    if (!wg || wg->type != GUI_WIDGET_SLIDER || !wg->owner) return 0;
+    min = wg->min_value;
+    max = wg->max_value;
+    if (max <= min) max = min + 1;
+    track_x = wg->owner->rect.x + GUI_BORDER_SIZE + wg->rect.x + 8;
+    track_w = wg->rect.w - 16;
+    if (track_w <= 0) track_w = 1;
+    rel = screen_x - track_x;
+    if (rel < 0) rel = 0;
+    if (rel > track_w) rel = track_w;
+    return min + (rel * (max - min) + track_w / 2) / track_w;
+}
+
+static void gui_slider_apply_screen_x(gui_widget_t *wg, int screen_x) {
+    int value;
+    if (!wg || wg->type != GUI_WIDGET_SLIDER || !wg->enabled) return;
+    value = gui_slider_value_from_screen_x(wg, screen_x);
+    if (value != wg->value) {
+        wg->value = value;
+        if (wg->on_click) wg->on_click(wg, wg->user_data);
+        gui_invalidate_all();
+    }
+}
+
 static void gui_set_hovered_widget(gui_widget_t *wg) {
-    if (wg && !gui_widget_is_clickable(wg)) wg = 0;
+    if (wg && !gui_widget_is_hoverable(wg)) wg = 0;
     if (g_gui.hovered_widget == wg) return;
     if (g_gui.hovered_widget) g_gui.hovered_widget->hovered = 0;
     g_gui.hovered_widget = wg;
@@ -1238,6 +1282,29 @@ static void gui_draw_widget(gui_widget_t *wg) {
             int cx = ax + 4 + (int)(wg->cursor * GUI_CHAR_W);
             if (cx < ax + wg->rect.w - 3) gui_raw_line(cx, ay + 4, cx, ay + wg->rect.h - 5, gui_rgb(20, 20, 20));
         }
+    } else if (wg->type == GUI_WIDGET_SLIDER) {
+        int min = wg->min_value;
+        int max = wg->max_value;
+        int val = wg->value;
+        int track_x = ax + 8;
+        int track_w = wg->rect.w - 16;
+        int track_y = ay + wg->rect.h / 2;
+        int knob_x;
+        uint32_t track_bg = gui_rgb(170, 178, 192);
+        uint32_t fill = wg->enabled ? g_gui.colors.accent : gui_rgb(120, 124, 132);
+        uint32_t knob = wg->pressed ? gui_rgb(255, 255, 255) : gui_rgb(238, 242, 248);
+        uint32_t border = wg->hovered || wg->pressed ? g_gui.colors.accent : g_gui.colors.button_border;
+        if (max <= min) max = min + 1;
+        if (val < min) val = min;
+        if (val > max) val = max;
+        knob_x = track_x + ((val - min) * track_w + (max - min) / 2) / (max - min);
+        gui_raw_fill_rect(track_x, track_y - 2, track_w, 4, track_bg);
+        gui_raw_fill_rect(track_x, track_y - 2, knob_x - track_x, 4, fill);
+        gui_raw_fill_rect(knob_x - 5, track_y - 8, 11, 16, knob);
+        gui_raw_line(knob_x - 5, track_y - 8, knob_x + 5, track_y - 8, border);
+        gui_raw_line(knob_x - 5, track_y + 8, knob_x + 5, track_y + 8, border);
+        gui_raw_line(knob_x - 5, track_y - 8, knob_x - 5, track_y + 8, border);
+        gui_raw_line(knob_x + 5, track_y - 8, knob_x + 5, track_y + 8, border);
     }
 }
 
@@ -2041,7 +2108,13 @@ static void gui_handle_mouse_down(int x, int y) {
         int sx = x - w->rect.x - GUI_BORDER_SIZE;
         int sy = y - w->rect.y - GUI_TITLE_HEIGHT;
         gui_widget_t *wg = gui_widget_at(w, sx, sy);
-        if (gui_widget_is_clickable(wg)) {
+        if (wg && wg->type == GUI_WIDGET_SLIDER && wg->enabled) {
+            gui_set_focused_widget(0);
+            wg->pressed = 1;
+            g_gui.slider_widget = wg;
+            gui_slider_apply_screen_x(wg, x);
+            gui_invalidate_all();
+        } else if (gui_widget_is_clickable(wg)) {
             gui_set_focused_widget(wg);
             wg->pressed = 1;
             g_gui.pressed_widget = wg;
@@ -2072,6 +2145,13 @@ static void gui_handle_mouse_up(int x, int y) {
         g_gui.drag_window->resizing = 0;
         g_gui.drag_window = 0;
     }
+    if (g_gui.slider_widget) {
+        int rebuild_settings = (g_gui.slider_widget->owner == g_settings_win);
+        g_gui.slider_widget->pressed = 0;
+        g_gui.slider_widget = 0;
+        if (rebuild_settings) gui_settings_build(0);
+        else gui_invalidate_all();
+    }
     if (g_gui.pressed_widget) {
         gui_widget_t *wg = g_gui.pressed_widget;
         int still_inside = 0;
@@ -2088,6 +2168,11 @@ static void gui_handle_mouse_up(int x, int y) {
 
 __attribute__((optimize("no-jump-tables")))
 static void gui_handle_mouse_move(int x, int y) {
+    if (g_gui.slider_widget) {
+        gui_set_hovered_widget(g_gui.slider_widget);
+        gui_slider_apply_screen_x(g_gui.slider_widget, x);
+        return;
+    }
     gui_set_hovered_widget(gui_widget_at_screen(x, y));
     if (g_gui.terminal.selecting) {
         uint32_t tc, trc;
@@ -3439,6 +3524,9 @@ static gui_widget_t *gui_alloc_widget(gui_window_t *window, gui_widget_type_t ty
     wg->visible = 1;
     wg->enabled = 1;
     wg->cursor = (uint32_t)strlen(wg->text);
+    wg->min_value = 0;
+    wg->max_value = 100;
+    wg->value = 0;
     return wg;
 }
 
@@ -3449,6 +3537,22 @@ gui_widget_t *gui_add_label(gui_window_t *window, int x, int y, int w, int h, co
 gui_widget_t *gui_add_button(gui_window_t *window, int x, int y, int w, int h, const char *text, gui_widget_callback_t cb, void *user_data) {
     gui_widget_t *wg = gui_alloc_widget(window, GUI_WIDGET_BUTTON, x, y, w, h, text);
     if (wg) { wg->on_click = cb; wg->user_data = user_data; }
+    return wg;
+}
+
+static gui_widget_t *gui_add_slider(gui_window_t *window, int x, int y, int w, int h, int min, int max, int value, gui_widget_callback_t cb, void *user_data) {
+    gui_widget_t *wg = gui_alloc_widget(window, GUI_WIDGET_SLIDER, x, y, w, h, "");
+    if (wg) {
+        if (max <= min) max = min + 1;
+        if (value < min) value = min;
+        if (value > max) value = max;
+        wg->min_value = min;
+        wg->max_value = max;
+        wg->value = value;
+        wg->on_click = cb;
+        wg->user_data = user_data;
+        wg->bg_color = 0;
+    }
     return wg;
 }
 
@@ -4349,11 +4453,6 @@ static int gui_demo_app_entry(gui_app_t *app, void *user_data) {
 
 static gui_window_t *g_about_win = 0;
 static gui_window_t *g_recycle_win = 0;
-static gui_window_t *g_settings_win = 0;
-static gui_widget_t *g_settings_ip_box = 0;
-static gui_widget_t *g_settings_mask_box = 0;
-static gui_widget_t *g_settings_gateway_box = 0;
-static gui_widget_t *g_settings_dns_box = 0;
 static gui_window_t *g_notif_win = 0;
 
 #define GUI_NOTIF_MAX        16
@@ -4460,11 +4559,17 @@ static void settings_on_close(gui_window_t *win, void *ud) {
     g_settings_win = 0;
 }
 
-static void gui_settings_build(int show_notice);
+static void settings_toggle_language_dropdown(gui_widget_t *w, void *ud) {
+    (void)w;
+    (void)ud;
+    g_settings_language_dropdown_open = !g_settings_language_dropdown_open;
+    gui_settings_build(0);
+}
 
 static void settings_apply_language_en(gui_widget_t *w, void *ud) {
     (void)w;
     (void)ud;
+    g_settings_language_dropdown_open = 0;
     i18n_set_locale(I18N_LOCALE_EN);
     gui_desktop_refresh_i18n_labels();
     gui_settings_build(1);
@@ -4473,30 +4578,19 @@ static void settings_apply_language_en(gui_widget_t *w, void *ud) {
 static void settings_apply_language_zh(gui_widget_t *w, void *ud) {
     (void)w;
     (void)ud;
+    g_settings_language_dropdown_open = 0;
     i18n_set_locale(I18N_LOCALE_ZH);
     gui_desktop_refresh_i18n_labels();
     gui_settings_build(1);
 }
 
-static void settings_apply_font_small(gui_widget_t *w, void *ud) {
-    (void)w;
+static void settings_apply_font_slider(gui_widget_t *w, void *ud) {
     (void)ud;
-    font_set_size(FONT_SIZE_SMALL);
-    gui_settings_build(1);
-}
-
-static void settings_apply_font_medium(gui_widget_t *w, void *ud) {
-    (void)w;
-    (void)ud;
-    font_set_size(FONT_SIZE_MEDIUM);
-    gui_settings_build(1);
-}
-
-static void settings_apply_font_large(gui_widget_t *w, void *ud) {
-    (void)w;
-    (void)ud;
-    font_set_size(FONT_SIZE_LARGE);
-    gui_settings_build(1);
+    if (!w) return;
+    if (w->value <= 0) font_set_size(FONT_SIZE_SMALL);
+    else if (w->value >= 2) font_set_size(FONT_SIZE_LARGE);
+    else font_set_size(FONT_SIZE_MEDIUM);
+    gui_invalidate_all();
 }
 
 static void settings_network_refresh(gui_widget_t *w, void *ud) {
@@ -4629,16 +4723,41 @@ static void gui_settings_build(int show_notice) {
     gui_add_label(g_settings_win, x, y, win_w - margin * 2, line_h + 4, i18n_t(I18N_KEY_SETTINGS_LANGUAGE));
     y += row_h;
     gui_add_label(g_settings_win, x, y + (button_h - line_h) / 2, label_w, line_h + 4, i18n_t(I18N_KEY_SETTINGS_CURRENT_LANGUAGE));
-    gui_add_button(g_settings_win, x + label_w + gap, y, button_w, button_h, i18n_t(I18N_KEY_BTN_ENGLISH), settings_apply_language_en, 0);
-    gui_add_button(g_settings_win, x + label_w + gap * 2 + button_w, y, button_w, button_h, i18n_t(I18N_KEY_BTN_CHINESE), settings_apply_language_zh, 0);
+    {
+        char language_text[64];
+        int dropdown_x = x + label_w + gap;
+        int dropdown_w = button_w * 2 + gap;
+        strncpy(language_text, gui_settings_language_name(), sizeof(language_text) - 4);
+        language_text[sizeof(language_text) - 4] = '\0';
+        {
+            uint32_t n = (uint32_t)strlen(language_text);
+            if (n + 2 < sizeof(language_text)) {
+                language_text[n] = ' ';
+                language_text[n + 1] = 'v';
+                language_text[n + 2] = '\0';
+            }
+        }
+        gui_add_button(g_settings_win, dropdown_x, y, dropdown_w, button_h, language_text, settings_toggle_language_dropdown, 0);
+        if (g_settings_language_dropdown_open) {
+            gui_add_button(g_settings_win, dropdown_x, y + button_h + 2, dropdown_w, button_h, i18n_t(I18N_KEY_SETTINGS_LANGUAGE_ENGLISH), settings_apply_language_en, 0);
+            gui_add_button(g_settings_win, dropdown_x, y + (button_h + 2) * 2, dropdown_w, button_h, i18n_t(I18N_KEY_SETTINGS_LANGUAGE_CHINESE), settings_apply_language_zh, 0);
+        }
+    }
 
     y += row_h + gap;
+    if (g_settings_language_dropdown_open) y += (button_h + 2) * 2;
     gui_add_label(g_settings_win, x, y, win_w - margin * 2, line_h + 4, i18n_t(I18N_KEY_SETTINGS_TEXT_SIZE));
     y += row_h;
     gui_add_label(g_settings_win, x, y + (button_h - line_h) / 2, label_w, line_h + 4, i18n_t(I18N_KEY_SETTINGS_CURRENT_TEXT_SIZE));
-    gui_add_button(g_settings_win, x + label_w + gap, y, button_w, button_h, i18n_t(I18N_KEY_BTN_FONT_SMALL), settings_apply_font_small, 0);
-    gui_add_button(g_settings_win, x + label_w + gap * 2 + button_w, y, button_w, button_h, i18n_t(I18N_KEY_BTN_FONT_MEDIUM), settings_apply_font_medium, 0);
-    gui_add_button(g_settings_win, x + label_w + gap * 3 + button_w * 2, y, button_w, button_h, i18n_t(I18N_KEY_BTN_FONT_LARGE), settings_apply_font_large, 0);
+    {
+        int slider_x = x + label_w + gap;
+        int slider_w = button_w * 3 + gap * 2;
+        int value = (font_get_size() == FONT_SIZE_SMALL) ? 0 : ((font_get_size() == FONT_SIZE_LARGE) ? 2 : 1);
+        gui_add_slider(g_settings_win, slider_x, y, slider_w, button_h, 0, 2, value, settings_apply_font_slider, 0);
+        gui_add_label(g_settings_win, slider_x, y + button_h, button_w, line_h + 4, i18n_t(I18N_KEY_BTN_FONT_SMALL));
+        gui_add_label(g_settings_win, slider_x + button_w + gap, y + button_h, button_w, line_h + 4, i18n_t(I18N_KEY_BTN_FONT_MEDIUM));
+        gui_add_label(g_settings_win, slider_x + (button_w + gap) * 2, y + button_h, button_w, line_h + 4, i18n_t(I18N_KEY_BTN_FONT_LARGE));
+    }
 
     y += row_h + gap;
     pos = 0;

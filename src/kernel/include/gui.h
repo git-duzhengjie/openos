@@ -82,7 +82,8 @@ typedef enum gui_widget_type {
     GUI_WIDGET_LABEL,
     GUI_WIDGET_BUTTON,
     GUI_WIDGET_PANEL,
-    GUI_WIDGET_TEXTBOX
+    GUI_WIDGET_TEXTBOX,
+    GUI_WIDGET_SLIDER
 } gui_widget_type_t;
 
 typedef enum gui_event_type {
@@ -150,6 +151,9 @@ struct gui_widget {
     int hovered;
     int focused;
     uint32_t cursor;
+    int min_value;
+    int max_value;
+    int value;
     gui_icon_id_t icon;
 };
 
@@ -295,6 +299,7 @@ typedef struct gui_system {
     gui_window_t *active_window;
     gui_window_t *drag_window;
     gui_widget_t *pressed_widget;
+    gui_widget_t *slider_widget;
     gui_widget_t *hovered_widget;
     gui_widget_t *focused_widget;
     uint32_t next_window_id;
