@@ -204,14 +204,17 @@ int net_config_save_static(uint32_t ip, uint32_t netmask, uint32_t gateway, uint
 
 int net_config_apply_saved(void) {
     net_persist_config_t cfg;
-    if (net_config_load(&cfg) != 0) return -1;
+    if (net_config_load(&cfg) != 0) {
+        /* First boot or missing config: prefer DHCP so OpenOS works on
+         * QEMU tap/bridge, passt, and most real LAN environments by default. */
+        return dhcp_start();
+    }
     if (cfg.mode == NET_CONFIG_MODE_STATIC) {
         net_config_ipv4(cfg.ip, cfg.netmask, cfg.gateway, cfg.dns);
         return 0;
     }
     if (cfg.mode == NET_CONFIG_MODE_DHCP) {
-        dhcp_start();
-        return 0;
+        return dhcp_start();
     }
-    return -1;
+    return dhcp_start();
 }

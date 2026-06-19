@@ -3,6 +3,7 @@
 #include "vga.h"
 #include "devmgr.h"
 #include "socket.h"
+#include "dhcp.h"
 #include "../include/e1000.h"
 
 #define ETH_TYPE_IPV4 0x0800
@@ -269,6 +270,10 @@ static int eth_send(net_device_t *dev, const uint8_t *dst, uint16_t type,
     eth->type = htons(type);
     memcpy(frame + sizeof(struct eth_header), payload, payload_len);
     frame_len = (uint16_t)(sizeof(struct eth_header) + payload_len);
+    if (frame_len < 60) {
+        memset(frame + frame_len, 0, 60 - frame_len);
+        frame_len = 60;
+    }
 
     if (dev->transmit(dev, frame, frame_len) == 0) {
         dev->tx_packets++;
@@ -887,6 +892,7 @@ int net_tcp_send_syn(uint32_t dst_ip, uint16_t src_port, uint16_t dst_port) {
 
 void net_tick(uint32_t elapsed_ms) {
     int i;
+    dhcp_tick(elapsed_ms);
     tcp_clock_ms += elapsed_ms;
     for (i = 0; i < TCP_CONN_SIZE; i++) {
         struct tcp_connection *c = &tcp_connections[i];

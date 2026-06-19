@@ -31,6 +31,8 @@
 
 #define DHCP_FLAGS_BROADCAST 0x8000U
 #define DHCP_OPTIONS_MAX 312
+#define DHCP_RETRY_INTERVAL_MS 1000U
+#define DHCP_MAX_RETRIES 30U
 
 typedef struct dhcp_packet {
     uint8_t op;
@@ -62,6 +64,8 @@ typedef struct dhcp_client {
     uint32_t lease_time;
     uint32_t packets_rx;
     uint32_t packets_tx;
+    uint32_t retry_elapsed_ms;
+    uint32_t retry_count;
 } dhcp_client_t;
 
 static dhcp_client_t dhcp;
@@ -128,10 +132,11 @@ static int dhcp_send_discover(void) {
     if (net_send_udp_broadcast(DHCP_CLIENT_PORT, DHCP_SERVER_PORT,
                                (const uint8_t *)&pkt, sizeof(pkt)) == 0) {
         dhcp.packets_tx++;
+        dhcp.retry_elapsed_ms = 0;
         dhcp.state = DHCP_STATE_SELECTING;
         return 0;
     }
-    dhcp.state = DHCP_STATE_FAILED;
+    dhcp.retry_elapsed_ms = DHCP_RETRY_INTERVAL_MS;
     return -1;
 }
 
@@ -220,6 +225,8 @@ static void dhcp_handle_packet(uint32_t src_ip, uint16_t src_port,
         dev = net_get_default_device();
         if (dev) {
             net_set_default_ipv4_dhcp(dhcp.offered_ip, dhcp.subnet_mask, dhcp.router, dhcp.dns_server);
+            dhcp.retry_elapsed_ms = 0;
+            dhcp.retry_count = 0;
             dhcp.state = DHCP_STATE_BOUND;
             vga_write("dhcp: bound ");
             dhcp_print_ip(dhcp.offered_ip);
@@ -239,26 +246,47 @@ void dhcp_init(void) {
 
 int dhcp_start(void) {
     net_device_t *dev = net_get_default_device();
-    if (!dev) {
-        dhcp.state = DHCP_STATE_FAILED;
-        return -1;
-    }
-    dhcp.xid ^= ((uint32_t)dev->mac[3] << 16) | ((uint32_t)dev->mac[4] << 8) | dev->mac[5];
     dhcp.offered_ip = 0;
     dhcp.server_ip = 0;
     dhcp.subnet_mask = 0;
     dhcp.router = 0;
     dhcp.dns_server = 0;
     dhcp.lease_time = 0;
+    dhcp.retry_elapsed_ms = DHCP_RETRY_INTERVAL_MS;
+    dhcp.retry_count = 0;
+    dhcp.state = DHCP_STATE_SELECTING;
+    if (!dev) {
+        return -1;
+    }
+    dhcp.xid ^= ((uint32_t)dev->mac[3] << 16) | ((uint32_t)dev->mac[4] << 8) | dev->mac[5];
     dev->ip = 0;
     dev->netmask = 0;
     dev->gateway = 0;
     dev->dns = 0;
+    dev->config_mode = NET_CONFIG_MODE_DHCP;
     return dhcp_send_discover();
 }
 
 int dhcp_renew(void) {
     return dhcp_start();
+}
+
+void dhcp_tick(uint32_t elapsed_ms) {
+    net_device_t *dev;
+    if (dhcp.state == DHCP_STATE_BOUND) return;
+    if (dhcp.state != DHCP_STATE_SELECTING && dhcp.state != DHCP_STATE_REQUESTING && dhcp.state != DHCP_STATE_FAILED) return;
+    dev = net_get_default_device();
+    if (!dev || dev->config_mode != NET_CONFIG_MODE_DHCP || dev->ip != 0) return;
+    if (dhcp.retry_count >= DHCP_MAX_RETRIES) {
+        dhcp.state = DHCP_STATE_FAILED;
+        return;
+    }
+    dhcp.retry_elapsed_ms += elapsed_ms;
+    if (dhcp.retry_elapsed_ms < DHCP_RETRY_INTERVAL_MS) return;
+    dhcp.retry_elapsed_ms = 0;
+    dhcp.retry_count++;
+    dhcp.xid ^= 0x00010001U + dhcp.retry_count;
+    dhcp_send_discover();
 }
 
 int dhcp_release(void) {
