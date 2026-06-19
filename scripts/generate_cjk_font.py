@@ -188,10 +188,26 @@ def write_ofnt(out_path: Path, glyphs: Sequence[Tuple[int, Sequence[int]]]) -> N
     out_path.write_bytes(header + codepoint_data + bitmap_data)
 
 
+def parse_generated_c_glyphs(path: Path) -> List[Tuple[int, List[int]]]:
+    text = path.read_text(encoding="utf-8")
+    pattern = re.compile(r"\{\s*0x([0-9A-Fa-f]+)u?\s*,\s*\{([^}]*)\}\s*\}")
+    glyphs: List[Tuple[int, List[int]]] = []
+    for match in pattern.finditer(text):
+        cp = int(match.group(1), 16)
+        rows = [int(value, 16) for value in re.findall(r"0x([0-9A-Fa-f]+)u?", match.group(2))]
+        if len(rows) != HEIGHT:
+            raise ValueError(f"invalid row count for U+{cp:04X}: {len(rows)}")
+        glyphs.append((cp, rows))
+    if not glyphs:
+        raise ValueError(f"no generated glyphs found in {path}")
+    return sorted(glyphs, key=lambda item: item[0])
+
+
 def main(argv: Sequence[str]) -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--font", type=Path, required=True, help="TTF/OTF/TTC font path")
-    parser.add_argument("--out", type=Path, required=True, help="output fallback C source path")
+    parser.add_argument("--font", type=Path, help="TTF/OTF/TTC font path")
+    parser.add_argument("--out", type=Path, help="output fallback C source path")
+    parser.add_argument("--from-c", type=Path, help="export .ofnt from an existing generated cjk_font.c")
     parser.add_argument("--resource-out", type=Path, help="optional external .ofnt resource path")
     parser.add_argument(
         "--coverage",
@@ -202,6 +218,17 @@ def main(argv: Sequence[str]) -> int:
     parser.add_argument("--scan", type=Path, action="append", default=[], help="UTF-8 file to scan for UI fallback glyphs")
     parser.add_argument("--chars", default="", help="extra characters / U+xxxx / hex codepoints")
     args = parser.parse_args(argv)
+
+    if args.from_c:
+        if not args.resource_out:
+            raise SystemExit("--from-c requires --resource-out")
+        glyphs = parse_generated_c_glyphs(args.from_c)
+        write_ofnt(args.resource_out, glyphs)
+        print(f"exported resource {len(glyphs)} glyphs from {args.from_c} -> {args.resource_out}")
+        return 0
+
+    if not args.font or not args.out:
+        raise SystemExit("--font and --out are required unless --from-c is used")
 
     fallback_cps = set(collect_codepoints(args.scan))
     if args.chars:

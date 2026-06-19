@@ -400,6 +400,9 @@ extern void serial_putc(char c);
 
 /* 链接脚本定义的内核结束地址 */
 extern char __kernel_end[];
+extern char _binary_cjk_ofnt_start;
+extern char _binary_cjk_ofnt_end;
+extern char _binary_cjk_ofnt_size;
 
 /* 简单延�?*/
 static void delay(int count) {
@@ -424,6 +427,29 @@ void test_proc_b(void) {
 
 static int g_shell_thread_started = 0;
 static int g_desktop_thread_started = 0;
+
+static void install_embedded_cjk_font_resource(void) {
+    uint32_t size = (uint32_t)(&_binary_cjk_ofnt_end - &_binary_cjk_ofnt_start);
+    if (size == 0) {
+        serial_write("[INFO] Embedded CJK font resource disabled\n");
+        return;
+    }
+
+    vfs_mkdir("/fonts", 0755);
+    int fd = vfs_open("/fonts/cjk.ofnt", O_CREAT | O_RDWR, 0644);
+    if (fd < 0) {
+        serial_write("[WARN] Failed to create /fonts/cjk.ofnt\n");
+        return;
+    }
+
+    int written = vfs_write(fd, &_binary_cjk_ofnt_start, size);
+    vfs_close(fd);
+    if (written == (int)size) {
+        serial_write("[OK] Installed /fonts/cjk.ofnt\n");
+    } else {
+        serial_write("[WARN] Incomplete /fonts/cjk.ofnt install\n");
+    }
+}
 
 #define KERNEL_UI_THREAD_STACK_PAGES 4u
 #define KERNEL_UI_THREAD_STACK_SIZE  (KERNEL_UI_THREAD_STACK_PAGES * 4096u)
@@ -623,6 +649,8 @@ void kernel_main(void) {
     ramfs_init();
     tmpfs_init();
     serial_write("[OK] VFS + ramfs + tmpfs\n");
+
+    install_embedded_cjk_font_resource();
 
     if (font_load_cjk_resource_from_file("/fonts/cjk.ofnt") == 0) {
         serial_write("[OK] Loaded external CJK font resource\n");

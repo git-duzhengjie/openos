@@ -11,6 +11,8 @@ fi
 BUILD=target
 SRC=src/kernel
 BUILD_ARCH="${ARCH:-i386}"
+OPENOS_CJK_RESOURCE=${OPENOS_CJK_RESOURCE:-1}
+OPENOS_CJK_RESOURCE_PATH=${OPENOS_CJK_RESOURCE_PATH:-$BUILD/cjk.ofnt}
 
 usage() {
     echo "Usage: ARCH=i386|x86_64 ./build.sh [clean|test]"
@@ -196,6 +198,17 @@ echo "===== Building openos Phase 2 (i386) ====="
 
 mkdir -p $BUILD
 rm -f $BUILD/*.elf
+
+if [ "$OPENOS_CJK_RESOURCE" = "1" ]; then
+    echo "[0.5/5] Exporting CJK resource..."
+    PYTHONDONTWRITEBYTECODE=1 python3 scripts/generate_cjk_font.py \
+        --from-c $SRC/generated/cjk_font.c \
+        --resource-out "$OPENOS_CJK_RESOURCE_PATH"
+    (cd $BUILD && objcopy -I binary -O elf32-i386 -B i386 "$(basename "$OPENOS_CJK_RESOURCE_PATH")" cjk_ofnt.o)
+else
+    printf '' > "$OPENOS_CJK_RESOURCE_PATH"
+    (cd $BUILD && objcopy -I binary -O elf32-i386 -B i386 "$(basename "$OPENOS_CJK_RESOURCE_PATH")" cjk_ofnt.o)
+fi
 
 echo "[1/5] Assembling boot.asm..."
 nasm -f bin $SRC/../boot/boot.asm -o $BUILD/boot.bin
@@ -1128,6 +1141,7 @@ ld -m elf_i386 -T $SRC/linker.ld \
     $BUILD/window_manager.o \
     $BUILD/font.o \
     $BUILD/cjk_font.o \
+    $BUILD/cjk_ofnt.o \
     $BUILD/string.o \
     $BUILD/keyboard.o \
     $BUILD/mouse.o \
