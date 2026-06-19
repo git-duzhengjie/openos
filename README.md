@@ -47,19 +47,27 @@ bash scripts/package-release.sh --version nightly
 
 ## 中文字库资源
 
-默认构建会把内置 UI 字库导出为压缩 `.ofntz` 容器，并以 `/fonts/cjk.ofnt` 路径安装到 ramfs；加载失败时会回退到内核内置小字库。
+默认构建会生成并嵌入 GB2312 覆盖的压缩 CJK 字库资源，启动时以 `/fonts/cjk.ofnt` 路径安装到 ramfs 并由 GUI 加载；加载失败时会回退到内核内置小字库。
 
-如需生成真正的大覆盖中文字库，需要安装 Pillow 并提供可用中文 TTF / OTF / TTC 字体。大覆盖资源默认只生成到 `target/cjk-large.ofntz`，不嵌入 BIOS 低端加载的内核镜像，避免再次触发 VGA 保留内存重叠：
+生成大覆盖字库优先使用 Python 生成器：需要安装 Pillow 并提供可用中文 TTF / OTF / TTC 字体；在 Windows + WSL 环境下，如果 WSL 缺少 Pillow，构建脚本会自动尝试调用 `scripts/generate_cjk_font.ps1`，使用 Windows GDI+ 和系统中文字体生成同格式资源。
+
+常用配置：
 
 ```bash
-# GB2312 覆盖，默认生成压缩外置资源 target/cjk-large.ofntz
-OPENOS_CJK_COVERAGE=gb2312 OPENOS_CJK_FONT=/path/to/chinese-font.ttf bash build.sh
+# 默认：GB2312 覆盖，压缩并嵌入 target/cjk.ofnt
+bash build.sh
+
+# 指定字体
+OPENOS_CJK_FONT=/path/to/chinese-font.ttf bash build.sh
 
 # CJK Unified Ideographs 基本区覆盖
 OPENOS_CJK_COVERAGE=cjk-basic OPENOS_CJK_FONT=/path/to/chinese-font.ttf bash build.sh
 
-# 仅在确认镜像体积可接受时，才显式嵌入大字库
-OPENOS_CJK_COVERAGE=gb2312 OPENOS_CJK_EMBED=1 OPENOS_CJK_FONT=/path/to/chinese-font.ttf bash build.sh
+# 只使用内置 UI 子集，适合最小镜像或无字体生成环境
+OPENOS_CJK_COVERAGE=ui bash build.sh
+
+# CI 中要求大字库生成失败时直接失败，不允许静默降级
+OPENOS_CJK_STRICT=1 bash build.sh
 ```
 
 ## 版本管理

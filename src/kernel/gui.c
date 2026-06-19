@@ -3455,6 +3455,18 @@ static void gui_ctxmenu_draw(void) {
     }
 }
 
+/* Handlers for taskbar window right-click menu */
+static void gui_ctxmenu_taskbar_window_action(int id, void *user) {
+    gui_window_t *w = (gui_window_t *)user;
+    if (id != 1 || !w || !w->used) return;
+    if (!(w->flags & GUI_WINDOW_FLAG_CLOSABLE)) return;
+
+    gui_set_focused_widget(0);
+    if (g_gui.drag_window == w) g_gui.drag_window = 0;
+    if (g_gui.pressed_widget && g_gui.pressed_widget->owner == w) g_gui.pressed_widget = 0;
+    gui_destroy_window(w);
+}
+
 /* Handlers for desktop right-click menu */
 static void gui_ctxmenu_desktop_action(int id, void *user) {
     (void)user;
@@ -3469,12 +3481,25 @@ static void gui_ctxmenu_desktop_action(int id, void *user) {
 }
 
 static void gui_handle_mouse_right_down(int x, int y) {
+    gui_window_t *tw;
+
     /* close any existing menu */
     if (g_ctxmenu.open) {
         gui_ctxmenu_close();
         return;
     }
-    /* only desktop-area right-click for now (not on taskbar / window) */
+
+    tw = gui_taskbar_window_at(x, y);
+    if (tw) {
+        gui_set_focused_widget(0);
+        gui_ctxmenu_reset();
+        gui_ctxmenu_add(i18n_t(I18N_KEY_BTN_CLOSE), 1,
+                        (tw->flags & GUI_WINDOW_FLAG_CLOSABLE) ? 1 : 0);
+        gui_ctxmenu_open_at(x, y, gui_ctxmenu_taskbar_window_action, tw);
+        return;
+    }
+
+    /* desktop-area right-click menu (not on taskbar / window) */
     if (gui_window_at(x, y) != 0) return;
     if (y >= (int)g_gui.height - GUI_TASKBAR_HEIGHT) return;
     gui_ctxmenu_reset();
@@ -5451,23 +5476,27 @@ static gui_icon_id_t fp_pick_icon(const dentry_t *e) {
 static const char *fp_type_label(const dentry_t *e) {
     const char *ext;
     if (!e) return "";
-    if (fp_entry_is_dir(e)) return "Folder";
+    if (fp_entry_is_dir(e)) return i18n_t(I18N_KEY_FILE_TYPE_FOLDER);
     ext = fp_ext(e->name);
-    if (!*ext) return "File";
-    if (fp_str_ieq(ext, "c") || fp_str_ieq(ext, "h")) return "C Src";
-    if (fp_str_ieq(ext, "md")) return "Markdown";
-    if (fp_str_ieq(ext, "txt") || fp_str_ieq(ext, "log")) return "Text";
-    if (fp_str_ieq(ext, "sh") || fp_str_ieq(ext, "bash")) return "Shell";
+    if (!*ext) return i18n_t(I18N_KEY_FILE_TYPE_FILE);
+    if (fp_str_ieq(ext, "c") || fp_str_ieq(ext, "h")) return i18n_t(I18N_KEY_FILE_TYPE_C_SOURCE);
+    if (fp_str_ieq(ext, "md")) return i18n_t(I18N_KEY_FILE_TYPE_MARKDOWN);
+    if (fp_str_ieq(ext, "txt") || fp_str_ieq(ext, "log")) return i18n_t(I18N_KEY_FILE_TYPE_TEXT);
+    if (fp_str_ieq(ext, "sh") || fp_str_ieq(ext, "bash")) return i18n_t(I18N_KEY_FILE_TYPE_SHELL);
     if (fp_str_ieq(ext, "json")) return "JSON";
     if (fp_str_ieq(ext, "conf") || fp_str_ieq(ext, "cfg") ||
-        fp_str_ieq(ext, "ini")) return "Config";
+        fp_str_ieq(ext, "ini") || fp_str_ieq(ext, "toml")) return i18n_t(I18N_KEY_FILE_TYPE_CONFIG);
     if (fp_str_ieq(ext, "yaml") || fp_str_ieq(ext, "yml")) return "YAML";
     if (fp_str_ieq(ext, "png") || fp_str_ieq(ext, "jpg") ||
-        fp_str_ieq(ext, "bmp") || fp_str_ieq(ext, "gif")) return "Image";
+        fp_str_ieq(ext, "jpeg") || fp_str_ieq(ext, "bmp") ||
+        fp_str_ieq(ext, "gif") || fp_str_ieq(ext, "ico")) return i18n_t(I18N_KEY_FILE_TYPE_IMAGE);
     if (fp_str_ieq(ext, "zip") || fp_str_ieq(ext, "tar") ||
-        fp_str_ieq(ext, "gz")) return "Archive";
-    if (fp_str_ieq(ext, "elf") || fp_str_ieq(ext, "bin")) return "Exec";
-    return "File";
+        fp_str_ieq(ext, "gz") || fp_str_ieq(ext, "bz2") ||
+        fp_str_ieq(ext, "xz") || fp_str_ieq(ext, "7z")) return i18n_t(I18N_KEY_FILE_TYPE_ARCHIVE);
+    if (fp_str_ieq(ext, "elf") || fp_str_ieq(ext, "exe") ||
+        fp_str_ieq(ext, "bin") || fp_str_ieq(ext, "o") ||
+        fp_str_ieq(ext, "a") || fp_str_ieq(ext, "so")) return i18n_t(I18N_KEY_FILE_TYPE_EXEC);
+    return i18n_t(I18N_KEY_FILE_TYPE_FILE);
 }
 
 /* format file size like "1.2K", "3M" etc */
@@ -5615,41 +5644,88 @@ static int fp_button_width_for(const char *text, int min_w) {
     return w < min_w ? min_w : w;
 }
 
+static int fp_default_window_w(void) {
+    int pad = fp_scale_i(8);
+    int icon_gap = fp_scale_i(24);
+    int col_gap = fp_scale_i(8);
+    int name_w;
+    int mtime_w;
+    int type_w;
+    int size_w;
+    int w;
+    if (pad < 6) pad = 6;
+    if (icon_gap < 24) icon_gap = 24;
+    if (col_gap < 6) col_gap = 6;
+
+    name_w = gui_text_width_px("hello-long-name.txt") + icon_gap + col_gap;
+    mtime_w = gui_text_width_px("2026-06-19 23:59") + col_gap * 2;
+    type_w = gui_text_width_px(i18n_t(I18N_KEY_FILE_TYPE_FOLDER)) + col_gap * 2;
+    size_w = gui_text_width_px("9999K") + col_gap * 2;
+
+    if (name_w < fp_scale_i(160)) name_w = fp_scale_i(160);
+    if (mtime_w < fp_scale_i(156)) mtime_w = fp_scale_i(156);
+    if (type_w < fp_scale_i(76)) type_w = fp_scale_i(76);
+    if (size_w < fp_scale_i(58)) size_w = fp_scale_i(58);
+
+    w = pad * 2 + icon_gap + name_w + mtime_w + type_w + size_w;
+    if (w < 560) w = 560;
+    if (w > 900) w = 900;
+    return w;
+}
+
 static void fp_compute_list_layout(fp_list_layout_t *l) {
     int inner_w;
-    int icon_gap = 24;
+    int pad;
+    int icon_gap;
+    int col_gap;
+    int name_min;
+    int mtime_min;
     int type_min;
     int size_min;
-    int mtime_min;
+    int fixed_w;
     int remaining;
     if (!l) return;
-    l->x = 8;
-    inner_w = fp_window ? fp_window->rect.w - 16 : 544;
-    if (inner_w < 544) inner_w = 544;
+
+    pad = fp_scale_i(8);
+    if (pad < 6) pad = 6;
+    col_gap = fp_scale_i(8);
+    if (col_gap < 6) col_gap = 6;
+    icon_gap = fp_scale_i(24);
+    if (icon_gap < 24) icon_gap = 24;
+
+    l->x = pad;
+    inner_w = fp_window ? fp_window->rect.w - pad * 2 : fp_default_window_w() - pad * 2;
+    if (inner_w < fp_scale_i(320)) inner_w = fp_scale_i(320);
     l->w = inner_w;
 
-    mtime_min = gui_text_width_px("2026-06-18 09:00") + 14;
-    type_min = gui_text_width_px("Folder") + 16;
-    size_min = gui_text_width_px("999K") + 16;
-    if (mtime_min < 170) mtime_min = 170;
-    if (type_min < 82) type_min = 82;
-    if (size_min < 78) size_min = 78;
+    name_min = gui_text_width_px(i18n_t(I18N_KEY_FILE_COL_NAME)) + icon_gap + col_gap;
+    mtime_min = gui_text_width_px("2026-06-19 23:59") + col_gap * 2;
+    type_min = gui_text_width_px(i18n_t(I18N_KEY_FILE_TYPE_FOLDER)) + col_gap * 2;
+    size_min = gui_text_width_px(i18n_t(I18N_KEY_FILE_COL_SIZE)) + col_gap * 2;
+    if (name_min < fp_scale_i(132)) name_min = fp_scale_i(132);
+    if (mtime_min < fp_scale_i(156)) mtime_min = fp_scale_i(156);
+    if (type_min < fp_scale_i(76)) type_min = fp_scale_i(76);
+    if (size_min < fp_scale_i(58)) size_min = fp_scale_i(58);
 
-    remaining = inner_w - icon_gap - mtime_min - type_min - size_min;
-    if (remaining < 220) remaining = 220;
+    fixed_w = icon_gap + mtime_min + type_min + size_min;
+    remaining = inner_w - fixed_w;
+    if (remaining < name_min) {
+        remaining = name_min;
+        l->w = fixed_w + remaining;
+    }
 
-    l->name_x = l->x + 4;
+    l->name_x = l->x + col_gap / 2;
     l->name_w = remaining;
     l->sep_name = l->x + icon_gap + l->name_w;
-    l->mtime_x = l->sep_name + 8;
-    l->mtime_w = mtime_min - 10;
-    l->sep_mtime = l->mtime_x + l->mtime_w + 8;
-    l->type_x = l->sep_mtime + 8;
-    l->type_w = type_min - 10;
-    l->sep_type = l->type_x + l->type_w + 8;
-    l->size_x = l->sep_type + 8;
-    l->size_w = l->x + l->w - l->size_x - 6;
-    if (l->size_w < 40) l->size_w = 40;
+    l->mtime_x = l->sep_name + col_gap;
+    l->mtime_w = mtime_min - col_gap;
+    l->sep_mtime = l->mtime_x + l->mtime_w + col_gap / 2;
+    l->type_x = l->sep_mtime + col_gap;
+    l->type_w = type_min - col_gap;
+    l->sep_type = l->type_x + l->type_w + col_gap / 2;
+    l->size_x = l->sep_type + col_gap;
+    l->size_w = l->x + l->w - l->size_x - col_gap / 2;
+    if (l->size_w < size_min / 2) l->size_w = size_min / 2;
 }
 
 static int fp_total_pages(void) {
@@ -6294,36 +6370,31 @@ static void gui_file_preview_render_list(void) {
 
     /* column header row: clickable sort buttons | separators */
     {
-        char hname[24], hmod[20], htype[12], hsize[12];
-        const char *arrow_up = " \x1e"; /* placeholder; we use ASCII below */
-        const char *arrow_dn = " v";
+        char hname[32], hmod[32], htype[24], hsize[24];
         const char *arrow_no = "  ";
-        int hp;
         const char *suf_n, *suf_m, *suf_t, *suf_s;
         uint32_t hdr_fg = gui_rgb(80, 80, 90);
         uint32_t hdr_bg = gui_rgb(232, 232, 240);
         uint32_t sel_bg = gui_rgb(208, 220, 244);
         uint32_t sep_color = gui_rgb(200, 200, 210);
-        (void)arrow_up;
         /* ascii arrows: ^ down, v up; use ASCII to avoid font issues */
         suf_n = (fp_sort_key == 0) ? (fp_sort_desc ? " v" : " ^") : arrow_no;
         suf_m = (fp_sort_key == 1) ? (fp_sort_desc ? " v" : " ^") : arrow_no;
         suf_t = arrow_no;
         suf_s = (fp_sort_key == 2) ? (fp_sort_desc ? " v" : " ^") : arrow_no;
 
-        hp = 0;
-        hname[hp++] = 'N'; hname[hp++] = 'a'; hname[hp++] = 'm'; hname[hp++] = 'e';
-        hname[hp++] = suf_n[0]; hname[hp++] = suf_n[1]; hname[hp] = 0;
-        hp = 0;
-        hmod[hp++] = 'M'; hmod[hp++] = 'o'; hmod[hp++] = 'd'; hmod[hp++] = 'i';
-        hmod[hp++] = 'f'; hmod[hp++] = 'i'; hmod[hp++] = 'e'; hmod[hp++] = 'd';
-        hmod[hp++] = suf_m[0]; hmod[hp++] = suf_m[1]; hmod[hp] = 0;
-        hp = 0;
-        htype[hp++] = 'T'; htype[hp++] = 'y'; htype[hp++] = 'p'; htype[hp++] = 'e';
-        htype[hp++] = suf_t[0]; htype[hp++] = suf_t[1]; htype[hp] = 0;
-        hp = 0;
-        hsize[hp++] = 'S'; hsize[hp++] = 'i'; hsize[hp++] = 'z'; hsize[hp++] = 'e';
-        hsize[hp++] = suf_s[0]; hsize[hp++] = suf_s[1]; hsize[hp] = 0;
+        hname[0] = 0;
+        hmod[0] = 0;
+        htype[0] = 0;
+        hsize[0] = 0;
+        fp_str_append(hname, 0, (int)sizeof(hname), i18n_t(I18N_KEY_FILE_COL_NAME));
+        fp_str_append(hmod, 0, (int)sizeof(hmod), i18n_t(I18N_KEY_FILE_COL_MODIFIED));
+        fp_str_append(htype, 0, (int)sizeof(htype), i18n_t(I18N_KEY_FILE_COL_TYPE));
+        fp_str_append(hsize, 0, (int)sizeof(hsize), i18n_t(I18N_KEY_FILE_COL_SIZE));
+        fp_str_append(hname, (int)strlen(hname), (int)sizeof(hname), suf_n);
+        fp_str_append(hmod, (int)strlen(hmod), (int)sizeof(hmod), suf_m);
+        fp_str_append(htype, (int)strlen(htype), (int)sizeof(htype), suf_t);
+        fp_str_append(hsize, (int)strlen(hsize), (int)sizeof(hsize), suf_s);
 
         /* column header buttons (x positions matching item-row text columns) */
         btn = gui_add_button(fp_window, layout.x, header_y, layout.sep_name - layout.x, header_h, hname, fp_on_sort, (void *)(intptr_t)0);
@@ -6370,7 +6441,7 @@ static void gui_file_preview_render_list(void) {
             is_parent = 1;
             icon = GUI_ICON_UPDIR;
             display_name = "..";
-            type_str = "Up";
+            type_str = i18n_t(I18N_KEY_TYPE_UP);
             mtimebuf[0] = '-'; mtimebuf[1] = '-'; mtimebuf[2] = 0;
             sizebuf[0] = '-'; sizebuf[1] = '-'; sizebuf[2] = 0;
         } else {
@@ -6818,24 +6889,42 @@ static void gui_file_preview_render_edit(void) {
 /* rebuild and open ---------------------------------------------- */
 static void gui_file_preview_rebuild(void) {
     const char *title;
+    int win_x = 60;
+    int win_y = 60;
+    int win_w = fp_default_window_w();
+    int win_h = 430;
+    int had_window = 0;
+
     switch (fp_mode) {
         case 0:  title = i18n_t(I18N_KEY_WIN_FILES); break;
         case 1:  title = i18n_t(I18N_KEY_WIN_FILE_VIEWER); break;
         case 2:  title = i18n_t(I18N_KEY_WIN_FILE_EDITOR); break;
         default: title = i18n_t(I18N_KEY_WIN_FILES); break;
     }
+
+    if (fp_mode == 1) win_h = fp_view_window_h();
+    else if (fp_mode == 2) win_h = fp_edit_window_h();
+
     if (fp_window) {
+        had_window = 1;
+        win_x = fp_window->rect.x;
+        win_y = fp_window->rect.y;
+        win_w = fp_window->rect.w;
+        win_h = fp_window->rect.h;
+
         /* avoid firing close hook (it would null fp_window prematurely) */
         gui_window_set_on_close(fp_window, 0, 0);
         gui_destroy_window(fp_window);
         fp_window = 0;
     }
-    {
-        int win_h = 430;
-        if (fp_mode == 1) win_h = fp_view_window_h();
-        else if (fp_mode == 2) win_h = fp_edit_window_h();
-        fp_window = gui_create_window(60, 60, 560, win_h, title);
+
+    if (had_window) {
+        int min_w = fp_default_window_w();
+        if (win_w < min_w) win_w = min_w;
+        if (win_h < 260) win_h = 260;
     }
+
+    fp_window = gui_create_window(win_x, win_y, win_w, win_h, title);
     if (!fp_window) return;
     gui_window_set_on_close(fp_window, fp_on_window_close, 0);
     if (fp_mode == 0) {

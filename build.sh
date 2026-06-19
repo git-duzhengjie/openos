@@ -13,15 +13,15 @@ SRC=src/kernel
 BUILD_ARCH="${ARCH:-i386}"
 OPENOS_CJK_RESOURCE=${OPENOS_CJK_RESOURCE:-1}
 OPENOS_CJK_RESOURCE_PATH=${OPENOS_CJK_RESOURCE_PATH:-$BUILD/cjk.ofnt}
-OPENOS_CJK_COVERAGE=${OPENOS_CJK_COVERAGE:-ui}
+# Default to a real Chinese coverage resource instead of the tiny UI subset.
+# If the host lacks Pillow or a Chinese font, the build falls back to the
+# checked-in UI subset unless OPENOS_CJK_STRICT=1 is set.
+OPENOS_CJK_COVERAGE=${OPENOS_CJK_COVERAGE:-gb2312}
 OPENOS_CJK_COMPRESS=${OPENOS_CJK_COMPRESS:-1}
 OPENOS_CJK_FONT=${OPENOS_CJK_FONT:-}
+OPENOS_CJK_STRICT=${OPENOS_CJK_STRICT:-0}
 if [ -z "${OPENOS_CJK_EMBED+x}" ]; then
-    if [ "$OPENOS_CJK_COVERAGE" = "ui" ]; then
-        OPENOS_CJK_EMBED=1
-    else
-        OPENOS_CJK_EMBED=0
-    fi
+    OPENOS_CJK_EMBED=1
 fi
 if [ "$OPENOS_CJK_COVERAGE" != "ui" ] && [ "$OPENOS_CJK_EMBED" != "1" ] && [ "$OPENOS_CJK_RESOURCE_PATH" = "$BUILD/cjk.ofnt" ]; then
     OPENOS_CJK_RESOURCE_PATH=$BUILD/cjk-large.ofntz
@@ -214,12 +214,16 @@ rm -f $BUILD/*.elf
 
 if [ "$OPENOS_CJK_RESOURCE" = "1" ]; then
     echo "[0.5/5] Exporting CJK resource..."
+    CJK_GENERATED=0
+    CJK_REQUESTED_COVERAGE="$OPENOS_CJK_COVERAGE"
+
     if [ "$OPENOS_CJK_COVERAGE" = "ui" ]; then
         CJK_GENERATOR_ARGS=(--from-c $SRC/generated/cjk_font.c --resource-out "$OPENOS_CJK_RESOURCE_PATH")
         if [ "$OPENOS_CJK_COMPRESS" = "1" ]; then
             CJK_GENERATOR_ARGS+=(--compress)
         fi
         PYTHONDONTWRITEBYTECODE=1 python3 scripts/generate_cjk_font.py "${CJK_GENERATOR_ARGS[@]}"
+        CJK_GENERATED=1
     else
         CJK_GENERATOR_ARGS=(--coverage "$OPENOS_CJK_COVERAGE" --resource-out "$OPENOS_CJK_RESOURCE_PATH")
         if [ "$OPENOS_CJK_COMPRESS" = "1" ]; then
@@ -228,7 +232,44 @@ if [ "$OPENOS_CJK_RESOURCE" = "1" ]; then
         if [ -n "$OPENOS_CJK_FONT" ]; then
             CJK_GENERATOR_ARGS+=(--font "$OPENOS_CJK_FONT")
         fi
-        PYTHONDONTWRITEBYTECODE=1 python3 scripts/generate_cjk_font.py "${CJK_GENERATOR_ARGS[@]}"
+        if PYTHONDONTWRITEBYTECODE=1 python3 scripts/generate_cjk_font.py "${CJK_GENERATOR_ARGS[@]}"; then
+            CJK_GENERATED=1
+        else
+            if command -v powershell.exe >/dev/null 2>&1 && command -v wslpath >/dev/null 2>&1; then
+                echo "  Python generator failed; trying Windows GDI+ CJK generator..."
+                PS_RESOURCE_PATH=$(wslpath -w "$OPENOS_CJK_RESOURCE_PATH")
+                PS_SCRIPT_PATH=$(wslpath -w "scripts/generate_cjk_font.ps1")
+                PS_ARGS=(-NoProfile -ExecutionPolicy Bypass -File "$PS_SCRIPT_PATH" -Out "" -ResourceOut "$PS_RESOURCE_PATH" -Coverage "$OPENOS_CJK_COVERAGE")
+                if [ "$OPENOS_CJK_COMPRESS" = "1" ]; then
+                    PS_ARGS+=(-Compress)
+                fi
+                if powershell.exe "${PS_ARGS[@]}"; then
+                    CJK_GENERATED=1
+                fi
+            fi
+            if [ "$CJK_GENERATED" != "1" ]; then
+                if [ "$OPENOS_CJK_STRICT" = "1" ]; then
+                    echo "ERROR: failed to generate OPENOS_CJK_COVERAGE=$CJK_REQUESTED_COVERAGE resource" >&2
+                    echo "       Install Pillow and a Chinese TTF/TTC font, or use Windows PowerShell/GDI+ generator." >&2
+                    exit 1
+                fi
+                echo "WARNING: failed to generate OPENOS_CJK_COVERAGE=$CJK_REQUESTED_COVERAGE; falling back to checked-in UI CJK subset." >&2
+                echo "         For full Chinese coverage install Pillow and a Chinese font, or set OPENOS_CJK_STRICT=1 in CI." >&2
+                OPENOS_CJK_COVERAGE=ui
+                OPENOS_CJK_RESOURCE_PATH=$BUILD/cjk.ofnt
+                CJK_GENERATOR_ARGS=(--from-c $SRC/generated/cjk_font.c --resource-out "$OPENOS_CJK_RESOURCE_PATH")
+                if [ "$OPENOS_CJK_COMPRESS" = "1" ]; then
+                    CJK_GENERATOR_ARGS+=(--compress)
+                fi
+                PYTHONDONTWRITEBYTECODE=1 python3 scripts/generate_cjk_font.py "${CJK_GENERATOR_ARGS[@]}"
+                CJK_GENERATED=1
+            fi
+        fi
+    fi
+
+    if [ "$CJK_GENERATED" != "1" ]; then
+        echo "ERROR: no CJK resource was generated" >&2
+        exit 1
     fi
     if [ "$OPENOS_CJK_EMBED" = "1" ]; then
         if [ "$OPENOS_CJK_RESOURCE_PATH" != "$BUILD/cjk.ofnt" ]; then
