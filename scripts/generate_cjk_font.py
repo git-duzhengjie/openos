@@ -2,16 +2,21 @@
 """Generate OpenOS 16x16 CJK bitmap glyph tables/resources from a real font.
 
 The small generated C source remains the always-available kernel fallback.
-For wider Chinese coverage, this script can also emit an external .ofnt bitmap
-resource that the kernel font renderer can load at runtime from VFS/ramfs/disk.
+For wider Chinese coverage, this script can also emit external bitmap resources
+that the kernel font renderer can load at runtime from VFS/ramfs/disk.
+
+Resource formats:
+  .ofnt  - uncompressed OpenOS bitmap font resource
+  .ofntz - RLE-compressed wrapper containing one .ofnt payload
 
 Dependencies:
-  - Pillow when regenerating glyphs; or
+  - Pillow when regenerating glyphs from TTF/OTF/TTC; or
   - use the pre-generated src/kernel/generated/cjk_font.c checked into the tree.
 """
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import struct
 import sys
@@ -21,9 +26,24 @@ from typing import Iterable, List, Sequence, Tuple
 WIDTH = 16
 HEIGHT = 16
 OFNT_MAGIC = 0x544E464F  # "OFNT", little-endian
+OFNTZ_MAGIC = 0x5A544E4F  # "ONTZ", little-endian compressed resource wrapper
 OFNT_VERSION = 1
+OFNTZ_VERSION = 1
 OFNT_FLAG_U16_CODEPOINTS = 0x00000001
 OFNT_FLAG_U32_CODEPOINTS = 0x00000002
+OFNTZ_FLAG_RLE8 = 0x00000001
+
+FONT_CANDIDATE_HINTS = (
+    "noto", "cjk", "sourcehan", "source-han", "wqy", "wenquanyi", "droid",
+    "uming", "ukai", "arphic", "simhei", "simsun", "msyh", "yahei",
+)
+FONT_SEARCH_DIRS = (
+    "/usr/share/fonts",
+    "/usr/local/share/fonts",
+    str(Path.home() / ".fonts"),
+    "C:/Windows/Fonts",
+    "/mnt/c/Windows/Fonts",
+)
 
 
 def is_cjk_resource_codepoint(cp: int) -> bool:
@@ -48,7 +68,7 @@ def collect_codepoints(paths: Sequence[Path]) -> List[int]:
 
 def gb2312_codepoints() -> List[int]:
     cps = set()
-    for high in range(0xB0, 0xF8):
+    for high in range(0xA1, 0xF8):
         for low in range(0xA1, 0xFF):
             try:
                 text = bytes((high, low)).decode("gb2312")
@@ -96,13 +116,43 @@ def parse_codepoint_list(value: str) -> List[int]:
     return sorted(set(out))
 
 
+def find_cjk_font(explicit: Path | None = None) -> Path | None:
+    if explicit:
+        return explicit if explicit.exists() else None
+    env_font = os.environ.get("OPENOS_CJK_FONT")
+    if env_font:
+        p = Path(env_font)
+        if p.exists():
+            return p
+    candidates: List[Path] = []
+    for root_text in FONT_SEARCH_DIRS:
+        root = Path(root_text)
+        if not root.exists():
+            continue
+        for path in root.rglob("*"):
+            if path.suffix.lower() not in (".ttf", ".ttc", ".otf"):
+                continue
+            low = path.as_posix().lower()
+            score = 0
+            for i, hint in enumerate(FONT_CANDIDATE_HINTS):
+                if hint in low:
+                    score += 100 - i
+            if score:
+                candidates.append(path)
+    if not candidates:
+        return None
+    candidates.sort(key=lambda p: p.as_posix().lower())
+    candidates.sort(key=lambda p: -sum((100 - i) for i, h in enumerate(FONT_CANDIDATE_HINTS) if h in p.as_posix().lower()))
+    return candidates[0]
+
+
 def render_with_pillow(font_path: Path, codepoints: Iterable[int]) -> List[Tuple[int, List[int]]]:
     try:
         from PIL import Image, ImageDraw, ImageFont
     except Exception as exc:  # pragma: no cover - environment dependent
         raise RuntimeError(
             "Pillow is required to regenerate CJK glyphs. "
-            "Install python3-pil or use the checked-in generated cjk_font.c."
+            "Install python3-pil or use --from-c for the checked-in fallback."
         ) from exc
 
     font = ImageFont.truetype(str(font_path), 16)
@@ -153,9 +203,10 @@ def write_c(out_path: Path, font_path: Path, glyphs: Sequence[Tuple[int, Sequenc
     out_path.write_text("\n".join(lines), encoding="utf-8")
 
 
-def write_ofnt(out_path: Path, glyphs: Sequence[Tuple[int, Sequence[int]]]) -> None:
+def build_ofnt_bytes(glyphs: Sequence[Tuple[int, Sequence[int]]]) -> bytes:
     if not glyphs:
         raise ValueError("cannot write empty CJK resource")
+    glyphs = sorted(glyphs, key=lambda item: item[0])
     max_cp = max(cp for cp, _rows in glyphs)
     use_u16 = max_cp <= 0xFFFF
     flags = OFNT_FLAG_U16_CODEPOINTS if use_u16 else OFNT_FLAG_U32_CODEPOINTS
@@ -184,8 +235,64 @@ def write_ofnt(out_path: Path, glyphs: Sequence[Tuple[int, Sequence[int]]]) -> N
         HEIGHT * 2,
         0,
     )
+    return bytes(header + codepoint_data + bitmap_data)
+
+
+def write_ofnt(out_path: Path, glyphs: Sequence[Tuple[int, Sequence[int]]]) -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_bytes(header + codepoint_data + bitmap_data)
+    out_path.write_bytes(build_ofnt_bytes(glyphs))
+
+
+def rle8_compress(data: bytes) -> bytes:
+    out = bytearray()
+    i = 0
+    while i < len(data):
+        run = 1
+        while i + run < len(data) and run < 128 and data[i + run] == data[i]:
+            run += 1
+        if run >= 3:
+            out.append(0x80 | (run - 1))
+            out.append(data[i])
+            i += run
+            continue
+        start = i
+        i += run
+        while i < len(data):
+            run = 1
+            while i + run < len(data) and run < 128 and data[i + run] == data[i]:
+                run += 1
+            if run >= 3 or i - start >= 128:
+                break
+            i += run
+        literal_len = i - start
+        out.append(literal_len - 1)
+        out.extend(data[start:i])
+    return bytes(out)
+
+
+def write_ofntz(out_path: Path, glyphs: Sequence[Tuple[int, Sequence[int]]]) -> None:
+    raw = build_ofnt_bytes(glyphs)
+    compressed = rle8_compress(raw)
+    header = struct.pack(
+        "<IIIIIIII",
+        OFNTZ_MAGIC,
+        OFNTZ_VERSION,
+        OFNTZ_FLAG_RLE8,
+        len(raw),
+        len(compressed),
+        OFNT_MAGIC,
+        32,
+        0,
+    )
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_bytes(header + compressed)
+
+
+def write_resource(out_path: Path, glyphs: Sequence[Tuple[int, Sequence[int]]], compress: bool = False) -> None:
+    if compress or out_path.suffix.lower() == ".ofntz":
+        write_ofntz(out_path, glyphs)
+    else:
+        write_ofnt(out_path, glyphs)
 
 
 def parse_generated_c_glyphs(path: Path) -> List[Tuple[int, List[int]]]:
@@ -205,10 +312,11 @@ def parse_generated_c_glyphs(path: Path) -> List[Tuple[int, List[int]]]:
 
 def main(argv: Sequence[str]) -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--font", type=Path, help="TTF/OTF/TTC font path")
+    parser.add_argument("--font", type=Path, help="TTF/OTF/TTC font path; defaults to OPENOS_CJK_FONT or auto-discovery")
     parser.add_argument("--out", type=Path, help="output fallback C source path")
-    parser.add_argument("--from-c", type=Path, help="export .ofnt from an existing generated cjk_font.c")
-    parser.add_argument("--resource-out", type=Path, help="optional external .ofnt resource path")
+    parser.add_argument("--from-c", type=Path, help="export resource from an existing generated cjk_font.c")
+    parser.add_argument("--resource-out", type=Path, help="optional external .ofnt/.ofntz resource path")
+    parser.add_argument("--compress", action="store_true", help="write compressed .ofntz resource")
     parser.add_argument(
         "--coverage",
         choices=("ui", "gb2312", "cjk-basic", "cjk-all"),
@@ -223,31 +331,39 @@ def main(argv: Sequence[str]) -> int:
         if not args.resource_out:
             raise SystemExit("--from-c requires --resource-out")
         glyphs = parse_generated_c_glyphs(args.from_c)
-        write_ofnt(args.resource_out, glyphs)
+        write_resource(args.resource_out, glyphs, args.compress)
         print(f"exported resource {len(glyphs)} glyphs from {args.from_c} -> {args.resource_out}")
         return 0
 
-    if not args.font or not args.out:
-        raise SystemExit("--font and --out are required unless --from-c is used")
+    font_path = find_cjk_font(args.font)
+    if not font_path:
+        raise SystemExit(
+            "no CJK font found; pass --font or set OPENOS_CJK_FONT to a TTF/OTF/TTC Chinese font"
+        )
 
     fallback_cps = set(collect_codepoints(args.scan))
     if args.chars:
         fallback_cps.update(parse_codepoint_list(args.chars))
-    if not fallback_cps:
-        raise SystemExit("no CJK codepoints found")
-    if not args.font.exists():
-        raise SystemExit(f"font not found: {args.font}")
 
-    fallback_glyphs = render_with_pillow(args.font, sorted(fallback_cps))
-    write_c(args.out, args.font, fallback_glyphs)
-    print(f"generated fallback {len(fallback_glyphs)} glyphs -> {args.out}")
+    if args.out:
+        if not fallback_cps:
+            raise SystemExit("no CJK codepoints found for fallback C output")
+        fallback_glyphs = render_with_pillow(font_path, sorted(fallback_cps))
+        write_c(args.out, font_path, fallback_glyphs)
+        print(f"generated fallback {len(fallback_glyphs)} glyphs -> {args.out}")
 
     if args.resource_out:
         resource_cps = set(fallback_cps)
         resource_cps.update(coverage_codepoints(args.coverage))
-        resource_glyphs = render_with_pillow(args.font, sorted(resource_cps))
-        write_ofnt(args.resource_out, resource_glyphs)
-        print(f"generated resource {len(resource_glyphs)} glyphs -> {args.resource_out}")
+        if not resource_cps:
+            raise SystemExit("no CJK codepoints found for resource output")
+        resource_glyphs = render_with_pillow(font_path, sorted(resource_cps))
+        write_resource(args.resource_out, resource_glyphs, args.compress)
+        mode = "compressed " if args.compress or args.resource_out.suffix.lower() == ".ofntz" else ""
+        print(f"generated {mode}resource {len(resource_glyphs)} glyphs using {font_path} -> {args.resource_out}")
+
+    if not args.out and not args.resource_out:
+        raise SystemExit("nothing to do: pass --out and/or --resource-out")
     return 0
 
 

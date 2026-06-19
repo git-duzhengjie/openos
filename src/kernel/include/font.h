@@ -15,9 +15,12 @@
 #define FONT_DEFAULT_TAB_SPACES  4
 
 #define FONT_CJK_RESOURCE_MAGIC      0x544E464Fu /* "OFNT", little-endian */
+#define FONT_CJK_RESOURCE_Z_MAGIC    0x5A544E4Fu /* "ONTZ", little-endian compressed wrapper */
 #define FONT_CJK_RESOURCE_VERSION    1u
+#define FONT_CJK_RESOURCE_Z_VERSION  1u
 #define FONT_CJK_RESOURCE_FLAG_U16_CODEPOINTS 0x00000001u
 #define FONT_CJK_RESOURCE_FLAG_U32_CODEPOINTS 0x00000002u
+#define FONT_CJK_RESOURCE_Z_FLAG_RLE8 0x00000001u
 
 typedef struct font_cjk_resource_info {
     uint32_t loaded;

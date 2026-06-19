@@ -42,6 +42,17 @@ typedef struct font_cjk_resource_header {
     uint32_t reserved;
 } font_cjk_resource_header_t;
 
+typedef struct font_cjk_resource_z_header {
+    uint32_t magic;
+    uint32_t version;
+    uint32_t flags;
+    uint32_t uncompressed_size;
+    uint32_t compressed_size;
+    uint32_t payload_magic;
+    uint32_t payload_offset;
+    uint32_t reserved;
+} font_cjk_resource_z_header_t;
+
 typedef struct font_cjk_resource {
     void *owned_data;
     uint32_t size;
@@ -64,6 +75,46 @@ static uint32_t font_external_codepoint_at(const uint8_t *base, uint32_t index, 
         const uint32_t *items = (const uint32_t *)base;
         return items[index];
     }
+}
+
+static int font_cjk_resource_z_validate(const font_cjk_resource_z_header_t *header, uint32_t size) {
+    if (!header) return 0;
+    if (size < sizeof(font_cjk_resource_z_header_t)) return 0;
+    if (header->magic != FONT_CJK_RESOURCE_Z_MAGIC) return 0;
+    if (header->version != FONT_CJK_RESOURCE_Z_VERSION) return 0;
+    if (header->flags != FONT_CJK_RESOURCE_Z_FLAG_RLE8) return 0;
+    if (header->payload_magic != FONT_CJK_RESOURCE_MAGIC) return 0;
+    if (header->payload_offset < sizeof(font_cjk_resource_z_header_t)) return 0;
+    if (header->uncompressed_size < sizeof(font_cjk_resource_header_t)) return 0;
+    if (header->compressed_size == 0) return 0;
+    if (font_u32_add_overflows(header->payload_offset, header->compressed_size)) return 0;
+    if (header->payload_offset + header->compressed_size > size) return 0;
+    return 1;
+}
+
+static int font_cjk_resource_rle8_decompress(const uint8_t *src, uint32_t src_size,
+                                             uint8_t *dst, uint32_t dst_size) {
+    uint32_t si = 0;
+    uint32_t di = 0;
+    while (si < src_size) {
+        uint8_t tag = src[si++];
+        uint32_t count = (uint32_t)(tag & 0x7fu) + 1u;
+        if ((tag & 0x80u) != 0) {
+            uint8_t value;
+            if (si >= src_size) return 0;
+            value = src[si++];
+            if (count > dst_size - di) return 0;
+            memset(dst + di, value, count);
+            di += count;
+        } else {
+            if (count > src_size - si) return 0;
+            if (count > dst_size - di) return 0;
+            memcpy(dst + di, src + si, count);
+            si += count;
+            di += count;
+        }
+    }
+    return di == dst_size;
 }
 
 static int font_cjk_resource_validate(const font_cjk_resource_header_t *header, uint32_t size) {
@@ -163,7 +214,7 @@ void font_unload_cjk_resource(void) {
     memset(&g_cjk_resource, 0, sizeof(g_cjk_resource));
 }
 
-int font_load_cjk_resource_from_memory(const void *data, uint32_t size) {
+static int font_load_cjk_resource_uncompressed_from_memory(const void *data, uint32_t size) {
     const font_cjk_resource_header_t *header;
     void *copy;
     font_cjk_resource_t next;
@@ -185,6 +236,33 @@ int font_load_cjk_resource_from_memory(const void *data, uint32_t size) {
     font_unload_cjk_resource();
     g_cjk_resource = next;
     return 0;
+}
+
+int font_load_cjk_resource_from_memory(const void *data, uint32_t size) {
+    const font_cjk_resource_header_t *header;
+    const font_cjk_resource_z_header_t *zheader;
+    uint8_t *uncompressed;
+    int rc;
+
+    if (!data || size < sizeof(font_cjk_resource_header_t)) return -1;
+    header = (const font_cjk_resource_header_t *)data;
+    if (header->magic == FONT_CJK_RESOURCE_MAGIC) {
+        return font_load_cjk_resource_uncompressed_from_memory(data, size);
+    }
+    zheader = (const font_cjk_resource_z_header_t *)data;
+    if (!font_cjk_resource_z_validate(zheader, size)) return -3;
+    uncompressed = (uint8_t *)kmalloc(zheader->uncompressed_size);
+    if (!uncompressed) return -4;
+    if (!font_cjk_resource_rle8_decompress((const uint8_t *)data + zheader->payload_offset,
+                                           zheader->compressed_size,
+                                           uncompressed,
+                                           zheader->uncompressed_size)) {
+        kfree(uncompressed);
+        return -5;
+    }
+    rc = font_load_cjk_resource_uncompressed_from_memory(uncompressed, zheader->uncompressed_size);
+    kfree(uncompressed);
+    return rc;
 }
 
 int font_load_cjk_resource_from_file(const char *path) {

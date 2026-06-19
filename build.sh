@@ -13,6 +13,19 @@ SRC=src/kernel
 BUILD_ARCH="${ARCH:-i386}"
 OPENOS_CJK_RESOURCE=${OPENOS_CJK_RESOURCE:-1}
 OPENOS_CJK_RESOURCE_PATH=${OPENOS_CJK_RESOURCE_PATH:-$BUILD/cjk.ofnt}
+OPENOS_CJK_COVERAGE=${OPENOS_CJK_COVERAGE:-ui}
+OPENOS_CJK_COMPRESS=${OPENOS_CJK_COMPRESS:-1}
+OPENOS_CJK_FONT=${OPENOS_CJK_FONT:-}
+if [ -z "${OPENOS_CJK_EMBED+x}" ]; then
+    if [ "$OPENOS_CJK_COVERAGE" = "ui" ]; then
+        OPENOS_CJK_EMBED=1
+    else
+        OPENOS_CJK_EMBED=0
+    fi
+fi
+if [ "$OPENOS_CJK_COVERAGE" != "ui" ] && [ "$OPENOS_CJK_EMBED" != "1" ] && [ "$OPENOS_CJK_RESOURCE_PATH" = "$BUILD/cjk.ofnt" ]; then
+    OPENOS_CJK_RESOURCE_PATH=$BUILD/cjk-large.ofntz
+fi
 
 usage() {
     echo "Usage: ARCH=i386|x86_64 ./build.sh [clean|test]"
@@ -201,13 +214,34 @@ rm -f $BUILD/*.elf
 
 if [ "$OPENOS_CJK_RESOURCE" = "1" ]; then
     echo "[0.5/5] Exporting CJK resource..."
-    PYTHONDONTWRITEBYTECODE=1 python3 scripts/generate_cjk_font.py \
-        --from-c $SRC/generated/cjk_font.c \
-        --resource-out "$OPENOS_CJK_RESOURCE_PATH"
-    (cd $BUILD && objcopy -I binary -O elf32-i386 -B i386 "$(basename "$OPENOS_CJK_RESOURCE_PATH")" cjk_ofnt.o)
+    if [ "$OPENOS_CJK_COVERAGE" = "ui" ]; then
+        CJK_GENERATOR_ARGS=(--from-c $SRC/generated/cjk_font.c --resource-out "$OPENOS_CJK_RESOURCE_PATH")
+        if [ "$OPENOS_CJK_COMPRESS" = "1" ]; then
+            CJK_GENERATOR_ARGS+=(--compress)
+        fi
+        PYTHONDONTWRITEBYTECODE=1 python3 scripts/generate_cjk_font.py "${CJK_GENERATOR_ARGS[@]}"
+    else
+        CJK_GENERATOR_ARGS=(--coverage "$OPENOS_CJK_COVERAGE" --resource-out "$OPENOS_CJK_RESOURCE_PATH")
+        if [ "$OPENOS_CJK_COMPRESS" = "1" ]; then
+            CJK_GENERATOR_ARGS+=(--compress)
+        fi
+        if [ -n "$OPENOS_CJK_FONT" ]; then
+            CJK_GENERATOR_ARGS+=(--font "$OPENOS_CJK_FONT")
+        fi
+        PYTHONDONTWRITEBYTECODE=1 python3 scripts/generate_cjk_font.py "${CJK_GENERATOR_ARGS[@]}"
+    fi
+    if [ "$OPENOS_CJK_EMBED" = "1" ]; then
+        if [ "$OPENOS_CJK_RESOURCE_PATH" != "$BUILD/cjk.ofnt" ]; then
+            cp "$OPENOS_CJK_RESOURCE_PATH" "$BUILD/cjk.ofnt"
+        fi
+    else
+        echo "  CJK resource kept external at $OPENOS_CJK_RESOURCE_PATH (OPENOS_CJK_EMBED=0)"
+        printf '' > "$BUILD/cjk.ofnt"
+    fi
+    (cd $BUILD && objcopy -I binary -O elf32-i386 -B i386 cjk.ofnt cjk_ofnt.o)
 else
-    printf '' > "$OPENOS_CJK_RESOURCE_PATH"
-    (cd $BUILD && objcopy -I binary -O elf32-i386 -B i386 "$(basename "$OPENOS_CJK_RESOURCE_PATH")" cjk_ofnt.o)
+    printf '' > "$BUILD/cjk.ofnt"
+    (cd $BUILD && objcopy -I binary -O elf32-i386 -B i386 cjk.ofnt cjk_ofnt.o)
 fi
 
 echo "[1/5] Assembling boot.asm..."

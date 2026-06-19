@@ -45,6 +45,23 @@ bash scripts/package-release.sh --version nightly
 
 发布包输出到 `target/release/`，包含 `openos.img`、`kernel.elf`、`kernel.bin`、文档、调试脚本和 SHA256 校验文件。详见 `docs/release.md`。
 
+## 中文字库资源
+
+默认构建会把内置 UI 字库导出为压缩 `.ofntz` 容器，并以 `/fonts/cjk.ofnt` 路径安装到 ramfs；加载失败时会回退到内核内置小字库。
+
+如需生成真正的大覆盖中文字库，需要安装 Pillow 并提供可用中文 TTF / OTF / TTC 字体。大覆盖资源默认只生成到 `target/cjk-large.ofntz`，不嵌入 BIOS 低端加载的内核镜像，避免再次触发 VGA 保留内存重叠：
+
+```bash
+# GB2312 覆盖，默认生成压缩外置资源 target/cjk-large.ofntz
+OPENOS_CJK_COVERAGE=gb2312 OPENOS_CJK_FONT=/path/to/chinese-font.ttf bash build.sh
+
+# CJK Unified Ideographs 基本区覆盖
+OPENOS_CJK_COVERAGE=cjk-basic OPENOS_CJK_FONT=/path/to/chinese-font.ttf bash build.sh
+
+# 仅在确认镜像体积可接受时，才显式嵌入大字库
+OPENOS_CJK_COVERAGE=gb2312 OPENOS_CJK_EMBED=1 OPENOS_CJK_FONT=/path/to/chinese-font.ttf bash build.sh
+```
+
 ## 版本管理
 
 基础版本记录在根目录 `VERSION`，完整版本可通过以下命令查询：
