@@ -4896,7 +4896,7 @@ static void gui_settings_build(int show_notice) {
         gui_add_label(g_settings_win, slider_x + (button_w + gap) * 2, y + button_h, button_w, line_h + 4, i18n_t(I18N_KEY_BTN_FONT_LARGE));
     }
 
-    y += row_h + gap;
+    y += button_h + line_h + 4 + gap;
     gui_add_label(g_settings_win, x, y, win_w - margin * 2, line_h + 4, i18n_t(I18N_KEY_SETTINGS_NETWORK));
     y += row_h;
     gui_add_button(g_settings_win, x, y, button_w * 2 + gap, button_h, i18n_t(I18N_KEY_SETTINGS_NETWORK_DEVICE), settings_open_network, 0);
