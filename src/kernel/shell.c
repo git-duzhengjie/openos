@@ -1609,7 +1609,7 @@ static int shell_wait_foreground_pids(int *pids, int count)
             if (pids[i] < 0)
                 continue;
             int ret = sys_waitpid(pids[i], NULL, SHELL_WAITPID_WNOHANG);
-            if (ret == pids[i]) {
+            if (ret == pids[i] || ret < 0) {
                 pids[i] = -1;
                 remaining--;
             }

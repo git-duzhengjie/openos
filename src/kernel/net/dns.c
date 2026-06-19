@@ -186,6 +186,9 @@ static void dns_handle_udp(uint32_t src_ip, uint16_t src_port, uint16_t dst_port
         dns_print_ip(dns.last_result);
         vga_write("\n");
     } else {
+        vga_write("dns: response parse failed from ");
+        dns_print_ip(src_ip);
+        vga_write("\n");
         dns.state = DNS_STATE_FAILED;
     }
 }
@@ -203,7 +206,12 @@ void dns_set_server(uint32_t server_ip) {
 }
 
 uint32_t dns_get_server(void) {
-    uint32_t dhcp_dns = dhcp_get_dns_server();
+    net_device_t *dev = net_get_default_device();
+    uint32_t dhcp_dns;
+
+    if (dev && dev->dns != 0) return dev->dns;
+
+    dhcp_dns = dhcp_get_dns_server();
     if (dhcp_dns != 0) return dhcp_dns;
     return dns.server_ip;
 }
@@ -254,6 +262,9 @@ int dns_query_a(const char *name) {
     server = dns_get_server();
     dns.server_ip = server;
     if (server == 0 || net_send_udp(server, DNS_CLIENT_PORT, DNS_PORT, packet, pos) < 0) {
+        vga_write("dns: send query failed server=");
+        dns_print_ip(server);
+        vga_write("\n");
         dns.state = DNS_STATE_FAILED;
         return -1;
     }

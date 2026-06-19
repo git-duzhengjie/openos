@@ -85,8 +85,8 @@ int main(int argc, char **argv)
 
     {
         int i;
-        for (i = 0; i < 20; i++) {
-            openos_sleep(1);
+        for (i = 0; i < 30; i++) {
+            openos_sleep(100);
             if (netinfo(&after) < 0)
                 return 1;
             if (after.icmp_echo_replies > before.icmp_echo_replies) {

@@ -1324,7 +1324,11 @@ static int sys_dnslookup(uint32_t user_name, uint32_t user_ip)
         if ((i & 0x3ff) == 0) asm volatile ("pause");
     }
 
-    if (!ip) return -1;
+    if (!ip) {
+        vga_write("dns: lookup timed out or failed\n");
+        dns_print_info();
+        return -1;
+    }
     if (copy_to_user((void *)(uintptr_t)user_ip, &ip, sizeof(ip)) < 0) return -1;
     return 0;
 }
@@ -1928,6 +1932,7 @@ uint32_t syscall_dispatch(uint32_t num,
             openos_netinfo_t info;
             if (!a || !user_ptr_valid((void *)a, sizeof(info), USERMEM_WRITE))
                 return (uint32_t)-1;
+            net_poll();
             if (net_get_diag_stats(&stats) < 0)
                 return (uint32_t)-1;
             memset(&info, 0, sizeof(info));
