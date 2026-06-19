@@ -4715,15 +4715,6 @@ static const char *gui_settings_language_name(void) {
                                              : i18n_t(I18N_KEY_SETTINGS_LANGUAGE_ENGLISH);
 }
 
-static const char *gui_settings_font_size_name(void) {
-    switch (font_get_size()) {
-        case FONT_SIZE_SMALL: return i18n_t(I18N_KEY_SETTINGS_TEXT_SIZE_SMALL);
-        case FONT_SIZE_LARGE: return i18n_t(I18N_KEY_SETTINGS_TEXT_SIZE_LARGE);
-        case FONT_SIZE_MEDIUM:
-        default: return i18n_t(I18N_KEY_SETTINGS_TEXT_SIZE_MEDIUM);
-    }
-}
-
 static void settings_on_close(gui_window_t *win, void *ud) {
     (void)win;
     (void)ud;
@@ -4848,14 +4839,11 @@ static void gui_settings_build(int show_notice) {
     int row_h = line_h + (int)font_scale_value(14);
     int button_h = line_h + (int)font_scale_value(12);
     int button_w = (int)font_scale_value(82);
-    int label_w = (int)font_scale_value(130);
     int gap = (int)font_scale_value(8);
     int win_w = (int)font_scale_value(640);
     int win_h = margin * 2 + row_h * 18 + 56;
     int x;
     int y;
-    int pos;
-    char status[192];
 
     if (win_w < 640) win_w = 640;
     if (win_h < 560) win_h = 560;
@@ -4873,10 +4861,9 @@ static void gui_settings_build(int show_notice) {
     y = 36;
     gui_add_label(g_settings_win, x, y, win_w - margin * 2, line_h + 4, i18n_t(I18N_KEY_SETTINGS_LANGUAGE));
     y += row_h;
-    gui_add_label(g_settings_win, x, y + (button_h - line_h) / 2, label_w, line_h + 4, i18n_t(I18N_KEY_SETTINGS_CURRENT_LANGUAGE));
     {
         char language_text[64];
-        int dropdown_x = x + label_w + gap;
+        int dropdown_x = x;
         int dropdown_w = button_w * 2 + gap;
         strncpy(language_text, gui_settings_language_name(), sizeof(language_text) - 4);
         language_text[sizeof(language_text) - 4] = '\0';
@@ -4899,9 +4886,8 @@ static void gui_settings_build(int show_notice) {
     if (g_settings_language_dropdown_open) y += (button_h + 2) * 2;
     gui_add_label(g_settings_win, x, y, win_w - margin * 2, line_h + 4, i18n_t(I18N_KEY_SETTINGS_TEXT_SIZE));
     y += row_h;
-    gui_add_label(g_settings_win, x, y + (button_h - line_h) / 2, label_w, line_h + 4, i18n_t(I18N_KEY_SETTINGS_CURRENT_TEXT_SIZE));
     {
-        int slider_x = x + label_w + gap;
+        int slider_x = x;
         int slider_w = button_w * 3 + gap * 2;
         int value = (font_get_size() == FONT_SIZE_SMALL) ? 0 : ((font_get_size() == FONT_SIZE_LARGE) ? 2 : 1);
         gui_add_slider(g_settings_win, slider_x, y, slider_w, button_h, 0, 2, value, settings_apply_font_slider, 0);
@@ -4909,18 +4895,6 @@ static void gui_settings_build(int show_notice) {
         gui_add_label(g_settings_win, slider_x + button_w + gap, y + button_h, button_w, line_h + 4, i18n_t(I18N_KEY_BTN_FONT_MEDIUM));
         gui_add_label(g_settings_win, slider_x + (button_w + gap) * 2, y + button_h, button_w, line_h + 4, i18n_t(I18N_KEY_BTN_FONT_LARGE));
     }
-
-    y += row_h + gap;
-    pos = 0;
-    pos = fp_str_append(status, pos, sizeof(status), i18n_t(I18N_KEY_SETTINGS_CURRENT_LANGUAGE));
-    pos = fp_str_append(status, pos, sizeof(status), ": ");
-    pos = fp_str_append(status, pos, sizeof(status), gui_settings_language_name());
-    pos = fp_str_append(status, pos, sizeof(status), "  |  ");
-    pos = fp_str_append(status, pos, sizeof(status), i18n_t(I18N_KEY_SETTINGS_CURRENT_TEXT_SIZE));
-    pos = fp_str_append(status, pos, sizeof(status), ": ");
-    pos = fp_str_append(status, pos, sizeof(status), gui_settings_font_size_name());
-    (void)pos;
-    gui_add_label(g_settings_win, x, y, win_w - margin * 2, line_h + 6, status);
 
     y += row_h + gap;
     gui_add_label(g_settings_win, x, y, win_w - margin * 2, line_h + 4, i18n_t(I18N_KEY_SETTINGS_NETWORK));
