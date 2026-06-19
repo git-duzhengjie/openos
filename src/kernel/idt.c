@@ -471,11 +471,10 @@ static int irq_handler_pointer_is_safe(isr_t handler) {
 	uint32_t addr = (uint32_t)handler;
 	uint32_t kernel_end = (uint32_t)&__kernel_end;
 
-	/* OpenOS 当前内核链接在 0x8000，合法 IRQ handler 必须落在内核镜像内。
-	 * 这既允许 keyboard_handler 这类低于 1MB 的合法函数，
-	 * 又能继续拦截 0x00000003 这类明显坏函数指针。
+	/* OpenOS 内核现在高地址加载在 1MiB，合法 IRQ handler 必须落在内核镜像内。
+	 * 继续拦截 0x00000003 这类明显坏函数指针。
 	 */
-	return addr >= 0x00008000u && addr < kernel_end;
+	return addr >= 0x00100000u && addr < kernel_end;
 }
 
 /*

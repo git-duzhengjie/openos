@@ -9,8 +9,8 @@ ENTRY(_start)
 
 SECTIONS
 {
-    /* 内核加载地址: 0x8000 */
-    . = 0x8000;
+    /* 内核高地址加载地址: 1 MiB */
+    . = 0x100000;
 
     /* === 代码段 === */
     .text : AT(ADDR(.text))
@@ -38,14 +38,6 @@ SECTIONS
     . = ALIGN(4096);
     __kernel_image_end = .;
 
-    /*
-     * Runtime BSS is intentionally placed above 1 MiB. The bootloader only
-     * needs to load text/rodata/data below the low-memory stack; BSS is zeroed
-     * by entry.asm at runtime and does not need disk space. This keeps growing
-     * kernel static state away from EBDA/VGA/temporary stack low memory.
-     */
-    . = 0x100000;
-
     /* === BSS 段 === */
     .bss (NOLOAD) : AT(ADDR(.bss))
     {
@@ -64,7 +56,6 @@ SECTIONS
     /* 结束地址 (调试用) */
     __kernel_end = .;
 
-    /* 低端加载镜像仍不能进入 VGA/ROM 保留区域。启动栈位于高端 .bss。 */
-    ASSERT(__kernel_image_end <= 0xA0000, "kernel image overlaps VGA reserved memory")
+    ASSERT(__kernel_image_end <= 0x260000, "kernel image exceeds bootloader high-memory load window")
     ASSERT(kernel_stack_bottom >= 0x100000, "kernel stack below high-memory area")
 }
