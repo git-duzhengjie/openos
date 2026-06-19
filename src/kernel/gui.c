@@ -49,6 +49,7 @@ static int gui_settings_append_field(char *dst, int pos, int cap, i18n_key_t key
 
 static gui_system_t g_gui;
 static gui_accel_info_t g_gui_accel;
+static gui_rect_t g_network_widget_rect;
 
 #ifndef GUI_DEBUG_LOG
 #define GUI_DEBUG_LOG 0
@@ -1984,6 +1985,7 @@ static void gui_taskbar_invalidate_hover_changes(int old_x, int old_y, int new_x
     gui_taskbar_get_layout(&layout);
     gui_taskbar_invalidate_icon_hover_change(layout.start_button, old_x, old_y, new_x, new_y);
     gui_taskbar_invalidate_icon_hover_change(layout.terminal_button, old_x, old_y, new_x, new_y);
+    gui_taskbar_invalidate_icon_hover_change(g_network_widget_rect, old_x, old_y, new_x, new_y);
     bx = layout.first_window_x;
     for (i = 0; i < g_gui.window_count; i++) {
         uint32_t idx = g_gui.z_order[i];
@@ -3225,10 +3227,15 @@ static int gui_desktop_handle_click(int x, int y) {
     gui_rect_t item;
 
     if (!g_gui.desktop_enabled) return 0;
-    /* notification widget pinned at the bottom-right (left of the clock) */
+    /* tray widgets pinned at the bottom-right: notifications, network, then clock */
     if (g_notif_widget_rect.w > 0 && g_notif_widget_rect.h > 0 &&
         gui_rect_contains(&g_notif_widget_rect, x, y)) {
         gui_desktop_run_action(GUI_DESKTOP_ACTION_NOTIF);
+        return 1;
+    }
+    if (g_network_widget_rect.w > 0 && g_network_widget_rect.h > 0 &&
+        gui_rect_contains(&g_network_widget_rect, x, y)) {
+        gui_network_open();
         return 1;
     }
     if (gui_rect_contains(&g_gui.desktop_start_button_rect, x, y)) {
@@ -4231,7 +4238,7 @@ static gui_rect_t gui_get_clock_rect(const char *time_str) {
     };
 }
 
-static gui_rect_t gui_get_notification_widget_rect(const gui_rect_t *clock_rect) {
+static gui_rect_t gui_get_network_widget_rect(const gui_rect_t *clock_rect) {
     int h = gui_clock_widget_height();
     int w = h + 12;
     int gap = 4;
@@ -4242,6 +4249,23 @@ static gui_rect_t gui_get_notification_widget_rect(const gui_rect_t *clock_rect)
 
     return (gui_rect_t){
         clock_rect->x - w - gap,
+        (int)g_gui.height - h - 3,
+        w,
+        h,
+    };
+}
+
+static gui_rect_t gui_get_notification_widget_rect(const gui_rect_t *network_rect) {
+    int h = gui_clock_widget_height();
+    int w = h + 12;
+    int gap = 4;
+
+    if (w < 30) {
+        w = 30;
+    }
+
+    return (gui_rect_t){
+        network_rect->x - w - gap,
         (int)g_gui.height - h - 3,
         w,
         h,
@@ -4308,8 +4332,10 @@ static void gui_draw_taskbar(void) {
         clk[p++] = (char)('0' + secs % 10);
         clk[p] = 0;
 
+        gui_rect_t net_rect;
         clock_rect = gui_get_clock_rect(clk);
-        notif_rect = gui_get_notification_widget_rect(&clock_rect);
+        net_rect = gui_get_network_widget_rect(&clock_rect);
+        notif_rect = gui_get_notification_widget_rect(&net_rect);
         text_y = clock_rect.y + (clock_rect.h - text_h) / 2;
 
         gui_raw_fill_rect(clock_rect.x, clock_rect.y, clock_rect.w, clock_rect.h, gui_rgb(36, 44, 60));
@@ -4320,6 +4346,27 @@ static void gui_draw_taskbar(void) {
         gui_raw_line(clock_rect.x + clock_rect.w - 1, clock_rect.y, clock_rect.x + clock_rect.w - 1,
                      clock_rect.y + clock_rect.h - 1, gui_rgb(12, 16, 24));
         gui_draw_text(clock_rect.x + padding_x, text_y, clk, gui_rgb(220, 240, 255));
+
+        {
+            int gx = net_rect.x + (net_rect.w - 15) / 2;
+            int gy = net_rect.y + (net_rect.h - 12) / 2;
+            uint32_t nc = gui_rgb(120, 220, 255);
+            uint32_t dim = gui_rgb(75, 95, 125);
+            gui_raw_fill_rect(net_rect.x, net_rect.y, net_rect.w, net_rect.h,
+                              gui_taskbar_icon_hovered(net_rect) ? gui_rgb(48, 58, 78) : gui_rgb(36, 44, 60));
+            gui_raw_line(net_rect.x, net_rect.y, net_rect.x + net_rect.w - 1, net_rect.y, gui_rgb(80, 92, 120));
+            gui_raw_line(net_rect.x, net_rect.y + net_rect.h - 1, net_rect.x + net_rect.w - 1,
+                         net_rect.y + net_rect.h - 1, gui_rgb(12, 16, 24));
+            gui_raw_line(net_rect.x, net_rect.y, net_rect.x, net_rect.y + net_rect.h - 1, gui_rgb(80, 92, 120));
+            gui_raw_line(net_rect.x + net_rect.w - 1, net_rect.y, net_rect.x + net_rect.w - 1,
+                         net_rect.y + net_rect.h - 1, gui_rgb(12, 16, 24));
+            gui_raw_fill_rect(gx, gy + 8, 3, 4, nc);
+            gui_raw_fill_rect(gx + 6, gy + 5, 3, 7, nc);
+            gui_raw_fill_rect(gx + 12, gy + 2, 3, 10, nc);
+            gui_raw_line(gx + 1, gy + 7, gx + 7, gy + 4, dim);
+            gui_raw_line(gx + 7, gy + 4, gx + 13, gy + 1, dim);
+            g_network_widget_rect = net_rect;
+        }
 
         {
             char cbuf[8];
