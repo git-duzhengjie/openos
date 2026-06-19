@@ -221,6 +221,7 @@ static void shell_print_hex32(uint32_t value)
 
 #define CMD_BUF_SIZE 256
 #define MAX_ARGS 16
+#define SHELL_MAX_PIPE_CMDS 8
 #define SHELL_ENV_MAX 32
 #define SHELL_ENV_NAME_MAX 32
 #define SHELL_ENV_VALUE_MAX 160
@@ -261,6 +262,12 @@ typedef struct shell_script_frame {
 static shell_script_frame_t shell_script_stack[SHELL_SCRIPT_STACK_MAX];
 static int shell_script_depth = 0;
 static int shell_script_prompt_pending = 0;
+
+/* Pipeline argument expansion needs SHELL_MAX_PIPE_CMDS * MAX_ARGS * CMD_BUF_SIZE
+ * bytes.  Keeping this on PID1's kernel stack overflows the 16KB stack even for
+ * non-pipeline commands because shell_run_pipeline() is called before the normal
+ * command path. */
+static char shell_pipeline_arg_storage[SHELL_MAX_PIPE_CMDS][MAX_ARGS][CMD_BUF_SIZE];
 
 /* ---- 辅助函数 ---- */
 static void shell_prompt(void)
@@ -740,17 +747,7 @@ static void shell_save_history(void)
 
 static void shell_history_save_file(void)
 {
-    /* Temporarily disabled for stability.
-     * Persistent history touches VFS file operations on every Enter.
-     * The current #UD eip=0x00000003 appears before command-specific code,
-     * which is consistent with a corrupted/zeroed indirect file-op call.
-     * Keep in-memory history only until the VFS ops corruption is fixed.
-     */
-    static int warned = 0;
-    if (!warned) {
-        serial_write("[SHELL] persistent history save disabled\n");
-        warned = 1;
-    }
+    /* Persistent history is currently disabled; keep history in memory only. */
     return;
 }
 static void shell_history_load_file(void)
@@ -2003,13 +2000,12 @@ fail:
 
 static int shell_run_pipeline(char *cmdline, int background)
 {
-    enum { SHELL_MAX_PIPE_CMDS = 8 };
     char job_command[SHELL_JOB_CMD_MAX];
     shell_copy_job_command(job_command, cmdline);
 
     char *segments[SHELL_MAX_PIPE_CMDS];
     char *stage_argv[SHELL_MAX_PIPE_CMDS][MAX_ARGS];
-    char stage_arg_storage[SHELL_MAX_PIPE_CMDS][MAX_ARGS][CMD_BUF_SIZE];
+    char (*stage_arg_storage)[MAX_ARGS][CMD_BUF_SIZE] = shell_pipeline_arg_storage;
     int stage_argc[SHELL_MAX_PIPE_CMDS];
     shell_redirect_t stage_redir[SHELL_MAX_PIPE_CMDS];
     int pids[SHELL_MAX_PIPE_CMDS];
@@ -2213,11 +2209,8 @@ static int shell_spawn_user_program_at(const char *full, char *argv[], int argc,
         child_argv[child_argc++] = argv[i];
     child_argv[child_argc] = NULL;
 
-    serial_write("[EXEC] spawning ");
-    serial_write(full);
-    serial_write("\n");
-
-    return spawn_user_process_env(full, child_argv, (char *const *)shell_build_envp());
+    char *const *child_envp = (char *const *)shell_build_envp();
+    return spawn_user_process_env(full, child_argv, (char *const *)child_envp);
 }
 
 static int shell_spawn_user_program(const char *path, char *argv[], int argc)

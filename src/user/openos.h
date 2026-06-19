@@ -110,6 +110,7 @@
 #define SYS_SANDBOX_SET  313
 #define SYS_AI_REQUEST   314
 #define SYS_NETDEVCTL    315
+#define SYS_DNSLOOKUP    316
 
 #define OPENOS_CAP_SETUID    (1u << 0)
 #define OPENOS_CAP_SETGID    (1u << 1)
@@ -489,6 +490,11 @@ static inline int openos_netinfo(openos_netinfo_t *info)
 static inline int openos_ping(unsigned int ip)
 {
     return openos_syscall_result(openos_syscall1(SYS_PING, (int)ip));
+}
+
+static inline int openos_dnslookup(const char *name, unsigned int *ip)
+{
+    return openos_syscall_result(openos_syscall2(SYS_DNSLOOKUP, (int)name, (int)ip));
 }
 
 static inline int openos_netconfig(unsigned int ip, unsigned int netmask, unsigned int gateway, unsigned int dns)
@@ -1372,6 +1378,11 @@ static inline void openos_format_emit_char(char *buf, int size, int *pos, int *t
         openos_write_fd(fd, &c, 1);
 }
 
+static inline int openos_format_strlen(const char *s)
+{
+    return s ? openos_strlen(s) : 0;
+}
+
 static inline void openos_format_emit_str(char *buf, int size, int *pos, int *total, int fd, const char *s)
 {
     if (!s)
@@ -1380,6 +1391,50 @@ static inline void openos_format_emit_str(char *buf, int size, int *pos, int *to
         openos_format_emit_char(buf, size, pos, total, fd, *s);
         s++;
     }
+}
+
+static inline void openos_format_emit_padded(char *buf, int size, int *pos, int *total, int fd,
+                                             const char *s, int width, int left_align, char pad)
+{
+    int len;
+    int pad_count;
+
+    if (!s)
+        s = "(null)";
+    len = openos_format_strlen(s);
+    pad_count = width > len ? width - len : 0;
+    if (!left_align) {
+        while (pad_count-- > 0)
+            openos_format_emit_char(buf, size, pos, total, fd, pad);
+    }
+    openos_format_emit_str(buf, size, pos, total, fd, s);
+    if (left_align) {
+        while (pad_count-- > 0)
+            openos_format_emit_char(buf, size, pos, total, fd, ' ');
+    }
+}
+
+static inline void openos_utoa_base(unsigned int value, char *buf, int base)
+{
+    char tmp[33];
+    int i = 0;
+    int j = 0;
+
+    if (!buf || base < 2 || base > 16)
+        return;
+    if (value == 0) {
+        buf[0] = '0';
+        buf[1] = 0;
+        return;
+    }
+    while (value > 0 && i < (int)sizeof(tmp)) {
+        int digit = (int)(value % (unsigned int)base);
+        tmp[i++] = (char)(digit < 10 ? '0' + digit : 'a' + digit - 10);
+        value /= (unsigned int)base;
+    }
+    while (i > 0)
+        buf[j++] = tmp[--i];
+    buf[j] = 0;
 }
 
 static inline int openos_vformat(char *buf, int size, int fd, const char *fmt, __builtin_va_list ap)
@@ -1395,6 +1450,11 @@ static inline int openos_vformat(char *buf, int size, int fd, const char *fmt, _
     }
 
     while (*fmt) {
+        int left_align = 0;
+        int zero_pad = 0;
+        int width = 0;
+        char spec;
+
         if (*fmt != '%') {
             openos_format_emit_char(buf, size, &pos, &total, fd, *fmt++);
             continue;
@@ -1404,42 +1464,57 @@ static inline int openos_vformat(char *buf, int size, int fd, const char *fmt, _
         if (*fmt == 0)
             break;
 
-        if (*fmt == '%') {
+        if (*fmt == '-') {
+            left_align = 1;
+            fmt++;
+        }
+        if (*fmt == '0') {
+            zero_pad = 1;
+            fmt++;
+        }
+        while (*fmt >= '0' && *fmt <= '9') {
+            width = width * 10 + (*fmt - '0');
+            fmt++;
+        }
+
+        spec = *fmt;
+        if (spec == 0)
+            break;
+
+        if (spec == '%') {
             openos_format_emit_char(buf, size, &pos, &total, fd, '%');
-        } else if (*fmt == 's') {
-            openos_format_emit_str(buf, size, &pos, &total, fd, __builtin_va_arg(ap, const char *));
-        } else if (*fmt == 'c') {
-            openos_format_emit_char(buf, size, &pos, &total, fd, __builtin_va_arg(ap, int));
-        } else if (*fmt == 'd' || *fmt == 'i') {
+        } else if (spec == 's') {
+            const char *value = __builtin_va_arg(ap, const char *);
+            openos_format_emit_padded(buf, size, &pos, &total, fd, value, width, left_align, ' ');
+        } else if (spec == 'c') {
+            char cbuf[2];
+            cbuf[0] = (char)__builtin_va_arg(ap, int);
+            cbuf[1] = 0;
+            openos_format_emit_padded(buf, size, &pos, &total, fd, cbuf, width, left_align, ' ');
+        } else if (spec == 'd' || spec == 'i') {
             char nbuf[16];
             openos_itoa(__builtin_va_arg(ap, int), nbuf, 10);
-            openos_format_emit_str(buf, size, &pos, &total, fd, nbuf);
-        } else if (*fmt == 'u') {
+            openos_format_emit_padded(buf, size, &pos, &total, fd, nbuf, width, left_align, zero_pad ? '0' : ' ');
+        } else if (spec == 'u') {
             char nbuf[16];
-            unsigned int value = __builtin_va_arg(ap, unsigned int);
-            char tmp[16];
-            int i = 0;
-            int j = 0;
-            if (value == 0) {
-                nbuf[0] = '0';
-                nbuf[1] = 0;
-            } else {
-                while (value > 0 && i < (int)sizeof(tmp)) {
-                    tmp[i++] = (char)('0' + (value % 10));
-                    value /= 10;
-                }
-                while (i > 0)
-                    nbuf[j++] = tmp[--i];
-                nbuf[j] = 0;
-            }
-            openos_format_emit_str(buf, size, &pos, &total, fd, nbuf);
-        } else if (*fmt == 'x') {
+            openos_utoa_base(__builtin_va_arg(ap, unsigned int), nbuf, 10);
+            openos_format_emit_padded(buf, size, &pos, &total, fd, nbuf, width, left_align, zero_pad ? '0' : ' ');
+        } else if (spec == 'x') {
             char nbuf[16];
-            openos_itoa(__builtin_va_arg(ap, int), nbuf, 16);
-            openos_format_emit_str(buf, size, &pos, &total, fd, nbuf);
+            openos_utoa_base(__builtin_va_arg(ap, unsigned int), nbuf, 16);
+            openos_format_emit_padded(buf, size, &pos, &total, fd, nbuf, width, left_align, zero_pad ? '0' : ' ');
         } else {
             openos_format_emit_char(buf, size, &pos, &total, fd, '%');
-            openos_format_emit_char(buf, size, &pos, &total, fd, *fmt);
+            if (left_align)
+                openos_format_emit_char(buf, size, &pos, &total, fd, '-');
+            if (zero_pad)
+                openos_format_emit_char(buf, size, &pos, &total, fd, '0');
+            if (width > 0) {
+                char wbuf[16];
+                openos_itoa(width, wbuf, 10);
+                openos_format_emit_str(buf, size, &pos, &total, fd, wbuf);
+            }
+            openos_format_emit_char(buf, size, &pos, &total, fd, spec);
         }
         fmt++;
     }
@@ -2152,6 +2227,7 @@ static inline void openos_clearerr(openos_FILE *stream)
 #define snprintf(buf, size, fmt, ...) openos_snprintf((buf), (size), (fmt), ##__VA_ARGS__)
 #define netinfo(info)          openos_netinfo((info))
 #define ping(ip)               openos_ping((ip))
+#define dnslookup(name, ip)    openos_dnslookup((name), (ip))
 #define netconfig(ip, mask, gw, dns) openos_netconfig((ip), (mask), (gw), (dns))
 #define netdevctl(name, op)    openos_netdevctl((name), (op))
 #define firewall(op, index, rule) openos_firewall((op), (index), (rule))

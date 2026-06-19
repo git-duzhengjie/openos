@@ -488,8 +488,8 @@ void ahci_init(void) {
                     continue;
                 }
 
-                if (pci_read8((uint8_t)bus, (uint8_t)dev, (uint8_t)func, PCI_OFFSET_CLASS + 2u) == AHCI_PCI_CLASS_MASS_STORAGE &&
-                    pci_read8((uint8_t)bus, (uint8_t)dev, (uint8_t)func, PCI_OFFSET_CLASS + 1u) == AHCI_PCI_SUBCLASS_SATA &&
+                if (pci_read8((uint8_t)bus, (uint8_t)dev, (uint8_t)func, PCI_OFFSET_CLASS) == AHCI_PCI_CLASS_MASS_STORAGE &&
+                    pci_read8((uint8_t)bus, (uint8_t)dev, (uint8_t)func, PCI_OFFSET_SUBCLASS) == AHCI_PCI_SUBCLASS_SATA &&
                     pci_read8((uint8_t)bus, (uint8_t)dev, (uint8_t)func, PCI_OFFSET_CLASS) == AHCI_PCI_PROGIF_AHCI) {
                     ahci_probe_controller((uint8_t)bus, (uint8_t)dev, (uint8_t)func);
                     controllers++;

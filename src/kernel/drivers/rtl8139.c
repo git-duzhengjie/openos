@@ -435,8 +435,8 @@ void rtl8139_init(void) {
 
                 {
                     uint16_t device = pci_read16((uint8_t)bus, (uint8_t)dev, (uint8_t)func, PCI_OFFSET_DEVICE);
-                    uint8_t class_code = pci_read8((uint8_t)bus, (uint8_t)dev, (uint8_t)func, PCI_OFFSET_CLASS + 2u);
-                    uint8_t subclass = pci_read8((uint8_t)bus, (uint8_t)dev, (uint8_t)func, PCI_OFFSET_CLASS + 1u);
+                    uint8_t class_code = pci_read8((uint8_t)bus, (uint8_t)dev, (uint8_t)func, PCI_OFFSET_CLASS);
+                    uint8_t subclass = pci_read8((uint8_t)bus, (uint8_t)dev, (uint8_t)func, PCI_OFFSET_SUBCLASS);
                     if (rtl8139_supported_device(vendor, device, class_code, subclass)) {
                         rtl8139_register((uint8_t)bus, (uint8_t)dev, (uint8_t)func, device);
                         if (rtl8139_count >= RTL8139_MAX_DEVICES) {

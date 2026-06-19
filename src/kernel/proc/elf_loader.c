@@ -83,12 +83,6 @@ elf_load_result_t elf_load(int fd) {
         return result;
     }
 
-    serial_write("[ELF] Valid ELF, entry=0x");
-    serial_write_hex(ehdr.e_entry);
-    serial_write(" phnum=");
-    serial_write_hex(ehdr.e_phnum);
-    serial_write("\n");
-
     /* 读取程序头表 */
     if (ehdr.e_phnum == 0 || ehdr.e_phnum > ELF_MAX_PHNUM ||
         ehdr.e_phentsize != sizeof(Elf32_Phdr) ||
@@ -126,24 +120,17 @@ elf_load_result_t elf_load(int fd) {
             continue;  /* 忽略非加载段 */
         }
 
-        serial_write("[ELF] PT_LOAD segment: vaddr=0x");
-        serial_write_hex(ph->p_vaddr);
-        serial_write(" filesz=");
-        serial_write_hex(ph->p_filesz);
-        serial_write(" memsz=");
-        serial_write_hex(ph->p_memsz);
-        serial_write(" flags=");
-        serial_write_hex(ph->p_flags);
-        serial_write("\n");
-
         if ((ph->p_flags & PF_W) && (ph->p_flags & PF_X)) {
             serial_write("[ELF] Rejecting RWX load segment\n");
             pmm_free_page((void *)phdrs);
             return result;
         }
 
-        /* 检查段大小和地址范围 */
-        if (ph->p_memsz < ph->p_filesz || ph->p_memsz == 0) {
+        /* 检查段大小和地址范围。部分链接器会生成空 PT_LOAD 段，跳过即可。 */
+        if (ph->p_memsz == 0 && ph->p_filesz == 0) {
+            continue;
+        }
+        if (ph->p_memsz < ph->p_filesz) {
             serial_write("[ELF] Invalid segment size\n");
             pmm_free_page((void *)phdrs);
             return result;
@@ -232,12 +219,6 @@ elf_load_result_t elf_load(int fd) {
     result.entry = ehdr.e_entry;
     result.brk_start = (max_addr + PAGE_SIZE - 1) & PAGE_MASK;  /* 页对齐 */
     result.num_segments = num_loaded;
-
-    serial_write("[ELF] Loaded ");
-    serial_write_hex(num_loaded);
-    serial_write(" segments, brk_start=0x");
-    serial_write_hex(result.brk_start);
-    serial_write("\n");
 
     return result;
 }

@@ -7,6 +7,7 @@
 #include "../include/pmm.h"
 #include "../include/serial.h"
 #include "../include/vga.h"
+#include "../include/gui.h"
 #include "../include/input_buffer.h"
 #include "../include/usermem.h"
 #include "../include/vmm.h"
@@ -18,6 +19,7 @@
 #include "../include/ai.h"
 #include "../net/socket.h"
 #include "../net/net.h"
+#include "../net/dns.h"
 #include "../net/dhcp.h"
 #include <stddef.h>  /* NULL */
 
@@ -767,10 +769,6 @@ static uint32_t syscall_write_user_buffer(int fd, const void *user_buf, uint32_t
     if (!user_ptr_valid(user_buf, count, USERMEM_READ))
         return (uint32_t)-1;
 
-    if ((fd == STDOUT_FILENO || fd == STDERR_FILENO) && !vfs_get_file(fd)) {
-        serial_write(fd == STDERR_FILENO ? "[USER-ERR] " : "[USER] ");
-    }
-
     while (done < count) {
         uint32_t n = count - done;
         int written;
@@ -784,6 +782,7 @@ static uint32_t syscall_write_user_buffer(int fd, const void *user_buf, uint32_t
             for (uint32_t i = 0; i < n; i++) {
                 serial_putc(chunk[i]);
                 vga_putc(chunk[i]);
+                gui_terminal_putc(chunk[i]);
             }
             written = (int)n;
         } else {
@@ -1301,6 +1300,33 @@ static int syscall_require_cap(uint32_t cap)
     if (proc_current_has_cap(cap))
         return 0;
     return -1;
+}
+
+static int sys_dnslookup(uint32_t user_name, uint32_t user_ip)
+{
+    char name[128];
+    uint32_t ip = 0;
+    int i;
+
+    if (!user_name || !user_ip) return -1;
+    if (strncpy_from_user(name, (const char *)(uintptr_t)user_name, sizeof(name)) < 0) return -1;
+    name[sizeof(name) - 1] = '\0';
+    if (!name[0]) return -1;
+
+    if (dns_query_a(name) < 0) return -1;
+    for (i = 0; i < 600000; i++) {
+        net_poll();
+        if (dns_get_state() == DNS_STATE_RESOLVED) {
+            ip = dns_get_last_result();
+            break;
+        }
+        if (dns_get_state() == DNS_STATE_FAILED) break;
+        if ((i & 0x3ff) == 0) asm volatile ("pause");
+    }
+
+    if (!ip) return -1;
+    if (copy_to_user((void *)(uintptr_t)user_ip, &ip, sizeof(ip)) < 0) return -1;
+    return 0;
 }
 
 /* ============================================================
@@ -1934,6 +1960,9 @@ uint32_t syscall_dispatch(uint32_t num,
         if (syscall_require_cap(OPENOS_CAP_NET_ADMIN) < 0)
             return (uint32_t)-1;
         return (uint32_t)net_ping_ipv4((uint32_t)a);
+
+    case SYS_DNSLOOKUP:
+        return (uint32_t)sys_dnslookup((uint32_t)a, (uint32_t)b);
 
     case SYS_NETCONFIG:
         if (syscall_require_cap(OPENOS_CAP_NET_ADMIN) < 0)

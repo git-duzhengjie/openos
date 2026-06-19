@@ -42,6 +42,7 @@ typedef struct user_spawn_args {
 static void user_process_trampoline(void *arg);
 static void user_thread_trampoline(void *arg);
 static void free_thread_kernel_resources(thread_t *t);
+static void free_kernel_stack_pages(void *kernel_stack);
 static int copy_exec_args(user_spawn_args_t *args, const char *path,
                           char *const argv[], char *const envp[]);
 static uint32_t setup_user_args_stack(uint32_t stack_top, const user_spawn_args_t *args);
@@ -77,6 +78,17 @@ static int copy_string_vector(char *dst, int max_count, int slot_size,
 
     *out_count = count;
     return 0;
+}
+
+static void free_kernel_stack_pages(void *kernel_stack)
+{
+    if (!kernel_stack) return;
+
+    uint32_t stack_pages = PROC_KERNEL_STACK_SIZE / PAGE_SIZE;
+    if (stack_pages == 0) stack_pages = 1;
+    for (uint32_t page = 0; page < stack_pages; page++) {
+        pmm_free_page((void *)((uint32_t)kernel_stack + page * PAGE_SIZE));
+    }
 }
 
 static int copy_exec_args(user_spawn_args_t *args, const char *path,
@@ -773,9 +785,6 @@ int sys_exec_env(const char *path, char *const argv[], char *const envp[]) {
     /* Open the executable before switching address spaces so ordinary errors
      * leave the current process image untouched, as exec should. */
     int fd = vfs_open(path, 0, 0);
-    serial_write("[EXEC] vfs_open returned fd=");
-    serial_write_hex(fd);
-    serial_write("\n");
     if (fd < 0) {
         serial_write("[EXEC] Cannot open: ");
         serial_write((char *)path);
@@ -848,10 +857,6 @@ int sys_exec_env(const char *path, char *const argv[], char *const envp[]) {
         proc_free_cloned_address_space((uint32_t *)old_cr3);
     }
 
-    serial_write("[EXEC] Replaced image, entry=0x");
-    serial_write_hex(load_result.entry);
-    serial_write("\n");
-
     /* CPU switches to TSS.esp0 on every ring3 -> ring0 interrupt. */
     tss_set_kernel_stack(cur->kernel_stack_top);
     switch_to_user_asm(load_result.entry, user_sp);
@@ -872,7 +877,8 @@ int spawn_user_process_env(const char *path, char *const argv[], char *const env
      * exec immediately, which makes user-space error handling ambiguous. */
     int fd = vfs_open(path, 0, 0);
     if (fd < 0) return -1;
-    vfs_close(fd);
+    int close_ret = vfs_close(fd);
+    if (close_ret < 0) return -1;
 
     process_t *child = proc_alloc();
     if (!child) return -1;
@@ -935,18 +941,14 @@ int spawn_user_process_env(const char *path, char *const argv[], char *const env
         return -1;
     }
 
-    /* thread_create_sized() cannot pass a C argument to entry directly.
-     * Temporarily store spawn args in an unused PCB field; the trampoline
-     * retrieves it through the current pid after the scheduler starts it. */
-    child->code_addr = (uint32_t)args;
-
-    thread_t *thread = thread_create_sized(child->pid, child->name,
-                                           (uint32_t)user_process_trampoline,
-                                           (uint32_t)kernel_stack + PROC_KERNEL_STACK_SIZE,
-                                           PROC_KERNEL_STACK_SIZE);
+    thread_t *thread = thread_create_sized_arg(child->pid, child->name,
+                                               (uint32_t)user_process_trampoline,
+                                               (uint32_t)kernel_stack + PROC_KERNEL_STACK_SIZE,
+                                               PROC_KERNEL_STACK_SIZE,
+                                               (uint32_t)args);
     if (!thread) {
         pmm_free_page(args);
-        pmm_free_page(kernel_stack);
+        free_kernel_stack_pages(kernel_stack);
         proc_free_cloned_address_space((uint32_t *)child_cr3);
         child->cr3 = 0;
         child->owns_address_space = 0;
@@ -958,13 +960,17 @@ int spawn_user_process_env(const char *path, char *const argv[], char *const env
     child->threads = thread;
     child->thread_count = 1;
     child->state = PROC_READY;
+
+    /* Publish the child thread atomically from the scheduler's point of view.
+     * Manual shell execution can be interrupted immediately after enqueueing a
+     * freshly-created user process.  Keep the PCB/thread linkage, enqueue, and
+     * spawn result log in one interrupt-disabled window so a timer tick cannot
+     * observe a half-published child before the parent returns from spawn. */
+    uint32_t saved_eflags;
+    __asm__ volatile("pushfl; pop %0; cli" : "=r"(saved_eflags) :: "memory");
     sched_add_thread(thread);
 
-    serial_write("[SPAWN] user process pid=");
-    serial_write_hex(child->pid);
-    serial_write(" path=");
-    serial_write(args->path);
-    serial_write("\n");
+    __asm__ volatile("push %0; popfl" :: "r"(saved_eflags) : "memory");
 
     return (int)child->pid;
 }
@@ -974,36 +980,44 @@ int spawn_user_process(const char *path, char *const argv[]) {
 }
 
 static void user_process_trampoline(void *arg) {
-    (void)arg;
-    thread_t *cur = sched_get_current();
-    process_t *proc = cur ? proc_find(cur->pid) : NULL;
-    user_spawn_args_t *args = proc ? (user_spawn_args_t *)proc->code_addr : NULL;
+    user_spawn_args_t *args = (user_spawn_args_t *)arg;
     if (!args) {
         sys_exit(-1);
     }
 
-    user_spawn_args_t exec_args;
-    memcpy(&exec_args, args, sizeof(exec_args));
-    if (proc) proc->code_addr = 0;
+    /* Keep the spawn argument block off the kernel stack.  The exec path
+     * allocates a sizeable stack frame while loading ELF metadata, and a
+     * second full user_spawn_args_t copy here can corrupt the synthetic
+     * scheduler frame on small process kernel stacks. */
+    user_spawn_args_t *exec_args = (user_spawn_args_t *)pmm_alloc_page();
+    if (!exec_args) {
+        pmm_free_page(args);
+        sys_exit(-1);
+    }
+
+    memcpy(exec_args, args, sizeof(*exec_args));
     pmm_free_page(args);
 
     char *argv[PROC_ARG_MAX + 1];
     char *envp[PROC_ENV_MAX + 1];
-    for (int i = 0; i < exec_args.argc && i < PROC_ARG_MAX; i++)
-        argv[i] = exec_args.argv[i];
-    argv[exec_args.argc] = NULL;
-    for (int i = 0; i < exec_args.envc && i < PROC_ENV_MAX; i++)
-        envp[i] = exec_args.envp[i];
-    envp[exec_args.envc] = NULL;
+    for (int i = 0; i < exec_args->argc && i < PROC_ARG_MAX; i++)
+        argv[i] = exec_args->argv[i];
+    argv[exec_args->argc] = NULL;
+    for (int i = 0; i < exec_args->envc && i < PROC_ENV_MAX; i++)
+        envp[i] = exec_args->envp[i];
+    envp[exec_args->envc] = NULL;
 
-    int ret = sys_exec_env(exec_args.path, argv, envp);
+    int ret = sys_exec_env(exec_args->path, argv, envp);
     if (ret < 0) {
         serial_write("[SPAWN] exec failed: ");
-        serial_write(exec_args.path);
+        serial_write(exec_args->path);
         serial_write("\n");
+        pmm_free_page(exec_args);
         sys_exit(-1);
     }
 
+    /* sys_exec_env() switches to user mode and normally never returns. */
+    pmm_free_page(exec_args);
     sys_exit(0);
 }
 
@@ -1052,8 +1066,7 @@ int sys_thread_create(uint32_t entry, uint32_t arg, uint32_t return_entry) {
                                            (uint32_t)kernel_stack + PROC_KERNEL_STACK_SIZE,
                                            PROC_KERNEL_STACK_SIZE);
     if (!thread) {
-        for (uint32_t page = 0; page < stack_pages; page++)
-            pmm_free_page((void *)((uint32_t)kernel_stack + page * PAGE_SIZE));
+        free_kernel_stack_pages(kernel_stack);
         free_user_stack_slot(slot);
         return -1;
     }

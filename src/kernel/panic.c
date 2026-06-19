@@ -33,9 +33,39 @@ static uint32_t panic_read_cr3(void)
 static void panic_write_field_hex(const char *name, uint32_t value)
 {
     serial_write(name);
-    serial_write("=0x");
+    serial_write("=");
     serial_write_hex(value);
     serial_write(" ");
+}
+
+static void panic_dump_stack_words(const char *label, uint32_t addr, uint32_t count)
+{
+    if (!addr) {
+        return;
+    }
+
+    serial_write("[PANIC] ");
+    serial_write(label);
+    serial_write(" base=");
+    serial_write_hex(addr);
+    serial_write("\n");
+
+    uint32_t *words = (uint32_t *)addr;
+    for (uint32_t i = 0; i < count; ++i) {
+        if ((i & 3u) == 0) {
+            serial_write("[PANIC]   +");
+            serial_write_hex(i * 4u);
+            serial_write(": ");
+        }
+        serial_write_hex(words[i]);
+        serial_write(" ");
+        if ((i & 3u) == 3u) {
+            serial_write("\n");
+        }
+    }
+    if ((count & 3u) != 0) {
+        serial_write("\n");
+    }
 }
 
 const panic_dump_t *panic_get_last_dump(void)
@@ -144,9 +174,12 @@ void panic_log_exception(const panic_frame_t *frame)
         panic_write_field_hex("fs", regs->fs);
         panic_write_field_hex("gs", regs->gs);
         serial_write("\n");
+
+        panic_dump_stack_words("kstack", regs->esp_skip, 32u);
+        panic_dump_stack_words("frame", (uint32_t)regs, 24u);
     }
 
-    serial_write("[PANIC] proc   pid=0x");
+    serial_write("[PANIC] proc   pid=");
     serial_write_hex(frame ? frame->pid : 0);
     serial_write("\n");
 

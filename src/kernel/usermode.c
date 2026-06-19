@@ -61,28 +61,8 @@ uint32_t alloc_user_stack_slot(uint32_t slot)
         uint32_t virt = stack_base + page * PAGE_SIZE;
         vmm_map_page(virt, phys, VMM_USER);
 
-        serial_write("[USERMODE] Stack page: phys=");
-        serial_write_hex(phys);
-        serial_write(" virt=");
-        serial_write_hex(virt);
-        serial_write("\n");
     }
 
-    serial_write("[USERMODE] Stack guard: base=");
-    serial_write_hex(guard_base);
-    serial_write(" size=");
-    serial_write_hex(USER_STACK_GUARD_SIZE);
-    serial_write("\n");
-
-    serial_write("[USERMODE] Stack range: base=");
-    serial_write_hex(stack_base);
-    serial_write(" top=");
-    serial_write_hex(stack_top);
-    serial_write(" pages=");
-    serial_write_hex(stack_pages);
-    serial_write(" slot=");
-    serial_write_hex(slot);
-    serial_write("\n");
 
     return stack_top;
 }

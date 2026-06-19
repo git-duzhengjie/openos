@@ -3,6 +3,7 @@
 #include "vga.h"
 #include "devmgr.h"
 #include "socket.h"
+#include "../include/e1000.h"
 
 #define ETH_TYPE_IPV4 0x0800
 #define ETH_TYPE_ARP  0x0806
@@ -208,6 +209,10 @@ static void copy_mac(uint8_t *dst, const uint8_t *src) {
     memcpy(dst, src, NET_ETH_ADDR_LEN);
 }
 
+void net_poll(void) {
+    e1000_poll();
+}
+
 static int arp_lookup(uint32_t ip, uint8_t *mac) {
     int i;
     for (i = 0; i < ARP_CACHE_SIZE; i++) {
@@ -287,6 +292,18 @@ static int arp_send_request(uint32_t target_ip) {
     arp.spa = htonl(default_dev->ip);
     arp.tpa = htonl(target_ip);
     return eth_send(default_dev, broadcast, ETH_TYPE_ARP, (const uint8_t *)&arp, sizeof(arp));
+}
+
+static int arp_resolve(uint32_t ip, uint8_t *mac) {
+    int i;
+    if (arp_lookup(ip, mac) == 0) return 0;
+    if (arp_send_request(ip) < 0) return -1;
+    for (i = 0; i < 200000; i++) {
+        net_poll();
+        if (arp_lookup(ip, mac) == 0) return 0;
+        if ((i & 0x3ff) == 0) asm volatile ("pause");
+    }
+    return -1;
 }
 
 static int arp_send_reply(net_device_t *dev, const struct arp_packet *req) {
@@ -1051,6 +1068,9 @@ static void handle_ipv4(net_device_t *dev, const uint8_t *data, uint16_t len) {
     else if (ip->protocol == IP_PROTO_TCP) handle_tcp(src, payload, payload_len);
 }
 
+static int net_is_loop_device(const net_device_t *dev);
+static int net_should_be_default(const net_device_t *dev);
+
 void net_input(net_device_t *dev, const uint8_t *frame, uint16_t len) {
     const struct eth_header *eth;
     uint16_t type;
@@ -1070,8 +1090,8 @@ void net_input(net_device_t *dev, const uint8_t *frame, uint16_t len) {
 int net_register_device(net_device_t *dev) {
     if (!dev) return -1;
     if (!dev->admin_up) dev->admin_up = 1;
-    if (!default_dev) default_dev = dev;
     devmgr_register(dev->name, "net", DEVMGR_TYPE_NET, 0, 0, 0, dev);
+    if (net_should_be_default(dev)) default_dev = dev;
     return 0;
 }
 
@@ -1100,6 +1120,17 @@ static int net_name_has_prefix(const char *name, const char *prefix) {
         i++;
     }
     return 1;
+}
+
+static int net_is_loop_device(const net_device_t *dev) {
+    return dev && net_name_has_prefix(dev->name, "loopnet");
+}
+
+static int net_should_be_default(const net_device_t *dev) {
+    if (!dev) return 0;
+    if (!default_dev) return 1;
+    if (net_is_loop_device(default_dev) && !net_is_loop_device(dev)) return 1;
+    return 0;
 }
 
 static const char *net_infer_driver_name(const net_device_t *dev) {
@@ -1309,8 +1340,12 @@ static int loopback_transmit(net_device_t *dev, const uint8_t *frame, uint16_t l
 
 int net_ping_ipv4(uint32_t dst_ip) {
     uint8_t payload[sizeof(struct icmp_header) + 4];
+    uint8_t mac[NET_ETH_ADDR_LEN];
+    uint32_t next_hop;
     struct icmp_header *icmp = (struct icmp_header *)payload;
     if (!default_dev) return -1;
+    next_hop = ((dst_ip & default_dev->netmask) == (default_dev->ip & default_dev->netmask)) ? dst_ip : default_dev->gateway;
+    if (arp_resolve(next_hop, mac) < 0) return -1;
     memset(payload, 0, sizeof(payload));
     icmp->type = ICMP_ECHO_REQUEST;
     icmp->code = 0;
@@ -1332,6 +1367,7 @@ int net_ping_self(void) {
 int net_get_diag_stats(net_diag_stats_t *stats) {
     int i;
     if (!stats || !default_dev) return -1;
+    net_poll();
     memset(stats, 0, sizeof(*stats));
     strncpy(stats->name, default_dev->name, sizeof(stats->name) - 1);
     stats->name[sizeof(stats->name) - 1] = '\0';

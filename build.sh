@@ -254,6 +254,7 @@ nasm -f elf32 $SRC/gdt_flush.asm -o $BUILD/gdt_flush.o
 nasm -f elf32 $SRC/sched/context_switch.asm -o $BUILD/context_switch.o
 nasm -f elf32 $SRC/timer_isr.asm -o $BUILD/timer_isr.o
 nasm -f elf32 $SRC/switch_to_user.asm -o $BUILD/switch_to_user.o
+nasm -f elf32 $SRC/kernel_thread_trampoline.asm -o $BUILD/kernel_thread_trampoline.o
 
 # 编译用户程序并嵌入内�?
 echo "[2.5] Building user program..."
@@ -798,7 +799,24 @@ if [ "$OPENOS_EMBED_TESTS" = "1" ] && [ -f $USR/sbrktest.c ]; then
     echo "  Embedded: sbrktest.elf"
 fi
 
-for app in ping ifconfig netstat id groups cap sandbox; do
+gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+    -fno-stack-protector -fno-builtin \
+    -I $SRC/include \
+    -c $USR/crt0.c -o $BUILD/crt0.o
+
+for app in ping ifconfig netstat; do
+    if [ -f $USR/$app.c ]; then
+        gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+            -fno-stack-protector -fno-builtin \
+            -I $SRC/include \
+            -c $USR/$app.c -o $BUILD/$app.o
+        ld -m elf_i386 -T $USR/user.ld -o $BUILD/$app.elf $BUILD/crt0.o $BUILD/$app.o
+        python3 _embed_elf.py $BUILD/$app.elf $SRC/include/embed_$app.h ${app}_elf
+        echo "  Embedded: $app.elf"
+    fi
+done
+
+for app in id groups cap sandbox; do
     if [ -f $USR/$app.c ]; then
         gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
             -fno-stack-protector -fno-builtin \
@@ -1156,6 +1174,7 @@ ld -m elf_i386 -T $SRC/linker.ld \
     $BUILD/context_switch.o \
     $BUILD/timer_isr.o \
     $BUILD/switch_to_user.o \
+    $BUILD/kernel_thread_trampoline.o \
     $BUILD/kernel.o \
     $BUILD/idt.o \
     $BUILD/gdt.o \

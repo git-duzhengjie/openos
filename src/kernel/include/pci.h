@@ -9,7 +9,10 @@
 
 #define PCI_OFFSET_VENDOR    0x00
 #define PCI_OFFSET_DEVICE    0x02
-#define PCI_OFFSET_CLASS     0x08
+#define PCI_OFFSET_REVISION  0x08
+#define PCI_OFFSET_PROGIF    0x09
+#define PCI_OFFSET_SUBCLASS  0x0A
+#define PCI_OFFSET_CLASS     0x0B
 #define PCI_OFFSET_HEADER    0x0E
 #define PCI_OFFSET_BAR0      0x10
 #define PCI_OFFSET_BAR1      0x14

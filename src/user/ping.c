@@ -49,6 +49,7 @@ int main(int argc, char **argv)
     openos_netinfo_t before;
     openos_netinfo_t after;
     unsigned int target;
+    const char *target_name = 0;
 
     if (netinfo(&before) < 0) {
         printf("ping: no network device\n");
@@ -56,13 +57,25 @@ int main(int argc, char **argv)
     }
 
     target = before.ip;
-    if (argc > 1 && parse_ip(argv[1], &target) < 0) {
-        printf("usage: ping [a.b.c.d]\n");
-        return 1;
+    if (argc > 1) {
+        target_name = argv[1];
+        if (parse_ip(target_name, &target) < 0) {
+            if (dnslookup(target_name, &target) < 0) {
+                printf("ping: cannot resolve %s\n", target_name);
+                return 1;
+            }
+            printf("ping: %s resolved to ", target_name);
+            print_ip(target);
+            printf("\n");
+        }
     }
 
     printf("PING ");
+    if (target_name)
+        printf("%s (", target_name);
     print_ip(target);
+    if (target_name)
+        printf(")");
     printf(": 4 data bytes\n");
 
     if (ping(target) < 0) {
@@ -70,17 +83,20 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    openos_sleep(1);
-
-    if (netinfo(&after) < 0)
-        return 1;
-
-    if (target == before.ip && after.icmp_echo_replies > before.icmp_echo_replies) {
-        printf("4 bytes from ");
-        print_ip(target);
-        printf(": icmp_seq=1 ttl=64\n");
-        printf("1 packets transmitted, 1 received, 0%% packet loss\n");
-        return 0;
+    {
+        int i;
+        for (i = 0; i < 20; i++) {
+            openos_sleep(1);
+            if (netinfo(&after) < 0)
+                return 1;
+            if (after.icmp_echo_replies > before.icmp_echo_replies) {
+                printf("4 bytes from ");
+                print_ip(target);
+                printf(": icmp_seq=1 ttl=64\n");
+                printf("1 packets transmitted, 1 received, 0%% packet loss\n");
+                return 0;
+            }
+        }
     }
 
     printf("1 packets transmitted, 0 received, 100%% packet loss\n");

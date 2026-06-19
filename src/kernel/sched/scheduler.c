@@ -22,6 +22,8 @@
 
 OPENOS_STATIC_ASSERT((uint32_t)&(((thread_t *)0)->kernel_sp) == THREAD_KERNEL_SP_OFFSET);
 
+extern void kernel_thread_entry_trampoline(void);
+
 void idle_entry(void) { while (1) { __asm__ volatile("hlt"); } }
 
 static struct {
@@ -382,7 +384,9 @@ process_t *proc_create(const char *name, uint32_t entry, uint32_t esp) {
     return p;
 }
 
-thread_t *thread_create_sized(uint32_t pid, const char *name, uint32_t entry, uint32_t stack_top, uint32_t stack_size) {
+thread_t *thread_create_sized_arg(uint32_t pid, const char *name, uint32_t entry,
+                                  uint32_t stack_top, uint32_t stack_size,
+                                  uint32_t arg) {
     thread_t *t = (thread_t *)pmm_alloc_page();
     if (!t) return NULL;
     for (int i = 0; i < (int)sizeof(thread_t); i++) ((char *)t)[i] = 0;
@@ -399,32 +403,54 @@ thread_t *thread_create_sized(uint32_t pid, const char *name, uint32_t entry, ui
     char *stack_base = (char *)((uint32_t)stack_top - stack_size);
     for (uint32_t i = 0; i < stack_size; i++) stack_base[i] = 0;
 
+    /* Freshly-created threads are first restored by the same interrupt-style
+     * paths used by sched_start(), sched_yield() and timer_isr_entry():
+     * pop segment registers, popad, then iret.
+     *
+     * After iret, the CPU must land in kernel_thread_entry_trampoline with a
+     * normal kernel stack containing the trampoline arguments:
+     *   [esp + 0] = real thread entry
+     *   [esp + 4] = entry argument
+     *
+     * popad ignores the saved ESP value, so the post-iret ESP is whatever is
+     * left after popping EIP/CS/EFLAGS.  Put entry/arg above the synthetic
+     * interrupt frame so they remain at the top of the stack when iret
+     * completes.
+     */
+    uint32_t *sp = (uint32_t *)stack_top;
+    *(--sp) = arg;
+    *(--sp) = entry;
+    uint32_t post_iret_sp = (uint32_t)sp;
+
     /* Stack frame matching timer_isr save format:
      * [GS][FS][ES][DS][EDI][ESI][EBP][ESP_skip][EBX][EDX][ECX][EAX][EIP][CS][EFLAGS]
      */
-    uint32_t *sp = (uint32_t *)stack_top;
-
     *(--sp) = 0x202;     /* EFLAGS: IF=1 */
     *(--sp) = 0x08;      /* CS */
-    *(--sp) = entry;     /* EIP */
-    *(--sp) = 0;          /* EAX */
-    *(--sp) = 0;          /* ECX */
-    *(--sp) = 0;          /* EDX */
-    *(--sp) = 0;          /* EBX */
-    *(--sp) = 0;          /* ESP (skip) */
-    *(--sp) = 0;          /* EBP */
-    *(--sp) = 0;          /* ESI */
-    *(--sp) = 0;          /* EDI */
-    *(--sp) = 0x10;       /* DS */
-    *(--sp) = 0x10;       /* ES */
-    *(--sp) = 0x10;       /* FS */
-    *(--sp) = 0x10;       /* GS */
+    *(--sp) = (uint32_t)kernel_thread_entry_trampoline; /* EIP */
+    *(--sp) = entry;     /* EAX: real thread entry */
+    *(--sp) = 0;         /* ECX */
+    *(--sp) = arg;       /* EDX: entry argument */
+    *(--sp) = 0;         /* EBX */
+    *(--sp) = post_iret_sp; /* ignored by popad; documents expected ESP */
+    *(--sp) = 0;         /* EBP */
+    *(--sp) = 0;         /* ESI */
+    *(--sp) = 0;         /* EDI */
+    *(--sp) = 0x10;      /* DS */
+    *(--sp) = 0x10;      /* ES */
+    *(--sp) = 0x10;      /* FS */
+    *(--sp) = 0x10;      /* GS */
 
     t->kernel_sp = (uint32_t)sp;
-    t->kernel_ip = entry;
+    t->kernel_ip = (uint32_t)kernel_thread_entry_trampoline;
     t->kernel_stack = (uint32_t)stack_base;
     t->kernel_stack_top = stack_top;
     return t;
+}
+
+thread_t *thread_create_sized(uint32_t pid, const char *name, uint32_t entry,
+                              uint32_t stack_top, uint32_t stack_size) {
+    return thread_create_sized_arg(pid, name, entry, stack_top, stack_size, 0);
 }
 
 thread_t *thread_create(uint32_t pid, const char *name, uint32_t entry, uint32_t stack_top) {

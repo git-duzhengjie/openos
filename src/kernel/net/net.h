@@ -161,6 +161,7 @@ int net_refresh_device_status(const char *name);
 void net_set_default_ipv4(uint32_t ip, uint32_t netmask, uint32_t gateway, uint32_t dns);
 void net_set_default_ipv4_dhcp(uint32_t ip, uint32_t netmask, uint32_t gateway, uint32_t dns);
 void net_input(net_device_t *dev, const uint8_t *frame, uint16_t len);
+void net_poll(void);
 int net_send_ipv4(uint32_t dst_ip, uint8_t protocol, const uint8_t *payload, uint16_t payload_len);
 int net_send_udp(uint32_t dst_ip, uint16_t src_port, uint16_t dst_port,
                  const uint8_t *data, uint16_t len);

@@ -5,6 +5,7 @@
 #include "../include/idt.h"
 #include "../include/pci.h"
 #include "../include/serial.h"
+#include "../include/vmm.h"
 #include "../include/string.h"
 #include "../net/net.h"
 
@@ -13,6 +14,7 @@
 #define E1000_TX_DESC_COUNT 32u
 #define E1000_RX_BUF_SIZE 2048u
 #define E1000_WAIT_LIMIT 1000000u
+#define E1000_MMIO_MAP_SIZE 0x20000u
 
 #define PCI_CLASS_NETWORK      0x02u
 #define PCI_SUBCLASS_ETHERNET  0x00u
@@ -123,6 +125,18 @@ static uint8_t e1000_tx_buffers[E1000_MAX_DEVICES][E1000_TX_DESC_COUNT][NET_FRAM
 
 static uint32_t e1000_ptr32(const void *ptr) {
     return (uint32_t)(uintptr_t)ptr;
+}
+
+static void e1000_map_mmio(uint32_t mmio_base) {
+    uint32_t start;
+    uint32_t end;
+    if (mmio_base == 0u) return;
+
+    start = mmio_base & PAGE_MASK;
+    end = (mmio_base + E1000_MMIO_MAP_SIZE + PAGE_SIZE - 1u) & PAGE_MASK;
+    if (end <= start) return;
+
+    vmm_map_range(start, start, end - start, VMM_RW);
 }
 
 static uint32_t e1000_read(e1000_device_t *edev, uint32_t reg) {
@@ -262,6 +276,15 @@ static void e1000_poll_rx_device(e1000_device_t *edev) {
     }
 }
 
+void e1000_poll(void) {
+    uint32_t i;
+    for (i = 0; i < e1000_count; i++) {
+        e1000_device_t *edev = &e1000_devices[i];
+        if (!edev->present || !edev->initialized) continue;
+        e1000_poll_rx_device(edev);
+    }
+}
+
 static void e1000_irq(registers_t *regs) {
     uint32_t i;
     (void)regs;
@@ -277,6 +300,7 @@ static void e1000_irq(registers_t *regs) {
 static int e1000_hw_init(e1000_device_t *edev, uint32_t index) {
     uint32_t i;
     if (edev->mmio_base == 0u) return -1;
+    e1000_map_mmio(edev->mmio_base);
     edev->mmio = (volatile uint32_t *)(uintptr_t)edev->mmio_base;
     edev->rx_desc = e1000_rx_descs[index];
     edev->tx_desc = e1000_tx_descs[index];
@@ -414,8 +438,8 @@ void e1000_init(void) {
 
                 {
                     uint16_t device = pci_read16((uint8_t)bus, (uint8_t)dev, (uint8_t)func, PCI_OFFSET_DEVICE);
-                    uint8_t class_code = pci_read8((uint8_t)bus, (uint8_t)dev, (uint8_t)func, PCI_OFFSET_CLASS + 2u);
-                    uint8_t subclass = pci_read8((uint8_t)bus, (uint8_t)dev, (uint8_t)func, PCI_OFFSET_CLASS + 1u);
+                    uint8_t class_code = pci_read8((uint8_t)bus, (uint8_t)dev, (uint8_t)func, PCI_OFFSET_CLASS);
+                    uint8_t subclass = pci_read8((uint8_t)bus, (uint8_t)dev, (uint8_t)func, PCI_OFFSET_SUBCLASS);
                     if (e1000_supported_device(vendor, device, class_code, subclass)) {
                         e1000_register((uint8_t)bus, (uint8_t)dev, (uint8_t)func, device);
                         if (e1000_count >= E1000_MAX_DEVICES) return;

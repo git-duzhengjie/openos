@@ -7,6 +7,7 @@
 #include "../include/input_buffer.h"
 #include "../include/vga.h"
 #include "../include/serial.h"
+#include "../include/gui.h"
 #include "../include/devmgr.h"
 #include "../fs/vfs.h"
 
@@ -157,6 +158,7 @@ static int console_write(chardev_t *dev, const void *buf, uint32_t count) {
 
     for (i = 0; i < count; i++) {
         vga_putc(in[i]);
+        gui_terminal_putc(in[i]);
         if (in[i] == '\n') {
             serial_putc('\r');
         }

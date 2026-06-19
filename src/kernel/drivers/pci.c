@@ -126,9 +126,9 @@ static uint32_t pci_collect_snapshot(pci_snapshot_entry_t *out, uint32_t max) {
                     entry->func = (uint8_t)func;
                     entry->vendor = vendor;
                     entry->device = pci_read16((uint8_t)bus, (uint8_t)dev, (uint8_t)func, PCI_OFFSET_DEVICE);
-                    entry->class_code = pci_read8((uint8_t)bus, (uint8_t)dev, (uint8_t)func, PCI_OFFSET_CLASS + 2);
-                    entry->sub_class = pci_read8((uint8_t)bus, (uint8_t)dev, (uint8_t)func, PCI_OFFSET_CLASS + 1);
-                    entry->prog_if = pci_read8((uint8_t)bus, (uint8_t)dev, (uint8_t)func, PCI_OFFSET_CLASS + 0);
+                    entry->class_code = pci_read8((uint8_t)bus, (uint8_t)dev, (uint8_t)func, PCI_OFFSET_CLASS);
+                    entry->sub_class = pci_read8((uint8_t)bus, (uint8_t)dev, (uint8_t)func, PCI_OFFSET_SUBCLASS);
+                    entry->prog_if = pci_read8((uint8_t)bus, (uint8_t)dev, (uint8_t)func, PCI_OFFSET_PROGIF);
                     pci_make_name(entry->name, entry->bus, entry->dev, entry->func);
                 }
 
@@ -214,9 +214,9 @@ void pci_scan_all(void) {
                 }
 
                 uint16_t device = pci_read16((uint8_t)bus, (uint8_t)dev, (uint8_t)func, PCI_OFFSET_DEVICE);
-                uint8_t class_code = pci_read8((uint8_t)bus, (uint8_t)dev, (uint8_t)func, PCI_OFFSET_CLASS + 2);
-                uint8_t sub_class = pci_read8((uint8_t)bus, (uint8_t)dev, (uint8_t)func, PCI_OFFSET_CLASS + 1);
-                uint8_t prog_if = pci_read8((uint8_t)bus, (uint8_t)dev, (uint8_t)func, PCI_OFFSET_CLASS + 0);
+                uint8_t class_code = pci_read8((uint8_t)bus, (uint8_t)dev, (uint8_t)func, PCI_OFFSET_CLASS);
+                uint8_t sub_class = pci_read8((uint8_t)bus, (uint8_t)dev, (uint8_t)func, PCI_OFFSET_SUBCLASS);
+                uint8_t prog_if = pci_read8((uint8_t)bus, (uint8_t)dev, (uint8_t)func, PCI_OFFSET_PROGIF);
 
                 serial_write_hex(bus);
                 serial_write("  ");

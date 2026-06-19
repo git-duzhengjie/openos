@@ -19,6 +19,12 @@
 #define NULL ((void*)0)
 #endif
 
+static int vfs_callback_is_sane(const void *fn) {
+    uint32_t addr = (uint32_t)fn;
+    /* Kernel callbacks must never be tiny integer values such as fd=3. */
+    return addr >= 0x00100000u;
+}
+
 /* ---- 全局状态 ---- */
 static dentry_t *root_dentry;
 static inode_t  *root_inode;
@@ -884,7 +890,21 @@ static void vfs_file_put(file_t *f) {
         f->ref_count--;
         return;
     }
-    if (f->ops && f->ops->close) f->ops->close(f);
+    if (f->ops && f->ops->close) {
+        if (!vfs_callback_is_sane((const void *)f->ops->close)) {
+            serial_write("[VFS] bad close callback f=");
+            serial_write_hex((uint32_t)f);
+            serial_write(" inode=");
+            serial_write_hex((uint32_t)f->inode);
+            serial_write(" ops=");
+            serial_write_hex((uint32_t)f->ops);
+            serial_write(" close=");
+            serial_write_hex((uint32_t)f->ops->close);
+            serial_write("\n");
+        } else {
+            f->ops->close(f);
+        }
+    }
     pmm_free_page(f);
 }
 
@@ -1145,6 +1165,20 @@ int vfs_open(const char *path, int flags, int mode) {
     f->ops = d->inode->ops;
 
     if (f->ops && f->ops->open) {
+        if (!vfs_callback_is_sane((const void *)f->ops->open)) {
+            serial_write("[VFS] bad open callback path=");
+            serial_write((char *)path);
+            serial_write(" inode=");
+            serial_write_hex((uint32_t)f->inode);
+            serial_write(" ops=");
+            serial_write_hex((uint32_t)f->ops);
+            serial_write(" open=");
+            serial_write_hex((uint32_t)f->ops->open);
+            serial_write("\n");
+            vfs_put_file(fd, NULL);
+            pmm_free_page(f);
+            return -1;
+        }
         if (f->ops->open(f) < 0) {
             vfs_put_file(fd, NULL);
             pmm_free_page(f);

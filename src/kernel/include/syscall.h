@@ -113,6 +113,7 @@
 #define SYS_SANDBOX_SET  313
 #define SYS_AI_REQUEST   314
 #define SYS_NETDEVCTL    315
+#define SYS_DNSLOOKUP    316
 
 #define OPENOS_CAP_SETUID    (1u << 0)
 #define OPENOS_CAP_SETGID    (1u << 1)

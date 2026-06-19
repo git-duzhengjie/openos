@@ -18,8 +18,11 @@ typedef enum {
     PROC_DEAD     = 0x06
 } process_state_t;
 
-/* 栈大小 (8KB per thread) */
-#define PROC_KERNEL_STACK_SIZE 8192
+/* 栈大小 (16KB per thread)
+ * User exec/loading paths can have relatively deep kernel call chains and
+ * several temporary metadata frames.  Keep the synthetic scheduler frame well
+ * away from those stack frames. */
+#define PROC_KERNEL_STACK_SIZE (16 * 1024)
 #define PROC_USER_STACK_SIZE    (2 * 1024 * 1024)  /* 2MB 用户栈 */
 
 /* 最大进程/线程数 */
@@ -155,6 +158,9 @@ thread_t *thread_create(uint32_t pid, const char *name,
 thread_t *thread_create_sized(uint32_t pid, const char *name,
                               uint32_t entry, uint32_t stack_top,
                               uint32_t stack_size);
+thread_t *thread_create_sized_arg(uint32_t pid, const char *name,
+                                  uint32_t entry, uint32_t stack_top,
+                                  uint32_t stack_size, uint32_t arg);
 void proc_mark_exit(uint32_t pid, int code);
 process_t *proc_find(uint32_t pid);
 void proc_reap_zombie(process_t *proc);

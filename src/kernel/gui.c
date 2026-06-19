@@ -48,6 +48,7 @@ static int gui_append_uint(char *dst, int pos, int cap, uint32_t v);
 static void gui_format_ipv4_inline(uint32_t ip, char *buf, int cap);
 static void gui_format_mac_inline(const uint8_t mac[6], char *buf, int cap);
 static int gui_settings_append_field(char *dst, int pos, int cap, i18n_key_t key, const char *value);
+void gui_terminal_redraw(void);
 
 static gui_system_t g_gui;
 static gui_accel_info_t g_gui_accel;
@@ -595,6 +596,21 @@ static void network_on_close(gui_window_t *win, void *ud) {
     g_network_win = 0;
 }
 
+static int gui_get_primary_net_info(net_device_info_t *out) {
+    net_device_t *dev;
+
+    if (!out) {
+        return -1;
+    }
+
+    dev = net_get_default_device();
+    if (dev && net_get_device_info_by_name(dev->name, out) == 0) {
+        return 0;
+    }
+
+    return net_get_device_info(0, out);
+}
+
 static void gui_network_build(int show_notice) {
     const font_renderer_t *font = font_get_default();
     int line_h = (int)font_get_line_height(font);
@@ -659,7 +675,7 @@ static void gui_network_build(int show_notice) {
         y += row_h;
     }
 
-    has_net = (net_get_device_info(0, &net_info) == 0);
+    has_net = (gui_get_primary_net_info(&net_info) == 0);
     if (!has_net) {
         gui_add_label(g_network_win, x, y, win_w - margin * 2, line_h + 6, i18n_t(I18N_KEY_SETTINGS_NETWORK_NO_DEVICE));
     } else {
@@ -1582,6 +1598,10 @@ static void gui_draw_window(gui_window_t *w) {
             gui_draw_widget(&w->widgets[i]);
         }
         gui_clear_clip_rect();
+    }
+
+    if (w->flags & GUI_WINDOW_FLAG_TERMINAL) {
+        gui_terminal_redraw();
     }
 
     if ((w->flags & GUI_WINDOW_FLAG_RESIZABLE) && !(w->flags & GUI_WINDOW_FLAG_MAXIMIZED)) {
@@ -4289,7 +4309,7 @@ static gui_tray_network_kind_t gui_get_tray_network_state(int *ok) {
     net_device_info_t info;
     int connected;
     if (ok) *ok = 0;
-    if (net_get_device_info(0, &info) != 0) {
+    if (gui_get_primary_net_info(&info) != 0) {
         return GUI_TRAY_NETWORK_NONE;
     }
     connected = ((info.flags & NET_DEVICE_FLAG_UP) != 0) &&
@@ -4609,13 +4629,16 @@ static void gui_render_scene(void) {
     gui_draw_wallpaper();
     gui_desktop_draw();
     gui_draw_taskbar();
-    gui_desktop_draw_start_menu();
 
     for (i = 0; i < g_gui.window_count; i++) {
         uint32_t idx = g_gui.z_order[i];
         if (idx < GUI_MAX_WINDOWS) gui_draw_window(&g_gui.windows[idx]);
     }
-    gui_terminal_redraw();
+
+    /* Start menu is a desktop shell overlay.  It must stay above all normal
+     * windows regardless of window activation/z-order, while the context menu
+     * remains the topmost transient popup. */
+    gui_desktop_draw_start_menu();
     gui_ctxmenu_draw();
 }
 
@@ -4867,7 +4890,7 @@ static void network_refresh(gui_widget_t *w, void *ud) {
     net_device_info_t info;
     (void)w;
     (void)ud;
-    if (net_get_device_info(0, &info) == 0) net_refresh_device_status(info.name);
+    if (gui_get_primary_net_info(&info) == 0) net_refresh_device_status(info.name);
     gui_network_build(1);
 }
 
@@ -4875,7 +4898,7 @@ static void network_up(gui_widget_t *w, void *ud) {
     net_device_info_t info;
     (void)w;
     (void)ud;
-    if (net_get_device_info(0, &info) == 0) net_set_device_admin_up(info.name, 1);
+    if (gui_get_primary_net_info(&info) == 0) net_set_device_admin_up(info.name, 1);
     gui_network_build(1);
 }
 
@@ -4883,7 +4906,7 @@ static void network_down(gui_widget_t *w, void *ud) {
     net_device_info_t info;
     (void)w;
     (void)ud;
-    if (net_get_device_info(0, &info) == 0) net_set_device_admin_up(info.name, 0);
+    if (gui_get_primary_net_info(&info) == 0) net_set_device_admin_up(info.name, 0);
     gui_network_build(1);
 }
 

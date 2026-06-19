@@ -8,6 +8,7 @@
 #include "../include/serial.h"
 #include "../include/io.h"
 #include "../include/input_buffer.h"
+#include "../include/gui.h"
 
 #define KEYBOARD_DATA_PORT   0x60
 #define KEYBOARD_STATUS_PORT 0x64
@@ -76,6 +77,17 @@ static void keyboard_put_csi_number_tilde(const char *number) {
         input_putc(*number++);
     }
     input_putc('~');
+}
+
+static int keyboard_gui_post_if_captured(int key) {
+    if (!gui_should_capture_key_code(key)) return 0;
+    gui_post_key_code(key);
+    return 1;
+}
+
+static void keyboard_put_or_gui_key(int key) {
+    if (keyboard_gui_post_if_captured(key)) return;
+    input_putc((char)key);
 }
 
 static void keyboard_wait_input(void) {
@@ -179,18 +191,34 @@ static void keyboard_handle_extended(uint8_t sc, int release) {
         return;
     }
     switch (sc) {
-        case 0x48: keyboard_put_esc3('[', 'A', 0); break;
-        case 0x50: keyboard_put_esc3('[', 'B', 0); break;
-        case 0x4D: keyboard_put_esc3('[', 'C', 0); break;
-        case 0x4B: keyboard_put_esc3('[', 'D', 0); break;
-        case 0x52: keyboard_put_csi_tilde('2'); break;
-        case 0x53: keyboard_put_csi_tilde('3'); break;
-        case 0x47: keyboard_put_esc3('[', 'H', 0); break;
-        case 0x4F: keyboard_put_esc3('[', 'F', 0); break;
+        case 0x48:
+            if (!keyboard_gui_post_if_captured(GUI_KEY_UP)) keyboard_put_esc3('[', 'A', 0);
+            break;
+        case 0x50:
+            if (!keyboard_gui_post_if_captured(GUI_KEY_DOWN)) keyboard_put_esc3('[', 'B', 0);
+            break;
+        case 0x4D:
+            if (!keyboard_gui_post_if_captured(GUI_KEY_RIGHT)) keyboard_put_esc3('[', 'C', 0);
+            break;
+        case 0x4B:
+            if (!keyboard_gui_post_if_captured(GUI_KEY_LEFT)) keyboard_put_esc3('[', 'D', 0);
+            break;
+        case 0x52:
+            if (!keyboard_gui_post_if_captured(0)) keyboard_put_csi_tilde('2');
+            break;
+        case 0x53:
+            if (!keyboard_gui_post_if_captured(GUI_KEY_DELETE)) keyboard_put_csi_tilde('3');
+            break;
+        case 0x47:
+            if (!keyboard_gui_post_if_captured(GUI_KEY_HOME)) keyboard_put_esc3('[', 'H', 0);
+            break;
+        case 0x4F:
+            if (!keyboard_gui_post_if_captured(GUI_KEY_END)) keyboard_put_esc3('[', 'F', 0);
+            break;
         case 0x49: keyboard_put_csi_tilde('5'); break;
         case 0x51: keyboard_put_csi_tilde('6'); break;
-        case 0x1C: input_putc(0x0A); break;
-        case 0x35: input_putc('/'); break;
+        case 0x1C: keyboard_put_or_gui_key(GUI_KEY_ENTER); break;
+        case 0x35: keyboard_put_or_gui_key('/'); break;
         default: break;
     }
 }
@@ -272,7 +300,7 @@ static void keyboard_handler(registers_t *regs) {
         }
         if (c == 4) {
             input_mark_eof();
-        } else {
+        } else if (!keyboard_gui_post_if_captured((int)c)) {
             input_putc(c);
         }
     }
