@@ -107,6 +107,18 @@ typedef struct net_device_info {
 #define NET_DEVICE_FLAG_DHCP    0x00000008u
 #define NET_DEVICE_FLAG_DEFAULT 0x00000010u
 #define NET_DEVICE_FLAG_STATIC  0x00000020u
+#define NET_DEVICE_FLAG_WIRED   0x00000040u
+#define NET_DEVICE_FLAG_WIRELESS 0x00000080u
+
+#define NET_WIFI_MAX_RESULTS 8
+#define NET_WIFI_SSID_MAX    32
+
+typedef struct net_wifi_network_info {
+    char ssid[NET_WIFI_SSID_MAX];
+    uint32_t signal_percent;
+    uint8_t secured;
+    uint8_t connected;
+} net_wifi_network_info_t;
 
 #define NETDEV_CTL_SET_DOWN    0u
 #define NETDEV_CTL_SET_UP      1u
@@ -143,6 +155,7 @@ net_device_t *net_get_device_by_index(uint32_t index);
 net_device_t *net_find_device(const char *name);
 int net_get_device_info(uint32_t index, net_device_info_t *out);
 int net_get_device_info_by_name(const char *name, net_device_info_t *out);
+uint32_t net_scan_wifi(net_wifi_network_info_t *out_list, uint32_t max_results);
 int net_set_device_admin_up(const char *name, int up);
 int net_refresh_device_status(const char *name);
 void net_set_default_ipv4(uint32_t ip, uint32_t netmask, uint32_t gateway, uint32_t dns);

@@ -37,6 +37,8 @@ static void gui_about_open(void);
 static void gui_recycle_open(void);
 static void gui_settings_open(void);
 static void gui_network_open(void);
+static void gui_wifi_open(void);
+static int  gui_tray_network_is_wireless(void);
 static void gui_notif_open(void);
 static void gui_launcher_scan_bin(uint32_t start_index);
 static void gui_notify(const char *text);
@@ -50,6 +52,7 @@ static int gui_settings_append_field(char *dst, int pos, int cap, i18n_key_t key
 static gui_system_t g_gui;
 static gui_accel_info_t g_gui_accel;
 static gui_rect_t g_network_widget_rect;
+static gui_window_t *g_wifi_win;
 
 #ifndef GUI_DEBUG_LOG
 #define GUI_DEBUG_LOG 0
@@ -3235,7 +3238,11 @@ static int gui_desktop_handle_click(int x, int y) {
     }
     if (g_network_widget_rect.w > 0 && g_network_widget_rect.h > 0 &&
         gui_rect_contains(&g_network_widget_rect, x, y)) {
-        gui_network_open();
+        if (gui_tray_network_is_wireless()) {
+            gui_wifi_open();
+        } else {
+            gui_network_open();
+        }
         return 1;
     }
     if (gui_rect_contains(&g_gui.desktop_start_button_rect, x, y)) {
@@ -4272,6 +4279,79 @@ static gui_rect_t gui_get_notification_widget_rect(const gui_rect_t *network_rec
     };
 }
 
+typedef enum gui_tray_network_kind {
+    GUI_TRAY_NETWORK_NONE = 0,
+    GUI_TRAY_NETWORK_WIRED,
+    GUI_TRAY_NETWORK_WIRELESS,
+} gui_tray_network_kind_t;
+
+static gui_tray_network_kind_t gui_get_tray_network_state(int *ok) {
+    net_device_info_t info;
+    int connected;
+    if (ok) *ok = 0;
+    if (net_get_device_info(0, &info) != 0) {
+        return GUI_TRAY_NETWORK_NONE;
+    }
+    connected = ((info.flags & NET_DEVICE_FLAG_UP) != 0) &&
+                ((info.flags & NET_DEVICE_FLAG_LINK_UP) != 0) &&
+                info.ip != 0;
+    if (ok) *ok = connected;
+    if (info.flags & NET_DEVICE_FLAG_WIRELESS) {
+        return GUI_TRAY_NETWORK_WIRELESS;
+    }
+    return GUI_TRAY_NETWORK_WIRED;
+}
+
+static int gui_tray_network_is_wireless(void) {
+    int ok;
+    return gui_get_tray_network_state(&ok) == GUI_TRAY_NETWORK_WIRELESS;
+}
+
+static void gui_draw_taskbar_network_error(int x, int y, uint32_t color) {
+    gui_raw_line(x, y, x + 6, y + 6, color);
+    gui_raw_line(x + 6, y, x, y + 6, color);
+}
+
+static void gui_draw_taskbar_network_icon(gui_rect_t net_rect) {
+    int gx = net_rect.x + (net_rect.w - 15) / 2;
+    int gy = net_rect.y + (net_rect.h - 12) / 2;
+    int ok = 0;
+    gui_tray_network_kind_t kind = gui_get_tray_network_state(&ok);
+    uint32_t nc = ok ? gui_rgb(120, 220, 255) : gui_rgb(255, 120, 120);
+    uint32_t dim = ok ? gui_rgb(75, 95, 125) : gui_rgb(125, 75, 75);
+
+    gui_raw_fill_rect(net_rect.x, net_rect.y, net_rect.w, net_rect.h,
+                      gui_taskbar_icon_hovered(net_rect) ? gui_rgb(48, 58, 78) : gui_rgb(36, 44, 60));
+    gui_raw_line(net_rect.x, net_rect.y, net_rect.x + net_rect.w - 1, net_rect.y, gui_rgb(80, 92, 120));
+    gui_raw_line(net_rect.x, net_rect.y + net_rect.h - 1, net_rect.x + net_rect.w - 1,
+                 net_rect.y + net_rect.h - 1, gui_rgb(12, 16, 24));
+    gui_raw_line(net_rect.x, net_rect.y, net_rect.x, net_rect.y + net_rect.h - 1, gui_rgb(80, 92, 120));
+    gui_raw_line(net_rect.x + net_rect.w - 1, net_rect.y, net_rect.x + net_rect.w - 1,
+                 net_rect.y + net_rect.h - 1, gui_rgb(12, 16, 24));
+
+    if (kind == GUI_TRAY_NETWORK_WIRELESS) {
+        gui_raw_line(gx + 1, gy + 8, gx + 7, gy + 2, dim);
+        gui_raw_line(gx + 13, gy + 8, gx + 7, gy + 2, dim);
+        gui_raw_line(gx + 3, gy + 10, gx + 7, gy + 6, nc);
+        gui_raw_line(gx + 11, gy + 10, gx + 7, gy + 6, nc);
+        gui_raw_fill_rect(gx + 6, gy + 10, 3, 2, nc);
+    } else if (kind == GUI_TRAY_NETWORK_WIRED) {
+        gui_raw_fill_rect(gx + 2, gy + 2, 11, 7, nc);
+        gui_raw_fill_rect(gx + 5, gy + 9, 5, 2, nc);
+        gui_raw_line(gx + 1, gy + 1, gx + 13, gy + 1, dim);
+        gui_raw_line(gx + 1, gy + 1, gx + 1, gy + 9, dim);
+        gui_raw_line(gx + 13, gy + 1, gx + 13, gy + 9, dim);
+    } else {
+        gui_raw_fill_rect(gx, gy + 8, 3, 4, dim);
+        gui_raw_fill_rect(gx + 6, gy + 5, 3, 7, dim);
+        gui_raw_fill_rect(gx + 12, gy + 2, 3, 10, dim);
+    }
+    if (!ok) {
+        gui_draw_taskbar_network_error(net_rect.x + net_rect.w - 9, net_rect.y + 4, gui_rgb(255, 100, 100));
+    }
+    g_network_widget_rect = net_rect;
+}
+
 static void gui_draw_taskbar(void) {
     uint32_t i;
     gui_taskbar_layout_t layout;
@@ -4347,26 +4427,7 @@ static void gui_draw_taskbar(void) {
                      clock_rect.y + clock_rect.h - 1, gui_rgb(12, 16, 24));
         gui_draw_text(clock_rect.x + padding_x, text_y, clk, gui_rgb(220, 240, 255));
 
-        {
-            int gx = net_rect.x + (net_rect.w - 15) / 2;
-            int gy = net_rect.y + (net_rect.h - 12) / 2;
-            uint32_t nc = gui_rgb(120, 220, 255);
-            uint32_t dim = gui_rgb(75, 95, 125);
-            gui_raw_fill_rect(net_rect.x, net_rect.y, net_rect.w, net_rect.h,
-                              gui_taskbar_icon_hovered(net_rect) ? gui_rgb(48, 58, 78) : gui_rgb(36, 44, 60));
-            gui_raw_line(net_rect.x, net_rect.y, net_rect.x + net_rect.w - 1, net_rect.y, gui_rgb(80, 92, 120));
-            gui_raw_line(net_rect.x, net_rect.y + net_rect.h - 1, net_rect.x + net_rect.w - 1,
-                         net_rect.y + net_rect.h - 1, gui_rgb(12, 16, 24));
-            gui_raw_line(net_rect.x, net_rect.y, net_rect.x, net_rect.y + net_rect.h - 1, gui_rgb(80, 92, 120));
-            gui_raw_line(net_rect.x + net_rect.w - 1, net_rect.y, net_rect.x + net_rect.w - 1,
-                         net_rect.y + net_rect.h - 1, gui_rgb(12, 16, 24));
-            gui_raw_fill_rect(gx, gy + 8, 3, 4, nc);
-            gui_raw_fill_rect(gx + 6, gy + 5, 3, 7, nc);
-            gui_raw_fill_rect(gx + 12, gy + 2, 3, 10, nc);
-            gui_raw_line(gx + 1, gy + 7, gx + 7, gy + 4, dim);
-            gui_raw_line(gx + 7, gy + 4, gx + 13, gy + 1, dim);
-            g_network_widget_rect = net_rect;
-        }
+        gui_draw_taskbar_network_icon(net_rect);
 
         {
             char cbuf[8];
@@ -4975,6 +5036,60 @@ static void notif_on_close_btn(gui_widget_t *w, void *ud) {
 }
 
 static void notif_on_clear(gui_widget_t *w, void *ud);
+
+static void wifi_on_close(gui_window_t *win, void *ud) {
+    (void)win;
+    (void)ud;
+    g_wifi_win = 0;
+}
+
+static void gui_wifi_open(void) {
+    net_wifi_network_info_t nets[NET_WIFI_MAX_RESULTS];
+    uint32_t count;
+    uint32_t i;
+    int margin = (int)font_scale_value(16);
+    int line_h = (int)font_get_line_height(font_get_default()) + 6;
+    int row_h = line_h + 8;
+    int win_w = (int)font_scale_value(420);
+    int win_h = (int)font_scale_value(260);
+    int x;
+    int y;
+
+    if (win_w < 360) win_w = 360;
+    if (win_h < 220) win_h = 220;
+    if (g_wifi_win) {
+        gui_destroy_window(g_wifi_win);
+        g_wifi_win = 0;
+    }
+    g_wifi_win = gui_create_window(230, 120, win_w, win_h, i18n_t(I18N_KEY_WIFI_AVAILABLE_NETWORKS));
+    if (!g_wifi_win) return;
+    gui_window_set_on_close(g_wifi_win, wifi_on_close, 0);
+
+    x = margin;
+    y = 42;
+    count = net_scan_wifi(nets, NET_WIFI_MAX_RESULTS);
+    if (count == 0) {
+        gui_add_label(g_wifi_win, x, y, win_w - margin * 2, line_h + 6, i18n_t(I18N_KEY_WIFI_NO_NETWORKS));
+        return;
+    }
+
+    for (i = 0; i < count && i < NET_WIFI_MAX_RESULTS; i++) {
+        char line[96];
+        int pos = 0;
+        const char *ssid = nets[i].ssid[0] ? nets[i].ssid : "Wi-Fi";
+        const char *state = nets[i].connected ? i18n_t(I18N_KEY_WIFI_CONNECTED) :
+                            (nets[i].secured ? i18n_t(I18N_KEY_WIFI_SECURED) : i18n_t(I18N_KEY_WIFI_OPEN));
+        pos = fp_str_append(line, pos, sizeof(line), ssid);
+        pos = fp_str_append(line, pos, sizeof(line), "  ");
+        pos = gui_append_uint(line, pos, sizeof(line), nets[i].signal_percent);
+        pos = fp_str_append(line, pos, sizeof(line), "%  ");
+        pos = fp_str_append(line, pos, sizeof(line), state);
+        (void)pos;
+        gui_add_label(g_wifi_win, x, y, win_w - margin * 2, line_h + 6, line);
+        y += row_h;
+        if (y + line_h > win_h - margin) break;
+    }
+}
 
 static void gui_notif_open(void) {
     int y;

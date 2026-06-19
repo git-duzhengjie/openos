@@ -98,6 +98,11 @@ static const char *const k_strings_en[I18N_KEY_COUNT] = {
     [I18N_KEY_SETTINGS_NETWORK_STATIC]    = "Static",
     [I18N_KEY_SETTINGS_NETWORK_NONE]      = "None",
     [I18N_KEY_SETTINGS_NETWORK_APPLY_STATIC] = "Apply static",
+    [I18N_KEY_WIFI_AVAILABLE_NETWORKS]    = "Available wireless networks",
+    [I18N_KEY_WIFI_NO_NETWORKS]           = "No available wireless networks",
+    [I18N_KEY_WIFI_CONNECTED]             = "Connected",
+    [I18N_KEY_WIFI_SECURED]               = "Secured",
+    [I18N_KEY_WIFI_OPEN]                  = "Open",
     [I18N_KEY_SETTINGS_APPLIED]           = "Settings applied",
 
     /* recycle */
@@ -252,6 +257,11 @@ static const char *const k_strings_zh[I18N_KEY_COUNT] = {
     [I18N_KEY_SETTINGS_NETWORK_STATIC]    = "静态",
     [I18N_KEY_SETTINGS_NETWORK_NONE]      = "无",
     [I18N_KEY_SETTINGS_NETWORK_APPLY_STATIC] = "应用静态",
+    [I18N_KEY_WIFI_AVAILABLE_NETWORKS]    = "可用无线网络",
+    [I18N_KEY_WIFI_NO_NETWORKS]           = "未发现可用无线网络",
+    [I18N_KEY_WIFI_CONNECTED]             = "已连接",
+    [I18N_KEY_WIFI_SECURED]               = "加密",
+    [I18N_KEY_WIFI_OPEN]                  = "开放",
     [I18N_KEY_SETTINGS_APPLIED]           = "设置已应用",
 
     /* recycle */

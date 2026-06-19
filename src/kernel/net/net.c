@@ -1154,6 +1154,11 @@ static int net_fill_device_info(net_device_t *dev, net_device_info_t *out) {
     if (dev->link_up) out->flags |= NET_DEVICE_FLAG_LINK_UP;
     if (dev->config_mode == NET_CONFIG_MODE_DHCP) out->flags |= NET_DEVICE_FLAG_DHCP;
     if (dev->config_mode == NET_CONFIG_MODE_STATIC) out->flags |= NET_DEVICE_FLAG_STATIC;
+    if (dev->name[0] == 'w' || dev->name[0] == 'W') {
+        out->flags |= NET_DEVICE_FLAG_WIRELESS;
+    } else {
+        out->flags |= NET_DEVICE_FLAG_WIRED;
+    }
     if (dev == default_dev) out->flags |= NET_DEVICE_FLAG_DEFAULT;
     out->ip = dev->ip;
     out->netmask = dev->netmask;
@@ -1173,6 +1178,12 @@ int net_get_device_info(uint32_t index, net_device_info_t *out) {
 
 int net_get_device_info_by_name(const char *name, net_device_info_t *out) {
     return net_fill_device_info(net_find_device(name), out);
+}
+
+uint32_t net_scan_wifi(net_wifi_network_info_t *out_list, uint32_t max_results) {
+    (void)out_list;
+    (void)max_results;
+    return 0;
 }
 
 int net_set_device_admin_up(const char *name, int up) {
