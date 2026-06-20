@@ -12,6 +12,9 @@ static volatile int g_thread_value = 0;
 static openos_pthread_mutex_t g_sync_mutex = 0;
 static openos_pthread_cond_t g_sync_cond = 0;
 static volatile int g_sync_ready = 0;
+static volatile int g_sync_broadcast_waiting = 0;
+static volatile int g_sync_broadcast_released = 0;
+static volatile int g_sync_broadcast_failed = 0;
 static volatile int g_tls_done = 0;
 static volatile int g_tls_ok = 0;
 static volatile unsigned int g_futex_word = 0;
@@ -857,6 +860,26 @@ static void sync_worker(void *arg)
     openos_thread_exit(0);
 }
 
+static void sync_broadcast_worker(void *arg)
+{
+    (void)arg;
+    if (openos_pthread_mutex_lock(&g_sync_mutex) != 0) {
+        g_sync_broadcast_failed = 1;
+        openos_thread_exit(1);
+    }
+    g_sync_broadcast_waiting++;
+    while (!g_sync_ready) {
+        if (openos_pthread_cond_wait(&g_sync_cond, &g_sync_mutex) != 0) {
+            g_sync_broadcast_failed = 1;
+            break;
+        }
+    }
+    if (!g_sync_broadcast_failed)
+        g_sync_broadcast_released++;
+    openos_pthread_mutex_unlock(&g_sync_mutex);
+    openos_thread_exit(g_sync_broadcast_failed ? 1 : 0);
+}
+
 static void tls_worker(void *arg)
 {
     int *worker_tls = (int *)arg;
@@ -893,7 +916,17 @@ static int test_tls(void)
 static int test_pthread_sync(void)
 {
     openos_pthread_t tid;
+    openos_pthread_t tid2;
     int loops = 0;
+
+    if (openos_pthread_mutex_lock(0) >= 0)
+        return CAP_FAIL;
+    if (openos_pthread_cond_wait(0, 0) >= 0)
+        return CAP_FAIL;
+    if (openos_pthread_cond_signal(0) >= 0)
+        return CAP_FAIL;
+    if (openos_pthread_cond_broadcast(0) >= 0)
+        return CAP_FAIL;
 
     g_sync_ready = 0;
     if (openos_pthread_mutex_init(&g_sync_mutex) != 0)
@@ -926,7 +959,54 @@ static int test_pthread_sync(void)
     (void)tid;
     openos_pthread_cond_destroy(&g_sync_cond);
     openos_pthread_mutex_destroy(&g_sync_mutex);
-    return g_sync_ready == 1 ? CAP_PASS : CAP_FAIL;
+    if (g_sync_ready != 1)
+        return CAP_FAIL;
+
+    g_sync_ready = 0;
+    g_sync_broadcast_waiting = 0;
+    g_sync_broadcast_released = 0;
+    g_sync_broadcast_failed = 0;
+    if (openos_pthread_mutex_init(&g_sync_mutex) != 0)
+        return CAP_FAIL;
+    if (openos_pthread_cond_init(&g_sync_cond) != 0) {
+        openos_pthread_mutex_destroy(&g_sync_mutex);
+        return CAP_FAIL;
+    }
+    if (openos_pthread_create(&tid, sync_broadcast_worker, 0) != 0 ||
+        openos_pthread_create(&tid2, sync_broadcast_worker, 0) != 0) {
+        openos_pthread_cond_destroy(&g_sync_cond);
+        openos_pthread_mutex_destroy(&g_sync_mutex);
+        return CAP_FAIL;
+    }
+    loops = 0;
+    while (g_sync_broadcast_waiting < 2 && loops++ < 100000)
+        openos_yield();
+    if (g_sync_broadcast_waiting != 2) {
+        openos_pthread_cond_destroy(&g_sync_cond);
+        openos_pthread_mutex_destroy(&g_sync_mutex);
+        return CAP_FAIL;
+    }
+    if (openos_pthread_mutex_lock(&g_sync_mutex) != 0) {
+        openos_pthread_cond_destroy(&g_sync_cond);
+        openos_pthread_mutex_destroy(&g_sync_mutex);
+        return CAP_FAIL;
+    }
+    g_sync_ready = 1;
+    if (openos_pthread_cond_broadcast(&g_sync_cond) != 0) {
+        openos_pthread_mutex_unlock(&g_sync_mutex);
+        openos_pthread_cond_destroy(&g_sync_cond);
+        openos_pthread_mutex_destroy(&g_sync_mutex);
+        return CAP_FAIL;
+    }
+    openos_pthread_mutex_unlock(&g_sync_mutex);
+    loops = 0;
+    while (g_sync_broadcast_released < 2 && loops++ < 100000)
+        openos_yield();
+    (void)tid2;
+    if (openos_pthread_cond_destroy(&g_sync_cond) != 0 ||
+        openos_pthread_mutex_destroy(&g_sync_mutex) != 0)
+        return CAP_FAIL;
+    return (!g_sync_broadcast_failed && g_sync_broadcast_released == 2) ? CAP_PASS : CAP_FAIL;
 }
 
 static int test_thread(void)

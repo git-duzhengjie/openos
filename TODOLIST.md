@@ -430,6 +430,7 @@
     - [√] 已补充 `/bin/chromiumcaptest` semaphore 生产者/消费者同步验收，覆盖非法句柄、非法初始值、阻塞等待、post 唤醒和 destroy 后失效
   - [ ] 条件变量、mutex、semaphore 压测，确保可支撑 Chromium base::Thread / TaskRunner
     - [√] 已补充 pthread-like 用户态薄封装 `openos_pthread_*`，并在 `/bin/chromiumcaptest` 中增加 mutex/cond 同步验收
+    - [√] 已增强 mutex/cond 压测，覆盖非法句柄、单等待者 signal 和双等待者 broadcast 唤醒
   - [ ] 高精度单调时钟、定时器队列、睡眠唤醒精度改进
     - [√] 已新增 `SYS_CLOCK_GETTIME` / `OPENOS_CLOCK_MONOTONIC` 单调 timespec 接口，并接入 `/bin/chromiumcaptest` 验收
 - [ ] M4 进程、加载器与 IPC 能力增强
