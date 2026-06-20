@@ -513,14 +513,17 @@ typedef struct openos_gui_widget_request {
 
 static inline int openos_syscall3(int num, int a, int b, int c)
 {
-    int ret;
+    register int eax __asm__("eax") = num;
+    register int ebx __asm__("ebx") = a;
+    register int ecx __asm__("ecx") = b;
+    register int edx __asm__("edx") = c;
     __asm__ volatile(
         "int $0x80"
-        : "=a"(ret)
-        : "a"(num), "b"(a), "c"(b), "d"(c)
-        : "memory"
+        : "+a"(eax), "+b"(ebx), "+c"(ecx), "+d"(edx)
+        :
+        : "memory", "cc"
     );
-    return ret;
+    return eax;
 }
 
 static inline int openos_syscall0(int num)

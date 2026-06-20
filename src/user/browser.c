@@ -129,16 +129,30 @@ static int browser_fetch_http(const char *host, const char *path, char *out, int
         return -1;
     }
 
+    /* Copy the resolved address before making any further syscall.  Optimized
+     * builds must not depend on keeping the addrinfo pointer live across the
+     * inline syscall wrappers.
+     */
+    openos_sockaddr_in_t connect_addr;
+    unsigned int connect_addrlen = res->ai_addrlen;
+    if (!res->ai_addr || connect_addrlen > sizeof(connect_addr) || connect_addrlen == 0) {
+        openos_freeaddrinfo(res);
+        snprintf(out, out_size, "invalid DNS address");
+        return -1;
+    }
+    memset(&connect_addr, 0, sizeof(connect_addr));
+    memcpy(&connect_addr, res->ai_addr, connect_addrlen);
+    openos_freeaddrinfo(res);
+    res = 0;
+
     fd = openos_socket(OPENOS_AF_INET, OPENOS_SOCK_STREAM, 0);
     if (fd < 0) {
-        openos_freeaddrinfo(res);
         snprintf(out, out_size, "socket() failed");
         return -1;
     }
 
-    if (openos_connect(fd, res->ai_addr, res->ai_addrlen) < 0) {
+    if (openos_connect(fd, (openos_sockaddr_t *)&connect_addr, connect_addrlen) < 0) {
         openos_close(fd);
-        openos_freeaddrinfo(res);
         snprintf(out, out_size, "connect() failed");
         return -1;
     }
@@ -148,7 +162,6 @@ static int browser_fetch_http(const char *host, const char *path, char *out, int
              path, host);
     if (openos_send(fd, request, strlen(request), 0) < 0) {
         openos_close(fd);
-        openos_freeaddrinfo(res);
         snprintf(out, out_size, "send() failed");
         return -1;
     }
@@ -162,7 +175,6 @@ static int browser_fetch_http(const char *host, const char *path, char *out, int
     out[total] = 0;
 
     openos_close(fd);
-    openos_freeaddrinfo(res);
     return total > 0 ? 0 : -1;
 }
 
