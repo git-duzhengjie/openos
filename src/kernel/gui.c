@@ -6067,15 +6067,19 @@ static int browser_tls_append_bytes(uint8_t *buf, uint32_t cap, uint32_t *pos, c
 
 static int browser_tls_build_client_hello(const char *host, uint8_t *out, uint32_t cap) {
     static const uint8_t ciphers[] = {
-        0xc0, 0x2f,
-        0xc0, 0x30,
-        0x00, 0x9c,
-        0x00, 0x9d,
-        0x00, 0x2f
+        0xc0, 0x2f, /* TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256 */
+        0xc0, 0x30, /* TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384 */
+        0xc0, 0x13, /* TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA */
+        0xc0, 0x14, /* TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA */
+        0x00, 0x9c, /* TLS_RSA_WITH_AES_128_GCM_SHA256 */
+        0x00, 0x9d, /* TLS_RSA_WITH_AES_256_GCM_SHA384 */
+        0x00, 0x2f, /* TLS_RSA_WITH_AES_128_CBC_SHA */
+        0x00, 0xff  /* TLS_EMPTY_RENEGOTIATION_INFO_SCSV */
     };
     static const uint8_t groups[] = {0x00, 0x17, 0x00, 0x18, 0x00, 0x19};
     static const uint8_t ec_points[] = {0x00};
     static const uint8_t sigalgs[] = {0x04, 0x01, 0x05, 0x01, 0x02, 0x01, 0x04, 0x03, 0x05, 0x03};
+    static const uint8_t alpn_http11[] = {0x00, 0x08, 0x07, 'h', 't', 't', 'p', '/', '1', '.', '1'};
     uint32_t p = 0;
     uint32_t record_len_pos;
     uint32_t handshake_len_pos;
@@ -6137,10 +6141,23 @@ static int browser_tls_build_client_hello(const char *host, uint8_t *out, uint32
     if (browser_tls_append_u16(out, cap, &p, (uint16_t)sizeof(sigalgs)) != 0) return -1;
     if (browser_tls_append_bytes(out, cap, &p, sigalgs, sizeof(sigalgs)) != 0) return -1;
 
+    if (browser_tls_append_u16(out, cap, &p, 0x0010) != 0) return -1;
+    if (browser_tls_append_u16(out, cap, &p, (uint16_t)sizeof(alpn_http11)) != 0) return -1;
+    if (browser_tls_append_bytes(out, cap, &p, alpn_http11, sizeof(alpn_http11)) != 0) return -1;
+
+    if (browser_tls_append_u16(out, cap, &p, 0x0016) != 0) return -1;
+    if (browser_tls_append_u16(out, cap, &p, 0) != 0) return -1;
+
+    if (browser_tls_append_u16(out, cap, &p, 0x0017) != 0) return -1;
+    if (browser_tls_append_u16(out, cap, &p, 0) != 0) return -1;
+
+    if (browser_tls_append_u16(out, cap, &p, 0xff01) != 0) return -1;
+    if (browser_tls_append_u16(out, cap, &p, 1) != 0) return -1;
+    if (browser_tls_append_u8(out, cap, &p, 0) != 0) return -1;
+
     if (browser_tls_append_u16(out, cap, &p, 0x002b) != 0) return -1;
-    if (browser_tls_append_u16(out, cap, &p, 5) != 0) return -1;
-    if (browser_tls_append_u8(out, cap, &p, 4) != 0) return -1;
-    if (browser_tls_append_u16(out, cap, &p, 0x0304) != 0) return -1;
+    if (browser_tls_append_u16(out, cap, &p, 3) != 0) return -1;
+    if (browser_tls_append_u8(out, cap, &p, 2) != 0) return -1;
     if (browser_tls_append_u16(out, cap, &p, 0x0303) != 0) return -1;
 
     out[ext_len_pos] = (uint8_t)((p - ext_start) >> 8);
