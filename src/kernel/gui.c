@@ -28,6 +28,7 @@ static void gui_desktop_run_action(uint32_t action);
 static int  gui_taskbar_search_handle_key(int key);
 static int  gui_is_enter_key(int key);
 static int  browser_handle_address_enter(int key);
+static void browser_http_get_current(void);
 static int  browser_header_name_eq(const char *p, const char *name);
 static void gui_taskbar_search_open_result(uint32_t index);
 static int  gui_taskbar_search_result_index_at(int x, int y);
@@ -157,8 +158,10 @@ static int gui_desktop_handle_click(int x, int y);
 static void gui_launcher_init(void);
 static void gui_browser_open(void);
 #define GUI_BROWSER_CONTENT_LINES 12
+#define GUI_BROWSER_LINKS_MAX GUI_BROWSER_CONTENT_LINES
 static gui_widget_t *g_browser_address_box = 0;
 static gui_widget_t *g_browser_content_lines[GUI_BROWSER_CONTENT_LINES];
+static char g_browser_line_links[GUI_BROWSER_LINKS_MAX][128];
 static gui_widget_t *g_browser_status_label = 0;
 static gui_window_t *g_browser_win = 0;
 static int gui_terminal_point_to_cell(int x, int y, uint32_t *col, uint32_t *row);
@@ -5551,7 +5554,16 @@ static void browser_set_status(const char *text) {
 
 static void browser_clear_content(void) {
     uint32_t i;
-    for (i = 0; i < GUI_BROWSER_CONTENT_LINES; i++) browser_set_widget_text(g_browser_content_lines[i], "");
+    for (i = 0; i < GUI_BROWSER_CONTENT_LINES; i++) {
+        browser_set_widget_text(g_browser_content_lines[i], "");
+        g_browser_line_links[i][0] = '\0';
+        if (g_browser_content_lines[i]) {
+            g_browser_content_lines[i]->type = GUI_WIDGET_LABEL;
+            g_browser_content_lines[i]->on_click = 0;
+            g_browser_content_lines[i]->user_data = 0;
+            g_browser_content_lines[i]->fg_color = gui_rgb(20, 30, 45);
+        }
+    }
 }
 
 static int browser_copy_until(char *out, uint32_t cap, const char **pp, char stop) {
@@ -5759,6 +5771,179 @@ static int browser_response_is_html(char *response, const char *body) {
     return body && (browser_str_starts_ci(body, "<!doctype html") || browser_str_starts_ci(body, "<html"));
 }
 
+static void browser_copy_url(char *dst, uint32_t cap, const char *src) {
+    uint32_t i = 0;
+    if (!dst || cap == 0) return;
+    if (!src) src = "";
+    while (src[i] && i + 1u < cap) {
+        dst[i] = src[i];
+        i++;
+    }
+    dst[i] = '\0';
+}
+
+static void browser_current_origin(char *origin, uint32_t cap) {
+    char url[64];
+    char host[64];
+    char path[128];
+    uint16_t port;
+    int pos = 0;
+    uint32_t i;
+    char portbuf[8];
+    if (!origin || cap == 0) return;
+    origin[0] = '\0';
+    browser_copy_url(url, sizeof(url), g_browser_address_box ? g_browser_address_box->text : "http://example.com/");
+    if (browser_parse_url(url, host, sizeof(host), path, sizeof(path), &port) != 0) return;
+    pos = fp_str_append(origin, pos, (int)cap, "http://");
+    pos = fp_str_append(origin, pos, (int)cap, host);
+    if (port != 80u) {
+        for (i = 0; i < sizeof(portbuf); i++) portbuf[i] = '\0';
+        i = sizeof(portbuf) - 1u;
+        do {
+            portbuf[--i] = (char)('0' + (port % 10u));
+            port /= 10u;
+        } while (port && i > 0);
+        pos = fp_str_append(origin, pos, (int)cap, ":");
+        pos = fp_str_append(origin, pos, (int)cap, &portbuf[i]);
+    }
+    (void)path;
+}
+
+static void browser_resolve_link_url(const char *href, char *out, uint32_t cap) {
+    char origin[96];
+    int pos = 0;
+    if (!out || cap == 0) return;
+    out[0] = '\0';
+    if (!href || !*href || href[0] == '#' || browser_str_starts_ci(href, "mailto:")) return;
+    if (browser_str_starts_ci(href, "http://") || browser_str_starts_ci(href, "https://")) {
+        browser_copy_url(out, cap, href);
+        return;
+    }
+    browser_current_origin(origin, sizeof(origin));
+    if (!origin[0]) return;
+    pos = fp_str_append(out, pos, (int)cap, origin);
+    if (href[0] == '/') {
+        pos = fp_str_append(out, pos, (int)cap, href);
+    } else {
+        pos = fp_str_append(out, pos, (int)cap, "/");
+        pos = fp_str_append(out, pos, (int)cap, href);
+    }
+    (void)pos;
+}
+
+static const char *browser_find_attr_value(const char *tag, const char *attr) {
+    uint32_t attr_len = (uint32_t)strlen(attr);
+    const char *p = tag;
+    while (p && *p && *p != '>') {
+        if (browser_str_starts_ci(p, attr) && p[attr_len] == '=') {
+            p += attr_len + 1u;
+            if (*p == '\"' || *p == '\'') p++;
+            return p;
+        }
+        p++;
+    }
+    return 0;
+}
+
+static void browser_copy_attr(char *dst, uint32_t cap, const char *value) {
+    uint32_t i = 0;
+    if (!dst || cap == 0) return;
+    dst[0] = '\0';
+    if (!value) return;
+    while (value[i] && value[i] != '\"' && value[i] != '\'' && value[i] != '>' &&
+           value[i] != ' ' && value[i] != '\t' && i + 1u < cap) {
+        dst[i] = value[i];
+        i++;
+    }
+    dst[i] = '\0';
+}
+
+static void browser_extract_anchor_text(const char *start, const char *end, char *out, uint32_t cap) {
+    uint32_t n = 0;
+    int in_tag = 0;
+    if (!out || cap == 0) return;
+    out[0] = '\0';
+    while (start && start < end && *start && n + 1u < cap) {
+        char ch = *start++;
+        if (in_tag) {
+            if (ch == '>') in_tag = 0;
+            continue;
+        }
+        if (ch == '<') {
+            in_tag = 1;
+            continue;
+        }
+        if (ch == '&') ch = browser_decode_entity(&start);
+        if (ch == '\r' || ch == '\n' || ch == '\t') ch = ' ';
+        if ((unsigned char)ch < 32u) continue;
+        out[n++] = ch;
+    }
+    out[n] = '\0';
+}
+
+static void browser_link_on_click(gui_widget_t *w, void *ud) {
+    const char *url = (const char *)ud;
+    (void)w;
+    if (!url || !*url || !g_browser_address_box) return;
+    browser_set_widget_text(g_browser_address_box, url);
+    g_browser_address_box->cursor = (uint32_t)strlen(g_browser_address_box->text);
+    browser_http_get_current();
+}
+
+static void browser_set_line_link(uint32_t line, const char *label, const char *url) {
+    gui_widget_t *wg;
+    if (line >= GUI_BROWSER_LINKS_MAX) return;
+    wg = g_browser_content_lines[line];
+    browser_copy_url(g_browser_line_links[line], sizeof(g_browser_line_links[line]), url);
+    browser_set_widget_text(wg, label && *label ? label : url);
+    if (wg) {
+        wg->type = GUI_WIDGET_BUTTON;
+        wg->on_click = browser_link_on_click;
+        wg->user_data = (void *)g_browser_line_links[line];
+        wg->bg_color = gui_rgb(236, 238, 244);
+        wg->fg_color = gui_rgb(20, 90, 190);
+    }
+}
+
+static uint32_t browser_render_links(const char *html, uint32_t start_line) {
+    const char *p = html;
+    uint32_t line = start_line;
+    while (p && *p && line < GUI_BROWSER_CONTENT_LINES) {
+        const char *a = p;
+        const char *href_v;
+        const char *tag_end;
+        const char *close;
+        char href[128];
+        char url[128];
+        char label[64];
+        char display[64];
+        int pos = 0;
+        while (*a && !browser_str_starts_ci(a, "<a")) a++;
+        if (!*a) break;
+        tag_end = a;
+        while (*tag_end && *tag_end != '>') tag_end++;
+        if (*tag_end != '>') break;
+        href_v = browser_find_attr_value(a, "href");
+        if (!href_v || href_v > tag_end) {
+            p = tag_end + 1;
+            continue;
+        }
+        browser_copy_attr(href, sizeof(href), href_v);
+        browser_resolve_link_url(href, url, sizeof(url));
+        close = tag_end + 1;
+        while (*close && !browser_str_starts_ci(close, "</a")) close++;
+        browser_extract_anchor_text(tag_end + 1, close, label, sizeof(label));
+        if (url[0]) {
+            pos = fp_str_append(display, pos, sizeof(display), "> ");
+            pos = fp_str_append(display, pos, sizeof(display), label[0] ? label : url);
+            (void)pos;
+            browser_set_line_link(line++, display, url);
+        }
+        p = *close ? close + 3 : tag_end + 1;
+    }
+    return line;
+}
+
 static uint32_t browser_render_body_at(const char *body, uint32_t start_line) {
     if (!body || !*body) {
         if (start_line < GUI_BROWSER_CONTENT_LINES) browser_set_widget_text(g_browser_content_lines[start_line++], "HTTP response has no body.");
@@ -5826,6 +6011,7 @@ static uint32_t browser_render_response_summary(char *response, const char *body
     if (line < GUI_BROWSER_CONTENT_LINES) browser_set_widget_text(g_browser_content_lines[line++], "");
     if (browser_response_is_html(response, body)) {
         static char html_text[1024];
+        line = browser_render_links(body, line);
         browser_html_to_text(body, html_text, sizeof(html_text));
         return browser_render_body_at(html_text, line);
     }
