@@ -380,7 +380,7 @@
   - [√] 字体接口：字体枚举、字形查询、UTF-8/Unicode 文本测量、基础 fallback；新增 `SYS_FONT_QUERY` 与 `/bin/fontprobe` 验证
   - [√] 图形接口：framebuffer/窗口绘制、矩形裁剪、位图 blit、滚动、双缓冲；扩展 `SYS_GUI_DRAW` 支持 fill/text/blit/scroll/present，并由 `/bin/guiprobe` 验证
   - [√] 图片解码依赖评估：PNG/JPEG/GIF/WebP 可分阶段接入
-  - [ ] 文件与配置目录：缓存、cookie、证书、字体资源、下载目录
+  - [√] 文件与配置目录：缓存、cookie、证书、字体资源、下载目录；启动时创建 `/home/browser/{cache,cookies,certs,downloads}` 并在用户态暴露路径常量
 - [ ] 优先评估并移植 NetSurf 作为 OpenOS 第一代开源浏览器内核
   - [√] 阅读 NetSurf framebuffer frontend、libdom、libcss、hubbub、utils 等依赖结构
   - [ ] 先在宿主机完成最小 framebuffer frontend 构建验证

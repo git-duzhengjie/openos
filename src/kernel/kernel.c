@@ -773,6 +773,13 @@ void kernel_main(void) {
 
     /* Install the embedded user ELF into ramfs. */
     vfs_mkdir("/bin", 0755);
+    vfs_mkdir("/home", 0755);
+    vfs_mkdir("/home/browser", 0755);
+    vfs_mkdir("/home/browser/cache", 0755);
+    vfs_mkdir("/home/browser/cookies", 0755);
+    vfs_mkdir("/home/browser/certs", 0755);
+    vfs_mkdir("/home/browser/downloads", 0755);
+    serial_write("[OK] Browser profile directories\n");
 
     fd = vfs_open("/bin/hello", O_CREAT | O_RDWR, 0755);
     if (fd >= 0) {
