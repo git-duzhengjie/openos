@@ -424,6 +424,7 @@
   - [ ] 用户态线程 TLS / thread-local storage 基础 ABI
   - [ ] futex wait/wake 语义稳定化，补齐超时、唤醒数量和错误码
   - [ ] 条件变量、mutex、semaphore 压测，确保可支撑 Chromium base::Thread / TaskRunner
+    - [√] 已补充 pthread-like 用户态薄封装 `openos_pthread_*`，并在 `/bin/chromiumcaptest` 中增加 mutex/cond 同步验收
   - [ ] 高精度单调时钟、定时器队列、睡眠唤醒精度改进
 - [ ] M4 进程、加载器与 IPC 能力增强
   - [ ] 稳定 fork/exec/spawn 与 fd/env/argv 继承语义

@@ -442,6 +442,10 @@ typedef int openos_cond_t;
 typedef int openos_mq_t;
 typedef int openos_shm_t;
 typedef int openos_eventfd_t;
+
+typedef openos_thread_t openos_pthread_t;
+typedef openos_mutex_t openos_pthread_mutex_t;
+typedef openos_cond_t openos_pthread_cond_t;
 typedef struct openos_service_channel {
     int client_fd;
     int server_fd;
@@ -1051,6 +1055,59 @@ static inline int openos_futex_wait(volatile unsigned int *uaddr, unsigned int e
 static inline int openos_futex_wake(volatile unsigned int *uaddr, unsigned int max_wake)
 {
     return openos_syscall_result(openos_syscall2(SYS_FUTEX_WAKE, (int)uaddr, (int)max_wake));
+}
+
+static inline int openos_pthread_create(openos_pthread_t *thread,
+                                        openos_thread_start_t start_routine,
+                                        void *arg)
+{
+    return openos_thread_create(thread, start_routine, arg);
+}
+
+static inline int openos_pthread_mutex_init(openos_pthread_mutex_t *mutex)
+{
+    return openos_mutex_init(mutex);
+}
+
+static inline int openos_pthread_mutex_lock(openos_pthread_mutex_t *mutex)
+{
+    return openos_mutex_lock(mutex);
+}
+
+static inline int openos_pthread_mutex_unlock(openos_pthread_mutex_t *mutex)
+{
+    return openos_mutex_unlock(mutex);
+}
+
+static inline int openos_pthread_mutex_destroy(openos_pthread_mutex_t *mutex)
+{
+    return openos_mutex_destroy(mutex);
+}
+
+static inline int openos_pthread_cond_init(openos_pthread_cond_t *cond)
+{
+    return openos_cond_init(cond);
+}
+
+static inline int openos_pthread_cond_wait(openos_pthread_cond_t *cond,
+                                           openos_pthread_mutex_t *mutex)
+{
+    return openos_cond_wait(cond, mutex);
+}
+
+static inline int openos_pthread_cond_signal(openos_pthread_cond_t *cond)
+{
+    return openos_cond_signal(cond);
+}
+
+static inline int openos_pthread_cond_broadcast(openos_pthread_cond_t *cond)
+{
+    return openos_cond_broadcast(cond);
+}
+
+static inline int openos_pthread_cond_destroy(openos_pthread_cond_t *cond)
+{
+    return openos_cond_destroy(cond);
 }
 
 static inline int openos_mq_create(openos_mq_t *mq)

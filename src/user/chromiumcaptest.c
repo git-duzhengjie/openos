@@ -9,6 +9,9 @@
 
 static volatile int g_thread_done = 0;
 static volatile int g_thread_value = 0;
+static openos_pthread_mutex_t g_sync_mutex = 0;
+static openos_pthread_cond_t g_sync_cond = 0;
+static volatile int g_sync_ready = 0;
 
 static void print_result(const char *name, int status)
 {
@@ -258,6 +261,56 @@ static int test_sbrk(void)
     return CAP_PASS;
 }
 
+static void sync_worker(void *arg)
+{
+    (void)arg;
+    if (openos_pthread_mutex_lock(&g_sync_mutex) == 0) {
+        g_sync_ready = 1;
+        openos_pthread_cond_signal(&g_sync_cond);
+        openos_pthread_mutex_unlock(&g_sync_mutex);
+    }
+    openos_thread_exit(0);
+}
+
+static int test_pthread_sync(void)
+{
+    openos_pthread_t tid;
+    int loops = 0;
+
+    g_sync_ready = 0;
+    if (openos_pthread_mutex_init(&g_sync_mutex) != 0)
+        return CAP_FAIL;
+    if (openos_pthread_cond_init(&g_sync_cond) != 0) {
+        openos_pthread_mutex_destroy(&g_sync_mutex);
+        return CAP_FAIL;
+    }
+    if (openos_pthread_mutex_lock(&g_sync_mutex) != 0) {
+        openos_pthread_cond_destroy(&g_sync_cond);
+        openos_pthread_mutex_destroy(&g_sync_mutex);
+        return CAP_FAIL;
+    }
+    if (openos_pthread_create(&tid, sync_worker, 0) != 0) {
+        openos_pthread_mutex_unlock(&g_sync_mutex);
+        openos_pthread_cond_destroy(&g_sync_cond);
+        openos_pthread_mutex_destroy(&g_sync_mutex);
+        return CAP_FAIL;
+    }
+    while (!g_sync_ready && loops++ < 64) {
+        if (openos_pthread_cond_wait(&g_sync_cond, &g_sync_mutex) != 0) {
+            openos_pthread_mutex_unlock(&g_sync_mutex);
+            (void)tid;
+            openos_pthread_cond_destroy(&g_sync_cond);
+            openos_pthread_mutex_destroy(&g_sync_mutex);
+            return CAP_FAIL;
+        }
+    }
+    openos_pthread_mutex_unlock(&g_sync_mutex);
+    (void)tid;
+    openos_pthread_cond_destroy(&g_sync_cond);
+    openos_pthread_mutex_destroy(&g_sync_mutex);
+    return g_sync_ready == 1 ? CAP_PASS : CAP_FAIL;
+}
+
 static int test_thread(void)
 {
     openos_thread_t thread;
@@ -392,7 +445,7 @@ int main(int argc, char **argv)
     (void)argv;
 
     openos_printf("Chromium core capability test\n");
-    openos_printf("target: mmap file-mmap mprotect v8-memory-policy brk thread shm eventfd socketpair poll time\n");
+    openos_printf("target: mmap file-mmap mprotect v8-memory-policy brk thread pthread-sync shm eventfd socketpair poll time\n");
 
     status = test_uptime();
     print_result("monotonic uptime", status);
@@ -428,6 +481,10 @@ int main(int argc, char **argv)
 
     status = test_thread();
     print_result("thread create shared address space", status);
+    failed += status == CAP_FAIL;
+
+    status = test_pthread_sync();
+    print_result("pthread-like mutex/cond synchronization", status);
     failed += status == CAP_FAIL;
 
     status = test_shm();
