@@ -468,6 +468,7 @@
   - [ ] 完善字体枚举、字体 fallback、字形缓存、文本测量、UTF-8/Unicode 输入
     - [√] 已将 `SYS_FONT_QUERY` 字体度量、换行文本测量与 codepoint 查询 smoke 并入 `/bin/chromiumcaptest`
   - [ ] 输入事件队列支持鼠标、键盘、组合键、文本输入、滚轮和窗口焦点
+    - [√] 已将用户态 GUI 事件队列空队列/非法参数 smoke 并入 `/bin/chromiumcaptest`
   - [ ] 剪贴板、光标、DPI/缩放和窗口 resize 事件
 - [ ] M8 C/C++ runtime 与工具链
   - [ ] 用户态 C++ 编译、链接、构造/析构、异常策略、RTTI 策略

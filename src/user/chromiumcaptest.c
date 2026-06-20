@@ -1302,6 +1302,7 @@ static int test_font_gui_smoke(void)
     int win;
     int label;
     int button;
+    openos_gui_event_t ev;
     unsigned int pixels[4] = {
         0xffff0000U, 0xff00ff00U,
         0xff0000ffU, 0xffffffffU
@@ -1332,6 +1333,15 @@ static int test_font_gui_smoke(void)
         openos_gui_blit_rgba32(win, 88, 48, 2, 2, pixels, 2) != 0 ||
         openos_gui_scroll_rect(win, 90, 50, 88, 48, 2, 2) != 0 ||
         openos_gui_present(win) != 0) {
+        openos_gui_destroy_window(win);
+        return CAP_FAIL;
+    }
+    if (openos_gui_poll_event(0) == 0) {
+        openos_gui_destroy_window(win);
+        return CAP_FAIL;
+    }
+    openos_memset(&ev, 0, sizeof(ev));
+    if (openos_gui_poll_event(&ev) != 0 || ev.type != OPENOS_GUI_EVENT_NONE) {
         openos_gui_destroy_window(win);
         return CAP_FAIL;
     }
