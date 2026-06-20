@@ -187,7 +187,7 @@ Chromium 主体是 C++，OpenOS 需要：
 - 进程/加载器：`spawn/waitpid`、argv/envp、fd 继承最小验收，`/bin/fdinherit` 作为继承 fd 子进程回归程序。
 - IPC：shared memory 双映射一致性、message queue FIFO 多消息顺序、service channel request/reply 结构化元数据和错误边界。
 - 文件系统：`stat/fstat/lstat` 时间字段、`statfs/fstatfs`、`getdents` 目录枚举、路径规范化、资源 pak 读取、缓存目录、稀疏文件。
-- 网络：socketpair send/recv/poll、空队列不报 `POLLIN`、`POLLOUT`、空读失败、对端关闭 `POLLHUP`，以及离线 DNS resolver 基础验收。
+- 网络：socketpair send/recv/poll/select、空队列不报 `POLLIN`、多 fd poll、负 fd 忽略、非法 fd `POLLERR`、select 读写位图、`POLLOUT`、空读失败、对端关闭 `POLLHUP`，以及离线 DNS resolver 基础验收。
 - 图形/字体/输入：GUI smoke、字体查询、GUI event queue、用户剪贴板 syscall smoke。
 
 这些能力仍不是完整 Chromium 运行时，但它们把后续 Skia/V8/Blink/content shell 的依赖从“规划项”推进为可重复构建验证的 OpenOS 原生底座。

@@ -1672,6 +1672,10 @@ static int test_socketpair_poll(void)
     char ch = 'C';
     char out = 0;
     openos_pollfd_t pfd;
+    openos_pollfd_t pfds[3];
+    openos_uint32_t readfds;
+    openos_uint32_t writefds;
+    openos_uint32_t exceptfds;
     int ready;
 
     if (openos_socketpair(OPENOS_AF_UNSPEC, OPENOS_SOCK_STREAM, 0, sv) != 0) {
@@ -1688,6 +1692,45 @@ static int test_socketpair_poll(void)
         return CAP_FAIL;
     }
 
+    memset(pfds, 0, sizeof(pfds));
+    pfds[0].fd = sv[0];
+    pfds[0].events = OPENOS_POLLOUT;
+    pfds[1].fd = sv[1];
+    pfds[1].events = OPENOS_POLLIN;
+    pfds[2].fd = -1;
+    pfds[2].events = OPENOS_POLLIN;
+    ready = openos_poll(pfds, 3, 0);
+    if (ready != 1 || !(pfds[0].revents & OPENOS_POLLOUT) || pfds[1].revents != 0 || pfds[2].revents != 0) {
+        openos_close(sv[0]);
+        openos_close(sv[1]);
+        return CAP_FAIL;
+    }
+
+    pfd.fd = 1234;
+    pfd.events = OPENOS_POLLIN;
+    pfd.revents = 0;
+    ready = openos_poll(&pfd, 1, 0);
+    if (ready != 1 || !(pfd.revents & OPENOS_POLLERR)) {
+        openos_close(sv[0]);
+        openos_close(sv[1]);
+        return CAP_FAIL;
+    }
+
+    if (sv[0] >= 32 || sv[1] >= 32) {
+        openos_close(sv[0]);
+        openos_close(sv[1]);
+        return CAP_FAIL;
+    }
+    readfds = 0;
+    writefds = 1u << sv[0];
+    exceptfds = 0xffffffffu;
+    ready = openos_select((openos_uint32_t)(sv[0] + 1), &readfds, &writefds, &exceptfds, 0);
+    if (ready != 1 || readfds != 0 || !(writefds & (1u << sv[0])) || exceptfds != 0) {
+        openos_close(sv[0]);
+        openos_close(sv[1]);
+        return CAP_FAIL;
+    }
+
     if (openos_send(sv[0], &ch, 1, 0) != 1) {
         openos_close(sv[0]);
         openos_close(sv[1]);
@@ -1699,6 +1742,16 @@ static int test_socketpair_poll(void)
     pfd.revents = 0;
     ready = openos_poll(&pfd, 1, 100);
     if (ready <= 0 || !(pfd.revents & OPENOS_POLLIN)) {
+        openos_close(sv[0]);
+        openos_close(sv[1]);
+        return CAP_FAIL;
+    }
+
+    readfds = 1u << sv[1];
+    writefds = 0;
+    exceptfds = 0;
+    ready = openos_select((openos_uint32_t)(sv[1] + 1), &readfds, &writefds, &exceptfds, 0);
+    if (ready != 1 || !(readfds & (1u << sv[1])) || writefds != 0 || exceptfds != 0) {
         openos_close(sv[0]);
         openos_close(sv[1]);
         return CAP_FAIL;
@@ -1893,7 +1946,7 @@ int main(int argc, char **argv)
     failed += status == CAP_FAIL;
 
     status = test_socketpair_poll();
-    print_result("socketpair send/recv/poll", status);
+    print_result("socketpair poll/select boundaries", status);
     failed += status == CAP_FAIL;
 
     status = test_spawn_argv_env_wait();

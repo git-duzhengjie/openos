@@ -467,7 +467,7 @@
     - [√] 已为 DNS resolver 增加成功缓存、失败负缓存、毫秒级超时回退，并在 `/bin/chromiumcaptest` 覆盖重复解析快路径
   - [ ] 引入或实现可维护 TLS 库，支撑 HTTPS、证书链校验和系统信任根
   - [ ] 为 Chromium net stack 所需 socket 行为补齐错误码、非阻塞、poll 边界语义
-    - [√] 已增强 `/bin/chromiumcaptest` 的 `socketpair` poll 边界验收，覆盖空队列不报 `POLLIN`、可写端 `POLLOUT`、空读失败和对端关闭 `POLLHUP`
+    - [√] 已增强 `/bin/chromiumcaptest` 的 `socketpair` poll/select 边界验收，覆盖空队列不报 `POLLIN`、多 fd poll、负 fd 忽略、非法 fd `POLLERR`、select 读写位图、可写端 `POLLOUT`、空读失败和对端关闭 `POLLHUP`
 - [ ] M7 图形、字体与输入
   - [ ] 为 Skia software raster 提供窗口 framebuffer / shared bitmap / dirty rect present 能力
     - [√] 已将用户态窗口创建、控件、fill/text/blit/scroll/present 基础绘制 smoke 并入 `/bin/chromiumcaptest`
