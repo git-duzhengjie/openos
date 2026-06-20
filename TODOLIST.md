@@ -362,6 +362,43 @@
 - [√] HTTPS/TLS 握手解析增强：解析 ServerKeyExchange / ECDHE 曲线、公钥、签名算法摘要
 - [√] 浏览器 HTTPS 握手详情展示：显示完整握手类型列表、扩展长度、ECDHE 摘要和下一步密钥交换限制
 
+#### 17.3.1.1 浏览器内核路线 / 开源内核移植
+
+- [ ] 明确当前内核内置 Browser 只是过渡实现，不作为最终完整浏览器内核
+  - [ ] 保持当前轻量浏览器继续可用：HTTP 访问、DNS/TCP/HTTP 非阻塞加载、基础 HTML 转可读文本、简单链接导航
+  - [ ] 增强当前 HTML 文本化渲染：更完整的 entity 解码、空白压缩、段落/标题/列表/pre/code 基础处理
+  - [ ] 增强浏览器加载状态机：DNS/TCP/HTTP 分阶段超时、失败状态显示、连续 Go/Refresh 取消旧请求、关闭窗口取消加载上下文
+- [ ] 将 Browser 从 `src/kernel/gui.c` 内核 GUI 中拆出，迁移为用户态 `/bin/browser`
+  - [ ] 设计用户态 GUI 应用 ABI：窗口创建、绘制、输入事件、定时器、剪贴板/文本输入等接口
+  - [ ] 浏览器崩溃不应拖垮内核，错误通过进程退出或窗口关闭处理
+  - [ ] 网络访问统一走用户态 socket/libc API，而不是直接调用内核内部函数
+- [ ] 补齐移植开源浏览器内核所需的基础运行环境
+  - [ ] libc/POSIX 子集：malloc/free/realloc、stdio、string、time、errno、文件 API、目录 API
+  - [ ] socket API：getaddrinfo/gethostbyname、connect/send/recv/close、select/poll、非阻塞 socket
+  - [ ] TLS/HTTPS 用户态库适配：优先评估 mbedTLS / BearSSL / wolfSSL 等轻量方案
+  - [ ] 字体接口：字体枚举、字形查询、UTF-8/Unicode 文本测量、基础 fallback
+  - [ ] 图形接口：framebuffer/窗口绘制、矩形裁剪、位图 blit、滚动、双缓冲
+  - [ ] 图片解码依赖评估：PNG/JPEG/GIF/WebP 可分阶段接入
+  - [ ] 文件与配置目录：缓存、cookie、证书、字体资源、下载目录
+- [ ] 优先评估并移植 NetSurf 作为 OpenOS 第一代开源浏览器内核
+  - [ ] 阅读 NetSurf framebuffer frontend、libdom、libcss、hubbub、utils 等依赖结构
+  - [ ] 先在宿主机完成最小 framebuffer frontend 构建验证
+  - [ ] 为 OpenOS 编写 NetSurf 平台层：framebuffer 绘制、输入事件、定时器、文件、socket、字体
+  - [ ] 先支持 HTTP 页面显示，再接入 HTTPS、图片、表单、下载等能力
+  - [ ] 记录 NetSurf 依赖裁剪清单，避免一次性引入过大依赖
+- [ ] 备选轻量浏览器方案调研
+  - [ ] Dillo：评估 FLTK 依赖替换成本、HTML/CSS 支持程度、HTTPS/中文支持工作量
+  - [ ] Links2/Lynx：作为文本/半图形浏览器验证方案，不作为最终 GUI 浏览器目标
+  - [ ] SerenityOS LibWeb / Ladybird：作为远期现代内核参考，待 C++ 运行时、线程、图形、JS 环境成熟后再评估
+  - [ ] Chromium/WebKit/Gecko：暂不作为近期目标，仅作为长期参考，原因是依赖体量和平台适配成本过高
+- [ ] JavaScript 后续路线
+  - [ ] 短期不在内核内置 Browser 中实现 JS
+  - [ ] 中期评估 QuickJS 作为轻量 JS 引擎
+  - [ ] 长期随 NetSurf/LibWeb 等内核路线决定 JS/DOM/CSSOM 支持深度
+- [ ] 文档化浏览器路线
+  - [ ] 新增 `docs/browser-engine-roadmap.md`，记录当前轻量浏览器、用户态化、NetSurf 移植、HTTPS/JS 后续路线
+  - [ ] 在 README 中说明当前 Browser 能力边界：支持基础 HTTP/HTML 文本化，不等同于 Chromium/WebKit 级完整浏览器
+
 ### 17.4 国际化（i18n / 翻译键）
 
 #### Phase 1：i18n 框架 + 桌面层文字
