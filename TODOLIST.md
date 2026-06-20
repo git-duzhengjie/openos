@@ -359,7 +359,7 @@
 - [√] HTTPS/TLS 响应解析：解析 TLS record、ServerHello、Certificate 等握手消息摘要
 - [√] 浏览器 HTTPS 页面显示握手摘要：展示 TLS 版本、握手类型、证书条目数量和下一步限制说明
 - [√] HTTPS/TLS ClientHello 兼容性增强：补齐 TLS 1.2 ECDHE 必需扩展和 cipher suite 顺序
-- [ ] HTTPS/TLS 握手解析增强：解析 ServerKeyExchange / ECDHE 曲线、公钥、签名算法摘要
+- [√] HTTPS/TLS 握手解析增强：解析 ServerKeyExchange / ECDHE 曲线、公钥、签名算法摘要
 - [ ] 浏览器 HTTPS 握手详情展示：显示完整握手类型列表、扩展长度、ECDHE 摘要和下一步密钥交换限制
 
 ### 17.4 国际化（i18n / 翻译键）

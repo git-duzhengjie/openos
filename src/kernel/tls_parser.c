@@ -112,6 +112,28 @@ static int tls_parse_certificate(const uint8_t* body, size_t len, tls_parser_sum
     return 0;
 }
 
+static int tls_parse_server_key_exchange(const uint8_t* body, size_t len, tls_parser_summary_t* summary)
+{
+    size_t pos = 0;
+    uint8_t public_key_len;
+
+    if (!body || !summary || len < 4u) return -1;
+    summary->key_exchange_curve_type = body[pos++];
+    summary->key_exchange_named_curve = tls_read_u16(body + pos);
+    pos += 2u;
+    public_key_len = body[pos++];
+    if (public_key_len > len - pos) return -1;
+    summary->key_exchange_public_key_length = public_key_len;
+    pos += public_key_len;
+
+    if (pos + 4u <= len) {
+        summary->key_exchange_signature_algorithm = tls_read_u16(body + pos);
+        pos += 2u;
+        summary->key_exchange_signature_length = tls_read_u16(body + pos);
+    }
+    return 0;
+}
+
 static int tls_parse_handshake_payload(const uint8_t* payload, size_t len, tls_parser_summary_t* summary)
 {
     size_t pos = 0;
@@ -130,6 +152,8 @@ static int tls_parse_handshake_payload(const uint8_t* payload, size_t len, tls_p
             (void)tls_parse_server_hello(body, hlen, summary);
         } else if (type == TLS_HANDSHAKE_CERTIFICATE) {
             (void)tls_parse_certificate(body, hlen, summary);
+        } else if (type == TLS_HANDSHAKE_SERVER_KEY_EXCHANGE) {
+            (void)tls_parse_server_key_exchange(body, hlen, summary);
         }
         pos += hlen;
         parsed++;

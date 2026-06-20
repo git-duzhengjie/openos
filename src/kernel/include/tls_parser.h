@@ -34,6 +34,11 @@ typedef struct tls_parser_summary {
     uint16_t extensions_length;
     uint16_t certificate_count;
     uint32_t certificate_bytes;
+    uint8_t key_exchange_curve_type;
+    uint16_t key_exchange_named_curve;
+    uint16_t key_exchange_public_key_length;
+    uint16_t key_exchange_signature_algorithm;
+    uint16_t key_exchange_signature_length;
     uint8_t alert_level;
     uint8_t alert_description;
 } tls_parser_summary_t;
