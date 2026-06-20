@@ -1263,11 +1263,15 @@ static uint32_t sys_mmap_anonymous(uint32_t addr, uint32_t len, uint32_t prot, u
     process_t *proc;
     uint32_t start;
 
-    if (addr != 0 || len == 0 || len > SYS_MMAP_MAX_REQUEST)
+    if (len == 0 || len > SYS_MMAP_MAX_REQUEST)
         return (uint32_t)-1;
     if ((prot & ~(uint32_t)0x7u) != 0)
         return (uint32_t)-1;
-    if ((flags & ~(PROCESS_MMAP_FLAG_ANON | PROCESS_MMAP_FLAG_PRIVATE)) != 0)
+    if ((flags & ~(PROCESS_MMAP_FLAG_ANON | PROCESS_MMAP_FLAG_PRIVATE | PROCESS_MMAP_FLAG_FIXED)) != 0)
+        return (uint32_t)-1;
+    if ((flags & PROCESS_MMAP_FLAG_FIXED) && (addr & (PAGE_SIZE - 1u)) != 0)
+        return (uint32_t)-1;
+    if (!(flags & PROCESS_MMAP_FLAG_FIXED) && addr != 0)
         return (uint32_t)-1;
 
     len = page_align_up_u32(len);
@@ -1283,7 +1287,7 @@ static uint32_t sys_mmap_anonymous(uint32_t addr, uint32_t len, uint32_t prot, u
         proc->mmap_end = proc->mmap_base;
     }
 
-    start = page_align_up_u32(proc->mmap_end);
+    start = (flags & PROCESS_MMAP_FLAG_FIXED) ? addr : page_align_up_u32(proc->mmap_end);
     if (start < SYS_MMAP_BASE || start > SYS_MMAP_LIMIT || len > (SYS_MMAP_LIMIT - start))
         return (uint32_t)-1;
 
@@ -1291,7 +1295,8 @@ static uint32_t sys_mmap_anonymous(uint32_t addr, uint32_t len, uint32_t prot, u
         return (uint32_t)-1;
 
     /* Demand paging: reserve virtual range only. Physical pages are allocated on #PF. */
-    proc->mmap_end = start + len;
+    if (start + len > proc->mmap_end)
+        proc->mmap_end = start + len;
     return start;
 }
 

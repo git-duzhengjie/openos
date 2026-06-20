@@ -129,6 +129,7 @@
 
 #define OPENOS_MAP_ANON    0x01
 #define OPENOS_MAP_PRIVATE 0x02
+#define OPENOS_MAP_FIXED   0x10
 
 #define OPENOS_CAP_SETUID    (1u << 0)
 #define OPENOS_CAP_SETGID    (1u << 1)

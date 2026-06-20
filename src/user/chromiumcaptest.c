@@ -96,6 +96,47 @@ static int test_mmap_prot_flags(void)
     return openos_munmap(mem, 4096) == 0 ? CAP_PASS : CAP_FAIL;
 }
 
+static int test_mmap_fixed(void)
+{
+    unsigned char *base;
+    unsigned char *fixed;
+    unsigned char *overlap;
+
+    base = (unsigned char *)openos_mmap(0, 4096, 0);
+    if (base == (unsigned char *)-1 || !base) {
+        return CAP_FAIL;
+    }
+    if (openos_munmap(base, 4096) != 0) {
+        return CAP_FAIL;
+    }
+
+    fixed = (unsigned char *)openos_mmap_ex(base, 4096,
+                                           OPENOS_PROT_READ | OPENOS_PROT_WRITE,
+                                           OPENOS_MAP_ANON | OPENOS_MAP_PRIVATE | OPENOS_MAP_FIXED);
+    if (fixed != base) {
+        if (fixed != (unsigned char *)-1)
+            openos_munmap(fixed, 4096);
+        return CAP_FAIL;
+    }
+
+    fixed[0] = 0x44;
+    if (fixed[0] != 0x44) {
+        openos_munmap(fixed, 4096);
+        return CAP_FAIL;
+    }
+
+    overlap = (unsigned char *)openos_mmap_ex(base, 4096,
+                                             OPENOS_PROT_READ | OPENOS_PROT_WRITE,
+                                             OPENOS_MAP_ANON | OPENOS_MAP_PRIVATE | OPENOS_MAP_FIXED);
+    if (overlap != (unsigned char *)-1) {
+        openos_munmap(overlap, 4096);
+        openos_munmap(fixed, 4096);
+        return CAP_FAIL;
+    }
+
+    return openos_munmap(fixed, 4096) == 0 ? CAP_PASS : CAP_FAIL;
+}
+
 static int test_mprotect(void)
 {
     unsigned char *mem;
@@ -298,6 +339,10 @@ int main(int argc, char **argv)
 
     status = test_mmap_prot_flags();
     print_result("mmap prot/flags metadata", status);
+    failed += status == CAP_FAIL;
+
+    status = test_mmap_fixed();
+    print_result("fixed-address mmap reservation", status);
     failed += status == CAP_FAIL;
 
     status = test_mprotect();

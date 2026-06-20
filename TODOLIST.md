@@ -415,6 +415,7 @@
     - [√] 已完成匿名私有 VMA 记录、基础 prot/flags 参数、按需分页按 VMA 写权限映射
   - [√] 实现 `mprotect` 页级权限切换基础能力，已接入 `/bin/chromiumcaptest` 验收
   - [ ] 支持固定地址映射、地址空间保留、解除映射后的 VMA 合并与冲突检测
+    - [√] 已完成 `MAP_FIXED` 基础固定地址预留与重叠 VMA 冲突拒绝
   - [ ] 文件 mmap 与 page cache 协同，支持只读资源映射和私有 COW 映射
   - [ ] 为 V8 预留 executable memory / jitless 两条路线的内核策略
 - [ ] M3 线程、同步与调度增强
