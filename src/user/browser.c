@@ -4,6 +4,41 @@
 #define BROWSER_DEFAULT_PATH "/"
 #define BROWSER_HTTP_PORT "80"
 #define BROWSER_RECV_MAX 1536
+#define BROWSER_NET_WAIT_TRIES 80
+#define BROWSER_DNS_RETRIES 8
+
+static void browser_format_ip(unsigned int ip, char *out, int out_size)
+{
+    if (!out || out_size <= 0) return;
+    snprintf(out, out_size, "%u.%u.%u.%u",
+             (ip >> 24) & 0xffU,
+             (ip >> 16) & 0xffU,
+             (ip >> 8) & 0xffU,
+             ip & 0xffU);
+}
+
+static int browser_wait_for_network(char *out, int out_size)
+{
+    openos_netinfo_t info;
+    int i;
+
+    for (i = 0; i < BROWSER_NET_WAIT_TRIES; ++i) {
+        if (openos_netinfo(&info) == 0 && info.ip != 0 && info.dns != 0)
+            return 0;
+        openos_sleep(5);
+    }
+
+    if (openos_netinfo(&info) == 0) {
+        char ip[24];
+        char dns[24];
+        browser_format_ip(info.ip, ip, sizeof(ip));
+        browser_format_ip(info.dns, dns, sizeof(dns));
+        snprintf(out, out_size, "network not ready: ip=%s dns=%s", ip, dns);
+    } else {
+        snprintf(out, out_size, "network not ready: no network device");
+    }
+    return -1;
+}
 
 static const char *find_body(const char *response)
 {
@@ -67,11 +102,30 @@ static int browser_fetch_http(const char *host, const char *path, char *out, int
     if (!host || !path || !out || out_size <= 0) return -1;
     out[0] = 0;
 
+    if (browser_wait_for_network(out, out_size) < 0)
+        return -1;
+
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = OPENOS_AF_INET;
     hints.ai_socktype = OPENOS_SOCK_STREAM;
-    if (openos_getaddrinfo(host, BROWSER_HTTP_PORT, &hints, &res) < 0 || !res) {
-        snprintf(out, out_size, "DNS failed for %s", host);
+    for (int attempt = 0; attempt < BROWSER_DNS_RETRIES; ++attempt) {
+        if (openos_getaddrinfo(host, BROWSER_HTTP_PORT, &hints, &res) == 0 && res)
+            break;
+        if (res) {
+            openos_freeaddrinfo(res);
+            res = 0;
+        }
+        openos_sleep(10);
+    }
+    if (!res) {
+        openos_netinfo_t info;
+        char ip[24] = "0.0.0.0";
+        char dns[24] = "0.0.0.0";
+        if (openos_netinfo(&info) == 0) {
+            browser_format_ip(info.ip, ip, sizeof(ip));
+            browser_format_ip(info.dns, dns, sizeof(dns));
+        }
+        snprintf(out, out_size, "DNS failed for %s (ip=%s dns=%s)", host, ip, dns);
         return -1;
     }
 
