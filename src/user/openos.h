@@ -125,6 +125,7 @@
 #define SYS_CHROMIUM_MEMORY_POLICY 329
 #define SYS_TLS_SET     330
 #define SYS_TLS_GET     331
+#define SYS_CLOCK_GETTIME 332
 
 #define OPENOS_CHROMIUM_MEM_JITLESS_DEFAULT     (1u << 0)
 #define OPENOS_CHROMIUM_MEM_EXEC_PROT_RESERVED  (1u << 1)
@@ -340,6 +341,13 @@ static inline unsigned short openos_htons(unsigned short v)
 #define OPENOS_POLLOUT    0x0004
 #define OPENOS_POLLERR    0x0008
 #define OPENOS_POLLHUP    0x0010
+
+#define OPENOS_CLOCK_MONOTONIC 1
+
+typedef struct openos_timespec {
+    long long tv_sec;
+    long long tv_nsec;
+} openos_timespec_t;
 
 #define WNOHANG         1
 #define SIGKILL         9
@@ -1236,6 +1244,11 @@ static inline void openos_exit(int code)
 static inline unsigned int openos_uptime_ms(void)
 {
     return (unsigned int)openos_syscall0(SYS_UPTIME_MS);
+}
+
+static inline int openos_clock_gettime(int clock_id, openos_timespec_t *ts)
+{
+    return openos_syscall2(SYS_CLOCK_GETTIME, clock_id, (int)ts);
 }
 
 static inline openos_time_t openos_time(openos_time_t *out)

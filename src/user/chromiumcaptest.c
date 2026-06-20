@@ -50,6 +50,34 @@ static int test_uptime(void)
     return openos_uptime_ms() >= before ? CAP_PASS : CAP_FAIL;
 }
 
+static int test_clock_gettime_monotonic(void)
+{
+    openos_timespec_t before;
+    openos_timespec_t after;
+    long long before_ns;
+    long long after_ns;
+
+    if (openos_clock_gettime(OPENOS_CLOCK_MONOTONIC, &before) != 0) {
+        return CAP_FAIL;
+    }
+    if (before.tv_nsec < 0 || before.tv_nsec >= 1000000000ll) {
+        return CAP_FAIL;
+    }
+
+    openos_sleep(2);
+
+    if (openos_clock_gettime(OPENOS_CLOCK_MONOTONIC, &after) != 0) {
+        return CAP_FAIL;
+    }
+    if (after.tv_nsec < 0 || after.tv_nsec >= 1000000000ll) {
+        return CAP_FAIL;
+    }
+
+    before_ns = before.tv_sec * 1000000000ll + before.tv_nsec;
+    after_ns = after.tv_sec * 1000000000ll + after.tv_nsec;
+    return after_ns >= before_ns ? CAP_PASS : CAP_FAIL;
+}
+
 static int test_mmap(void)
 {
     unsigned char *mem;
@@ -530,6 +558,10 @@ int main(int argc, char **argv)
 
     status = test_uptime();
     print_result("monotonic uptime", status);
+    failed += status == CAP_FAIL;
+
+    status = test_clock_gettime_monotonic();
+    print_result("clock_gettime monotonic timespec", status);
     failed += status == CAP_FAIL;
 
     status = test_mmap();

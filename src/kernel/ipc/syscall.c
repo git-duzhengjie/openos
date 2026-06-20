@@ -113,6 +113,20 @@ static int syscall_getgrgid(uint32_t gid, openos_group_t *group)
     return -1;
 }
 
+static int syscall_clock_gettime(uint32_t clock_id, openos_timespec_t *user_ts)
+{
+    openos_timespec_t ts;
+    uint32_t ms;
+
+    if (!user_ts || clock_id != OPENOS_CLOCK_MONOTONIC)
+        return -1;
+
+    ms = sched_time_ms();
+    ts.tv_sec = (int64_t)(ms / 1000u);
+    ts.tv_nsec = (int64_t)(ms % 1000u) * 1000000ll;
+    return copy_to_user(user_ts, &ts, sizeof(ts));
+}
+
 #define SYSCALL_MAX_MUTEXES 64u
 #define SYSCALL_MAX_SEMAPHORES 64u
 #define SYSCALL_MAX_CONDS 64u
@@ -1623,6 +1637,9 @@ uint32_t syscall_dispatch(uint32_t num,
 
     case SYS_UPTIME_MS:
         return sched_time_ms();
+
+    case SYS_CLOCK_GETTIME:
+        return (uint32_t)syscall_clock_gettime(a, (openos_timespec_t *)b);
 
     case SYS_FONT_QUERY:
         {
