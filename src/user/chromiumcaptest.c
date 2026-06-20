@@ -389,6 +389,82 @@ static int test_path_normalization(void)
     return CAP_PASS;
 }
 
+static int test_filesystem_mutations(void)
+{
+    const char *dir = "/tmp/chromiumcaptest_fs";
+    const char *file = "/tmp/chromiumcaptest_fs/resource.pak";
+    const char *hardlink = "/tmp/chromiumcaptest_fs/resource-hard.pak";
+    const char *symlink = "/tmp/chromiumcaptest_fs/resource-link.pak";
+    const char *payload = "pak-resource";
+    openos_stat_t file_st;
+    openos_stat_t hard_st;
+    openos_stat_t sym_st;
+    char linkbuf[64];
+    int fd;
+    int n;
+
+    openos_unlink(symlink);
+    openos_unlink(hardlink);
+    openos_unlink(file);
+    openos_rmdir(dir);
+
+    if (openos_mkdir(dir, 0755) != 0) {
+        return CAP_FAIL;
+    }
+
+    fd = openos_open(file, O_CREAT | O_TRUNC | O_RDWR, 0644);
+    if (fd < 0) {
+        openos_rmdir(dir);
+        return CAP_FAIL;
+    }
+    if (openos_write_fd(fd, payload, openos_strlen(payload)) != openos_strlen(payload)) {
+        openos_close(fd);
+        return CAP_FAIL;
+    }
+    openos_close(fd);
+
+    if (openos_link(file, hardlink) != 0) {
+        return CAP_FAIL;
+    }
+    if (openos_stat(file, &file_st) != 0 ||
+        openos_stat(hardlink, &hard_st) != 0 ||
+        file_st.ino != hard_st.ino || hard_st.nlinks < 2) {
+        return CAP_FAIL;
+    }
+
+    if (openos_symlink(file, symlink) != 0) {
+        return CAP_FAIL;
+    }
+    openos_memset(linkbuf, 0, sizeof(linkbuf));
+    n = openos_readlink(symlink, linkbuf, sizeof(linkbuf) - 1);
+    if (n != openos_strlen(file) || openos_strcmp(linkbuf, file) != 0) {
+        return CAP_FAIL;
+    }
+    if (openos_lstat(symlink, &sym_st) != 0 ||
+        (sym_st.mode & FS_SYMLINK) != FS_SYMLINK) {
+        return CAP_FAIL;
+    }
+    if (openos_stat(symlink, &sym_st) != 0 ||
+        sym_st.ino != file_st.ino || (sym_st.mode & FS_FILE) != FS_FILE) {
+        return CAP_FAIL;
+    }
+
+    if (openos_unlink(file) != 0) {
+        return CAP_FAIL;
+    }
+    if (openos_stat(hardlink, &hard_st) != 0 ||
+        hard_st.ino != file_st.ino || hard_st.nlinks < 1) {
+        return CAP_FAIL;
+    }
+
+    if (openos_unlink(symlink) != 0 || openos_unlink(hardlink) != 0 ||
+        openos_rmdir(dir) != 0) {
+        return CAP_FAIL;
+    }
+
+    return CAP_PASS;
+}
+
 static int test_sbrk(void)
 {
     unsigned char *old_break;
@@ -879,7 +955,7 @@ int main(int argc, char **argv)
     (void)argv;
 
     openos_printf("Chromium core capability test\n");
-    openos_printf("target: mmap file-mmap fs-metadata path-normalization mprotect v8-memory-policy brk thread tls pthread-sync futex shm eventfd message-queue service-channel socketpair poll time spawn fork pipe fd argv env\n");
+    openos_printf("target: mmap file-mmap fs-metadata path-normalization fs-mutations mprotect v8-memory-policy brk thread tls pthread-sync futex shm eventfd message-queue service-channel socketpair poll time spawn fork pipe fd argv env\n");
 
     status = test_uptime();
     print_result("monotonic uptime", status);
@@ -919,6 +995,10 @@ int main(int argc, char **argv)
 
     status = test_path_normalization();
     print_result("path normalization and cwd", status);
+    failed += status == CAP_FAIL;
+
+    status = test_filesystem_mutations();
+    print_result("filesystem link/symlink/unlink/rmdir", status);
     failed += status == CAP_FAIL;
 
     status = test_sbrk();
