@@ -464,7 +464,9 @@
   - [ ] 为 Chromium net stack 所需 socket 行为补齐错误码、非阻塞、poll 边界语义
 - [ ] M7 图形、字体与输入
   - [ ] 为 Skia software raster 提供窗口 framebuffer / shared bitmap / dirty rect present 能力
+    - [√] 已将用户态窗口创建、控件、fill/text/blit/scroll/present 基础绘制 smoke 并入 `/bin/chromiumcaptest`
   - [ ] 完善字体枚举、字体 fallback、字形缓存、文本测量、UTF-8/Unicode 输入
+    - [√] 已将 `SYS_FONT_QUERY` 字体度量、换行文本测量与 codepoint 查询 smoke 并入 `/bin/chromiumcaptest`
   - [ ] 输入事件队列支持鼠标、键盘、组合键、文本输入、滚轮和窗口焦点
   - [ ] 剪贴板、光标、DPI/缩放和窗口 resize 事件
 - [ ] M8 C/C++ runtime 与工具链

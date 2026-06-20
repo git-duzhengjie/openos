@@ -1296,6 +1296,50 @@ static int test_fork_pipe_fd_inheritance(void)
     return CAP_PASS;
 }
 
+static int test_font_gui_smoke(void)
+{
+    openos_font_query_t q;
+    int win;
+    int label;
+    int button;
+    unsigned int pixels[4] = {
+        0xffff0000U, 0xff00ff00U,
+        0xff0000ffU, 0xffffffffU
+    };
+
+    openos_memset(&q, 0, sizeof(q));
+    q.codepoint = 'A';
+    openos_str_copy(q.text, "OpenOS UI\nSkia smoke", sizeof(q.text));
+    if (openos_font_query(&q) != 0)
+        return CAP_FAIL;
+    if (q.ascii_width == 0 || q.ascii_height == 0 || q.line_height == 0 ||
+        q.text_width == 0 || q.text_height == 0 || q.text_lines < 2 ||
+        q.codepoint_width == 0)
+        return CAP_FAIL;
+
+    win = openos_gui_create_window("cap gui", 24, 24, 120, 80);
+    if (win < 0)
+        return CAP_FAIL;
+    label = openos_gui_add_label(win, 4, 4, 100, 16, "label");
+    button = openos_gui_add_button(win, 4, 24, 80, 20, "button");
+    if (label < 0 || button < 0) {
+        openos_gui_destroy_window(win);
+        return CAP_FAIL;
+    }
+    if (openos_gui_set_text(win, label, "updated") != 0 ||
+        openos_gui_fill_rect(win, 2, 48, 24, 12, 0xff336699U) != 0 ||
+        openos_gui_draw_text(win, 4, 62, "txt", 0xffffffffU) != 0 ||
+        openos_gui_blit_rgba32(win, 88, 48, 2, 2, pixels, 2) != 0 ||
+        openos_gui_scroll_rect(win, 90, 50, 88, 48, 2, 2) != 0 ||
+        openos_gui_present(win) != 0) {
+        openos_gui_destroy_window(win);
+        return CAP_FAIL;
+    }
+    if (openos_gui_destroy_window(win) != 0)
+        return CAP_FAIL;
+    return CAP_PASS;
+}
+
 static int test_dns_resolver_literal(void)
 {
     unsigned int ip = 0;
@@ -1387,7 +1431,7 @@ int main(int argc, char **argv)
     (void)argv;
 
     openos_printf("Chromium core capability test\n");
-    openos_printf("target: mmap file-mmap fs-metadata path-normalization fs-mutations getdents browser-dirs resource-pak sparse-seek mprotect v8-memory-policy brk thread tls pthread-sync futex shm eventfd message-queue service-channel socketpair poll time spawn fork pipe fd argv env\n");
+    openos_printf("target: mmap file-mmap fs-metadata path-normalization fs-mutations getdents browser-dirs resource-pak sparse-seek mprotect v8-memory-policy brk thread tls pthread-sync futex shm eventfd message-queue service-channel socketpair poll time spawn fork pipe fd argv env dns font gui\n");
 
     status = test_uptime();
     print_result("monotonic uptime", status);
@@ -1487,6 +1531,10 @@ int main(int argc, char **argv)
 
     status = test_service_channel();
     print_result("service channel request/reply", status);
+    failed += status == CAP_FAIL;
+
+    status = test_font_gui_smoke();
+    print_result("font metrics and gui drawing", status);
     failed += status == CAP_FAIL;
 
     status = test_dns_resolver_literal();
