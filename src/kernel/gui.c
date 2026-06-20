@@ -30,11 +30,41 @@ typedef enum browser_scheme {
     BROWSER_SCHEME_HTTPS = 1
 } browser_scheme_t;
 
+typedef enum browser_load_state {
+    BROWSER_LOAD_IDLE = 0,
+    BROWSER_LOAD_RESOLVING,
+    BROWSER_LOAD_CONNECTING,
+    BROWSER_LOAD_HTTP_SEND,
+    BROWSER_LOAD_HTTP_RECV,
+    BROWSER_LOAD_TLS_SEND,
+    BROWSER_LOAD_TLS_RECV
+} browser_load_state_t;
+
+typedef struct browser_load_context {
+    browser_load_state_t state;
+    uint32_t state_started_ms;
+    char url[64];
+    char host[64];
+    char path[128];
+    uint16_t port;
+    browser_scheme_t scheme;
+    uint32_t ip;
+    int conn;
+    char request[256];
+    uint8_t response[2048];
+    int total;
+    uint8_t tls_record[256];
+    int tls_hello_len;
+    uint8_t tls_hello[256];
+} browser_load_context_t;
+
 static void gui_desktop_run_action(uint32_t action);
 static int  gui_taskbar_search_handle_key(int key);
 static int  gui_is_enter_key(int key);
 static int  browser_handle_address_enter(int key);
-static void browser_fetch_current(void);
+static void browser_load_start(void);
+static void browser_load_tick(void);
+static void browser_load_finish(const char *status);
 static int  browser_str_starts_ci(const char *p, const char *prefix);
 static int  browser_header_name_eq(const char *p, const char *name);
 static void gui_taskbar_search_open_result(uint32_t index);
@@ -73,6 +103,7 @@ static gui_accel_info_t g_gui_accel;
 static gui_rect_t g_network_widget_rect;
 static gui_rect_t g_taskbar_search_rect;
 static gui_window_t *g_wifi_win;
+static browser_load_context_t g_browser_load;
 
 #define GUI_TASKBAR_SEARCH_MAX   63u
 #define GUI_TASKBAR_SEARCH_W     180
@@ -5384,6 +5415,7 @@ void gui_poll(void) {
     if (!g_gui.initialized) return;
     gui_poll_mouse();
     gui_process_events();
+    browser_load_tick();
     gui_terminal_drain_output_queue();
     gui_terminal_tick_cursor();
     /* clock tick: invalidate taskbar clock area once per second */
@@ -5540,6 +5572,7 @@ static void browser_on_close(gui_window_t *win, void *ud) {
     uint32_t i;
     (void)win;
     (void)ud;
+    browser_load_finish(0);
     g_browser_win = 0;
     g_browser_address_box = 0;
     g_browser_status_label = 0;
@@ -5630,36 +5663,6 @@ static int browser_parse_url(const char *url, char *host, uint32_t host_cap,
     }
     if (scheme) *scheme = parsed_scheme;
     return 0;
-}
-
-static uint32_t browser_resolve_host(const char *host) {
-    uint32_t ip = 0;
-    uint32_t start;
-    if (net_parse_ipv4(host, &ip) == 0) return ip;
-    if (dns_query_a(host) != 0) return 0;
-    start = sched_time_ms();
-    while (sched_time_ms() - start < 3000u) {
-        dns_state_t state;
-        net_poll();
-        state = dns_get_state();
-        if (state == DNS_STATE_RESOLVED) return dns_get_last_result();
-        if (state == DNS_STATE_FAILED) return 0;
-        sched_yield();
-    }
-    return 0;
-}
-
-static int browser_wait_tcp_state(int conn, int want_state, uint32_t timeout_ms) {
-    uint32_t start = sched_time_ms();
-    while (sched_time_ms() - start < timeout_ms) {
-        int state;
-        net_poll();
-        state = net_tcp_state(conn);
-        if (state == want_state) return 0;
-        if (state < 0 || state == NET_TCP_STATE_CLOSED) return -1;
-        sched_yield();
-    }
-    return -1;
 }
 
 static uint32_t browser_render_text_at(const char *text, uint32_t start_line) {
@@ -5809,7 +5812,7 @@ static void browser_current_origin(char *origin, uint32_t cap) {
     uint16_t default_port;
     if (!origin || cap == 0) return;
     origin[0] = '\0';
-    browser_copy_url(url, sizeof(url), g_browser_address_box ? g_browser_address_box->text : "https://example.com/");
+    browser_copy_url(url, sizeof(url), g_browser_address_box ? g_browser_address_box->text : "http://example.com/");
     if (browser_parse_url(url, host, sizeof(host), path, sizeof(path), &port, &scheme) != 0) return;
     default_port = (scheme == BROWSER_SCHEME_HTTPS) ? 443u : 80u;
     pos = fp_str_append(origin, pos, (int)cap, scheme == BROWSER_SCHEME_HTTPS ? "https://" : "http://");
@@ -5905,7 +5908,7 @@ static void browser_link_on_click(gui_widget_t *w, void *ud) {
     if (!url || !*url || !g_browser_address_box) return;
     browser_set_widget_text(g_browser_address_box, url);
     g_browser_address_box->cursor = (uint32_t)strlen(g_browser_address_box->text);
-    browser_fetch_current();
+    browser_load_start();
 }
 
 static void browser_set_line_link(uint32_t line, const char *label, const char *url) {
@@ -6274,157 +6277,227 @@ static void browser_render_https_probe(const char *host, const uint8_t *record, 
     browser_set_widget_text(g_browser_content_lines[10], "HTTPS pages still need cipher/decrypt + Finished verify.");
 }
 
-static void browser_https_probe_current(const char *host, uint32_t ip, uint16_t port) {
-    uint8_t hello[256];
-    uint8_t record[256];
-    int hello_len;
-    int conn;
-    int sent;
-    int got;
-    uint32_t start;
-    uint32_t local_port;
-
-    hello_len = browser_tls_build_client_hello(host, hello, sizeof(hello));
-    if (hello_len <= 0) {
-        browser_set_widget_text(g_browser_content_lines[0], "Failed to build TLS ClientHello.");
-        browser_set_status("TLS setup failed");
-        return;
+static void browser_load_reset_connection(void) {
+    if (g_browser_load.state != BROWSER_LOAD_IDLE && g_browser_load.conn >= 0) {
+        net_tcp_close(g_browser_load.conn);
     }
-
-    local_port = 45000u + (sched_time_ms() % 2000u);
-    conn = net_tcp_open(0, (uint16_t)local_port, ip, port, 1);
-    if (conn < 0 || browser_wait_tcp_state(conn, NET_TCP_STATE_ESTABLISHED, 5000u) != 0) {
-        if (conn >= 0) net_tcp_close(conn);
-        browser_set_widget_text(g_browser_content_lines[0], "HTTPS TCP connection failed.");
-        browser_set_status("HTTPS connection failed");
-        return;
-    }
-
-    sent = net_tcp_send(conn, hello, (uint16_t)hello_len);
-    if (sent != 0) {
-        net_tcp_close(conn);
-        browser_set_widget_text(g_browser_content_lines[0], "Failed to send TLS ClientHello.");
-        browser_set_status("TLS send failed");
-        return;
-    }
-
-    got = 0;
-    start = sched_time_ms();
-    while (sched_time_ms() - start < 6000u) {
-        net_poll();
-        got = net_tcp_recv(conn, record, sizeof(record));
-        if (got > 0) break;
-        if (net_tcp_state(conn) == NET_TCP_STATE_CLOSED || net_tcp_state(conn) == NET_TCP_STATE_CLOSE_WAIT) break;
-        sched_yield();
-    }
-    net_tcp_close(conn);
-
-    if (got <= 0) {
-        browser_set_widget_text(g_browser_content_lines[0], "No TLS response received.");
-        browser_set_status("TLS no response");
-        return;
-    }
-    browser_render_https_probe(host, record, (uint32_t)got);
-    browser_set_status("HTTPS TLS response received");
+    g_browser_load.conn = -1;
 }
 
-static void browser_fetch_current(void) {
-    char url[64];
-    char host[64];
-    char path[128];
-    char request[256];
-    uint8_t response[2048];
-    int conn;
-    int total = 0;
-    int got;
-    uint32_t start;
-    uint32_t ip;
-    uint32_t local_port;
-    uint16_t port;
-    browser_scheme_t scheme = BROWSER_SCHEME_HTTP;
+static void browser_load_finish(const char *status) {
+    browser_load_reset_connection();
+    g_browser_load.state = BROWSER_LOAD_IDLE;
+    if (status) browser_set_status(status);
+}
+
+static int browser_load_timed_out(uint32_t timeout_ms) {
+    return (uint32_t)(sched_time_ms() - g_browser_load.state_started_ms) >= timeout_ms;
+}
+
+static void browser_load_set_state(browser_load_state_t state) {
+    g_browser_load.state = state;
+    g_browser_load.state_started_ms = sched_time_ms();
+}
+
+static void browser_load_begin_connect(void) {
+    uint32_t local_port = (g_browser_load.scheme == BROWSER_SCHEME_HTTPS ? 45000u : 43000u) +
+                          (sched_time_ms() % 2000u);
+    g_browser_load.conn = net_tcp_open(0, (uint16_t)local_port,
+                                       g_browser_load.ip, g_browser_load.port, 1);
+    if (g_browser_load.conn < 0) {
+        browser_set_widget_text(g_browser_content_lines[0],
+                                g_browser_load.scheme == BROWSER_SCHEME_HTTPS ?
+                                "HTTPS TCP connection failed." : "TCP connection failed.");
+        browser_load_finish("Connection failed");
+        return;
+    }
+    browser_load_set_state(BROWSER_LOAD_CONNECTING);
+}
+
+static void browser_load_start(void) {
     int parse_result;
-    int pos;
+
+    browser_load_reset_connection();
+    memset(&g_browser_load, 0, sizeof(g_browser_load));
+    g_browser_load.conn = -1;
 
     browser_clear_content();
     browser_set_status("Loading...");
-    browser_copy_url(url, sizeof(url), g_browser_address_box ? g_browser_address_box->text : "https://example.com/");
-    parse_result = browser_parse_url(url, host, sizeof(host), path, sizeof(path), &port, &scheme);
+    browser_copy_url(g_browser_load.url, sizeof(g_browser_load.url),
+                     g_browser_address_box ? g_browser_address_box->text : "http://example.com/");
+    parse_result = browser_parse_url(g_browser_load.url,
+                                     g_browser_load.host, sizeof(g_browser_load.host),
+                                     g_browser_load.path, sizeof(g_browser_load.path),
+                                     &g_browser_load.port, &g_browser_load.scheme);
     if (parse_result != 0) {
         browser_set_widget_text(g_browser_content_lines[0], "Invalid URL. Use http://host/path or https://host/path.");
-        browser_set_status("Invalid URL");
+        browser_load_finish("Invalid URL");
         return;
     }
-    ip = browser_resolve_host(host);
-    if (!ip) {
+
+    if (net_parse_ipv4(g_browser_load.host, &g_browser_load.ip) == 0) {
+        browser_load_begin_connect();
+        return;
+    }
+    if (dns_query_a(g_browser_load.host) != 0) {
         browser_set_widget_text(g_browser_content_lines[0], "DNS lookup failed or host is unreachable.");
-        browser_set_status("DNS failed");
+        browser_load_finish("DNS failed");
         return;
     }
+    browser_load_set_state(BROWSER_LOAD_RESOLVING);
+}
 
-    if (scheme == BROWSER_SCHEME_HTTPS) {
-        browser_https_probe_current(host, ip, port);
-        return;
-    }
-
-    local_port = 43000u + (sched_time_ms() % 2000u);
-    conn = net_tcp_open(0, (uint16_t)local_port, ip, port, 1);
-    if (conn < 0 || browser_wait_tcp_state(conn, NET_TCP_STATE_ESTABLISHED, 5000u) != 0) {
-        if (conn >= 0) net_tcp_close(conn);
-        browser_set_widget_text(g_browser_content_lines[0], "TCP connection failed.");
-        browser_set_status("Connection failed");
-        return;
-    }
-
-    pos = 0;
-    request[0] = '\0';
-    pos = fp_str_append(request, pos, sizeof(request), "GET ");
-    pos = fp_str_append(request, pos, sizeof(request), path);
-    pos = fp_str_append(request, pos, sizeof(request), " HTTP/1.0\r\nHost: ");
-    pos = fp_str_append(request, pos, sizeof(request), host);
-    pos = fp_str_append(request, pos, sizeof(request), "\r\nConnection: close\r\nUser-Agent: OpenOSBrowser/0.1\r\n\r\n");
+static void browser_load_send_http(void) {
+    int pos = 0;
+    g_browser_load.request[0] = '\0';
+    pos = fp_str_append(g_browser_load.request, pos, sizeof(g_browser_load.request), "GET ");
+    pos = fp_str_append(g_browser_load.request, pos, sizeof(g_browser_load.request), g_browser_load.path);
+    pos = fp_str_append(g_browser_load.request, pos, sizeof(g_browser_load.request), " HTTP/1.0\r\nHost: ");
+    pos = fp_str_append(g_browser_load.request, pos, sizeof(g_browser_load.request), g_browser_load.host);
+    pos = fp_str_append(g_browser_load.request, pos, sizeof(g_browser_load.request),
+                        "\r\nConnection: close\r\nUser-Agent: OpenOSBrowser/0.1\r\n\r\n");
     (void)pos;
-
-    if (net_tcp_send(conn, (const uint8_t *)request, (uint16_t)strlen(request)) != 0) {
-        net_tcp_close(conn);
+    if (net_tcp_send(g_browser_load.conn, (const uint8_t *)g_browser_load.request,
+                     (uint16_t)strlen(g_browser_load.request)) != 0) {
         browser_set_widget_text(g_browser_content_lines[0], "Failed to send HTTP request.");
-        browser_set_status("Send failed");
+        browser_load_finish("Send failed");
+        return;
+    }
+    g_browser_load.total = 0;
+    browser_load_set_state(BROWSER_LOAD_HTTP_RECV);
+}
+
+static void browser_load_send_tls(void) {
+    g_browser_load.tls_hello_len = browser_tls_build_client_hello(g_browser_load.host,
+                                                                  g_browser_load.tls_hello,
+                                                                  sizeof(g_browser_load.tls_hello));
+    if (g_browser_load.tls_hello_len <= 0) {
+        browser_set_widget_text(g_browser_content_lines[0], "Failed to build TLS ClientHello.");
+        browser_load_finish("TLS setup failed");
+        return;
+    }
+    if (net_tcp_send(g_browser_load.conn, g_browser_load.tls_hello,
+                     (uint16_t)g_browser_load.tls_hello_len) != 0) {
+        browser_set_widget_text(g_browser_content_lines[0], "Failed to send TLS ClientHello.");
+        browser_load_finish("TLS send failed");
+        return;
+    }
+    browser_load_set_state(BROWSER_LOAD_TLS_RECV);
+}
+
+static void browser_load_tick(void) {
+    int state;
+    int got;
+
+    if (g_browser_load.state == BROWSER_LOAD_IDLE) return;
+    net_poll();
+
+    if (g_browser_load.state == BROWSER_LOAD_RESOLVING) {
+        dns_state_t dns_state = dns_get_state();
+        if (dns_state == DNS_STATE_RESOLVED) {
+            g_browser_load.ip = dns_get_last_result();
+            if (!g_browser_load.ip) {
+                browser_set_widget_text(g_browser_content_lines[0], "DNS lookup returned no address.");
+                browser_load_finish("DNS failed");
+                return;
+            }
+            browser_load_begin_connect();
+            return;
+        }
+        if (dns_state == DNS_STATE_FAILED || browser_load_timed_out(3000u)) {
+            browser_set_widget_text(g_browser_content_lines[0], "DNS lookup failed or timed out.");
+            browser_load_finish("DNS failed");
+        }
         return;
     }
 
-    start = sched_time_ms();
-    while (sched_time_ms() - start < 7000u && total < (int)sizeof(response) - 1) {
-        net_poll();
-        got = net_tcp_recv(conn, response + total, (uint16_t)(sizeof(response) - 1u - (uint32_t)total));
-        if (got > 0) {
-            total += got;
-            start = sched_time_ms();
-        } else if (net_tcp_state(conn) == NET_TCP_STATE_CLOSED || net_tcp_state(conn) == NET_TCP_STATE_CLOSE_WAIT) {
-            break;
+    if (g_browser_load.state == BROWSER_LOAD_CONNECTING) {
+        state = net_tcp_state(g_browser_load.conn);
+        if (state == NET_TCP_STATE_ESTABLISHED) {
+            browser_load_set_state(g_browser_load.scheme == BROWSER_SCHEME_HTTPS ?
+                                   BROWSER_LOAD_TLS_SEND : BROWSER_LOAD_HTTP_SEND);
+        } else if (state < 0 || state == NET_TCP_STATE_CLOSED || browser_load_timed_out(5000u)) {
+            browser_set_widget_text(g_browser_content_lines[0],
+                                    g_browser_load.scheme == BROWSER_SCHEME_HTTPS ?
+                                    "HTTPS TCP connection failed or timed out." :
+                                    "TCP connection failed or timed out.");
+            browser_load_finish("Connection failed");
         }
-        sched_yield();
-    }
-    net_tcp_close(conn);
-    response[total] = 0;
-    if (total <= 0) {
-        browser_clear_content();
-        browser_set_widget_text(g_browser_content_lines[0], "No HTTP response received before timeout.");
-        browser_set_status("Timeout");
         return;
     }
-    (void)browser_render_response_summary((char *)response, browser_find_body((char *)response));
-    browser_set_status("Done");
+
+    if (g_browser_load.state == BROWSER_LOAD_HTTP_SEND) {
+        browser_load_send_http();
+        return;
+    }
+
+    if (g_browser_load.state == BROWSER_LOAD_HTTP_RECV) {
+        got = net_tcp_recv(g_browser_load.conn,
+                           g_browser_load.response + g_browser_load.total,
+                           (uint16_t)(sizeof(g_browser_load.response) - 1u - (uint32_t)g_browser_load.total));
+        if (got > 0) {
+            g_browser_load.total += got;
+            g_browser_load.state_started_ms = sched_time_ms();
+            if (g_browser_load.total >= (int)sizeof(g_browser_load.response) - 1) {
+                g_browser_load.response[g_browser_load.total] = 0;
+                (void)browser_render_response_summary((char *)g_browser_load.response,
+                                                       browser_find_body((char *)g_browser_load.response));
+                browser_load_finish("Done");
+            }
+            return;
+        }
+        state = net_tcp_state(g_browser_load.conn);
+        if (state == NET_TCP_STATE_CLOSED || state == NET_TCP_STATE_CLOSE_WAIT) {
+            g_browser_load.response[g_browser_load.total] = 0;
+            if (g_browser_load.total <= 0) {
+                browser_clear_content();
+                browser_set_widget_text(g_browser_content_lines[0], "No HTTP response received before connection closed.");
+                browser_load_finish("Timeout");
+            } else {
+                (void)browser_render_response_summary((char *)g_browser_load.response,
+                                                       browser_find_body((char *)g_browser_load.response));
+                browser_load_finish("Done");
+            }
+            return;
+        }
+        if (browser_load_timed_out(7000u)) {
+            browser_clear_content();
+            browser_set_widget_text(g_browser_content_lines[0], "No HTTP response received before timeout.");
+            browser_load_finish("Timeout");
+        }
+        return;
+    }
+
+    if (g_browser_load.state == BROWSER_LOAD_TLS_SEND) {
+        browser_load_send_tls();
+        return;
+    }
+
+    if (g_browser_load.state == BROWSER_LOAD_TLS_RECV) {
+        got = net_tcp_recv(g_browser_load.conn, g_browser_load.tls_record, sizeof(g_browser_load.tls_record));
+        if (got > 0) {
+            browser_render_https_probe(g_browser_load.host, g_browser_load.tls_record, (uint32_t)got);
+            browser_load_finish("HTTPS TLS response received");
+            return;
+        }
+        state = net_tcp_state(g_browser_load.conn);
+        if (state == NET_TCP_STATE_CLOSED || state == NET_TCP_STATE_CLOSE_WAIT || browser_load_timed_out(6000u)) {
+            browser_set_widget_text(g_browser_content_lines[0], "No TLS response received.");
+            browser_load_finish("TLS no response");
+        }
+    }
 }
 
 static void browser_on_nav(gui_widget_t *w, void *ud) {
     (void)w;
     (void)ud;
-    browser_fetch_current();
+    browser_load_start();
 }
 
 static int browser_handle_address_enter(int key) {
     if (!g_browser_address_box || g_gui.focused_widget != g_browser_address_box) return 0;
     if (!gui_is_enter_key(key)) return 0;
-    browser_fetch_current();
+    browser_load_start();
     return 1;
 }
 
@@ -6450,7 +6523,7 @@ static void gui_browser_open(void) {
     gui_add_button(g_browser_win, 54, 18, 34, 26, i18n_t(I18N_KEY_BROWSER_FORWARD), browser_on_nav, 0);
     gui_add_button(g_browser_win, 94, 18, 70, 26, i18n_t(I18N_KEY_BROWSER_REFRESH), browser_on_nav, 0);
     gui_add_label(g_browser_win, 176, 24, 62, 16, i18n_t(I18N_KEY_BROWSER_ADDRESS));
-    g_browser_address_box = gui_add_textbox(g_browser_win, 238, 18, 282, 26, "https://example.com/");
+    g_browser_address_box = gui_add_textbox(g_browser_win, 238, 18, 282, 26, "http://example.com/");
     gui_add_button(g_browser_win, 530, 18, 62, 26, i18n_t(I18N_KEY_BROWSER_GO), browser_on_nav, 0);
 
     gui_add_panel(g_browser_win, 14, 56, win_w - 28, win_h - 104, gui_rgb(246, 249, 253));
