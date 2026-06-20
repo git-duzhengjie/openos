@@ -177,6 +177,21 @@ Chromium 主体是 C++，OpenOS 需要：
 - 单进程、禁用 GPU、禁用 sandbox 的最小 content shell。
 - 打开 `http://example.com` 并完成 Blink layout + Skia paint。
 
+## 近期底层能力闭环记录
+
+`/bin/chromiumcaptest` 已从最早的 capability smoke 扩展为覆盖 Chromium 底座的持续验收入口。近期已并入的关键验收包括：
+
+- 内存：匿名 `mmap/munmap`、`mprotect` 权限切换、非法 `prot/flags` 拒绝、固定地址映射、文件私有快照 mmap、稀疏文件 seek。
+- 时间：`clock_gettime(OPENOS_CLOCK_MONOTONIC)` timespec ABI；当前底层精度仍是毫秒级，后续替换高精度硬件时间源。
+- 线程/同步：线程创建、共享地址空间、TLS base ABI、pthread-like mutex/cond、双等待者 cond broadcast、futex 边界、semaphore 生产/消费同步、eventfd。
+- 进程/加载器：`spawn/waitpid`、argv/envp、fd 继承最小验收，`/bin/fdinherit` 作为继承 fd 子进程回归程序。
+- IPC：shared memory 双映射一致性、message queue FIFO 多消息顺序、service channel request/reply 结构化元数据和错误边界。
+- 文件系统：`stat/fstat/lstat` 时间字段、`statfs/fstatfs`、`getdents` 目录枚举、路径规范化、资源 pak 读取、缓存目录、稀疏文件。
+- 网络：socketpair send/recv/poll、空队列不报 `POLLIN`、`POLLOUT`、空读失败、对端关闭 `POLLHUP`，以及离线 DNS resolver 基础验收。
+- 图形/字体/输入：GUI smoke、字体查询、GUI event queue、用户剪贴板 syscall smoke。
+
+这些能力仍不是完整 Chromium 运行时，但它们把后续 Skia/V8/Blink/content shell 的依赖从“规划项”推进为可重复构建验证的 OpenOS 原生底座。
+
 ## 当前第一步
 
 本路线的第一步是把底层能力变成可运行的系统验收，而不是只写规划：

@@ -493,6 +493,7 @@
   - [ ] 增加内核压力测试：内存、线程、IPC、socket、文件 mmap、GUI present
   - [ ] 文档同步：每完成一个里程碑更新 `docs/chromium-core-roadmap.md` 和本 TODOLIST
     - [√] 已新增 C++ runtime / Chromium 工具链路线文档，记录 M8 到 M9 的分阶段验收边界
+    - [√] 已同步近期 Chromium 底座闭环记录到 `docs/chromium-core-roadmap.md`，覆盖 mmap、clock、同步原语、fd 继承、IPC、FS、socket poll、GUI/字体/剪贴板等能力
 
 ### 17.4 国际化（i18n / 翻译键）
 
