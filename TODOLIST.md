@@ -464,12 +464,14 @@
     - [√] 已将 cache 文件创建/删除、profiles/Default/Preferences 写入和目录遍历并入 `/bin/chromiumcaptest`
 - [ ] M6 网络与 TLS
   - [ ] TCP 长连接、半关闭、RST、超时、窗口与重传压力测试
+    - [√] 已新增 `SYS_SHUTDOWN` / `openos_shutdown` 基础半关闭 ABI，并在 `/bin/chromiumcaptest` 覆盖 socketpair 写端关闭、读端关闭、`SHUT_RDWR`、非法 how、send/recv 拒绝和 poll `POLLHUP` 语义
   - [ ] DNS resolver 完善：缓存、超时、失败回退、IPv4 优先策略
     - [√] 已新增 DNS IPv4 字面量快路径，用户态 `openos_dnslookup/openos_getaddrinfo/openos_gethostbyname` 可离线解析 IPv4 地址，并接入 `/bin/chromiumcaptest` 验收
     - [√] 已为 DNS resolver 增加成功缓存、失败负缓存、毫秒级超时回退，并在 `/bin/chromiumcaptest` 覆盖重复解析快路径
   - [ ] 引入或实现可维护 TLS 库，支撑 HTTPS、证书链校验和系统信任根
   - [ ] 为 Chromium net stack 所需 socket 行为补齐错误码、非阻塞、poll 边界语义
     - [√] 已增强 `/bin/chromiumcaptest` 的 `socketpair` poll/select 边界验收，覆盖空队列不报 `POLLIN`、多 fd poll、负 fd 忽略、非法 fd `POLLERR`、select 读写位图、可写端 `POLLOUT`、空读失败和对端关闭 `POLLHUP`
+    - [√] 已新增 `SYS_FCNTL` / `openos_fcntl` 最小 flags ABI，覆盖 `F_GETFL/F_SETFL/O_NONBLOCK` 开关、非法 fd 和非法 cmd，为后续 socket 非阻塞 I/O 语义打底
 - [ ] M7 图形、字体与输入
   - [ ] 为 Skia software raster 提供窗口 framebuffer / shared bitmap / dirty rect present 能力
     - [√] 已将用户态窗口创建、控件、fill/text/blit/scroll/present 基础绘制 smoke 并入 `/bin/chromiumcaptest`
@@ -481,6 +483,7 @@
     - [√] 已新增 `SYS_CLIPBOARD_SET` / `SYS_CLIPBOARD_GET` 与用户态 `openos_clipboard_set/get`，并接入 `/bin/chromiumcaptest` 验收
 - [ ] M8 C/C++ runtime 与工具链
   - [ ] 用户态 C++ 编译、链接、构造/析构、异常策略、RTTI 策略
+    - [√] 已新增 `build.sh cppsmoke` 工具链探测入口；当前环境缺少 `i686-elf-g++/clang++/g++` 时会明确失败并提示 `OPENOS_CXX`，避免静默伪装 C++ 能力完成
   - [ ] libstdc++/libc++ 子集或 OpenOS C++ runtime 路线
     - [√] 已新增 `docs/chromium-cpp-runtime-roadmap.md`，明确工具链探测、最小 C++ ABI、new/delete、静态初始化、异常/RTTI 策略与 `/bin/cppsmoke` 验收顺序
   - [ ] 原子操作、内存序、TLS、new/delete、静态初始化

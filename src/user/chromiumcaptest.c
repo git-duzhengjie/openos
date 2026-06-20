@@ -1869,6 +1869,118 @@ static int test_socketpair_poll(void)
     return CAP_PASS;
 }
 
+static int test_fcntl_nonblock_flags(void)
+{
+    int sv[2];
+    int flags;
+
+    if (openos_socketpair(OPENOS_AF_UNSPEC, OPENOS_SOCK_STREAM, 0, sv) != 0) {
+        return CAP_FAIL;
+    }
+
+    flags = openos_fcntl(sv[0], F_GETFL, 0);
+    if (flags < 0 || (flags & O_NONBLOCK)) {
+        openos_close(sv[0]);
+        openos_close(sv[1]);
+        return CAP_FAIL;
+    }
+
+    if (openos_fcntl(sv[0], F_SETFL, flags | O_NONBLOCK) != 0) {
+        openos_close(sv[0]);
+        openos_close(sv[1]);
+        return CAP_FAIL;
+    }
+    flags = openos_fcntl(sv[0], F_GETFL, 0);
+    if (flags < 0 || !(flags & O_NONBLOCK)) {
+        openos_close(sv[0]);
+        openos_close(sv[1]);
+        return CAP_FAIL;
+    }
+
+    if (openos_fcntl(sv[0], F_SETFL, flags & ~O_NONBLOCK) != 0) {
+        openos_close(sv[0]);
+        openos_close(sv[1]);
+        return CAP_FAIL;
+    }
+    flags = openos_fcntl(sv[0], F_GETFL, 0);
+    if (flags < 0 || (flags & O_NONBLOCK)) {
+        openos_close(sv[0]);
+        openos_close(sv[1]);
+        return CAP_FAIL;
+    }
+
+    if (openos_fcntl(-1, F_GETFL, 0) >= 0 || openos_fcntl(sv[0], 999, 0) >= 0) {
+        openos_close(sv[0]);
+        openos_close(sv[1]);
+        return CAP_FAIL;
+    }
+
+    openos_close(sv[0]);
+    openos_close(sv[1]);
+    return CAP_PASS;
+}
+
+static int test_socketpair_shutdown(void)
+{
+    int sv[2];
+    char ch = 'S';
+    char out = 0;
+    openos_pollfd_t pfd;
+    int ready;
+
+    if (openos_socketpair(OPENOS_AF_UNSPEC, OPENOS_SOCK_STREAM, 0, sv) != 0) {
+        return CAP_FAIL;
+    }
+
+    if (openos_shutdown(sv[0], OPENOS_SHUT_WR) != 0) {
+        openos_close(sv[0]);
+        openos_close(sv[1]);
+        return CAP_FAIL;
+    }
+    if (openos_send(sv[0], &ch, 1, 0) >= 0) {
+        openos_close(sv[0]);
+        openos_close(sv[1]);
+        return CAP_FAIL;
+    }
+
+    pfd.fd = sv[1];
+    pfd.events = OPENOS_POLLIN | OPENOS_POLLOUT;
+    pfd.revents = 0;
+    ready = openos_poll(&pfd, 1, 0);
+    if (ready != 1 || !(pfd.revents & OPENOS_POLLHUP) || !(pfd.revents & OPENOS_POLLOUT)) {
+        openos_close(sv[0]);
+        openos_close(sv[1]);
+        return CAP_FAIL;
+    }
+
+    if (openos_shutdown(sv[1], OPENOS_SHUT_RD) != 0) {
+        openos_close(sv[0]);
+        openos_close(sv[1]);
+        return CAP_FAIL;
+    }
+    if (openos_recv(sv[1], &out, 1, 0) >= 0) {
+        openos_close(sv[0]);
+        openos_close(sv[1]);
+        return CAP_FAIL;
+    }
+    if (openos_send(sv[1], &ch, 1, 0) >= 0) {
+        openos_close(sv[0]);
+        openos_close(sv[1]);
+        return CAP_FAIL;
+    }
+
+    if (openos_shutdown(sv[0], OPENOS_SHUT_RDWR) != 0 ||
+        openos_shutdown(sv[0], 99) == 0) {
+        openos_close(sv[0]);
+        openos_close(sv[1]);
+        return CAP_FAIL;
+    }
+
+    openos_close(sv[0]);
+    openos_close(sv[1]);
+    return CAP_PASS;
+}
+
 static int test_kernel_pressure_smoke(void)
 {
     int i;
@@ -1903,7 +2015,7 @@ int main(int argc, char **argv)
     (void)argv;
 
     openos_printf("Chromium core capability test\n");
-    openos_printf("target: mmap file-mmap fs-metadata path-normalization fs-mutations getdents browser-dirs resource-pak sparse-seek mprotect v8-memory-policy brk thread tls pthread-sync futex shm eventfd message-queue service-channel socketpair poll time spawn fork pipe fd argv env dns font gui clipboard pressure-smoke\n");
+    openos_printf("target: mmap file-mmap fs-metadata path-normalization fs-mutations getdents browser-dirs resource-pak sparse-seek mprotect v8-memory-policy brk thread tls pthread-sync futex shm eventfd message-queue service-channel socketpair poll fcntl shutdown time spawn fork pipe fd argv env dns font gui clipboard pressure-smoke\n");
 
     status = test_uptime();
     print_result("monotonic uptime", status);
@@ -2023,6 +2135,14 @@ int main(int argc, char **argv)
 
     status = test_socketpair_poll();
     print_result("socketpair poll/select boundaries", status);
+    failed += status == CAP_FAIL;
+
+    status = test_socketpair_shutdown();
+    print_result("socketpair shutdown half-close", status);
+    failed += status == CAP_FAIL;
+
+    status = test_fcntl_nonblock_flags();
+    print_result("fcntl O_NONBLOCK flags", status);
     failed += status == CAP_FAIL;
 
     status = test_spawn_argv_env_wait();

@@ -90,9 +90,9 @@ Chromium 需要真实文件系统能力：
 
 Chromium 需要完整网络基础：
 
-- TCP socket：connect/send/recv/poll 已有，需加强非阻塞和错误码。
+- TCP socket：connect/send/recv/poll 已有，需加强非阻塞和错误码；已新增 `SYS_SHUTDOWN` / `openos_shutdown` 基础半关闭 ABI，socketpair 路径覆盖 `SHUT_RD/SHUT_WR/SHUT_RDWR`、send/recv 拒绝和 poll `POLLHUP` 语义；已新增 `SYS_FCNTL` / `openos_fcntl` 最小 flags ABI，覆盖 `F_GETFL/F_SETFL/O_NONBLOCK` 开关，为后续 socket 非阻塞 I/O 打底。
 - DNS：已有基础能力，当前已具备 IPv4 字面量快路径、成功缓存、失败负缓存和超时回退；后续需要完善 getaddrinfo 级语义、真实递归查询稳定性与 IPv6 后置。
-- socketpair：已有用户态 API，用于本地 IPC smoke test。
+- socketpair：已有用户态 API，用于本地 IPC smoke test，并覆盖 poll/select 边界与半关闭语义。
 - TLS/HTTPS：需要用户态 TLS 库或原生 TLS 服务；证书链、时间、根证书存储必须补。
 - poll/select/epoll：已有 poll，需要扩展可扩展事件通知。Chromium 级别建议最终实现 epoll/kqueue 类事件核心。
 

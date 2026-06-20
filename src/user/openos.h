@@ -133,6 +133,8 @@
 #define SYS_CLIPBOARD_SET 337
 #define SYS_CLIPBOARD_GET 338
 #define SYS_FUTEX_WAIT_TIMEOUT 339
+#define SYS_SHUTDOWN 340
+#define SYS_FCNTL 341
 
 #define OPENOS_CHROMIUM_MEM_JITLESS_DEFAULT     (1u << 0)
 #define OPENOS_CHROMIUM_MEM_EXEC_PROT_RESERVED  (1u << 1)
@@ -353,6 +355,10 @@ static inline unsigned short openos_htons(unsigned short v)
 #define OPENOS_POLLERR    0x0008
 #define OPENOS_POLLHUP    0x0010
 
+#define OPENOS_SHUT_RD    0
+#define OPENOS_SHUT_WR    1
+#define OPENOS_SHUT_RDWR  2
+
 #define OPENOS_CLOCK_MONOTONIC 1
 
 typedef struct openos_timespec {
@@ -375,6 +381,9 @@ typedef struct openos_timespec {
 #define O_RDWR          2
 #define O_CREAT         0x100
 #define O_TRUNC         0x200
+#define O_NONBLOCK      0x800
+#define F_GETFL         3
+#define F_SETFL         4
 #define SEEK_SET        0
 #define SEEK_CUR        1
 #define SEEK_END        2
@@ -655,6 +664,16 @@ static inline int openos_send(int fd, const void *buf, unsigned int len, int fla
 static inline int openos_recv(int fd, void *buf, unsigned int len, int flags)
 {
     return openos_syscall_result(openos_syscall4(SYS_RECV, fd, (int)buf, (int)len, flags));
+}
+
+static inline int openos_shutdown(int fd, int how)
+{
+    return openos_syscall_result(openos_syscall2(SYS_SHUTDOWN, fd, how));
+}
+
+static inline int openos_fcntl(int fd, int cmd, int arg)
+{
+    return openos_syscall_result(openos_syscall3(SYS_FCNTL, fd, cmd, arg));
 }
 
 

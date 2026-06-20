@@ -46,6 +46,8 @@ typedef struct openos_socket_info {
     uint16_t remote_port;
     int tcp_conn_id;
     int listen_backlog;
+    uint8_t read_shutdown;
+    uint8_t write_shutdown;
 } openos_socket_info_t;
 
 int socket_create_fd(int domain, int type, int protocol);
@@ -60,6 +62,7 @@ int socket_sendto_fd(int fd, const uint8_t *data, uint32_t len, int flags,
 int socket_recv_fd(int fd, uint8_t *data, uint32_t len, int flags);
 int socket_recvfrom_fd(int fd, uint8_t *data, uint32_t len, int flags,
                        openos_sockaddr_t *addr, uint32_t *addrlen);
+int socket_shutdown_fd(int fd, int how);
 int socket_deliver_udp(uint32_t src_ip, uint16_t src_port, uint16_t dst_port,
                        const uint8_t *data, uint16_t len);
 const openos_socket_info_t *socket_get_info(int fd);

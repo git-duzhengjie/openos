@@ -28,13 +28,43 @@ if [ "$OPENOS_CJK_COVERAGE" != "ui" ] && [ "$OPENOS_CJK_EMBED" != "1" ] && [ "$O
 fi
 
 usage() {
-    echo "Usage: ARCH=i386|x86_64 ./build.sh [clean|test]"
-    echo "       ./build.sh [i386|x86_64] [clean|test]"
+    echo "Usage: ARCH=i386|x86_64 ./build.sh [clean|test|cppsmoke]"
+    echo "       ./build.sh [i386|x86_64] [clean|test|cppsmoke]"
+    echo "       ./build.sh cppsmoke    # probe OpenOS userland C++ toolchain"
+}
+
+check_cpp_toolchain() {
+    local cxx="${OPENOS_CXX:-}"
+    local candidate
+
+    if [ -z "$cxx" ]; then
+        for candidate in i686-elf-g++ clang++ g++; do
+            if command -v "$candidate" >/dev/null 2>&1; then
+                cxx="$candidate"
+                break
+            fi
+        done
+    fi
+
+    if [ -z "$cxx" ] || ! command -v "$cxx" >/dev/null 2>&1; then
+        echo "ERROR: no OpenOS C++ toolchain found for cppsmoke." >&2
+        echo "       Install i686-elf-g++ or clang++, or set OPENOS_CXX=/path/to/compiler." >&2
+        echo "       M8 C++ runtime smoke remains unavailable until this probe passes." >&2
+        return 1
+    fi
+
+    echo "OpenOS C++ compiler candidate: $cxx"
+    "$cxx" --version | head -1
+    echo "cppsmoke toolchain probe passed; userland C++ ABI smoke is ready to wire next."
 }
 
 case "${1:-}" in
     test)
         exec bash tests/run_unit_tests.sh
+        ;;
+    cppsmoke|check-cpp|cpp)
+        check_cpp_toolchain
+        exit $?
         ;;
     i386|x86_64)
         BUILD_ARCH="$1"
@@ -55,6 +85,10 @@ esac
 
 if [ "${1:-}" = "test" ]; then
     exec bash tests/run_unit_tests.sh
+fi
+if [ "${1:-}" = "cppsmoke" ] || [ "${1:-}" = "check-cpp" ] || [ "${1:-}" = "cpp" ]; then
+    check_cpp_toolchain
+    exit $?
 fi
 
 case "$BUILD_ARCH" in

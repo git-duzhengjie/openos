@@ -237,7 +237,7 @@ static int socket_enqueue_packet(socket_file_t *sock, uint32_t src_ip, uint16_t 
     uint32_t tail;
 
     if (!sock || !data || len == 0 || len > SOCKET_RECV_PACKET_MAX ||
-        sock->recv_count >= SOCKET_RECV_QUEUE_LEN) {
+        sock->recv_count >= SOCKET_RECV_QUEUE_LEN || sock->info.read_shutdown) {
         return -1;
     }
     tail = (sock->recv_head + sock->recv_count) % SOCKET_RECV_QUEUE_LEN;
@@ -254,10 +254,13 @@ static int socket_enqueue_packet(socket_file_t *sock, uint32_t src_ip, uint16_t 
 
 static int socket_read(file_t *f, void *buf, uint32_t count) {
     socket_file_t *sock = socket_from_file(f);
-    if (sock && (sock->flags & SOCKET_FLAG_PAIR)) {
+    if (!sock || sock->info.read_shutdown) {
+        return -1;
+    }
+    if (sock->flags & SOCKET_FLAG_PAIR) {
         return socket_dequeue(sock, (uint8_t *)buf, count);
     }
-    if (sock && socket_type_base(sock->info.type) == OPENOS_SOCK_STREAM) {
+    if (socket_type_base(sock->info.type) == OPENOS_SOCK_STREAM) {
         if (sock->info.tcp_conn_id < 0) return -1;
         return net_tcp_recv(sock->info.tcp_conn_id, (uint8_t *)buf, (uint16_t)count);
     }
@@ -266,16 +269,19 @@ static int socket_read(file_t *f, void *buf, uint32_t count) {
 
 static int socket_write(file_t *f, const void *buf, uint32_t count) {
     socket_file_t *sock = socket_from_file(f);
-    if (sock && (sock->flags & SOCKET_FLAG_PAIR)) {
+    if (!sock || sock->info.write_shutdown) {
+        return -1;
+    }
+    if (sock->flags & SOCKET_FLAG_PAIR) {
         if (!buf || count == 0 || count > SOCKET_RECV_PACKET_MAX || !sock->peer ||
-            sock->peer->magic != SOCKET_MAGIC ||
+            sock->peer->magic != SOCKET_MAGIC || sock->peer->info.read_shutdown ||
             socket_enqueue_packet(sock->peer, OPENOS_INADDR_ANY, 0,
                                   (const uint8_t *)buf, (uint16_t)count) < 0) {
             return -1;
         }
         return (int)count;
     }
-    if (sock && socket_type_base(sock->info.type) == OPENOS_SOCK_STREAM) {
+    if (socket_type_base(sock->info.type) == OPENOS_SOCK_STREAM) {
         if (sock->info.tcp_conn_id < 0 || !buf || count > NET_ETH_MTU) return -1;
         return net_tcp_send(sock->info.tcp_conn_id, (const uint8_t *)buf, (uint16_t)count) == 0 ? (int)count : -1;
     }
@@ -298,9 +304,11 @@ static int socket_poll(file_t *f, uint32_t events) {
         return VFS_POLLERR | VFS_POLLHUP;
     }
     if (sock->flags & SOCKET_FLAG_PAIR) {
-        if ((events & VFS_POLLIN) && sock->recv_count > 0) ready |= VFS_POLLIN;
-        if ((events & VFS_POLLOUT) && sock->peer && sock->peer->magic == SOCKET_MAGIC) ready |= VFS_POLLOUT;
-        if (!sock->peer || sock->peer->magic != SOCKET_MAGIC) ready |= VFS_POLLHUP;
+        if ((events & VFS_POLLIN) && !sock->info.read_shutdown && sock->recv_count > 0) ready |= VFS_POLLIN;
+        if ((events & VFS_POLLOUT) && !sock->info.write_shutdown && sock->peer &&
+            sock->peer->magic == SOCKET_MAGIC && !sock->peer->info.read_shutdown) ready |= VFS_POLLOUT;
+        if (!sock->peer || sock->peer->magic != SOCKET_MAGIC || sock->info.read_shutdown ||
+            (sock->peer && sock->peer->magic == SOCKET_MAGIC && sock->peer->info.write_shutdown)) ready |= VFS_POLLHUP;
     } else if (socket_type_base(sock->info.type) == OPENOS_SOCK_STREAM) {
         int state = sock->info.tcp_conn_id >= 0 ? net_tcp_state(sock->info.tcp_conn_id) : -1;
         if (state == NET_TCP_STATE_CLOSED || state < 0) ready |= VFS_POLLHUP;
@@ -750,7 +758,7 @@ int socket_recvfrom_fd(int fd, uint8_t *data, uint32_t len, int flags,
     }
     file = vfs_get_file(fd);
     sock = socket_from_file(file);
-    if (!sock || socket_type_base(sock->info.type) != OPENOS_SOCK_DGRAM) {
+    if (!sock || sock->info.read_shutdown || socket_type_base(sock->info.type) != OPENOS_SOCK_DGRAM) {
         return -1;
     }
     ret = socket_dequeue_from(sock, data, len, &src_ip, &src_port);
@@ -769,6 +777,30 @@ int socket_recvfrom_fd(int fd, uint8_t *data, uint32_t len, int flags,
         *addrlen = sizeof(openos_sockaddr_in_t);
     }
     return ret;
+}
+
+int socket_shutdown_fd(int fd, int how) {
+    file_t *file;
+    socket_file_t *sock;
+
+    file = vfs_get_file(fd);
+    sock = socket_from_file(file);
+    if (!sock || sock->info.state == OPENOS_SOCKET_STATE_CLOSED) {
+        return -1;
+    }
+    if (how < 0 || how > 2) {
+        return -1;
+    }
+    if (how == 0 || how == 2) {
+        sock->info.read_shutdown = 1;
+        memset(sock->recv_queue, 0, sizeof(sock->recv_queue));
+        sock->recv_head = 0;
+        sock->recv_count = 0;
+    }
+    if (how == 1 || how == 2) {
+        sock->info.write_shutdown = 1;
+    }
+    return 0;
 }
 
 int socket_bind_fd(int fd, const openos_sockaddr_t *addr, uint32_t addrlen) {

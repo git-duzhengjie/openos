@@ -6,6 +6,7 @@
 
 - 当前用户态程序以 C 为主，使用 `crt0.c`、`user.ld` 和 `openos.h` 直接链接到 OpenOS syscall ABI。
 - 当前构建环境未检测到可用的 `g++` 或 `clang++`，因此不能宣称已经具备用户态 C++ 编译和链接能力。
+- `build.sh cppsmoke` 已作为显式工具链探测入口：会查找 `OPENOS_CXX`、`i686-elf-g++`、`clang++`、`g++`，缺失时给出明确错误，默认镜像构建不静默伪装 C++ 能力。
 - 已具备 Chromium 底座所需的一批 C ABI 验收入口：内存映射、线程/TLS syscall、futex、IPC、文件系统、DNS、GUI/font smoke。
 
 ## M8 最小可交付顺序
@@ -15,6 +16,7 @@
 - 安装或引入可固定版本的 i386 交叉编译工具链。
 - 优先目标：`i686-elf-gcc/g++` 或 clang + lld，输出 freestanding i386 ELF。
 - 构建脚本需要显式探测 C++ 编译器，失败时给出清晰错误而不是静默跳过。
+  - [已接入] `./build.sh cppsmoke` / `./build.sh i386 cppsmoke` 执行工具链探测；当前环境缺少 C++ 编译器时按预期失败并提示安装或设置 `OPENOS_CXX`。
 
 ### 2. C++ ABI 最小运行时
 

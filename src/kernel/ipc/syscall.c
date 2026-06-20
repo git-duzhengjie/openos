@@ -40,6 +40,9 @@
 #define OPENOS_USER_NAME_MAX 32u
 #define OPENOS_USER_HOME_MAX 64u
 #define OPENOS_USER_SHELL_MAX 64u
+#define OPENOS_F_GETFL 3
+#define OPENOS_F_SETFL 4
+#define OPENOS_FCNTL_SETFL_MASK O_NONBLOCK
 #define SYSCALL_CLIPBOARD_MAX 512u
 
 static char syscall_clipboard[SYSCALL_CLIPBOARD_MAX];
@@ -2211,6 +2214,22 @@ uint32_t syscall_dispatch(uint32_t num,
             return 0;
         }
 
+    case SYS_FCNTL:
+        {
+            file_t *f;
+            f = vfs_get_file((int)a);
+            if (!f)
+                return (uint32_t)-1;
+            if ((int)b == OPENOS_F_GETFL)
+                return (uint32_t)f->flags;
+            if ((int)b == OPENOS_F_SETFL) {
+                f->flags = (f->flags & ~OPENOS_FCNTL_SETFL_MASK) |
+                           ((int)c & OPENOS_FCNTL_SETFL_MASK);
+                return 0;
+            }
+            return (uint32_t)-1;
+        }
+
     case SYS_LSTAT:
         {
             char path[USERMEM_CSTR_MAX];
@@ -2413,6 +2432,9 @@ uint32_t syscall_dispatch(uint32_t num,
             pmm_free_page(kbuf);
             return (uint32_t)ret;
         }
+
+    case SYS_SHUTDOWN:
+        return (uint32_t)socket_shutdown_fd((int)a, (int)b);
 
     case SYS_SENDTO:
         {
