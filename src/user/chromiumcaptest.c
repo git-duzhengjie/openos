@@ -18,6 +18,10 @@ static volatile unsigned int g_futex_word = 0;
 static volatile int g_futex_waiting = 0;
 static volatile int g_futex_done = 0;
 static volatile int g_futex_ok = 0;
+static openos_sem_t g_sem_slots = 0;
+static volatile int g_sem_produced = 0;
+static volatile int g_sem_consumed = 0;
+static volatile int g_sem_failed = 0;
 
 static void print_result(const char *name, int status)
 {
@@ -1057,6 +1061,76 @@ static int test_futex(void)
     return (g_futex_done && g_futex_ok) ? CAP_PASS : CAP_FAIL;
 }
 
+static void semaphore_worker(void *arg)
+{
+    (void)arg;
+    if (openos_sem_wait(&g_sem_slots) != 0) {
+        g_sem_failed = 1;
+        openos_thread_exit(1);
+    }
+    if (g_sem_produced != 0x5151) {
+        g_sem_failed = 1;
+    } else {
+        g_sem_consumed = g_sem_produced + 1;
+    }
+    openos_thread_exit(g_sem_failed ? 1 : 0);
+}
+
+static int test_semaphore(void)
+{
+    openos_thread_t tid;
+    int spin;
+
+    if (openos_sem_wait(0) >= 0)
+        return CAP_FAIL;
+    if (openos_sem_post(0) >= 0)
+        return CAP_FAIL;
+    if (openos_sem_destroy(0) >= 0)
+        return CAP_FAIL;
+    if (openos_sem_init(0, 0) >= 0)
+        return CAP_FAIL;
+    if (openos_sem_init(&g_sem_slots, -1) >= 0)
+        return CAP_FAIL;
+
+    g_sem_slots = 0;
+    g_sem_produced = 0;
+    g_sem_consumed = 0;
+    g_sem_failed = 0;
+
+    if (openos_sem_init(&g_sem_slots, 0) != 0)
+        return CAP_FAIL;
+    if (openos_thread_create(&tid, semaphore_worker, 0) != 0) {
+        openos_sem_destroy(&g_sem_slots);
+        return CAP_FAIL;
+    }
+
+    for (spin = 0; spin < 32; ++spin)
+        openos_yield();
+    if (g_sem_consumed != 0) {
+        openos_sem_destroy(&g_sem_slots);
+        return CAP_FAIL;
+    }
+
+    g_sem_produced = 0x5151;
+    if (openos_sem_post(&g_sem_slots) != 0) {
+        openos_sem_destroy(&g_sem_slots);
+        return CAP_FAIL;
+    }
+
+    spin = 0;
+    while (!g_sem_consumed && spin++ < 100000)
+        openos_yield();
+
+    if (openos_sem_destroy(&g_sem_slots) != 0)
+        return CAP_FAIL;
+    if (g_sem_slots != 0)
+        return CAP_FAIL;
+    if (openos_sem_post(&g_sem_slots) >= 0)
+        return CAP_FAIL;
+    (void)tid;
+    return (!g_sem_failed && g_sem_consumed == 0x5152) ? CAP_PASS : CAP_FAIL;
+}
+
 static int test_eventfd(void)
 {
     openos_eventfd_t efd;
@@ -1602,6 +1676,10 @@ int main(int argc, char **argv)
 
     status = test_futex();
     print_result("futex wait/wake synchronization", status);
+    failed += status == CAP_FAIL;
+
+    status = test_semaphore();
+    print_result("semaphore producer/consumer synchronization", status);
     failed += status == CAP_FAIL;
 
     status = test_shm();
