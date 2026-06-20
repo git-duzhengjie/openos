@@ -27,6 +27,7 @@ typedef enum {
     I18N_KEY_APP_SETTINGS,
     I18N_KEY_APP_WINDOW_DEMO,
     I18N_KEY_APP_ABOUT_OPENOS,
+    I18N_KEY_TASKBAR_SEARCH,
 
     /* Desktop welcome banner (3 lines) */
     I18N_KEY_BANNER_LINE0,

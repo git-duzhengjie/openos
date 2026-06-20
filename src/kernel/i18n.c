@@ -35,6 +35,7 @@ static const char *const k_strings_en[I18N_KEY_COUNT] = {
     [I18N_KEY_APP_SETTINGS]              = "Settings",
     [I18N_KEY_APP_WINDOW_DEMO]           = "Window Demo",
     [I18N_KEY_APP_ABOUT_OPENOS]          = "About OpenOS",
+    [I18N_KEY_TASKBAR_SEARCH]            = "Search",
 
     /* welcome banner */
     [I18N_KEY_BANNER_LINE0]              = "Welcome to OpenOS",
@@ -208,6 +209,7 @@ static const char *const k_strings_zh[I18N_KEY_COUNT] = {
     [I18N_KEY_APP_SETTINGS]              = "设置",
     [I18N_KEY_APP_WINDOW_DEMO]           = "窗口演示",
     [I18N_KEY_APP_ABOUT_OPENOS]          = "关于 OpenOS",
+    [I18N_KEY_TASKBAR_SEARCH]            = "搜索",
 
     /* welcome banner */
     [I18N_KEY_BANNER_LINE0]              = "欢迎来到 OpenOS",

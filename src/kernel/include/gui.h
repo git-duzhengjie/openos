@@ -23,7 +23,7 @@
 #define GUI_TERM_CLIPBOARD_SIZE  1024u
 #define GUI_EVENT_QUEUE_SIZE     64u
 #define GUI_MAX_DIRTY_RECTS      32u
-#define GUI_TASKBAR_HEIGHT       32
+#define GUI_TASKBAR_HEIGHT       40
 #define GUI_TASKBAR_ICON_BUTTON_W 40
 #define GUI_TASKBAR_START_W      GUI_TASKBAR_ICON_BUTTON_W
 #define GUI_DESKTOP_MAX_ICONS    16u
@@ -344,6 +344,9 @@ typedef struct gui_system {
     int launcher_enabled;
     gui_launcher_entry_t launcher_entries[GUI_LAUNCHER_MAX_APPS];
     uint32_t launcher_app_count;
+    int taskbar_search_focused;
+    uint32_t taskbar_search_len;
+    char taskbar_search_text[64];
     uint32_t wallpaper_theme;
     uint32_t frame_counter;
 

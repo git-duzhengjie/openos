@@ -23,6 +23,7 @@ extern int spawn_user_process(const char *path, char *const argv[]);
 extern uint32_t sched_time_ms(void);
 
 static void gui_desktop_run_action(uint32_t action);
+static int  gui_taskbar_search_handle_key(int key);
 static void gui_handle_mouse_right_down(int x, int y);
 static void gui_ctxmenu_close(void);
 static int  gui_ctxmenu_handle_click(int x, int y);
@@ -53,7 +54,12 @@ void gui_terminal_redraw(void);
 static gui_system_t g_gui;
 static gui_accel_info_t g_gui_accel;
 static gui_rect_t g_network_widget_rect;
+static gui_rect_t g_taskbar_search_rect;
 static gui_window_t *g_wifi_win;
+
+#define GUI_TASKBAR_SEARCH_MAX   63u
+#define GUI_TASKBAR_SEARCH_W     180
+#define GUI_TASKBAR_SEARCH_MIN_W 96
 
 #ifndef GUI_DEBUG_LOG
 #define GUI_DEBUG_LOG 0
@@ -1880,6 +1886,7 @@ void gui_hide_window(gui_window_t *window) {
 typedef struct gui_taskbar_layout {
     gui_rect_t bar;
     gui_rect_t start_button;
+    gui_rect_t search_box;
     gui_rect_t terminal_button;
     int first_window_x;
     int item_y;
@@ -1889,6 +1896,13 @@ typedef struct gui_taskbar_layout {
 static int gui_taskbar_button_width(gui_window_t *window) {
     (void)window;
     return GUI_TASKBAR_ICON_BUTTON_W;
+}
+
+static int gui_taskbar_search_width(void) {
+    int w = GUI_TASKBAR_SEARCH_W;
+    if ((int)g_gui.width < 520) w = 120;
+    if ((int)g_gui.width < 420) w = GUI_TASKBAR_SEARCH_MIN_W;
+    return w;
 }
 
 static int gui_taskbar_content_width(void) {
@@ -1920,13 +1934,20 @@ static void gui_taskbar_get_layout(gui_taskbar_layout_t *layout) {
     if (max_w < 0) max_w = (int)g_gui.width;
     bar_w = content_w + padding * 2;
     if (bar_w > max_w) bar_w = max_w;
-    if (bar_w < GUI_TASKBAR_START_W * 2 + 6 + padding * 2) bar_w = GUI_TASKBAR_START_W * 2 + 6 + padding * 2;
+    if (bar_w < GUI_TASKBAR_START_W * 2 + 6 + padding * 2) {
+        bar_w = GUI_TASKBAR_START_W * 2 + 6 + padding * 2;
+    }
     if (bar_w > (int)g_gui.width) bar_w = (int)g_gui.width;
 
     layout->bar.x = ((int)g_gui.width - bar_w) / 2;
+    if (layout->bar.x < 0) layout->bar.x = 0;
     layout->bar.y = y;
     layout->bar.w = bar_w;
     layout->bar.h = GUI_TASKBAR_HEIGHT;
+    layout->search_box.x = margin;
+    layout->search_box.y = y + 3;
+    layout->search_box.w = gui_taskbar_search_width();
+    layout->search_box.h = GUI_TASKBAR_HEIGHT - 6;
     layout->start_button.x = layout->bar.x + padding;
     layout->start_button.y = y + 3;
     layout->start_button.w = GUI_TASKBAR_START_W;
@@ -1949,7 +1970,8 @@ static int gui_taskbar_terminal_button_at(int x, int y) {
 static int gui_is_taskbar_at(int x, int y) {
     gui_taskbar_layout_t layout;
     gui_taskbar_get_layout(&layout);
-    return gui_rect_contains(&layout.bar, x, y);
+    return gui_rect_contains(&layout.bar, x, y) ||
+           gui_rect_contains(&layout.search_box, x, y);
 }
 
 static gui_window_t *gui_taskbar_window_at(int x, int y) {
@@ -2408,7 +2430,9 @@ void gui_process_events(void) {
     gui_event_t ev;
     while (gui_event_pop(&ev)) {
         if (ev.type == GUI_EVENT_KEY_DOWN) {
-            if (ev.key == GUI_KEY_ALT_TAB) {
+            if (g_gui.taskbar_search_focused && gui_taskbar_search_handle_key(ev.key)) {
+                /* taskbar search consumed the key */
+            } else if (ev.key == GUI_KEY_ALT_TAB) {
                 gui_alt_tab_cycle();
             } else if (ev.key == GUI_KEY_SUPER) {
                 gui_toggle_start_menu();
@@ -3181,6 +3205,80 @@ static void gui_desktop_draw(void) {
     }
 }
 
+static int gui_ascii_case_equal_prefix(const char *text, const char *query) {
+    while (*query) {
+        char a = *text++;
+        char b = *query++;
+        if (a >= 'A' && a <= 'Z') a = (char)(a - 'A' + 'a');
+        if (b >= 'A' && b <= 'Z') b = (char)(b - 'A' + 'a');
+        if (a != b) return 0;
+    }
+    return 1;
+}
+
+static int gui_ascii_case_contains(const char *text, const char *query) {
+    const char *p;
+    if (!query || !query[0]) return 1;
+    if (!text) return 0;
+    for (p = text; *p; p++) {
+        if (gui_ascii_case_equal_prefix(p, query)) return 1;
+    }
+    return 0;
+}
+
+static void gui_taskbar_search_clear(void) {
+    g_gui.taskbar_search_text[0] = 0;
+    g_gui.taskbar_search_len = 0;
+}
+
+static void gui_taskbar_search_submit(void) {
+    uint32_t i;
+    const char *q = g_gui.taskbar_search_text;
+    if (!q[0]) {
+        gui_desktop_run_action(GUI_DESKTOP_ACTION_MENU);
+        return;
+    }
+    gui_launcher_scan_bin(g_gui.launcher_app_count);
+    for (i = 0; i < GUI_LAUNCHER_MAX_APPS; i++) {
+        gui_launcher_entry_t *e = &g_gui.launcher_entries[i];
+        if (!e->used) continue;
+        if (gui_ascii_case_contains(e->name, q) || gui_ascii_case_contains(e->path, q)) {
+            gui_desktop_run_action(GUI_DESKTOP_ACTION_LAUNCH_BIN_BASE + i);
+            gui_taskbar_search_clear();
+            g_gui.taskbar_search_focused = 0;
+            gui_invalidate_all();
+            return;
+        }
+    }
+    g_gui.desktop_start_menu_open = 1;
+    g_gui.desktop_start_menu_scroll = 0;
+    gui_update_start_menu_layout();
+    gui_invalidate_all();
+}
+
+static int gui_taskbar_search_handle_key(int key) {
+    if (!g_gui.taskbar_search_focused) return 0;
+    if (key == GUI_KEY_ENTER) {
+        gui_taskbar_search_submit();
+        return 1;
+    }
+    if (key == GUI_KEY_BACKSPACE) {
+        if (g_gui.taskbar_search_len > 0) {
+            g_gui.taskbar_search_len--;
+            g_gui.taskbar_search_text[g_gui.taskbar_search_len] = 0;
+            gui_invalidate_all();
+        }
+        return 1;
+    }
+    if (key >= 32 && key < 127 && g_gui.taskbar_search_len < GUI_TASKBAR_SEARCH_MAX) {
+        g_gui.taskbar_search_text[g_gui.taskbar_search_len++] = (char)key;
+        g_gui.taskbar_search_text[g_gui.taskbar_search_len] = 0;
+        gui_invalidate_all();
+        return 1;
+    }
+    return 1;
+}
+
 static void gui_desktop_run_action(uint32_t action) {
     if (action == GUI_DESKTOP_ACTION_TERMINAL) {
         gui_terminal_open();
@@ -3250,6 +3348,18 @@ static int gui_desktop_handle_click(int x, int y) {
     gui_rect_t item;
 
     if (!g_gui.desktop_enabled) return 0;
+    if (g_taskbar_search_rect.w > 0 && g_taskbar_search_rect.h > 0 &&
+        gui_rect_contains(&g_taskbar_search_rect, x, y)) {
+        g_gui.taskbar_search_focused = 1;
+        g_gui.desktop_start_menu_open = 0;
+        gui_set_focused_widget(0);
+        gui_invalidate_all();
+        return 1;
+    }
+    if (g_gui.taskbar_search_focused) {
+        g_gui.taskbar_search_focused = 0;
+        gui_invalidate_all();
+    }
     /* tray widgets pinned at the bottom-right: notifications, network, then clock */
     if (g_notif_widget_rect.w > 0 && g_notif_widget_rect.h > 0 &&
         gui_rect_contains(&g_notif_widget_rect, x, y)) {
@@ -4397,6 +4507,42 @@ static void gui_draw_taskbar_network_icon(gui_rect_t net_rect) {
     g_network_widget_rect = net_rect;
 }
 
+static void gui_draw_taskbar_search_box(gui_rect_t r) {
+    const char *text = g_gui.taskbar_search_text[0] ? g_gui.taskbar_search_text : i18n_t(I18N_KEY_TASKBAR_SEARCH);
+    char clipped[GUI_TASKBAR_SEARCH_MAX + 1];
+    uint32_t bg = g_gui.taskbar_search_focused ? gui_rgb(46, 56, 76) : gui_rgb(34, 40, 54);
+    uint32_t fg = g_gui.taskbar_search_text[0] ? gui_rgb(230, 240, 255) : gui_rgb(150, 170, 195);
+    int text_h = GUI_TEXT_LINE_H;
+    int ty = r.y + (r.h - text_h) / 2;
+    int max_chars;
+    int cw = GUI_CHAR_W;
+    if (cw <= 0) cw = 8;
+    if (ty < r.y + 2) ty = r.y + 2;
+    gui_raw_fill_rect(r.x, r.y, r.w, r.h, bg);
+    gui_raw_line(r.x, r.y, r.x + r.w - 1, r.y, gui_rgb(82, 96, 126));
+    gui_raw_line(r.x, r.y + r.h - 1, r.x + r.w - 1, r.y + r.h - 1, gui_rgb(12, 16, 24));
+    gui_raw_line(r.x, r.y, r.x, r.y + r.h - 1, gui_rgb(82, 96, 126));
+    gui_raw_line(r.x + r.w - 1, r.y, r.x + r.w - 1, r.y + r.h - 1, gui_rgb(12, 16, 24));
+
+    /* magnifier glyph */
+    gui_raw_line(r.x + 6, r.y + 5, r.x + 10, r.y + 5, gui_rgb(170, 190, 220));
+    gui_raw_line(r.x + 5, r.y + 6, r.x + 5, r.y + 9, gui_rgb(170, 190, 220));
+    gui_raw_line(r.x + 11, r.y + 6, r.x + 11, r.y + 9, gui_rgb(170, 190, 220));
+    gui_raw_line(r.x + 6, r.y + 10, r.x + 10, r.y + 10, gui_rgb(170, 190, 220));
+    gui_raw_line(r.x + 10, r.y + 10, r.x + 14, r.y + 14, gui_rgb(170, 190, 220));
+
+    max_chars = (r.w - 28) / cw;
+    if (max_chars < 1) max_chars = 1;
+    strncpy(clipped, text, (size_t)max_chars);
+    clipped[max_chars] = 0;
+    gui_draw_text(r.x + 22, ty, clipped, fg);
+    if (g_gui.taskbar_search_focused) {
+        int caret_x = r.x + 22 + (int)g_gui.taskbar_search_len * cw;
+        if (caret_x > r.x + r.w - 6) caret_x = r.x + r.w - 6;
+        gui_raw_line(caret_x, ty, caret_x, ty + text_h - 1, gui_rgb(230, 240, 255));
+    }
+}
+
 static void gui_draw_taskbar(void) {
     uint32_t i;
     gui_taskbar_layout_t layout;
@@ -4412,6 +4558,9 @@ static void gui_draw_taskbar(void) {
 
     g_gui.desktop_start_button_rect = layout.start_button;
     gui_draw_taskbar_start_icon(layout.start_button);
+
+    g_taskbar_search_rect = layout.search_box;
+    gui_draw_taskbar_search_box(layout.search_box);
 
     gui_draw_taskbar_terminal_icon(layout.terminal_button);
 
