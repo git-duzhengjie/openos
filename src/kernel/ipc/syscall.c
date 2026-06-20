@@ -10,6 +10,7 @@
 #include "../include/gui.h"
 #include "../include/gui_user.h"
 #include "../include/font.h"
+#include "../include/heap.h"
 #include "../include/input_buffer.h"
 #include "../include/usermem.h"
 #include "../include/vmm.h"
@@ -2208,12 +2209,35 @@ uint32_t syscall_dispatch(uint32_t num,
     case SYS_GUI_DRAW:
         {
             gui_user_draw_request_t req;
+            uint32_t *pixels = 0;
+            uint32_t pixel_bytes = 0;
+            int rc;
             if (!a || !user_ptr_valid((void *)a, sizeof(req), USERMEM_READ))
                 return (uint32_t)-1;
             if (copy_from_user(&req, (const void *)a, sizeof(req)) < 0)
                 return (uint32_t)-1;
             req.text[sizeof(req.text) - 1] = 0;
-            return (uint32_t)gui_user_draw(&req);
+
+            if (req.op == GUI_USER_DRAW_BLIT_RGBA32) {
+                if (req.w <= 0 || req.h <= 0 || req.w > 256 || req.h > 256)
+                    return (uint32_t)-1;
+                pixel_bytes = (uint32_t)req.w * (uint32_t)req.h * sizeof(uint32_t);
+                if (!req.pixels_user_ptr || !user_ptr_valid((void *)req.pixels_user_ptr, pixel_bytes, USERMEM_READ))
+                    return (uint32_t)-1;
+                pixels = (uint32_t *)kmalloc(pixel_bytes);
+                if (!pixels)
+                    return (uint32_t)-1;
+                if (copy_from_user(pixels, (const void *)req.pixels_user_ptr, pixel_bytes) < 0) {
+                    kfree(pixels);
+                    return (uint32_t)-1;
+                }
+                req.pixels_user_ptr = (uint32_t)pixels;
+            }
+
+            rc = gui_user_draw(&req);
+            if (pixels)
+                kfree(pixels);
+            return (uint32_t)rc;
         }
 
     default:

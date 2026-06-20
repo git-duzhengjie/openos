@@ -4208,6 +4208,33 @@ int gui_window_draw_client_text(gui_window_t *win, int x, int y, const char *tex
     return 0;
 }
 
+int gui_window_blit_client_rgba32(gui_window_t *win, int x, int y, int w, int h, const uint32_t *pixels, uint32_t src_stride) {
+    gui_rect_t clip;
+    int rc;
+    if (!gui_window_client_clip(win, &clip) || !pixels || w <= 0 || h <= 0) return -1;
+    gui_set_clip_rect(&clip);
+    rc = gui_blit_rgba32(clip.x + x, clip.y + y, w, h, pixels, src_stride);
+    gui_clear_clip_rect();
+    return rc;
+}
+
+int gui_window_scroll_client_rect(gui_window_t *win, int dst_x, int dst_y, int src_x, int src_y, int w, int h) {
+    gui_rect_t clip;
+    int rc;
+    if (!gui_window_client_clip(win, &clip) || w <= 0 || h <= 0) return -1;
+    gui_set_clip_rect(&clip);
+    rc = gui_copy_rect(clip.x + dst_x, clip.y + dst_y, clip.x + src_x, clip.y + src_y, w, h);
+    gui_clear_clip_rect();
+    return rc;
+}
+
+int gui_window_present_client(gui_window_t *win) {
+    gui_rect_t clip;
+    if (!gui_window_client_clip(win, &clip)) return -1;
+    gui_invalidate_rect(clip.x, clip.y, clip.w, clip.h);
+    return 0;
+}
+
 gui_app_t *gui_get_active_app(void) { return g_gui.active_app; }
 
 gui_app_t *gui_get_window_app(gui_window_t *window) { return gui_app_for_window(window); }

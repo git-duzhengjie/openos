@@ -230,6 +230,20 @@ int gui_user_draw(const gui_user_draw_request_t *request) {
         return gui_window_draw_client_text(win, request->x, request->y, safe_text, request->fg_color);
     }
 
+    if (request->op == GUI_USER_DRAW_BLIT_RGBA32) {
+        return gui_window_blit_client_rgba32(win, request->x, request->y, request->w, request->h,
+                                            (const uint32_t *)request->pixels_user_ptr, request->src_stride);
+    }
+
+    if (request->op == GUI_USER_DRAW_SCROLL) {
+        return gui_window_scroll_client_rect(win, request->x, request->y, request->src_x, request->src_y,
+                                             request->w, request->h);
+    }
+
+    if (request->op == GUI_USER_DRAW_PRESENT) {
+        return gui_window_present_client(win);
+    }
+
     return -1;
 }
 

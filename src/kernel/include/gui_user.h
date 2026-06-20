@@ -9,6 +9,9 @@
 
 #define GUI_USER_DRAW_FILL_RECT 1u
 #define GUI_USER_DRAW_TEXT      2u
+#define GUI_USER_DRAW_BLIT_RGBA32 3u
+#define GUI_USER_DRAW_SCROLL    4u
+#define GUI_USER_DRAW_PRESENT   5u
 
 typedef struct gui_user_event {
     uint32_t owner_pid;
@@ -40,6 +43,10 @@ typedef struct gui_user_draw_request {
     int32_t h;
     uint32_t fg_color;
     uint32_t bg_color;
+    uint32_t pixels_user_ptr;
+    uint32_t src_stride;
+    int32_t src_x;
+    int32_t src_y;
     char text[128];
 } gui_user_draw_request_t;
 

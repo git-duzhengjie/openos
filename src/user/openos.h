@@ -461,6 +461,9 @@ typedef struct openos_pollfd {
 
 #define OPENOS_GUI_DRAW_FILL_RECT 1u
 #define OPENOS_GUI_DRAW_TEXT      2u
+#define OPENOS_GUI_DRAW_BLIT_RGBA32 3u
+#define OPENOS_GUI_DRAW_SCROLL    4u
+#define OPENOS_GUI_DRAW_PRESENT   5u
 
 typedef struct openos_gui_draw_request {
     unsigned int window_id;
@@ -471,6 +474,10 @@ typedef struct openos_gui_draw_request {
     int h;
     unsigned int fg_color;
     unsigned int bg_color;
+    unsigned int pixels_user_ptr;
+    unsigned int src_stride;
+    int src_x;
+    int src_y;
     char text[128];
 } openos_gui_draw_request_t;
 
@@ -679,6 +686,10 @@ static inline int openos_gui_fill_rect(int window_id, int x, int y, int w, int h
     req.h = h;
     req.fg_color = 0;
     req.bg_color = color;
+    req.pixels_user_ptr = 0;
+    req.src_stride = 0;
+    req.src_x = 0;
+    req.src_y = 0;
     req.text[0] = 0;
     return openos_syscall_result(openos_syscall1(SYS_GUI_DRAW, (int)&req));
 }
@@ -694,7 +705,68 @@ static inline int openos_gui_draw_text(int window_id, int x, int y, const char *
     req.h = 0;
     req.fg_color = color;
     req.bg_color = 0;
+    req.pixels_user_ptr = 0;
+    req.src_stride = 0;
+    req.src_x = 0;
+    req.src_y = 0;
     openos_gui_copy_text128(req.text, text);
+    return openos_syscall_result(openos_syscall1(SYS_GUI_DRAW, (int)&req));
+}
+
+static inline int openos_gui_blit_rgba32(int window_id, int x, int y, int w, int h, const unsigned int *pixels, unsigned int stride)
+{
+    openos_gui_draw_request_t req;
+    req.window_id = (unsigned int)window_id;
+    req.op = OPENOS_GUI_DRAW_BLIT_RGBA32;
+    req.x = x;
+    req.y = y;
+    req.w = w;
+    req.h = h;
+    req.fg_color = 0;
+    req.bg_color = 0;
+    req.pixels_user_ptr = (unsigned int)pixels;
+    req.src_stride = stride;
+    req.src_x = 0;
+    req.src_y = 0;
+    req.text[0] = 0;
+    return openos_syscall_result(openos_syscall1(SYS_GUI_DRAW, (int)&req));
+}
+
+static inline int openos_gui_scroll_rect(int window_id, int dst_x, int dst_y, int src_x, int src_y, int w, int h)
+{
+    openos_gui_draw_request_t req;
+    req.window_id = (unsigned int)window_id;
+    req.op = OPENOS_GUI_DRAW_SCROLL;
+    req.x = dst_x;
+    req.y = dst_y;
+    req.w = w;
+    req.h = h;
+    req.fg_color = 0;
+    req.bg_color = 0;
+    req.pixels_user_ptr = 0;
+    req.src_stride = 0;
+    req.src_x = src_x;
+    req.src_y = src_y;
+    req.text[0] = 0;
+    return openos_syscall_result(openos_syscall1(SYS_GUI_DRAW, (int)&req));
+}
+
+static inline int openos_gui_present(int window_id)
+{
+    openos_gui_draw_request_t req;
+    req.window_id = (unsigned int)window_id;
+    req.op = OPENOS_GUI_DRAW_PRESENT;
+    req.x = 0;
+    req.y = 0;
+    req.w = 0;
+    req.h = 0;
+    req.fg_color = 0;
+    req.bg_color = 0;
+    req.pixels_user_ptr = 0;
+    req.src_stride = 0;
+    req.src_x = 0;
+    req.src_y = 0;
+    req.text[0] = 0;
     return openos_syscall_result(openos_syscall1(SYS_GUI_DRAW, (int)&req));
 }
 
