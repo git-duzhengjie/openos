@@ -792,6 +792,7 @@ void kernel_main(void) {
     vfs_mkdir("/home/browser/cache", 0755);
     vfs_mkdir("/home/browser/cookies", 0755);
     vfs_mkdir("/home/browser/certs", 0755);
+    vfs_mkdir("/home/browser/profiles", 0755);
     vfs_mkdir("/home/browser/downloads", 0755);
     serial_write("[OK] Browser profile directories\n");
 

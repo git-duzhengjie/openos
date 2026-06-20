@@ -444,7 +444,9 @@
     - [√] 已将 `.` / `..` / 重复斜杠 / 相对路径 / cwd 语义并入 `/bin/chromiumcaptest`，覆盖 Chromium 资源路径规范化的最小验收
     - [√] 已将 `mkdir/link/symlink/readlink/unlink/rmdir` 基础变更语义并入 `/bin/chromiumcaptest`，覆盖 Chromium 资源/缓存文件生命周期的最小验收
   - [ ] 支持大文件、稀疏文件、资源 pak 文件读取与缓存目录
-  - [ ] 统一应用数据目录：cache、cookies、certs、profiles、downloads
+  - [√] 统一应用数据目录：cache、cookies、certs、profiles、downloads
+    - [√] 已在内核启动时创建 `/home/browser/profiles`，并在 `openos.h` 暴露 `OPENOS_BROWSER_PROFILES_DIR`
+    - [√] 已将 cache 文件创建/删除、profiles/Default/Preferences 写入和目录遍历并入 `/bin/chromiumcaptest`
 - [ ] M6 网络与 TLS
   - [ ] TCP 长连接、半关闭、RST、超时、窗口与重传压力测试
   - [ ] DNS resolver 完善：缓存、超时、失败回退、IPv4 优先策略

@@ -198,6 +198,7 @@ typedef int openos_clock_t;
 #define OPENOS_BROWSER_CACHE_DIR "/home/browser/cache"
 #define OPENOS_BROWSER_COOKIE_DIR "/home/browser/cookies"
 #define OPENOS_BROWSER_CERT_DIR "/home/browser/certs"
+#define OPENOS_BROWSER_PROFILES_DIR "/home/browser/profiles"
 #define OPENOS_BROWSER_DOWNLOAD_DIR "/home/browser/downloads"
 #define OPENOS_FONT_DIR "/fonts"
 

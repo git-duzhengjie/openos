@@ -465,6 +465,90 @@ static int test_filesystem_mutations(void)
     return CAP_PASS;
 }
 
+static int test_browser_data_directories(void)
+{
+    const char *dirs[] = {
+        OPENOS_BROWSER_PROFILE_DIR,
+        OPENOS_BROWSER_CACHE_DIR,
+        OPENOS_BROWSER_COOKIE_DIR,
+        OPENOS_BROWSER_CERT_DIR,
+        OPENOS_BROWSER_PROFILES_DIR,
+        OPENOS_BROWSER_DOWNLOAD_DIR,
+    };
+    const char *cache_file = OPENOS_BROWSER_CACHE_DIR "/chromiumcaptest-cache.bin";
+    const char *profile_dir = OPENOS_BROWSER_PROFILES_DIR "/Default";
+    const char *prefs_file = OPENOS_BROWSER_PROFILES_DIR "/Default/Preferences";
+    const char *prefs_payload = "{\"homepage\":\"about:blank\"}";
+    openos_stat_t st;
+    openos_dirent_t entry;
+    int found_default = 0;
+    int fd;
+    int i;
+
+    for (i = 0; i < (int)(sizeof(dirs) / sizeof(dirs[0])); ++i) {
+        if (openos_stat(dirs[i], &st) != 0 || (st.mode & FS_DIR) != FS_DIR) {
+            return CAP_FAIL;
+        }
+    }
+
+    openos_unlink(cache_file);
+    fd = openos_open(cache_file, O_CREAT | O_TRUNC | O_RDWR, 0644);
+    if (fd < 0) {
+        return CAP_FAIL;
+    }
+    if (openos_write_fd(fd, "cache", 5) != 5) {
+        openos_close(fd);
+        return CAP_FAIL;
+    }
+    openos_close(fd);
+    if (openos_stat(cache_file, &st) != 0 ||
+        (st.mode & FS_FILE) != FS_FILE || st.size != 5) {
+        return CAP_FAIL;
+    }
+    if (openos_unlink(cache_file) != 0) {
+        return CAP_FAIL;
+    }
+
+    if (openos_mkdir(profile_dir, 0755) != 0 &&
+        openos_stat(profile_dir, &st) != 0) {
+        return CAP_FAIL;
+    }
+    fd = openos_open(prefs_file, O_CREAT | O_TRUNC | O_RDWR, 0644);
+    if (fd < 0) {
+        return CAP_FAIL;
+    }
+    if (openos_write_fd(fd, prefs_payload, openos_strlen(prefs_payload)) !=
+        openos_strlen(prefs_payload)) {
+        openos_close(fd);
+        return CAP_FAIL;
+    }
+    openos_close(fd);
+
+    for (i = 0; i < 64; ++i) {
+        if (openos_readdir_path(OPENOS_BROWSER_PROFILES_DIR, i, &entry) <= 0)
+            break;
+        if (openos_strcmp(entry.name, "Default") == 0 &&
+            (entry.mode & FS_DIR) == FS_DIR) {
+            found_default = 1;
+        }
+    }
+
+    if (!found_default) {
+        return CAP_FAIL;
+    }
+    if (openos_stat(prefs_file, &st) != 0 ||
+        (st.mode & FS_FILE) != FS_FILE ||
+        st.size != openos_strlen(prefs_payload)) {
+        return CAP_FAIL;
+    }
+
+    if (openos_unlink(prefs_file) != 0 || openos_rmdir(profile_dir) != 0) {
+        return CAP_FAIL;
+    }
+
+    return CAP_PASS;
+}
+
 static int test_sbrk(void)
 {
     unsigned char *old_break;
@@ -955,7 +1039,7 @@ int main(int argc, char **argv)
     (void)argv;
 
     openos_printf("Chromium core capability test\n");
-    openos_printf("target: mmap file-mmap fs-metadata path-normalization fs-mutations mprotect v8-memory-policy brk thread tls pthread-sync futex shm eventfd message-queue service-channel socketpair poll time spawn fork pipe fd argv env\n");
+    openos_printf("target: mmap file-mmap fs-metadata path-normalization fs-mutations browser-dirs mprotect v8-memory-policy brk thread tls pthread-sync futex shm eventfd message-queue service-channel socketpair poll time spawn fork pipe fd argv env\n");
 
     status = test_uptime();
     print_result("monotonic uptime", status);
@@ -999,6 +1083,10 @@ int main(int argc, char **argv)
 
     status = test_filesystem_mutations();
     print_result("filesystem link/symlink/unlink/rmdir", status);
+    failed += status == CAP_FAIL;
+
+    status = test_browser_data_directories();
+    print_result("browser cache/profile directories", status);
     failed += status == CAP_FAIL;
 
     status = test_sbrk();
