@@ -6301,7 +6301,7 @@ static void browser_https_probe_current(const char *host, uint32_t ip, uint16_t 
     }
 
     sent = net_tcp_send(conn, hello, (uint16_t)hello_len);
-    if (sent <= 0) {
+    if (sent != 0) {
         net_tcp_close(conn);
         browser_set_widget_text(g_browser_content_lines[0], "Failed to send TLS ClientHello.");
         browser_set_status("TLS send failed");
@@ -6384,7 +6384,7 @@ static void browser_fetch_current(void) {
     pos = fp_str_append(request, pos, sizeof(request), "\r\nConnection: close\r\nUser-Agent: OpenOSBrowser/0.1\r\n\r\n");
     (void)pos;
 
-    if (net_tcp_send(conn, (const uint8_t *)request, (uint16_t)strlen(request)) <= 0) {
+    if (net_tcp_send(conn, (const uint8_t *)request, (uint16_t)strlen(request)) != 0) {
         net_tcp_close(conn);
         browser_set_widget_text(g_browser_content_lines[0], "Failed to send HTTP request.");
         browser_set_status("Send failed");
