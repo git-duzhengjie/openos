@@ -130,6 +130,8 @@
 #define SYS_STATFS 334
 #define SYS_FSTATFS 335
 #define SYS_GETDENTS 336
+#define SYS_CLIPBOARD_SET 337
+#define SYS_CLIPBOARD_GET 338
 
 #define OPENOS_CHROMIUM_MEM_JITLESS_DEFAULT     (1u << 0)
 #define OPENOS_CHROMIUM_MEM_EXEC_PROT_RESERVED  (1u << 1)
@@ -3032,6 +3034,24 @@ static inline int openos_ai_request(const char *prompt, char *response, unsigned
     req.response_len = response_len;
     req.flags = 0;
     return openos_syscall_result(openos_syscall1(SYS_AI_REQUEST, (int)&req));
+}
+
+static inline int openos_clipboard_set(const char *text)
+{
+    if (!text) {
+        openos_set_errno(OPENOS_EINVAL);
+        return -1;
+    }
+    return openos_syscall_result(openos_syscall1(SYS_CLIPBOARD_SET, (int)text));
+}
+
+static inline int openos_clipboard_get(char *buf, unsigned int len)
+{
+    if (!buf || len == 0) {
+        openos_set_errno(OPENOS_EINVAL);
+        return -1;
+    }
+    return openos_syscall_result(openos_syscall2(SYS_CLIPBOARD_GET, (int)buf, (int)len));
 }
 
 

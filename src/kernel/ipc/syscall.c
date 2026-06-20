@@ -40,6 +40,10 @@
 #define OPENOS_USER_NAME_MAX 32u
 #define OPENOS_USER_HOME_MAX 64u
 #define OPENOS_USER_SHELL_MAX 64u
+#define SYSCALL_CLIPBOARD_MAX 512u
+
+static char syscall_clipboard[SYSCALL_CLIPBOARD_MAX];
+static uint32_t syscall_clipboard_len;
 
 static int syscall_require_cap(uint32_t cap);
 
@@ -125,6 +129,44 @@ static int syscall_clock_gettime(uint32_t clock_id, openos_timespec_t *user_ts)
     ts.tv_sec = (int64_t)(ms / 1000u);
     ts.tv_nsec = (int64_t)(ms % 1000u) * 1000000ll;
     return copy_to_user(user_ts, &ts, sizeof(ts));
+}
+
+static int syscall_clipboard_set(const char *text)
+{
+    uint32_t len = 0;
+
+    if (!text) return -1;
+    while (len + 1u < SYSCALL_CLIPBOARD_MAX) {
+        char ch;
+        if (copy_from_user(&ch, text + len, 1) < 0)
+            return -1;
+        syscall_clipboard[len] = ch;
+        if (ch == '\0') {
+            syscall_clipboard_len = len;
+            return 0;
+        }
+        len++;
+    }
+    syscall_clipboard[SYSCALL_CLIPBOARD_MAX - 1u] = '\0';
+    syscall_clipboard_len = SYSCALL_CLIPBOARD_MAX - 1u;
+    return 0;
+}
+
+static int syscall_clipboard_get(char *buf, uint32_t len)
+{
+    uint32_t copy_len;
+
+    if (!buf || len == 0) return -1;
+    copy_len = syscall_clipboard_len + 1u;
+    if (copy_len > len) copy_len = len;
+    if (copy_to_user(buf, syscall_clipboard, copy_len) < 0)
+        return -1;
+    if (copy_len == len) {
+        char nul = '\0';
+        if (copy_to_user(buf + len - 1u, &nul, 1) < 0)
+            return -1;
+    }
+    return (int)syscall_clipboard_len;
 }
 
 #define SYSCALL_MAX_MUTEXES 64u
@@ -2543,6 +2585,12 @@ uint32_t syscall_dispatch(uint32_t num,
 
     case SYS_GETDENTS:
         return syscall_getdents(a, b, c);
+
+    case SYS_CLIPBOARD_SET:
+        return (uint32_t)syscall_clipboard_set((const char *)a);
+
+    case SYS_CLIPBOARD_GET:
+        return (uint32_t)syscall_clipboard_get((char *)a, (uint32_t)b);
 
     case SYS_READDIR:
         {

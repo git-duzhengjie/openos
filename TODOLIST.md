@@ -470,6 +470,7 @@
   - [ ] 输入事件队列支持鼠标、键盘、组合键、文本输入、滚轮和窗口焦点
     - [√] 已将用户态 GUI 事件队列空队列/非法参数 smoke 并入 `/bin/chromiumcaptest`
   - [ ] 剪贴板、光标、DPI/缩放和窗口 resize 事件
+    - [√] 已新增 `SYS_CLIPBOARD_SET` / `SYS_CLIPBOARD_GET` 与用户态 `openos_clipboard_set/get`，并接入 `/bin/chromiumcaptest` 验收
 - [ ] M8 C/C++ runtime 与工具链
   - [ ] 用户态 C++ 编译、链接、构造/析构、异常策略、RTTI 策略
   - [ ] libstdc++/libc++ 子集或 OpenOS C++ runtime 路线

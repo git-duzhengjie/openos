@@ -1296,6 +1296,28 @@ static int test_fork_pipe_fd_inheritance(void)
     return CAP_PASS;
 }
 
+static int test_clipboard_smoke(void)
+{
+    char buf[64];
+    int n;
+
+    if (openos_clipboard_set(0) == 0)
+        return CAP_FAIL;
+    if (openos_clipboard_get(buf, 0) == 0)
+        return CAP_FAIL;
+    if (openos_clipboard_set("chromium clipboard") != 0)
+        return CAP_FAIL;
+    openos_memset(buf, 0xaa, sizeof(buf));
+    n = openos_clipboard_get(buf, sizeof(buf));
+    if (n != 18 || openos_strcmp(buf, "chromium clipboard") != 0)
+        return CAP_FAIL;
+    openos_memset(buf, 0, sizeof(buf));
+    n = openos_clipboard_get(buf, 8);
+    if (n != 18 || openos_strcmp(buf, "chromiu") != 0 || buf[7] != '\0')
+        return CAP_FAIL;
+    return CAP_PASS;
+}
+
 static int test_font_gui_smoke(void)
 {
     openos_font_query_t q;
@@ -1441,7 +1463,7 @@ int main(int argc, char **argv)
     (void)argv;
 
     openos_printf("Chromium core capability test\n");
-    openos_printf("target: mmap file-mmap fs-metadata path-normalization fs-mutations getdents browser-dirs resource-pak sparse-seek mprotect v8-memory-policy brk thread tls pthread-sync futex shm eventfd message-queue service-channel socketpair poll time spawn fork pipe fd argv env dns font gui\n");
+    openos_printf("target: mmap file-mmap fs-metadata path-normalization fs-mutations getdents browser-dirs resource-pak sparse-seek mprotect v8-memory-policy brk thread tls pthread-sync futex shm eventfd message-queue service-channel socketpair poll time spawn fork pipe fd argv env dns font gui clipboard\n");
 
     status = test_uptime();
     print_result("monotonic uptime", status);
@@ -1541,6 +1563,10 @@ int main(int argc, char **argv)
 
     status = test_service_channel();
     print_result("service channel request/reply", status);
+    failed += status == CAP_FAIL;
+
+    status = test_clipboard_smoke();
+    print_result("clipboard set/get", status);
     failed += status == CAP_FAIL;
 
     status = test_font_gui_smoke();
