@@ -33,6 +33,8 @@
 #define GUI_DESKTOP_MENU_H       144
 #define GUI_LAUNCHER_MAX_APPS    24u
 #define GUI_LAUNCHER_ITEM_H      24
+#define GUI_TASKBAR_SEARCH_MAX_RESULTS 8u
+#define GUI_TASKBAR_SEARCH_PATH_LEN 128u
 
 #define GUI_WINDOW_FLAG_NONE      0x00000000u
 #define GUI_WINDOW_FLAG_CLOSABLE  0x00000001u
@@ -285,6 +287,14 @@ typedef struct gui_launcher_info {
     gui_rect_t menu_rect;
 } gui_launcher_info_t;
 
+typedef struct gui_taskbar_search_result {
+    int used;
+    int is_dir;
+    int is_executable;
+    char name[GUI_APP_NAME_LEN];
+    char path[GUI_TASKBAR_SEARCH_PATH_LEN];
+} gui_taskbar_search_result_t;
+
 typedef struct gui_system {
     int initialized;
     uint32_t width;
@@ -347,6 +357,10 @@ typedef struct gui_system {
     int taskbar_search_focused;
     uint32_t taskbar_search_len;
     char taskbar_search_text[64];
+    gui_taskbar_search_result_t taskbar_search_results[GUI_TASKBAR_SEARCH_MAX_RESULTS];
+    uint32_t taskbar_search_result_count;
+    int taskbar_search_selected;
+    gui_rect_t taskbar_search_results_rect;
     uint32_t wallpaper_theme;
     uint32_t frame_counter;
 

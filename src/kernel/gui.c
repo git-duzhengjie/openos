@@ -24,6 +24,11 @@ extern uint32_t sched_time_ms(void);
 
 static void gui_desktop_run_action(uint32_t action);
 static int  gui_taskbar_search_handle_key(int key);
+static int  gui_is_enter_key(int key);
+static void gui_taskbar_search_open_result(uint32_t index);
+static int  gui_taskbar_search_result_index_at(int x, int y);
+static void gui_taskbar_search_reset_results(void);
+static void gui_taskbar_search_refresh_results(void);
 static void gui_handle_mouse_right_down(int x, int y);
 static void gui_ctxmenu_close(void);
 static int  gui_ctxmenu_handle_click(int x, int y);
@@ -2209,6 +2214,26 @@ static void gui_handle_mouse_down(int x, int y) {
         gui_ctxmenu_handle_click(x, y);
         return;
     }
+
+    if (g_gui.taskbar_search_focused && g_gui.taskbar_search_results_rect.w > 0) {
+        int idx = gui_taskbar_search_result_index_at(x, y);
+        if (idx >= 0) {
+            g_gui.taskbar_search_selected = idx;
+            gui_invalidate_rect(g_gui.taskbar_search_results_rect.x,
+                                g_gui.taskbar_search_results_rect.y,
+                                g_gui.taskbar_search_results_rect.w,
+                                g_gui.taskbar_search_results_rect.h);
+            gui_taskbar_search_open_result((uint32_t)idx);
+            return;
+        }
+        if (x >= g_gui.taskbar_search_results_rect.x &&
+            x < g_gui.taskbar_search_results_rect.x + g_gui.taskbar_search_results_rect.w &&
+            y >= g_gui.taskbar_search_results_rect.y &&
+            y < g_gui.taskbar_search_results_rect.y + g_gui.taskbar_search_results_rect.h) {
+            return;
+        }
+    }
+
     if (gui_desktop_handle_click(x, y)) {
         gui_set_focused_widget(0);
         return;
@@ -2386,10 +2411,19 @@ static void gui_handle_mouse_up(int x, int y) {
 
 __attribute__((optimize("no-jump-tables")))
 static void gui_handle_mouse_move(int x, int y) {
+    int search_idx;
     if (g_gui.slider_widget) {
         gui_set_hovered_widget(g_gui.slider_widget);
         gui_slider_apply_screen_x(g_gui.slider_widget, x);
         return;
+    }
+    search_idx = gui_taskbar_search_result_index_at(x, y);
+    if (search_idx >= 0 && search_idx != g_gui.taskbar_search_selected) {
+        g_gui.taskbar_search_selected = search_idx;
+        gui_invalidate_rect(g_gui.taskbar_search_results_rect.x,
+                            g_gui.taskbar_search_results_rect.y,
+                            g_gui.taskbar_search_results_rect.w,
+                            g_gui.taskbar_search_results_rect.h);
     }
     gui_set_hovered_widget(gui_widget_at_screen(x, y));
     if (g_gui.terminal.selecting) {
@@ -3226,39 +3260,219 @@ static int gui_ascii_case_contains(const char *text, const char *query) {
     return 0;
 }
 
+static int gui_ascii_case_ends_with(const char *text, const char *suffix) {
+    uint32_t text_len = 0;
+    uint32_t suffix_len = 0;
+    const char *start;
+    if (!text || !suffix) return 0;
+    while (text[text_len]) text_len++;
+    while (suffix[suffix_len]) suffix_len++;
+    if (suffix_len > text_len) return 0;
+    start = text + text_len - suffix_len;
+    return gui_ascii_case_equal_prefix(start, suffix);
+}
+
+static int gui_path_starts_with(const char *path, const char *prefix) {
+    uint32_t i = 0;
+    if (!path || !prefix) return 0;
+    while (prefix[i]) {
+        if (path[i] != prefix[i]) return 0;
+        i++;
+    }
+    return 1;
+}
+
+static int gui_taskbar_search_is_executable_path(const char *path, int mode_executable) {
+    if (mode_executable) return 1;
+    if (!path || !path[0]) return 0;
+    if (gui_path_starts_with(path, "/bin/")) return 1;
+    if (gui_ascii_case_ends_with(path, ".elf")) return 1;
+    if (gui_ascii_case_ends_with(path, ".bin")) return 1;
+    if (gui_ascii_case_ends_with(path, ".app")) return 1;
+    return 0;
+}
+
+static void gui_taskbar_search_reset_results(void) {
+    uint32_t i;
+    for (i = 0; i < GUI_TASKBAR_SEARCH_MAX_RESULTS; i++) {
+        g_gui.taskbar_search_results[i].used = 0;
+        g_gui.taskbar_search_results[i].is_dir = 0;
+        g_gui.taskbar_search_results[i].name[0] = 0;
+        g_gui.taskbar_search_results[i].path[0] = 0;
+    }
+    g_gui.taskbar_search_result_count = 0;
+    g_gui.taskbar_search_selected = -1;
+    g_gui.taskbar_search_results_rect.x = 0;
+    g_gui.taskbar_search_results_rect.y = 0;
+    g_gui.taskbar_search_results_rect.w = 0;
+    g_gui.taskbar_search_results_rect.h = 0;
+}
+
 static void gui_taskbar_search_clear(void) {
     g_gui.taskbar_search_text[0] = 0;
     g_gui.taskbar_search_len = 0;
+    gui_taskbar_search_reset_results();
 }
 
-static void gui_taskbar_search_submit(void) {
+static void gui_taskbar_search_copy(char *dst, uint32_t dst_len, const char *src) {
+    uint32_t i = 0;
+    if (!dst || dst_len == 0) return;
+    if (!src) src = "";
+    while (src[i] && i + 1 < dst_len) {
+        dst[i] = src[i];
+        i++;
+    }
+    dst[i] = 0;
+}
+
+static void gui_taskbar_search_join_path(char *dst, uint32_t dst_len, const char *dir, const char *name) {
+    uint32_t i = 0;
+    uint32_t j = 0;
+    if (!dst || dst_len == 0) return;
+    if (!dir || !dir[0]) dir = "/";
+    while (dir[i] && i + 1 < dst_len) {
+        dst[i] = dir[i];
+        i++;
+    }
+    if (i == 0) {
+        dst[i++] = '/';
+    } else if (i > 1 && dst[i - 1] != '/' && i + 1 < dst_len) {
+        dst[i++] = '/';
+    }
+    while (name && name[j] && i + 1 < dst_len) {
+        dst[i++] = name[j++];
+    }
+    dst[i] = 0;
+}
+
+static void gui_taskbar_search_add_result(const char *name, const char *path, int is_dir, int is_executable) {
+    gui_taskbar_search_result_t *r;
+    if (g_gui.taskbar_search_result_count >= GUI_TASKBAR_SEARCH_MAX_RESULTS) return;
+    r = &g_gui.taskbar_search_results[g_gui.taskbar_search_result_count++];
+    r->used = 1;
+    r->is_dir = is_dir ? 1 : 0;
+    r->is_executable = (!is_dir && is_executable) ? 1 : 0;
+    gui_taskbar_search_copy(r->name, sizeof(r->name), name);
+    gui_taskbar_search_copy(r->path, sizeof(r->path), path);
+    if (g_gui.taskbar_search_selected < 0) g_gui.taskbar_search_selected = 0;
+}
+
+static void gui_taskbar_search_scan_dir(const char *dir, uint32_t depth) {
     uint32_t i;
-    const char *q = g_gui.taskbar_search_text;
-    if (!q[0]) {
-        gui_desktop_run_action(GUI_DESKTOP_ACTION_MENU);
+    if (!dir || !dir[0]) return;
+    if (depth > 4) return;
+    for (i = 0; i < 128 && g_gui.taskbar_search_result_count < GUI_TASKBAR_SEARCH_MAX_RESULTS; i++) {
+        dentry_t *e = vfs_readdir(dir, i);
+        char child_path[GUI_TASKBAR_SEARCH_PATH_LEN];
+        int is_dir;
+        int is_executable;
+        if (!e) break;
+        if (!e->name[0] || gui_string_equals(e->name, ".") || gui_string_equals(e->name, "..")) continue;
+        is_dir = (e->inode && (e->inode->mode & FS_DIR)) ? 1 : 0;
+        is_executable = (e->inode && (e->inode->mode & (S_IXUSR | S_IXGRP | S_IXOTH))) ? 1 : 0;
+        gui_taskbar_search_join_path(child_path, sizeof(child_path), dir, e->name);
+        is_executable = gui_taskbar_search_is_executable_path(child_path, is_executable);
+        if (gui_ascii_case_contains(e->name, g_gui.taskbar_search_text) ||
+            gui_ascii_case_contains(child_path, g_gui.taskbar_search_text)) {
+            gui_taskbar_search_add_result(e->name, child_path, is_dir, is_executable);
+        }
+        if (is_dir) {
+            gui_taskbar_search_scan_dir(child_path, depth + 1);
+        }
+    }
+}
+
+static void gui_taskbar_search_refresh_results(void) {
+    gui_taskbar_search_reset_results();
+    if (!g_gui.taskbar_search_text[0]) return;
+    gui_taskbar_search_scan_dir("/", 0);
+}
+
+static void gui_file_preview_open_path(const char *path);
+static void gui_file_preview_open_file(const char *path);
+
+static void gui_taskbar_search_finish_open(void) {
+    gui_taskbar_search_clear();
+    g_gui.taskbar_search_focused = 0;
+    gui_invalidate_all();
+}
+
+static void gui_taskbar_search_open_result(uint32_t index) {
+    gui_taskbar_search_result_t *r;
+    char path[MAX_PATH];
+    char *argv[2];
+    int pid;
+    int is_dir;
+    int is_executable;
+    if (index >= g_gui.taskbar_search_result_count) return;
+    r = &g_gui.taskbar_search_results[index];
+    if (!r->used || !r->path[0]) return;
+
+    strncpy(path, r->path, sizeof(path) - 1);
+    path[sizeof(path) - 1] = 0;
+    is_dir = r->is_dir;
+    is_executable = r->is_executable;
+
+    if (is_dir) {
+        gui_file_preview_open_path(path);
+        gui_taskbar_search_finish_open();
         return;
     }
-    gui_launcher_scan_bin(g_gui.launcher_app_count);
-    for (i = 0; i < GUI_LAUNCHER_MAX_APPS; i++) {
-        gui_launcher_entry_t *e = &g_gui.launcher_entries[i];
-        if (!e->used) continue;
-        if (gui_ascii_case_contains(e->name, q) || gui_ascii_case_contains(e->path, q)) {
-            gui_desktop_run_action(GUI_DESKTOP_ACTION_LAUNCH_BIN_BASE + i);
-            gui_taskbar_search_clear();
-            g_gui.taskbar_search_focused = 0;
-            gui_invalidate_all();
+
+    if (is_executable) {
+        argv[0] = path;
+        argv[1] = 0;
+        pid = spawn_user_process(path, argv);
+        if (pid > 0) {
+            gui_taskbar_search_finish_open();
             return;
         }
     }
-    g_gui.desktop_start_menu_open = 1;
-    g_gui.desktop_start_menu_scroll = 0;
-    gui_update_start_menu_layout();
-    gui_invalidate_all();
+
+    gui_file_preview_open_file(path);
+    gui_taskbar_search_finish_open();
+}
+
+static int gui_taskbar_search_result_index_at(int x, int y) {
+    int row_h;
+    int idx;
+    if (!g_gui.taskbar_search_focused || g_gui.taskbar_search_results_rect.w <= 0) return -1;
+    if (x < g_gui.taskbar_search_results_rect.x ||
+        x >= g_gui.taskbar_search_results_rect.x + g_gui.taskbar_search_results_rect.w ||
+        y < g_gui.taskbar_search_results_rect.y ||
+        y >= g_gui.taskbar_search_results_rect.y + g_gui.taskbar_search_results_rect.h) {
+        return -1;
+    }
+    row_h = GUI_TEXT_LINE_H + 8;
+    idx = (y - g_gui.taskbar_search_results_rect.y) / row_h;
+    if (idx < 0 || (uint32_t)idx >= g_gui.taskbar_search_result_count) return -1;
+    if (!g_gui.taskbar_search_results[idx].used) return -1;
+    return idx;
+}
+
+static int gui_is_enter_key(int key) {
+    return key == GUI_KEY_ENTER || key == '\n' || key == '\r';
+}
+
+static void gui_taskbar_search_submit(void) {
+    if (!g_gui.taskbar_search_text[0]) {
+        gui_desktop_run_action(GUI_DESKTOP_ACTION_FILES);
+        return;
+    }
+    if (g_gui.taskbar_search_result_count == 0) {
+        gui_taskbar_search_refresh_results();
+    }
+    if (g_gui.taskbar_search_result_count > 0) {
+        uint32_t index = g_gui.taskbar_search_selected >= 0 ? (uint32_t)g_gui.taskbar_search_selected : 0u;
+        gui_taskbar_search_open_result(index);
+    } else {
+        gui_invalidate_all();
+    }
 }
 
 static int gui_taskbar_search_handle_key(int key) {
     if (!g_gui.taskbar_search_focused) return 0;
-    if (key == GUI_KEY_ENTER) {
+    if (gui_is_enter_key(key)) {
         gui_taskbar_search_submit();
         return 1;
     }
@@ -3266,13 +3480,38 @@ static int gui_taskbar_search_handle_key(int key) {
         if (g_gui.taskbar_search_len > 0) {
             g_gui.taskbar_search_len--;
             g_gui.taskbar_search_text[g_gui.taskbar_search_len] = 0;
+            gui_taskbar_search_refresh_results();
             gui_invalidate_all();
+        }
+        return 1;
+    }
+    if (key == GUI_KEY_UP || key == GUI_KEY_DOWN) {
+        if (g_gui.taskbar_search_result_count > 0) {
+            if (g_gui.taskbar_search_selected < 0) {
+                g_gui.taskbar_search_selected = 0;
+            } else if (key == GUI_KEY_UP) {
+                if (g_gui.taskbar_search_selected <= 0) {
+                    g_gui.taskbar_search_selected = (int)g_gui.taskbar_search_result_count - 1;
+                } else {
+                    g_gui.taskbar_search_selected--;
+                }
+            } else {
+                g_gui.taskbar_search_selected++;
+                if ((uint32_t)g_gui.taskbar_search_selected >= g_gui.taskbar_search_result_count) {
+                    g_gui.taskbar_search_selected = 0;
+                }
+            }
+            gui_invalidate_rect(g_gui.taskbar_search_results_rect.x,
+                                g_gui.taskbar_search_results_rect.y,
+                                g_gui.taskbar_search_results_rect.w,
+                                g_gui.taskbar_search_results_rect.h);
         }
         return 1;
     }
     if (key >= 32 && key < 127 && g_gui.taskbar_search_len < GUI_TASKBAR_SEARCH_MAX) {
         g_gui.taskbar_search_text[g_gui.taskbar_search_len++] = (char)key;
         g_gui.taskbar_search_text[g_gui.taskbar_search_len] = 0;
+        gui_taskbar_search_refresh_results();
         gui_invalidate_all();
         return 1;
     }
@@ -3353,11 +3592,13 @@ static int gui_desktop_handle_click(int x, int y) {
         g_gui.taskbar_search_focused = 1;
         g_gui.desktop_start_menu_open = 0;
         gui_set_focused_widget(0);
+        gui_taskbar_search_refresh_results();
         gui_invalidate_all();
         return 1;
     }
     if (g_gui.taskbar_search_focused) {
         g_gui.taskbar_search_focused = 0;
+        gui_taskbar_search_reset_results();
         gui_invalidate_all();
     }
     /* tray widgets pinned at the bottom-right: notifications, network, then clock */
@@ -3654,6 +3895,17 @@ int gui_should_capture_key_code(int key) {
 
     /* Global hotkeys: always capture regardless of focus. */
     if (key == GUI_KEY_ALT_TAB || key == GUI_KEY_SUPER) return 1;
+
+    /* Taskbar search is not a regular widget, but it still needs to receive
+     * keyboard input after being clicked. Capture only the keys it handles so
+     * terminal command editing keeps working when search is not focused.
+     */
+    if (g_gui.taskbar_search_focused) {
+        if (gui_is_enter_key(key) || key == GUI_KEY_BACKSPACE ||
+            key == GUI_KEY_UP || key == GUI_KEY_DOWN) return 1;
+        if (key >= 32 && key < 127) return 1;
+        return 0;
+    }
 
     /* GUI Terminal is the Shell's graphical output window. Do not capture
      * printable keys here: shell_run() must receive them so command editing,
@@ -4543,6 +4795,148 @@ static void gui_draw_taskbar_search_box(gui_rect_t r) {
     }
 }
 
+static int taskbar_search_str_ieq(const char *a, const char *b) {
+    while (*a && *b) {
+        char ca = *a;
+        char cb = *b;
+        if (ca >= 'A' && ca <= 'Z') ca = (char)(ca + 32);
+        if (cb >= 'A' && cb <= 'Z') cb = (char)(cb + 32);
+        if (ca != cb) return 0;
+        a++;
+        b++;
+    }
+    return *a == 0 && *b == 0;
+}
+
+static const char *taskbar_search_path_ext(const char *path) {
+    const char *dot = 0;
+    const char *p = path;
+    while (p && *p) {
+        if (*p == '/') dot = 0;
+        else if (*p == '.') dot = p;
+        p++;
+    }
+    return dot ? dot + 1 : "";
+}
+
+static gui_icon_id_t taskbar_search_result_icon(const gui_taskbar_search_result_t *r) {
+    const char *ext;
+    if (!r) return GUI_ICON_FILE_GENERIC;
+    if (r->is_dir) return GUI_ICON_FOLDER;
+    if (r->is_executable) return GUI_ICON_FILE_EXEC;
+    ext = taskbar_search_path_ext(r->path);
+    if (!*ext) return GUI_ICON_FILE_GENERIC;
+    if (taskbar_search_str_ieq(ext, "c") || taskbar_search_str_ieq(ext, "h") ||
+        taskbar_search_str_ieq(ext, "cpp") || taskbar_search_str_ieq(ext, "hpp") ||
+        taskbar_search_str_ieq(ext, "js") || taskbar_search_str_ieq(ext, "ts") ||
+        taskbar_search_str_ieq(ext, "py") || taskbar_search_str_ieq(ext, "go") ||
+        taskbar_search_str_ieq(ext, "rs") || taskbar_search_str_ieq(ext, "asm")) return GUI_ICON_FILE_CODE;
+    if (taskbar_search_str_ieq(ext, "md")) return GUI_ICON_FILE_MARKUP;
+    if (taskbar_search_str_ieq(ext, "txt") || taskbar_search_str_ieq(ext, "log") ||
+        taskbar_search_str_ieq(ext, "readme")) return GUI_ICON_FILE_TEXT;
+    if (taskbar_search_str_ieq(ext, "sh") || taskbar_search_str_ieq(ext, "bash")) return GUI_ICON_FILE_SHELL;
+    if (taskbar_search_str_ieq(ext, "conf") || taskbar_search_str_ieq(ext, "cfg") ||
+        taskbar_search_str_ieq(ext, "ini") || taskbar_search_str_ieq(ext, "json") ||
+        taskbar_search_str_ieq(ext, "yaml") || taskbar_search_str_ieq(ext, "yml") ||
+        taskbar_search_str_ieq(ext, "toml")) return GUI_ICON_FILE_CONFIG;
+    if (taskbar_search_str_ieq(ext, "png") || taskbar_search_str_ieq(ext, "jpg") ||
+        taskbar_search_str_ieq(ext, "jpeg") || taskbar_search_str_ieq(ext, "bmp") ||
+        taskbar_search_str_ieq(ext, "gif") || taskbar_search_str_ieq(ext, "ico")) return GUI_ICON_FILE_IMAGE;
+    if (taskbar_search_str_ieq(ext, "zip") || taskbar_search_str_ieq(ext, "tar") ||
+        taskbar_search_str_ieq(ext, "gz") || taskbar_search_str_ieq(ext, "bz2") ||
+        taskbar_search_str_ieq(ext, "xz") || taskbar_search_str_ieq(ext, "7z")) return GUI_ICON_FILE_ARCHIVE;
+    if (taskbar_search_str_ieq(ext, "elf") || taskbar_search_str_ieq(ext, "exe") ||
+        taskbar_search_str_ieq(ext, "bin") || taskbar_search_str_ieq(ext, "o") ||
+        taskbar_search_str_ieq(ext, "a") || taskbar_search_str_ieq(ext, "so")) return GUI_ICON_FILE_EXEC;
+    return GUI_ICON_FILE_GENERIC;
+}
+
+static void gui_draw_taskbar_search_results(void) {
+    uint32_t i;
+    gui_rect_t box = g_taskbar_search_rect;
+    int row_h = GUI_TEXT_LINE_H + 8;
+    int panel_h;
+    int panel_y;
+    int max_chars;
+    int cw = GUI_CHAR_W > 0 ? GUI_CHAR_W : 8;
+    int icon_size = 14;
+    int icon_x_pad = 8;
+    int text_x_pad = 30;
+    if (!g_gui.taskbar_search_focused || !g_gui.taskbar_search_text[0]) {
+        g_gui.taskbar_search_results_rect.x = 0;
+        g_gui.taskbar_search_results_rect.y = 0;
+        g_gui.taskbar_search_results_rect.w = 0;
+        g_gui.taskbar_search_results_rect.h = 0;
+        return;
+    }
+    panel_h = (int)g_gui.taskbar_search_result_count * row_h;
+    if (panel_h <= 0) panel_h = row_h;
+    panel_y = box.y - panel_h - 6;
+    if (panel_y < 0) panel_y = 0;
+    g_gui.taskbar_search_results_rect.x = box.x;
+    g_gui.taskbar_search_results_rect.y = panel_y;
+    g_gui.taskbar_search_results_rect.w = box.w + 180;
+    if (g_gui.taskbar_search_results_rect.x + g_gui.taskbar_search_results_rect.w > (int)g_gui.width) {
+        g_gui.taskbar_search_results_rect.w = (int)g_gui.width - g_gui.taskbar_search_results_rect.x - 4;
+    }
+    g_gui.taskbar_search_results_rect.h = panel_h;
+
+    gui_raw_fill_rect(g_gui.taskbar_search_results_rect.x, g_gui.taskbar_search_results_rect.y,
+                      g_gui.taskbar_search_results_rect.w, g_gui.taskbar_search_results_rect.h,
+                      gui_rgb(28, 34, 48));
+    gui_raw_line(g_gui.taskbar_search_results_rect.x, g_gui.taskbar_search_results_rect.y,
+                 g_gui.taskbar_search_results_rect.x + g_gui.taskbar_search_results_rect.w - 1,
+                 g_gui.taskbar_search_results_rect.y, gui_rgb(86, 100, 130));
+    gui_raw_line(g_gui.taskbar_search_results_rect.x, g_gui.taskbar_search_results_rect.y,
+                 g_gui.taskbar_search_results_rect.x,
+                 g_gui.taskbar_search_results_rect.y + g_gui.taskbar_search_results_rect.h - 1,
+                 gui_rgb(86, 100, 130));
+    gui_raw_line(g_gui.taskbar_search_results_rect.x + g_gui.taskbar_search_results_rect.w - 1,
+                 g_gui.taskbar_search_results_rect.y,
+                 g_gui.taskbar_search_results_rect.x + g_gui.taskbar_search_results_rect.w - 1,
+                 g_gui.taskbar_search_results_rect.y + g_gui.taskbar_search_results_rect.h - 1,
+                 gui_rgb(10, 14, 22));
+    gui_raw_line(g_gui.taskbar_search_results_rect.x,
+                 g_gui.taskbar_search_results_rect.y + g_gui.taskbar_search_results_rect.h - 1,
+                 g_gui.taskbar_search_results_rect.x + g_gui.taskbar_search_results_rect.w - 1,
+                 g_gui.taskbar_search_results_rect.y + g_gui.taskbar_search_results_rect.h - 1,
+                 gui_rgb(10, 14, 22));
+
+    max_chars = (g_gui.taskbar_search_results_rect.w - text_x_pad - 8) / cw;
+    if (max_chars < 1) max_chars = 1;
+    if (g_gui.taskbar_search_result_count == 0) {
+        gui_draw_text(g_gui.taskbar_search_results_rect.x + 10,
+                      g_gui.taskbar_search_results_rect.y + 4,
+                      "No files found", gui_rgb(160, 178, 205));
+        return;
+    }
+    for (i = 0; i < g_gui.taskbar_search_result_count; i++) {
+        gui_taskbar_search_result_t *r = &g_gui.taskbar_search_results[i];
+        char line[GUI_TASKBAR_SEARCH_PATH_LEN];
+        uint32_t k = 0;
+        uint32_t j = 0;
+        int row_y = g_gui.taskbar_search_results_rect.y + (int)i * row_h;
+        int icon_y = row_y + (row_h - icon_size) / 2;
+        uint32_t text_color;
+        if (!r->used) continue;
+        if ((int)i == g_gui.taskbar_search_selected) {
+            gui_raw_fill_rect(g_gui.taskbar_search_results_rect.x + 2, row_y + 2,
+                              g_gui.taskbar_search_results_rect.w - 4, row_h - 4,
+                              gui_rgb(50, 64, 92));
+        }
+        while (r->path[j] && k + 1 < sizeof(line) && (int)k < max_chars) {
+            line[k++] = r->path[j++];
+        }
+        line[k] = 0;
+        text_color = r->is_dir ? gui_rgb(170, 220, 255) :
+                     (r->is_executable ? gui_rgb(255, 210, 170) : gui_rgb(230, 240, 255));
+        gui_draw_file_icon(taskbar_search_result_icon(r),
+                           g_gui.taskbar_search_results_rect.x + icon_x_pad, icon_y);
+        gui_draw_text(g_gui.taskbar_search_results_rect.x + text_x_pad, row_y + 4,
+                      line, text_color);
+    }
+}
+
 static void gui_draw_taskbar(void) {
     uint32_t i;
     gui_taskbar_layout_t layout;
@@ -4655,6 +5049,7 @@ static void gui_draw_taskbar(void) {
             g_notif_widget_rect = notif_rect;
         }
     }
+    gui_draw_taskbar_search_results();
 }
 
 static void gui_draw_wallpaper_day(int width, int taskbar_top) {
@@ -7084,6 +7479,111 @@ static void gui_file_preview_rebuild(void) {
         gui_file_preview_render_edit();
     }
     gui_render();
+}
+
+static void gui_file_preview_open_file(const char *path) {
+    char parent[GUI_FP_MAX_PATH];
+    char name[GUI_FP_MAX_NAME];
+    uint32_t i;
+    int slash = -1;
+    if (!path || !path[0]) return;
+    for (i = 0; path[i] && i < GUI_FP_MAX_PATH - 1; i++) {
+        if (path[i] == '/') slash = (int)i;
+    }
+    if (slash <= 0) {
+        parent[0] = '/';
+        parent[1] = 0;
+        gui_taskbar_search_copy(name, sizeof(name), path[0] == '/' ? path + 1 : path);
+    } else {
+        uint32_t n = 0;
+        while (n < (uint32_t)slash && n + 1 < sizeof(parent)) {
+            parent[n] = path[n];
+            n++;
+        }
+        parent[n] = 0;
+        gui_taskbar_search_copy(name, sizeof(name), path + slash + 1);
+    }
+
+    gui_taskbar_search_copy(fp_path, sizeof(fp_path), parent);
+    gui_taskbar_search_copy(fp_view_name, sizeof(fp_view_name), name);
+    fp_mode = 1;
+    fp_selected = -1;
+    fp_page = 0;
+    fp_view_line_offset = 0;
+    fp_view_total_lines = 0;
+    fp_last_click_global = -1;
+    fp_last_click_frame = 0;
+    fp_clear_entry_click_state();
+    gui_file_preview_rebuild();
+}
+
+static void gui_file_preview_open_path(const char *path) {
+    char parent[GUI_FP_MAX_PATH];
+    char name[GUI_FP_MAX_NAME];
+    dentry_t *entry = 0;
+    uint32_t i;
+    uint32_t entry_index = 0;
+    int slash = -1;
+    int is_dir = 0;
+    if (!path || !path[0]) {
+        gui_file_preview_open();
+        return;
+    }
+    if (gui_string_equals(path, "/")) {
+        fp_path_set_root();
+        fp_selected = -1;
+        fp_mode = 0;
+        fp_page = 0;
+        fp_clear_entry_click_state();
+        gui_file_preview_rebuild();
+        return;
+    }
+    for (i = 0; path[i] && i < GUI_FP_MAX_PATH - 1; i++) {
+        if (path[i] == '/') slash = (int)i;
+    }
+    if (slash <= 0) {
+        parent[0] = '/';
+        parent[1] = 0;
+        gui_taskbar_search_copy(name, sizeof(name), path[0] == '/' ? path + 1 : path);
+    } else {
+        uint32_t n = 0;
+        while (n < (uint32_t)slash && n + 1 < sizeof(parent)) {
+            parent[n] = path[n];
+            n++;
+        }
+        parent[n] = 0;
+        gui_taskbar_search_copy(name, sizeof(name), path + slash + 1);
+    }
+    for (i = 0; i < 128; i++) {
+        dentry_t *e = vfs_readdir(parent, i);
+        if (!e) break;
+        if (gui_string_equals(e->name, name)) {
+            entry = e;
+            entry_index = i;
+            break;
+        }
+    }
+    if (entry && fp_entry_is_dir(entry)) is_dir = 1;
+    if (is_dir) {
+        gui_taskbar_search_copy(fp_path, sizeof(fp_path), path);
+        fp_selected = -1;
+    } else {
+        int global_index;
+        gui_taskbar_search_copy(fp_path, sizeof(fp_path), parent);
+        global_index = (fp_is_root() ? (int)entry_index : (int)entry_index + 1);
+        fp_page = global_index / fp_list_per_page();
+        fp_selected = global_index - fp_page * fp_list_per_page();
+    }
+    fp_mode = 0;
+    fp_clear_entry_click_state();
+    if (!is_dir && entry) {
+        int global_index = (fp_is_root() ? (int)entry_index : (int)entry_index + 1);
+        fp_page = global_index / fp_list_per_page();
+        fp_selected = global_index - fp_page * fp_list_per_page();
+    } else {
+        fp_page = 0;
+    }
+    gui_file_preview_rebuild();
 }
 
 static void gui_file_preview_open(void) {
