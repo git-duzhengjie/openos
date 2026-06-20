@@ -132,6 +132,12 @@
 #else
 #define OPENOS_HAS_ENVTEST 0
 #endif
+#if __has_include("embed_fdinherit.h")
+#include "embed_fdinherit.h"  /* fd inheritance helper for chromiumcaptest */
+#define OPENOS_HAS_FDINHERIT 1
+#else
+#define OPENOS_HAS_FDINHERIT 0
+#endif
 #if OPENOS_EMBED_TESTS && __has_include("embed_libctest.h")
 #include "embed_libctest.h"  /* libc subset 回归测试程序 */
 #define OPENOS_HAS_LIBCTEST 1
@@ -965,6 +971,17 @@ void kernel_main(void) {
         serial_write("[OK] Installed /bin/envtest user ELF\n");
     } else {
         serial_write("[WARN] Failed to install /bin/envtest\n");
+    }
+#endif
+
+#if OPENOS_HAS_FDINHERIT
+    fd = vfs_open("/bin/fdinherit", O_CREAT | O_RDWR, 0755);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)fdinherit_elf, fdinherit_elf_size);
+        vfs_close(fd);
+        serial_write("[OK] Installed /bin/fdinherit user ELF\n");
+    } else {
+        serial_write("[WARN] Failed to install /bin/fdinherit\n");
     }
 #endif
 

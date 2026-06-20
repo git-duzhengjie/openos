@@ -1203,6 +1203,42 @@ static int test_spawn_argv_env_wait(void)
         openos_puts("spawned env child exited nonzero");
         return CAP_FAIL;
     }
+
+    {
+        int pipefd[2];
+        char fdarg[16];
+        char *fdargv[] = { (char *)"/bin/fdinherit", fdarg, 0 };
+        const char *payload = "spawn!";
+
+        if (openos_pipe(pipefd) != 0) {
+            openos_puts("spawn fd pipe create failed");
+            return CAP_FAIL;
+        }
+        if (openos_write_fd(pipefd[1], payload, 6) != 6) {
+            openos_close(pipefd[0]);
+            openos_close(pipefd[1]);
+            openos_puts("spawn fd pipe write failed");
+            return CAP_FAIL;
+        }
+        openos_close(pipefd[1]);
+        openos_snprintf(fdarg, sizeof(fdarg), "%d", pipefd[0]);
+        pid = openos_spawn_env("/bin/fdinherit", fdargv, envp);
+        openos_close(pipefd[0]);
+        if (pid <= 0) {
+            openos_puts("spawn fd child failed");
+            return CAP_FAIL;
+        }
+        status = -1;
+        if (openos_waitpid(pid, &status, 0) != pid) {
+            openos_puts("waitpid did not reap fd child");
+            return CAP_FAIL;
+        }
+        if (status != 0) {
+            openos_puts("spawn fd child exited nonzero");
+            return CAP_FAIL;
+        }
+    }
+
     return CAP_PASS;
 }
 

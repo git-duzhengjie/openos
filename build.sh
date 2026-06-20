@@ -377,6 +377,17 @@ if [ -f $USR/chromiumcaptest.c ]; then
     echo "  Embedded: chromiumcaptest.elf"
 fi
 
+if [ -f $USR/fdinherit.c ]; then
+    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+        -fno-stack-protector -fno-builtin \
+        -I $SRC/include \
+        -c $USR/fdinherit.c -o $BUILD/fdinherit.o
+    ld -m elf_i386 -T $USR/user.ld -o $BUILD/fdinherit.elf $BUILD/crt0.o $BUILD/fdinherit.o
+    verify_user_start $BUILD/fdinherit.elf fdinherit.elf
+    python3 _embed_elf.py $BUILD/fdinherit.elf $SRC/include/embed_fdinherit.h fdinherit_elf
+    echo "  Embedded: fdinherit.elf"
+fi
+
 if [ -f $USR/nsdemo.c ] && [ -f $USR/openos_netsurf_platform.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \
