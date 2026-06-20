@@ -25,11 +25,6 @@
 extern int spawn_user_process(const char *path, char *const argv[]);
 extern uint32_t sched_time_ms(void);
 
-#define BROWSER_DNS_WAIT_POLLS       4096u
-#define BROWSER_TCP_WAIT_POLLS       8192u
-#define BROWSER_HTTP_RECV_POLLS      16384u
-#define BROWSER_TLS_RECV_POLLS       12288u
-
 typedef enum browser_scheme {
     BROWSER_SCHEME_HTTP = 0,
     BROWSER_SCHEME_HTTPS = 1
@@ -5643,7 +5638,7 @@ static uint32_t browser_resolve_host(const char *host) {
     if (net_parse_ipv4(host, &ip) == 0) return ip;
     if (dns_query_a(host) != 0) return 0;
     start = sched_time_ms();
-    for (uint32_t polls = 0; polls < BROWSER_DNS_WAIT_POLLS && sched_time_ms() - start < 3000u; polls++) {
+    while (sched_time_ms() - start < 3000u) {
         dns_state_t state;
         net_poll();
         state = dns_get_state();
@@ -5656,7 +5651,7 @@ static uint32_t browser_resolve_host(const char *host) {
 
 static int browser_wait_tcp_state(int conn, int want_state, uint32_t timeout_ms) {
     uint32_t start = sched_time_ms();
-    for (uint32_t polls = 0; polls < BROWSER_TCP_WAIT_POLLS && sched_time_ms() - start < timeout_ms; polls++) {
+    while (sched_time_ms() - start < timeout_ms) {
         int state;
         net_poll();
         state = net_tcp_state(conn);
@@ -5814,7 +5809,7 @@ static void browser_current_origin(char *origin, uint32_t cap) {
     uint16_t default_port;
     if (!origin || cap == 0) return;
     origin[0] = '\0';
-    browser_copy_url(url, sizeof(url), g_browser_address_box ? g_browser_address_box->text : "http://example.com/");
+    browser_copy_url(url, sizeof(url), g_browser_address_box ? g_browser_address_box->text : "https://example.com/");
     if (browser_parse_url(url, host, sizeof(host), path, sizeof(path), &port, &scheme) != 0) return;
     default_port = (scheme == BROWSER_SCHEME_HTTPS) ? 443u : 80u;
     pos = fp_str_append(origin, pos, (int)cap, scheme == BROWSER_SCHEME_HTTPS ? "https://" : "http://");
@@ -6315,7 +6310,7 @@ static void browser_https_probe_current(const char *host, uint32_t ip, uint16_t 
 
     got = 0;
     start = sched_time_ms();
-    for (uint32_t polls = 0; polls < BROWSER_TLS_RECV_POLLS && sched_time_ms() - start < 6000u; polls++) {
+    while (sched_time_ms() - start < 6000u) {
         net_poll();
         got = net_tcp_recv(conn, record, sizeof(record));
         if (got > 0) break;
@@ -6352,7 +6347,7 @@ static void browser_fetch_current(void) {
 
     browser_clear_content();
     browser_set_status("Loading...");
-    browser_copy_url(url, sizeof(url), g_browser_address_box ? g_browser_address_box->text : "http://example.com/");
+    browser_copy_url(url, sizeof(url), g_browser_address_box ? g_browser_address_box->text : "https://example.com/");
     parse_result = browser_parse_url(url, host, sizeof(host), path, sizeof(path), &port, &scheme);
     if (parse_result != 0) {
         browser_set_widget_text(g_browser_content_lines[0], "Invalid URL. Use http://host/path or https://host/path.");
@@ -6397,13 +6392,12 @@ static void browser_fetch_current(void) {
     }
 
     start = sched_time_ms();
-    for (uint32_t polls = 0; polls < BROWSER_HTTP_RECV_POLLS && sched_time_ms() - start < 7000u && total < (int)sizeof(response) - 1; polls++) {
+    while (sched_time_ms() - start < 7000u && total < (int)sizeof(response) - 1) {
         net_poll();
         got = net_tcp_recv(conn, response + total, (uint16_t)(sizeof(response) - 1u - (uint32_t)total));
         if (got > 0) {
             total += got;
             start = sched_time_ms();
-            polls = 0;
         } else if (net_tcp_state(conn) == NET_TCP_STATE_CLOSED || net_tcp_state(conn) == NET_TCP_STATE_CLOSE_WAIT) {
             break;
         }
@@ -6456,7 +6450,7 @@ static void gui_browser_open(void) {
     gui_add_button(g_browser_win, 54, 18, 34, 26, i18n_t(I18N_KEY_BROWSER_FORWARD), browser_on_nav, 0);
     gui_add_button(g_browser_win, 94, 18, 70, 26, i18n_t(I18N_KEY_BROWSER_REFRESH), browser_on_nav, 0);
     gui_add_label(g_browser_win, 176, 24, 62, 16, i18n_t(I18N_KEY_BROWSER_ADDRESS));
-    g_browser_address_box = gui_add_textbox(g_browser_win, 238, 18, 282, 26, "http://example.com/");
+    g_browser_address_box = gui_add_textbox(g_browser_win, 238, 18, 282, 26, "https://example.com/");
     gui_add_button(g_browser_win, 530, 18, 62, 26, i18n_t(I18N_KEY_BROWSER_GO), browser_on_nav, 0);
 
     gui_add_panel(g_browser_win, 14, 56, win_w - 28, win_h - 104, gui_rgb(246, 249, 253));
