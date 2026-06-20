@@ -180,6 +180,9 @@ typedef struct openos_stat {
     uint32_t fs_type;
     uint32_t uid;
     uint32_t gid;
+    uint64_t ctime_utc;
+    uint64_t mtime_utc;
+    uint64_t atime_utc;
 } openos_stat_t;
 
 typedef struct openos_statfs {

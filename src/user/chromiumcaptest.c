@@ -316,9 +316,16 @@ static int test_filesystem_metadata(void)
         return CAP_FAIL;
     }
 
+    if (file_st.ctime_utc == 0 || file_st.mtime_utc == 0 || file_st.atime_utc == 0) {
+        return CAP_FAIL;
+    }
+
     if (openos_lstat("/bin/chromiumcaptest", &lstat_st) != 0 ||
         (lstat_st.mode & FS_FILE) != FS_FILE ||
-        lstat_st.size != file_st.size) {
+        lstat_st.size != file_st.size ||
+        lstat_st.ctime_utc != file_st.ctime_utc ||
+        lstat_st.mtime_utc != file_st.mtime_utc ||
+        lstat_st.atime_utc != file_st.atime_utc) {
         return CAP_FAIL;
     }
 
@@ -328,7 +335,10 @@ static int test_filesystem_metadata(void)
     }
     if (openos_fstat(fd, &fstat_st) != 0 ||
         (fstat_st.mode & FS_FILE) != FS_FILE ||
-        fstat_st.size != file_st.size) {
+        fstat_st.size != file_st.size ||
+        fstat_st.ctime_utc != file_st.ctime_utc ||
+        fstat_st.mtime_utc != file_st.mtime_utc ||
+        fstat_st.atime_utc != file_st.atime_utc) {
         openos_close(fd);
         return CAP_FAIL;
     }

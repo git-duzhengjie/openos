@@ -453,6 +453,7 @@ static inline int openos_syscall_result(int ret)
 }
 
 typedef unsigned int openos_uint32_t;
+typedef unsigned long long openos_uint64_t;
 typedef int openos_thread_t;
 typedef int openos_mutex_t;
 typedef int openos_sem_t;
@@ -491,6 +492,9 @@ typedef struct openos_stat {
     openos_uint32_t fs_type;
     openos_uint32_t uid;
     openos_uint32_t gid;
+    openos_uint64_t ctime_utc;
+    openos_uint64_t mtime_utc;
+    openos_uint64_t atime_utc;
 } openos_stat_t;
 
 typedef struct openos_statfs {

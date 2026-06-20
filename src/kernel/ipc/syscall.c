@@ -1047,6 +1047,19 @@ static int syscall_copy_user_strvec(syscall_strvec_t *out,
     return 0;
 }
 
+static uint64_t syscall_pack_vfs_time(const vfs_time_t *time)
+{
+    if (!time || time->year == 0) {
+        return 0;
+    }
+    return ((uint64_t)time->year * 10000000000ull) +
+           ((uint64_t)time->month * 100000000u) +
+           ((uint64_t)time->day * 1000000u) +
+           ((uint64_t)time->hour * 10000u) +
+           ((uint64_t)time->minute * 100u) +
+           (uint64_t)time->second;
+}
+
 static void syscall_fill_user_stat(openos_stat_t *user_st, const inode_t *st)
 {
     user_st->ino = st->ino;
@@ -1056,6 +1069,9 @@ static void syscall_fill_user_stat(openos_stat_t *user_st, const inode_t *st)
     user_st->fs_type = st->fs_type;
     user_st->uid = st->uid;
     user_st->gid = st->gid;
+    user_st->ctime_utc = syscall_pack_vfs_time(&st->ctime);
+    user_st->mtime_utc = syscall_pack_vfs_time(&st->mtime);
+    user_st->atime_utc = syscall_pack_vfs_time(&st->atime);
 }
 
 static void syscall_fill_user_statfs(openos_statfs_t *user_st, const inode_t *st)
