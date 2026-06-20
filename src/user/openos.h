@@ -111,6 +111,7 @@
 #define SYS_AI_REQUEST   314
 #define SYS_NETDEVCTL    315
 #define SYS_DNSLOOKUP    316
+#define SYS_UPTIME_MS    317
 #define SYS_GUI_CREATE_WINDOW 320
 #define SYS_GUI_DESTROY_WINDOW 321
 #define SYS_GUI_ADD_LABEL 322
@@ -163,6 +164,21 @@ typedef struct openos_hostent {
     int h_length;
     char **h_addr_list;
 } openos_hostent_t;
+
+typedef unsigned int openos_time_t;
+typedef int openos_clock_t;
+
+#define OPENOS_CLOCKS_PER_SEC 1000
+
+typedef struct openos_timeval {
+    long tv_sec;
+    long tv_usec;
+} openos_timeval_t;
+
+typedef struct openos_timezone {
+    int tz_minuteswest;
+    int tz_dsttime;
+} openos_timezone_t;
 
 #define NET_DEVICE_FLAG_PRESENT 0x00000001u
 #define NET_DEVICE_FLAG_UP      0x00000002u
@@ -970,6 +986,40 @@ static inline void openos_exit(int code)
     for (;;) {
         __asm__ volatile("pause");
     }
+}
+
+static inline unsigned int openos_uptime_ms(void)
+{
+    return (unsigned int)openos_syscall0(SYS_UPTIME_MS);
+}
+
+static inline openos_time_t openos_time(openos_time_t *out)
+{
+    openos_time_t seconds = (openos_time_t)(openos_uptime_ms() / 1000u);
+    if (out) *out = seconds;
+    return seconds;
+}
+
+static inline int openos_gettimeofday(openos_timeval_t *tv, openos_timezone_t *tz)
+{
+    unsigned int ms;
+    if (!tv) {
+        openos_set_errno(OPENOS_EINVAL);
+        return -1;
+    }
+    ms = openos_uptime_ms();
+    tv->tv_sec = (long)(ms / 1000u);
+    tv->tv_usec = (long)((ms % 1000u) * 1000u);
+    if (tz) {
+        tz->tz_minuteswest = 0;
+        tz->tz_dsttime = 0;
+    }
+    return 0;
+}
+
+static inline openos_clock_t openos_clock(void)
+{
+    return (openos_clock_t)openos_uptime_ms();
 }
 
 static inline int openos_strlen(const char *s)
@@ -2647,6 +2697,10 @@ static inline int openos_ai_request(const char *prompt, char *response, unsigned
 #define strstr(h, n)                  openos_strstr((h), (n))
 #define strdup(s)                     openos_strdup((s))
 #define atoi(s)                       openos_atoi((s))
+#define time(out)                     openos_time((out))
+#define gettimeofday(tv, tz)          openos_gettimeofday((tv), (tz))
+#define clock()                       openos_clock()
+#define CLOCKS_PER_SEC                OPENOS_CLOCKS_PER_SEC
 #define isdigit(ch)                   openos_isdigit((ch))
 #define isspace(ch)                   openos_isspace((ch))
 #define isalpha(ch)                   openos_isalpha((ch))

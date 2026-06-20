@@ -1367,6 +1367,9 @@ uint32_t syscall_dispatch(uint32_t num,
         thread_sleep(a);
         return 0;
 
+    case SYS_UPTIME_MS:
+        return sched_time_ms();
+
     case SYS_YIELD:
         sched_yield();
         return 0;

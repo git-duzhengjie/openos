@@ -374,7 +374,7 @@
   - [√] 浏览器崩溃不应拖垮内核，错误通过进程退出或窗口关闭处理：用户态 GUI 窗口绑定进程 PID，`sys_exit` 自动回收窗口和事件
   - [√] 网络访问统一走用户态 socket/libc API，而不是直接调用内核内部函数：新增 `/bin/browser` 用户态原型，使用 `openos_getaddrinfo/openos_socket/openos_connect/openos_send/openos_recv` 拉取 HTTP 页面
 - [ ] 补齐移植开源浏览器内核所需的基础运行环境
-  - [ ] libc/POSIX 子集：malloc/free/realloc、stdio、string、time、errno、文件 API、目录 API
+  - [√] libc/POSIX 子集：malloc/free/realloc、stdio、string、time、errno、文件 API、目录 API；新增 `SYS_UPTIME_MS` 与用户态 `time/gettimeofday/clock` 兼容封装
   - [√] socket API：getaddrinfo/gethostbyname、connect/send/recv/close、select/poll、非阻塞 socket
   - [√] TLS/HTTPS 用户态库适配：优先评估 mbedTLS / BearSSL / wolfSSL 等轻量方案
   - [ ] 字体接口：字体枚举、字形查询、UTF-8/Unicode 文本测量、基础 fallback
