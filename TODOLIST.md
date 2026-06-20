@@ -436,6 +436,7 @@
     - [√] 已为匿名共享内存段增加内核 refcount/flags 元数据、`SYS_SHM_INFO` 查询接口、引用中拒绝 destroy 的生命周期保护，并在 `/bin/chromiumcaptest` 增加双映射 refcount 与 destroy 防误释放验收
   - [ ] socketpair / message queue / service channel 压测，支撑 Chromium 多进程 IPC
     - [√] 已将 message queue 基础 create/send/recv/truncate/destroy 语义并入 `/bin/chromiumcaptest`，与 socketpair/poll 共同覆盖 Chromium 多进程 IPC 的最小通道能力
+    - [√] 已将基于 socketpair 的 service channel 结构化 request/reply 消息语义并入 `/bin/chromiumcaptest`，覆盖 service/opcode/seq/status/payload 元数据往返校验
   - [ ] 设计 `/bin/chromium` 第一版单进程模式与后续多进程模型边界
 - [ ] M5 文件系统与资源管理
   - [ ] 完善 `stat/fstat/lstat`、权限、mtime/ctime/atime、目录遍历和路径规范化

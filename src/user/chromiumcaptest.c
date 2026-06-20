@@ -553,6 +553,75 @@ static int test_message_queue(void)
     return openos_mq_destroy(&mq) == 0 && mq == 0 ? CAP_PASS : CAP_FAIL;
 }
 
+static int test_service_channel(void)
+{
+    openos_service_channel_t channel;
+    openos_service_message_t request;
+    openos_service_message_t server_request;
+    openos_service_message_t reply;
+    openos_service_message_t client_reply;
+
+    if (openos_service_channel_create(&channel) != 0) {
+        return CAP_FAIL;
+    }
+
+    openos_service_message_init(&request, 0x4348524f, 7, 1234, "ping", 5);
+    if (openos_service_send_message(channel.client_fd, &request) != 0) {
+        openos_service_channel_close(&channel);
+        return CAP_FAIL;
+    }
+
+    if (openos_service_receive_request(&channel, &server_request) != 0) {
+        openos_service_channel_close(&channel);
+        return CAP_FAIL;
+    }
+    if (server_request.service != request.service ||
+        server_request.opcode != request.opcode ||
+        server_request.seq != request.seq ||
+        server_request.length != 5 ||
+        server_request.payload[0] != 'p' ||
+        server_request.payload[1] != 'i' ||
+        server_request.payload[2] != 'n' ||
+        server_request.payload[3] != 'g' ||
+        server_request.payload[4] != 0) {
+        openos_service_channel_close(&channel);
+        return CAP_FAIL;
+    }
+
+    openos_service_message_init(&reply, server_request.service,
+                                server_request.opcode + 1,
+                                server_request.seq, "pong", 5);
+    reply.status = OPENOS_SERVICE_STATUS_OK;
+    if (openos_service_send_reply(&channel, &reply) != 0) {
+        openos_service_channel_close(&channel);
+        return CAP_FAIL;
+    }
+
+    if (openos_service_recv_message(channel.client_fd, &client_reply) != 0) {
+        openos_service_channel_close(&channel);
+        return CAP_FAIL;
+    }
+
+    if (client_reply.service != request.service ||
+        client_reply.opcode != 8 ||
+        client_reply.seq != request.seq ||
+        client_reply.status != OPENOS_SERVICE_STATUS_OK ||
+        client_reply.length != 5 ||
+        client_reply.payload[0] != 'p' ||
+        client_reply.payload[1] != 'o' ||
+        client_reply.payload[2] != 'n' ||
+        client_reply.payload[3] != 'g' ||
+        client_reply.payload[4] != 0) {
+        openos_service_channel_close(&channel);
+        return CAP_FAIL;
+    }
+
+    return openos_service_channel_close(&channel) == 0 &&
+           channel.client_fd == -1 && channel.server_fd == -1
+               ? CAP_PASS
+               : CAP_FAIL;
+}
+
 static int test_spawn_argv_env_wait(void)
 {
     char *argv[] = { (char *)"/bin/argtest", (char *)"alpha", (char *)"beta", 0 };
@@ -692,7 +761,7 @@ int main(int argc, char **argv)
     (void)argv;
 
     openos_printf("Chromium core capability test\n");
-    openos_printf("target: mmap file-mmap mprotect v8-memory-policy brk thread tls pthread-sync futex shm eventfd message-queue socketpair poll time spawn fork pipe fd argv env\n");
+    openos_printf("target: mmap file-mmap mprotect v8-memory-policy brk thread tls pthread-sync futex shm eventfd message-queue service-channel socketpair poll time spawn fork pipe fd argv env\n");
 
     status = test_uptime();
     print_result("monotonic uptime", status);
@@ -756,6 +825,10 @@ int main(int argc, char **argv)
 
     status = test_message_queue();
     print_result("message queue send/recv/truncate", status);
+    failed += status == CAP_FAIL;
+
+    status = test_service_channel();
+    print_result("service channel request/reply", status);
     failed += status == CAP_FAIL;
 
     status = test_socketpair_poll();
