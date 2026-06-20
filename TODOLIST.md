@@ -473,6 +473,7 @@
 - [ ] M8 C/C++ runtime 与工具链
   - [ ] 用户态 C++ 编译、链接、构造/析构、异常策略、RTTI 策略
   - [ ] libstdc++/libc++ 子集或 OpenOS C++ runtime 路线
+    - [√] 已新增 `docs/chromium-cpp-runtime-roadmap.md`，明确工具链探测、最小 C++ ABI、new/delete、静态初始化、异常/RTTI 策略与 `/bin/cppsmoke` 验收顺序
   - [ ] 原子操作、内存序、TLS、new/delete、静态初始化
   - [ ] 宿主机交叉编译 Chromium 依赖的 GN/Ninja/Clang 构建链设计
 - [ ] M9 Skia / V8 / Blink / Chromium 分阶段落地
@@ -485,6 +486,7 @@
   - [ ] 扩展 `/bin/chromiumcaptest` 覆盖每个新底层能力
   - [ ] 增加内核压力测试：内存、线程、IPC、socket、文件 mmap、GUI present
   - [ ] 文档同步：每完成一个里程碑更新 `docs/chromium-core-roadmap.md` 和本 TODOLIST
+    - [√] 已新增 C++ runtime / Chromium 工具链路线文档，记录 M8 到 M9 的分阶段验收边界
 
 ### 17.4 国际化（i18n / 翻译键）
 
