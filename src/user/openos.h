@@ -119,6 +119,7 @@
 #define SYS_GUI_ADD_BUTTON 323
 #define SYS_GUI_POLL_EVENT 324
 #define SYS_GUI_SET_TEXT 325
+#define SYS_GUI_DRAW 326
 
 #define OPENOS_CAP_SETUID    (1u << 0)
 #define OPENOS_CAP_SETGID    (1u << 1)
@@ -458,6 +459,21 @@ typedef struct openos_pollfd {
     short revents;
 } openos_pollfd_t;
 
+#define OPENOS_GUI_DRAW_FILL_RECT 1u
+#define OPENOS_GUI_DRAW_TEXT      2u
+
+typedef struct openos_gui_draw_request {
+    unsigned int window_id;
+    unsigned int op;
+    int x;
+    int y;
+    int w;
+    int h;
+    unsigned int fg_color;
+    unsigned int bg_color;
+    char text[128];
+} openos_gui_draw_request_t;
+
 typedef struct openos_gui_event {
     unsigned int owner_pid;
     unsigned int type;
@@ -641,6 +657,45 @@ static inline int openos_gui_set_text(int window_id, int widget_id, const char *
     req.h = 0;
     openos_gui_copy_text64(req.text, text);
     return openos_syscall_result(openos_syscall1(SYS_GUI_SET_TEXT, (int)&req));
+}
+
+static inline void openos_gui_copy_text128(char *dst, const char *src)
+{
+    unsigned int i;
+    if (!dst) return;
+    if (!src) src = "";
+    for (i = 0; i < 127 && src[i]; ++i) dst[i] = src[i];
+    dst[i] = 0;
+}
+
+static inline int openos_gui_fill_rect(int window_id, int x, int y, int w, int h, unsigned int color)
+{
+    openos_gui_draw_request_t req;
+    req.window_id = (unsigned int)window_id;
+    req.op = OPENOS_GUI_DRAW_FILL_RECT;
+    req.x = x;
+    req.y = y;
+    req.w = w;
+    req.h = h;
+    req.fg_color = 0;
+    req.bg_color = color;
+    req.text[0] = 0;
+    return openos_syscall_result(openos_syscall1(SYS_GUI_DRAW, (int)&req));
+}
+
+static inline int openos_gui_draw_text(int window_id, int x, int y, const char *text, unsigned int color)
+{
+    openos_gui_draw_request_t req;
+    req.window_id = (unsigned int)window_id;
+    req.op = OPENOS_GUI_DRAW_TEXT;
+    req.x = x;
+    req.y = y;
+    req.w = 0;
+    req.h = 0;
+    req.fg_color = color;
+    req.bg_color = 0;
+    openos_gui_copy_text128(req.text, text);
+    return openos_syscall_result(openos_syscall1(SYS_GUI_DRAW, (int)&req));
 }
 
 static inline int openos_sendto(int fd, const void *buf, unsigned int len, int flags,

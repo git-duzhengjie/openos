@@ -4179,6 +4179,35 @@ void gui_destroy_windows_by_user_owner(uint32_t owner_pid) {
     gui_refresh_active_app();
 }
 
+static int gui_window_client_clip(gui_window_t *win, gui_rect_t *clip) {
+    if (!win || !win->used || !clip) return 0;
+    clip->x = win->rect.x + GUI_BORDER_SIZE;
+    clip->y = win->rect.y + GUI_TITLE_HEIGHT;
+    clip->w = win->rect.w - GUI_BORDER_SIZE * 2;
+    clip->h = win->rect.h - GUI_TITLE_HEIGHT - GUI_BORDER_SIZE;
+    return clip->w > 0 && clip->h > 0;
+}
+
+int gui_window_fill_client_rect(gui_window_t *win, int x, int y, int w, int h, uint32_t color) {
+    gui_rect_t clip;
+    if (!gui_window_client_clip(win, &clip) || w <= 0 || h <= 0) return -1;
+    gui_set_clip_rect(&clip);
+    gui_raw_fill_rect(clip.x + x, clip.y + y, w, h, color);
+    gui_clear_clip_rect();
+    gui_invalidate_rect(clip.x + x, clip.y + y, w, h);
+    return 0;
+}
+
+int gui_window_draw_client_text(gui_window_t *win, int x, int y, const char *text, uint32_t color) {
+    gui_rect_t clip;
+    if (!gui_window_client_clip(win, &clip) || !text) return -1;
+    gui_set_clip_rect(&clip);
+    gui_draw_text(clip.x + x, clip.y + y, text, color);
+    gui_clear_clip_rect();
+    gui_invalidate_rect(clip.x, clip.y, clip.w, clip.h);
+    return 0;
+}
+
 gui_app_t *gui_get_active_app(void) { return g_gui.active_app; }
 
 gui_app_t *gui_get_window_app(gui_window_t *window) { return gui_app_for_window(window); }

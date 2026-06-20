@@ -397,6 +397,8 @@ gui_app_t *gui_register_app(const char *name, const char *title, gui_app_entry_t
 int gui_start_app(gui_app_t *app);
 void gui_exit_app(gui_app_t *app);
 void gui_destroy_windows_by_user_owner(uint32_t owner_pid);
+int gui_window_fill_client_rect(gui_window_t *win, int x, int y, int w, int h, uint32_t color);
+int gui_window_draw_client_text(gui_window_t *win, int x, int y, const char *text, uint32_t color);
 gui_app_t *gui_get_active_app(void);
 gui_app_t *gui_get_window_app(gui_window_t *window);
 gui_window_t *gui_create_app_window(gui_app_t *app, int x, int y, int w, int h, const char *title);

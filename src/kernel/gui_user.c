@@ -210,6 +210,29 @@ int gui_user_set_text(uint32_t window_id, uint32_t widget_id, const char *text) 
     return 0;
 }
 
+int gui_user_draw(const gui_user_draw_request_t *request) {
+    if (!request) {
+        return -1;
+    }
+
+    gui_window_t *win = gui_find_window(request->window_id);
+    if (!gui_user_window_owned_by_current(win)) {
+        return -1;
+    }
+
+    if (request->op == GUI_USER_DRAW_FILL_RECT) {
+        return gui_window_fill_client_rect(win, request->x, request->y, request->w, request->h, request->bg_color);
+    }
+
+    if (request->op == GUI_USER_DRAW_TEXT) {
+        char safe_text[129];
+        gui_user_copy_text(safe_text, sizeof(safe_text), request->text);
+        return gui_window_draw_client_text(win, request->x, request->y, safe_text, request->fg_color);
+    }
+
+    return -1;
+}
+
 void gui_user_cleanup_process(uint32_t pid) {
     if (pid == 0) {
         return;
