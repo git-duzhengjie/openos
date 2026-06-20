@@ -7,6 +7,14 @@ OUTPUT_FORMAT("elf32-i386")
 OUTPUT_ARCH(i386)
 ENTRY(_start)
 
+PHDRS
+{
+    text PT_LOAD FLAGS(5);   /* R + X */
+    rodata PT_LOAD FLAGS(4); /* R */
+    data PT_LOAD FLAGS(6);   /* R + W */
+    bss PT_LOAD FLAGS(6);    /* R + W */
+}
+
 SECTIONS
 {
     /* 内核高地址加载地址: 1 MiB */
@@ -18,7 +26,7 @@ SECTIONS
         *(.entry.text)       /* entry.asm 入口点 */
         *(.text*)
         *(.gnu.linkonce.t*)
-    } = 0x90
+    } :text = 0x90
 
     /* === 只读数据段 === */
     .rodata : AT(ADDR(.rodata))
@@ -26,14 +34,14 @@ SECTIONS
         *(.rodata*)
         *(.rodata.str1.*)
         *(.gnu.linkonce.r*)
-    }
+    } :rodata
 
     /* === 数据段 === */
     .data : AT(ADDR(.data))
     {
         *(.data*)
         *(.gnu.linkonce.d*)
-    }
+    } :data
 
     . = ALIGN(4096);
     __kernel_image_end = .;
@@ -51,7 +59,7 @@ SECTIONS
         kernel_stack_top = .;
         . = ALIGN(4096);
         __bss_end = .;
-    }
+    } :bss
 
     /* 结束地址 (调试用) */
     __kernel_end = .;
