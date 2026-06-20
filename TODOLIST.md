@@ -383,7 +383,7 @@
   - [√] 文件与配置目录：缓存、cookie、证书、字体资源、下载目录；启动时创建 `/home/browser/{cache,cookies,certs,downloads}` 并在用户态暴露路径常量
 - [ ] 优先评估并移植 NetSurf 作为 OpenOS 第一代开源浏览器内核
   - [√] 阅读 NetSurf framebuffer frontend、libdom、libcss、hubbub、utils 等依赖结构
-  - [ ] 先在宿主机完成最小 framebuffer frontend 构建验证
+  - [√] 先在宿主机完成最小 framebuffer frontend 构建验证：新增 `ports/netsurf-openos` 平台层 smoke，覆盖 surface/clip/fill/blit/scroll/present/time/file/text/http 占位接口
   - [ ] 为 OpenOS 编写 NetSurf 平台层：framebuffer 绘制、输入事件、定时器、文件、socket、字体
   - [ ] 先支持 HTTP 页面显示，再接入 HTTPS、图片、表单、下载等能力
   - [√] 记录 NetSurf 依赖裁剪清单，避免一次性引入过大依赖
