@@ -1733,6 +1733,31 @@ static int test_socketpair_poll(void)
     return CAP_PASS;
 }
 
+static int test_kernel_pressure_smoke(void)
+{
+    int i;
+
+    for (i = 0; i < 3; ++i) {
+        if (test_mmap() != CAP_PASS)
+            return CAP_FAIL;
+        if (test_thread() != CAP_PASS)
+            return CAP_FAIL;
+        if (test_message_queue() != CAP_PASS)
+            return CAP_FAIL;
+        if (test_socketpair_poll() != CAP_PASS)
+            return CAP_FAIL;
+    }
+
+    for (i = 0; i < 2; ++i) {
+        if (test_file_mmap() != CAP_PASS)
+            return CAP_FAIL;
+        if (test_font_gui_smoke() != CAP_PASS)
+            return CAP_FAIL;
+    }
+
+    return CAP_PASS;
+}
+
 int main(int argc, char **argv)
 {
     int failed = 0;
@@ -1742,7 +1767,7 @@ int main(int argc, char **argv)
     (void)argv;
 
     openos_printf("Chromium core capability test\n");
-    openos_printf("target: mmap file-mmap fs-metadata path-normalization fs-mutations getdents browser-dirs resource-pak sparse-seek mprotect v8-memory-policy brk thread tls pthread-sync futex shm eventfd message-queue service-channel socketpair poll time spawn fork pipe fd argv env dns font gui clipboard\n");
+    openos_printf("target: mmap file-mmap fs-metadata path-normalization fs-mutations getdents browser-dirs resource-pak sparse-seek mprotect v8-memory-policy brk thread tls pthread-sync futex shm eventfd message-queue service-channel socketpair poll time spawn fork pipe fd argv env dns font gui clipboard pressure-smoke\n");
 
     status = test_uptime();
     print_result("monotonic uptime", status);
@@ -1870,6 +1895,10 @@ int main(int argc, char **argv)
 
     status = test_fork_pipe_fd_inheritance();
     print_result("fork pipe fd inheritance", status);
+    failed += status == CAP_FAIL;
+
+    status = test_kernel_pressure_smoke();
+    print_result("kernel subsystem pressure smoke", status);
     failed += status == CAP_FAIL;
 
     if (failed) {
