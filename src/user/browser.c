@@ -6,6 +6,7 @@
 #define BROWSER_RECV_MAX 1536
 #define BROWSER_NET_WAIT_TRIES 80
 #define BROWSER_DNS_RETRIES 8
+#define BROWSER_CONNECT_RETRIES 12
 
 static void browser_format_ip(unsigned int ip, char *out, int out_size)
 {
@@ -23,21 +24,53 @@ static int browser_wait_for_network(char *out, int out_size)
     int i;
 
     for (i = 0; i < BROWSER_NET_WAIT_TRIES; ++i) {
-        if (openos_netinfo(&info) == 0 && info.ip != 0 && info.dns != 0)
+        if (openos_netinfo(&info) == 0 && info.ip != 0 && info.gateway != 0 && info.dns != 0)
             return 0;
         openos_sleep(5);
     }
 
     if (openos_netinfo(&info) == 0) {
         char ip[24];
+        char gw[24];
         char dns[24];
         browser_format_ip(info.ip, ip, sizeof(ip));
+        browser_format_ip(info.gateway, gw, sizeof(gw));
         browser_format_ip(info.dns, dns, sizeof(dns));
-        snprintf(out, out_size, "network not ready: ip=%s dns=%s", ip, dns);
+        snprintf(out, out_size, "network not ready: ip=%s gw=%s dns=%s", ip, gw, dns);
     } else {
         snprintf(out, out_size, "network not ready: no network device");
     }
     return -1;
+}
+
+static void browser_format_connect_error(char *out, int out_size, const char *host, const openos_sockaddr_in_t *addr)
+{
+    openos_netinfo_t info;
+    char dst[24] = "0.0.0.0";
+    char ip[24] = "0.0.0.0";
+    char gw[24] = "0.0.0.0";
+    char dns[24] = "0.0.0.0";
+    char txdst[24] = "0.0.0.0";
+    char nexthop[24] = "0.0.0.0";
+    unsigned int tx_result = 0xffffffffU;
+    unsigned int arp_entries = 0;
+    unsigned int flags = 0;
+
+    if (addr) browser_format_ip(addr->sin_addr, dst, sizeof(dst));
+    if (openos_netinfo(&info) == 0) {
+        browser_format_ip(info.ip, ip, sizeof(ip));
+        browser_format_ip(info.gateway, gw, sizeof(gw));
+        browser_format_ip(info.dns, dns, sizeof(dns));
+        browser_format_ip(info.last_ipv4_tx_dst, txdst, sizeof(txdst));
+        browser_format_ip(info.last_ipv4_tx_next_hop, nexthop, sizeof(nexthop));
+        tx_result = (unsigned int)info.last_ipv4_tx_result;
+        arp_entries = info.arp_entries;
+        flags = info.flags;
+    }
+    snprintf(out, out_size,
+             "connect() failed host=%s dst=%s port=%u ip=%s gw=%s dns=%s arp=%u flags=0x%x last_tx_dst=%s nh=%s tx_result=%d",
+             host ? host : "?", dst, addr ? (unsigned int)addr->sin_port : 0U,
+             ip, gw, dns, arp_entries, flags, txdst, nexthop, (int)tx_result);
 }
 
 static const char *find_body(const char *response)
@@ -151,10 +184,20 @@ static int browser_fetch_http(const char *host, const char *path, char *out, int
         return -1;
     }
 
-    if (openos_connect(fd, (openos_sockaddr_t *)&connect_addr, connect_addrlen) < 0) {
-        openos_close(fd);
-        snprintf(out, out_size, "connect() failed");
-        return -1;
+    {
+        int connected = 0;
+        for (int attempt = 0; attempt < BROWSER_CONNECT_RETRIES; ++attempt) {
+            if (openos_connect(fd, (openos_sockaddr_t *)&connect_addr, connect_addrlen) == 0) {
+                connected = 1;
+                break;
+            }
+            openos_sleep(10);
+        }
+        if (!connected) {
+            browser_format_connect_error(out, out_size, host, &connect_addr);
+            openos_close(fd);
+            return -1;
+        }
     }
 
     snprintf(request, sizeof(request),
