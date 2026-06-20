@@ -1191,7 +1191,71 @@ static int test_message_queue(void)
         return CAP_FAIL;
     }
 
+    if (openos_mq_send(&mq, "one", 4) != 4 ||
+        openos_mq_send(&mq, "two", 4) != 4 ||
+        openos_mq_send(&mq, "three", 6) != 6) {
+        openos_mq_destroy(&mq);
+        return CAP_FAIL;
+    }
+    ret = openos_mq_recv(&mq, buf, sizeof(buf));
+    if (ret != 4 || buf[0] != 'o' || buf[1] != 'n' || buf[2] != 'e' || buf[3] != 0) {
+        openos_mq_destroy(&mq);
+        return CAP_FAIL;
+    }
+    ret = openos_mq_recv(&mq, buf, sizeof(buf));
+    if (ret != 4 || buf[0] != 't' || buf[1] != 'w' || buf[2] != 'o' || buf[3] != 0) {
+        openos_mq_destroy(&mq);
+        return CAP_FAIL;
+    }
+    ret = openos_mq_recv(&mq, buf, sizeof(buf));
+    if (ret != 6 || buf[0] != 't' || buf[1] != 'h' || buf[2] != 'r' ||
+        buf[3] != 'e' || buf[4] != 'e' || buf[5] != 0) {
+        openos_mq_destroy(&mq);
+        return CAP_FAIL;
+    }
+
     return openos_mq_destroy(&mq) == 0 && mq == 0 ? CAP_PASS : CAP_FAIL;
+}
+
+static int service_roundtrip_expect(int bad_seq, int bad_status)
+{
+    openos_service_channel_t channel;
+    openos_service_message_t request;
+    openos_service_message_t server_request;
+    openos_service_message_t reply;
+    openos_service_message_t client_reply;
+    int ret;
+
+    if (openos_service_channel_create(&channel) != 0)
+        return CAP_FAIL;
+    openos_service_message_init(&request, 0x4348524f, 9, 2000, "call", 5);
+    if (openos_service_send_message(channel.client_fd, &request) != 0 ||
+        openos_service_receive_request(&channel, &server_request) != 0) {
+        openos_service_channel_close(&channel);
+        return CAP_FAIL;
+    }
+    openos_service_message_init(&reply, request.service, request.opcode + 1,
+                                bad_seq ? request.seq + 1 : request.seq,
+                                "done", 5);
+    reply.status = bad_status ? OPENOS_SERVICE_STATUS_ERROR : OPENOS_SERVICE_STATUS_OK;
+    if (openos_service_send_reply(&channel, &reply) != 0) {
+        openos_service_channel_close(&channel);
+        return CAP_FAIL;
+    }
+    ret = openos_service_recv_message(channel.client_fd, &client_reply);
+    if (openos_service_channel_close(&channel) != 0)
+        return CAP_FAIL;
+    if (ret != 0)
+        return CAP_FAIL;
+    if (bad_seq)
+        return client_reply.seq != request.seq ? CAP_PASS : CAP_FAIL;
+    if (bad_status)
+        return client_reply.status == OPENOS_SERVICE_STATUS_ERROR ? CAP_PASS : CAP_FAIL;
+    return (client_reply.service == request.service &&
+            client_reply.seq == request.seq &&
+            client_reply.status == OPENOS_SERVICE_STATUS_OK)
+               ? CAP_PASS
+               : CAP_FAIL;
 }
 
 static int test_service_channel(void)
@@ -1201,6 +1265,12 @@ static int test_service_channel(void)
     openos_service_message_t server_request;
     openos_service_message_t reply;
     openos_service_message_t client_reply;
+
+    if (service_roundtrip_expect(0, 0) != CAP_PASS ||
+        service_roundtrip_expect(1, 0) != CAP_PASS ||
+        service_roundtrip_expect(0, 1) != CAP_PASS) {
+        return CAP_FAIL;
+    }
 
     if (openos_service_channel_create(&channel) != 0) {
         return CAP_FAIL;
