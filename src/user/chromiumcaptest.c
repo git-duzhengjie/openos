@@ -1425,6 +1425,44 @@ static int test_spawn_argv_env_wait(void)
 {
     char *argv[] = { (char *)"/bin/argtest", (char *)"alpha", (char *)"beta", 0 };
     char *envp[] = { (char *)"OPENOS_CAP=chromium", (char *)"OPENOS_MODE=test", 0 };
+    char *wide_argv[] = {
+        (char *)"/bin/argtest",
+        (char *)"wide",
+        (char *)"--user-data-dir=/tmp/openos-chromium-profile",
+        (char *)"--disable-gpu",
+        (char *)"--single-process",
+        (char *)"--renderer-process-limit=1",
+        (char *)"--enable-logging=stderr",
+        (char *)"--v=1",
+        (char *)"--js-flags=--jitless",
+        (char *)"--resource-dir=/usr/share/openos/browser/pak",
+        (char *)"--cache-dir=/tmp/openos-cache",
+        (char *)"--lang=zh-CN",
+        (char *)"--font-render-hinting=none",
+        (char *)"--no-first-run",
+        (char *)"--disable-background-networking",
+        (char *)"--disable-dev-shm-usage",
+        (char *)"--remote-debugging-port=0",
+        (char *)"--ozone-platform=openos",
+        (char *)"--enable-features=OpenOSNative",
+        (char *)"--disable-features=SandboxedRenderer",
+        (char *)"https://example.openos.local/",
+        0
+    };
+    char *wide_env_argv[] = { (char *)"/bin/envtest", (char *)"alpha", (char *)"beta", (char *)"wide-env", 0 };
+    char *wide_envp[] = {
+        (char *)"USER=openos",
+        (char *)"HOME=/",
+        (char *)"LANG=zh_CN.UTF-8",
+        (char *)"OPENOS_CAP=chromium-content",
+        (char *)"OPENOS_MODE=capability-test",
+        (char *)"CHROME_DEVEL_SANDBOX=/bin/openos-sandbox",
+        (char *)"XDG_CACHE_HOME=/tmp/openos-cache",
+        (char *)"XDG_CONFIG_HOME=/tmp/openos-config",
+        (char *)"FONTCONFIG_PATH=/usr/share/fonts",
+        (char *)"TZ=UTC",
+        0
+    };
     int status = -1;
     int pid = openos_spawn_env("/bin/argtest", argv, envp);
     if (pid <= 0) {
@@ -1453,6 +1491,36 @@ static int test_spawn_argv_env_wait(void)
     }
     if (status != 0) {
         openos_puts("spawned env child exited nonzero");
+        return CAP_FAIL;
+    }
+
+    pid = openos_spawn_env("/bin/argtest", wide_argv, wide_envp);
+    if (pid <= 0) {
+        openos_puts("wide argv spawn failed");
+        return CAP_FAIL;
+    }
+    status = -1;
+    if (openos_waitpid(pid, &status, 0) != pid) {
+        openos_puts("wide argv waitpid failed");
+        return CAP_FAIL;
+    }
+    if (status != 0) {
+        openos_puts("wide argv child exited nonzero");
+        return CAP_FAIL;
+    }
+
+    pid = openos_spawn_env("/bin/envtest", wide_env_argv, wide_envp);
+    if (pid <= 0) {
+        openos_puts("wide envp spawn failed");
+        return CAP_FAIL;
+    }
+    status = -1;
+    if (openos_waitpid(pid, &status, 0) != pid) {
+        openos_puts("wide envp waitpid failed");
+        return CAP_FAIL;
+    }
+    if (status != 0) {
+        openos_puts("wide envp child exited nonzero");
         return CAP_FAIL;
     }
 

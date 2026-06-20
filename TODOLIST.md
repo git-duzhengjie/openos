@@ -69,6 +69,7 @@
 - [√] 用户态入口支持 `main(argc, argv)` / `_start(argc, argv)` 参数栈（提交：本提交）
 - [√] shell 支持执行 `/bin/app arg1 arg2`（提交：本提交）
 - [√] 支持环境变量 `envp`（新增 `/bin/envtest` 回归，提交：本提交）
+- [√] 扩大 `spawn/exec` argv/envp 容量，并新增 Chromium 风格宽 argv/envp 回归验收
 
 ### 3. 文件系统基础接口
 

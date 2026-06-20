@@ -26,10 +26,10 @@ extern void switch_to_user_asm(uint32_t eip, uint32_t esp);
 static process_t proc_table[MAX_PROCS];
 static uint32_t next_pid = 2;  /* PID 0 = idle, PID 1 = init/reaper */
 
-#define PROC_ARG_MAX     8
-#define PROC_ENV_MAX     8
-#define PROC_ARG_STR_MAX 64
-#define PROC_ENV_STR_MAX 96
+#define PROC_ARG_MAX     24
+#define PROC_ENV_MAX     12
+#define PROC_ARG_STR_MAX 96
+#define PROC_ENV_STR_MAX 112
 
 typedef struct user_spawn_args {
     char path[128];

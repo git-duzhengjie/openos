@@ -59,7 +59,7 @@ Chromium base、V8、网络栈和渲染流水线依赖稳定线程模型：
 Chromium 默认多进程，OpenOS 必须具备可靠的用户态进程模型：
 
 - ELF 加载：已支持用户态 ELF，需要扩展动态链接或确定静态链接策略。
-- fork/exec/wait：已有测试入口，需要完善 fd 继承、COW、信号/退出状态。
+- fork/exec/wait：已有测试入口；已扩大 `spawn/exec` argv/envp 容量并加入 Chromium 风格宽参数/环境回归，后续继续完善 COW、信号/退出状态。
 - 进程间 IPC：已有 mq/shm/eventfd/socketpair 雏形，需要形成稳定 IPC 基础。
 - 句柄/FD 生命周期：需要 close-on-exec、dup/dup2、poll 语义。
 - 崩溃隔离：渲染进程崩溃不能拖垮浏览器主进程。
