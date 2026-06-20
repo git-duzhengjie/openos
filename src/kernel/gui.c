@@ -18,7 +18,9 @@
 #include "i18n.h"
 #include "net/net.h"
 #include "net/dhcp.h"
+#include "net/dns.h"
 #include "net/net_config.h"
+#include "process.h"
 extern int spawn_user_process(const char *path, char *const argv[]);
 extern uint32_t sched_time_ms(void);
 
@@ -82,9 +84,10 @@ static gui_window_t *g_wifi_win;
 #define GUI_DESKTOP_ACTION_DEMO     4u
 #define GUI_DESKTOP_ACTION_FILES    5u
 #define GUI_DESKTOP_ACTION_RECYCLE  6u
-#define GUI_DESKTOP_ACTION_THEME    7u
-#define GUI_DESKTOP_ACTION_NOTIF    8u
-#define GUI_DESKTOP_ACTION_SETTINGS 9u
+#define GUI_DESKTOP_ACTION_BROWSER  7u
+#define GUI_DESKTOP_ACTION_THEME    8u
+#define GUI_DESKTOP_ACTION_NOTIF    9u
+#define GUI_DESKTOP_ACTION_SETTINGS 10u
 #define GUI_DESKTOP_ACTION_LAUNCH_BIN_BASE 0x1000u  /* +index into binlist */
 static volatile uint32_t g_terminal_out_head = 0;
 static volatile uint32_t g_terminal_out_tail = 0;
@@ -150,6 +153,12 @@ static void gui_desktop_init(void);
 static void gui_desktop_draw(void);
 static int gui_desktop_handle_click(int x, int y);
 static void gui_launcher_init(void);
+static void gui_browser_open(void);
+#define GUI_BROWSER_CONTENT_LINES 12
+static gui_widget_t *g_browser_address_box = 0;
+static gui_widget_t *g_browser_content_lines[GUI_BROWSER_CONTENT_LINES];
+static gui_widget_t *g_browser_status_label = 0;
+static gui_window_t *g_browser_win = 0;
 static int gui_terminal_point_to_cell(int x, int y, uint32_t *col, uint32_t *row);
 static void gui_terminal_update_selection(uint32_t col, uint32_t row);
 static int gui_terminal_cell_selected(uint32_t col, uint32_t row);
@@ -2862,6 +2871,9 @@ static void gui_desktop_refresh_i18n_labels(void) {
     if (g_gui.desktop_icons[1].used) {
         gui_copy_cached_text(g_gui.desktop_icons[1].label, sizeof(g_gui.desktop_icons[1].label), i18n_t(I18N_KEY_ICON_RECYCLE_BIN));
     }
+    if (g_gui.desktop_icons[2].used) {
+        gui_copy_cached_text(g_gui.desktop_icons[2].label, sizeof(g_gui.desktop_icons[2].label), i18n_t(I18N_KEY_ICON_BROWSER));
+    }
 
     if (g_gui.launcher_entries[0].used) {
         gui_copy_cached_text(g_gui.launcher_entries[0].title, sizeof(g_gui.launcher_entries[0].title), i18n_t(I18N_KEY_APP_TERMINAL));
@@ -2896,10 +2908,11 @@ static void gui_desktop_init(void) {
 
     memset(g_gui.desktop_icons, 0, sizeof(g_gui.desktop_icons));
     gui_desktop_clear_icon_click_state();
-    /* 桌面只保留 Files 和 Recycle Bin，其他入口走开始菜单/任务栏挂件 */
+    /* 桌面保留常用入口：文件、回收站、浏览器。 */
     gui_desktop_add_icon(0, 32, 72,  i18n_t(I18N_KEY_ICON_FILES),       gui_rgb(242, 194, 74),  GUI_DESKTOP_ACTION_FILES);
     gui_desktop_add_icon(1, 32, 160, i18n_t(I18N_KEY_ICON_RECYCLE_BIN), gui_rgb(168, 178, 198), GUI_DESKTOP_ACTION_RECYCLE);
-    g_gui.desktop_icon_count = 6;
+    gui_desktop_add_icon(2, 32, 248, i18n_t(I18N_KEY_ICON_BROWSER),     gui_rgb(74, 158, 245),  GUI_DESKTOP_ACTION_BROWSER);
+    g_gui.desktop_icon_count = 3;
 }
 
 static void gui_draw_folder_icon_art(int x, int y, uint32_t color) {
@@ -2910,6 +2923,34 @@ static void gui_draw_folder_icon_art(int x, int y, uint32_t color) {
     gui_raw_line(x, y + 11, x, y + 30, gui_rgb(255, 238, 160));
     gui_raw_line(x + 27, y + 11, x + 27, y + 30, gui_rgb(130, 90, 24));
     gui_raw_line(x, y + 30, x + 27, y + 30, gui_rgb(130, 90, 24));
+}
+
+static void gui_draw_browser_icon_art(int x, int y, uint32_t color) {
+    uint32_t dark = gui_rgb(22, 72, 118);
+    uint32_t light = gui_rgb(176, 226, 255);
+    uint32_t green = gui_rgb(72, 220, 166);
+    uint32_t white = gui_rgb(236, 248, 255);
+
+    gui_raw_fill_rect(x + 3, y + 3, 22, 22, color);
+    gui_raw_line(x + 8, y + 1, x + 19, y + 1, light);
+    gui_raw_line(x + 5, y + 2, x + 22, y + 2, light);
+    gui_raw_line(x + 2, y + 5, x + 2, y + 22, light);
+    gui_raw_line(x + 25, y + 5, x + 25, y + 22, dark);
+    gui_raw_line(x + 5, y + 25, x + 22, y + 25, dark);
+
+    /* Globe latitude and longitude lines. */
+    gui_raw_line(x + 5, y + 13, x + 23, y + 13, white);
+    gui_raw_line(x + 13, y + 5, x + 13, y + 23, white);
+    gui_raw_line(x + 7, y + 8, x + 21, y + 8, light);
+    gui_raw_line(x + 7, y + 18, x + 21, y + 18, dark);
+    gui_raw_line(x + 9, y + 6, x + 9, y + 22, light);
+    gui_raw_line(x + 18, y + 6, x + 18, y + 22, dark);
+
+    /* Small green orbit / arrow to make it recognizable as a browser. */
+    gui_raw_line(x + 4, y + 20, x + 12, y + 24, green);
+    gui_raw_line(x + 12, y + 24, x + 24, y + 16, green);
+    gui_raw_fill_rect(x + 21, y + 15, 4, 2, green);
+    gui_raw_fill_rect(x + 23, y + 13, 2, 4, green);
 }
 
 static void gui_desktop_draw_icon(gui_desktop_icon_t *icon) {
@@ -2949,6 +2990,8 @@ static void gui_desktop_draw_icon(gui_desktop_icon_t *icon) {
     iy = icon->rect.y + top_pad;
     if (icon->action == GUI_DESKTOP_ACTION_FILES) {
         gui_draw_folder_icon_art(cx, iy, icon->color);
+    } else if (icon->action == GUI_DESKTOP_ACTION_BROWSER) {
+        gui_draw_browser_icon_art(cx, iy, icon->color);
     } else if (icon->action == GUI_DESKTOP_ACTION_RECYCLE) {
         uint32_t lid    = gui_rgb(150, 152, 162);
         uint32_t body   = icon->color;
@@ -3557,6 +3600,10 @@ static void gui_desktop_run_action(uint32_t action) {
     }
     if (action == GUI_DESKTOP_ACTION_RECYCLE) {
         gui_recycle_open();
+        return;
+    }
+    if (action == GUI_DESKTOP_ACTION_BROWSER) {
+        gui_browser_open();
         return;
     }
     if (action == GUI_DESKTOP_ACTION_SETTINGS) {
@@ -4622,6 +4669,18 @@ static void gui_draw_taskbar_window_icon(gui_rect_t rect, gui_window_t *w) {
         gui_draw_folder_icon_art(x, y, gui_rgb(242, 194, 74));
         return;
     }
+    if (w == g_browser_win) {
+        const int browser_w = 28;
+        const int browser_h = 26;
+        x = rect.x + (rect.w - browser_w) / 2;
+        y = gui_taskbar_icon_y(rect, browser_h);
+        if (hover) {
+            y -= gui_taskbar_icon_hover_lift(rect);
+            gui_taskbar_draw_icon_shadow(x + 2, y + 2, 24, 24);
+        }
+        gui_draw_browser_icon_art(x, y, gui_rgb(74, 158, 245));
+        return;
+    }
 
     x = rect.x + (rect.w - 26) / 2;
     y = gui_taskbar_icon_y(rect, 22);
@@ -5460,6 +5519,290 @@ static void gui_recycle_open(void) {
     g_recycle_win = gui_create_window(140, 120, win_w, win_h, i18n_t(I18N_KEY_WIN_RECYCLE_BIN));
     if (!g_recycle_win) return;
     gui_window_set_on_close(g_recycle_win, recycle_on_close, 0);
+    gui_render();
+}
+
+static void browser_on_close(gui_window_t *win, void *ud) {
+    uint32_t i;
+    (void)win;
+    (void)ud;
+    g_browser_win = 0;
+    g_browser_address_box = 0;
+    g_browser_status_label = 0;
+    for (i = 0; i < GUI_BROWSER_CONTENT_LINES; i++) g_browser_content_lines[i] = 0;
+}
+
+static void browser_set_widget_text(gui_widget_t *widget, const char *text) {
+    uint32_t i;
+    if (!widget || !text) return;
+    for (i = 0; i < sizeof(widget->text) - 1u && text[i]; i++) widget->text[i] = text[i];
+    widget->text[i] = '\0';
+}
+
+static void browser_set_status(const char *text) {
+    browser_set_widget_text(g_browser_status_label, text);
+    if (text) gui_notify(text);
+    gui_render();
+}
+
+static void browser_clear_content(void) {
+    uint32_t i;
+    for (i = 0; i < GUI_BROWSER_CONTENT_LINES; i++) browser_set_widget_text(g_browser_content_lines[i], "");
+}
+
+static int browser_copy_until(char *out, uint32_t cap, const char **pp, char stop) {
+    uint32_t len = 0;
+    const char *p;
+    if (!out || cap == 0 || !pp || !*pp) return -1;
+    p = *pp;
+    while (*p && *p != stop) {
+        if (len + 1u >= cap) return -1;
+        out[len++] = *p++;
+    }
+    out[len] = '\0';
+    *pp = p;
+    return 0;
+}
+
+static int browser_parse_url(const char *url, char *host, uint32_t host_cap,
+                             char *path, uint32_t path_cap, uint16_t *port) {
+    const char *p;
+    const char *host_start;
+    uint32_t len = 0;
+    uint32_t port_num = 0;
+    if (!url || !host || !path || !port || host_cap == 0 || path_cap == 0) return -1;
+    p = url;
+    if (p[0] == 'h' && p[1] == 't' && p[2] == 't' && p[3] == 'p' && p[4] == ':' && p[5] == '/' && p[6] == '/') p += 7;
+    else if (p[0] == 'h' && p[1] == 't' && p[2] == 't' && p[3] == 'p' && p[4] == 's') return -2;
+    host_start = p;
+    while (*p && *p != '/' && *p != ':') {
+        if (len + 1u >= host_cap) return -1;
+        host[len++] = *p++;
+    }
+    host[len] = '\0';
+    if (p == host_start) return -1;
+    *port = 80;
+    if (*p == ':') {
+        p++;
+        while (*p >= '0' && *p <= '9') {
+            port_num = port_num * 10u + (uint32_t)(*p - '0');
+            if (port_num > 65535u) return -1;
+            p++;
+        }
+        if (port_num == 0) return -1;
+        *port = (uint16_t)port_num;
+    }
+    if (*p == '/') {
+        if (browser_copy_until(path, path_cap, &p, '\0') != 0) return -1;
+    } else {
+        path[0] = '/';
+        path[1] = '\0';
+    }
+    return 0;
+}
+
+static uint32_t browser_resolve_host(const char *host) {
+    uint32_t ip = 0;
+    uint32_t start;
+    if (net_parse_ipv4(host, &ip) == 0) return ip;
+    if (dns_query_a(host) != 0) return 0;
+    start = sched_time_ms();
+    while (sched_time_ms() - start < 3000u) {
+        dns_state_t state;
+        net_poll();
+        state = dns_get_state();
+        if (state == DNS_STATE_RESOLVED) return dns_get_last_result();
+        if (state == DNS_STATE_FAILED) return 0;
+        sched_yield();
+    }
+    return 0;
+}
+
+static int browser_wait_tcp_state(int conn, int want_state, uint32_t timeout_ms) {
+    uint32_t start = sched_time_ms();
+    while (sched_time_ms() - start < timeout_ms) {
+        int state;
+        net_poll();
+        state = net_tcp_state(conn);
+        if (state == want_state) return 0;
+        if (state < 0 || state == NET_TCP_STATE_CLOSED) return -1;
+        sched_yield();
+    }
+    return -1;
+}
+
+static void browser_render_body(const char *body) {
+    uint32_t line = 0;
+    uint32_t col = 0;
+    char linebuf[64];
+    const char *p;
+    browser_clear_content();
+    if (!body || !*body) {
+        browser_set_widget_text(g_browser_content_lines[0], "HTTP response has no body.");
+        return;
+    }
+    linebuf[0] = '\0';
+    p = body;
+    while (*p && line < GUI_BROWSER_CONTENT_LINES) {
+        char ch = *p++;
+        if (ch == '\r') continue;
+        if (ch == '\n' || col >= 58u) {
+            linebuf[col] = '\0';
+            browser_set_widget_text(g_browser_content_lines[line], linebuf);
+            line++;
+            col = 0;
+            linebuf[0] = '\0';
+            if (ch == '\n') continue;
+        }
+        if ((unsigned char)ch < 32u) ch = ' ';
+        linebuf[col++] = ch;
+        linebuf[col] = '\0';
+    }
+    if (line < GUI_BROWSER_CONTENT_LINES && col > 0) browser_set_widget_text(g_browser_content_lines[line], linebuf);
+}
+
+static const char *browser_find_body(char *response) {
+    char *p;
+    if (!response) return "";
+    for (p = response; p[0] && p[1] && p[2] && p[3]; p++) {
+        if (p[0] == '\r' && p[1] == '\n' && p[2] == '\r' && p[3] == '\n') return p + 4;
+        if (p[0] == '\n' && p[1] == '\n') return p + 2;
+    }
+    return response;
+}
+
+static void browser_http_get_current(void) {
+    char url[64];
+    char host[64];
+    char path[128];
+    char request[256];
+    char response[1536];
+    uint32_t ip;
+    uint16_t port;
+    int parse_result;
+    int conn;
+    int sent;
+    int got;
+    uint32_t total = 0;
+    uint32_t start;
+    uint32_t local_port;
+    uint32_t i;
+
+    if (!g_browser_address_box) return;
+    for (i = 0; i < sizeof(url) - 1u && g_browser_address_box->text[i]; i++) url[i] = g_browser_address_box->text[i];
+    url[i] = '\0';
+    browser_clear_content();
+    browser_set_status("Loading...");
+
+    parse_result = browser_parse_url(url, host, sizeof(host), path, sizeof(path), &port);
+    if (parse_result == -2) {
+        browser_set_widget_text(g_browser_content_lines[0], "HTTPS is not supported yet.");
+        browser_set_status("Only plain http:// URLs are supported.");
+        return;
+    }
+    if (parse_result != 0) {
+        browser_set_widget_text(g_browser_content_lines[0], "Invalid URL. Try http://example.com/");
+        browser_set_status("Invalid URL");
+        return;
+    }
+
+    ip = browser_resolve_host(host);
+    if (!ip) {
+        browser_set_widget_text(g_browser_content_lines[0], "DNS lookup failed or host is unreachable.");
+        browser_set_status("DNS failed");
+        return;
+    }
+
+    local_port = 43000u + (sched_time_ms() % 2000u);
+    conn = net_tcp_open(0, (uint16_t)local_port, ip, port, 1);
+    if (conn < 0 || browser_wait_tcp_state(conn, NET_TCP_STATE_ESTABLISHED, 4000u) != 0) {
+        if (conn >= 0) net_tcp_close(conn);
+        browser_set_widget_text(g_browser_content_lines[0], "TCP connection failed.");
+        browser_set_status("Connection failed");
+        return;
+    }
+
+    request[0] = '\0';
+    sent = 0;
+    sent = fp_str_append(request, sent, sizeof(request), "GET ");
+    sent = fp_str_append(request, sent, sizeof(request), path);
+    sent = fp_str_append(request, sent, sizeof(request), " HTTP/1.0\r\nHost: ");
+    sent = fp_str_append(request, sent, sizeof(request), host);
+    sent = fp_str_append(request, sent, sizeof(request), "\r\nUser-Agent: OpenOS-Browser/0.1\r\nConnection: close\r\n\r\n");
+
+    sent = net_tcp_send(conn, (const uint8_t *)request, (uint16_t)strlen(request));
+    if (sent <= 0) {
+        net_tcp_close(conn);
+        browser_set_widget_text(g_browser_content_lines[0], "Failed to send HTTP request.");
+        browser_set_status("Send failed");
+        return;
+    }
+
+    response[0] = '\0';
+    start = sched_time_ms();
+    while (sched_time_ms() - start < 6000u && total + 1u < sizeof(response)) {
+        net_poll();
+        got = net_tcp_recv(conn, (uint8_t *)(response + total), (uint16_t)(sizeof(response) - total - 1u));
+        if (got > 0) {
+            total += (uint32_t)got;
+            response[total] = '\0';
+            start = sched_time_ms();
+            continue;
+        }
+        if (net_tcp_state(conn) == NET_TCP_STATE_CLOSED || net_tcp_state(conn) == NET_TCP_STATE_CLOSE_WAIT) break;
+        sched_yield();
+    }
+    net_tcp_close(conn);
+
+    if (total == 0) {
+        browser_set_widget_text(g_browser_content_lines[0], "No HTTP response received.");
+        browser_set_status("No response");
+        return;
+    }
+    browser_render_body(browser_find_body(response));
+    browser_set_status("Loaded HTTP response");
+}
+
+static void browser_on_nav(gui_widget_t *w, void *ud) {
+    (void)w;
+    (void)ud;
+    browser_http_get_current();
+}
+
+static void gui_browser_open(void) {
+    int win_w = 620;
+    int win_h = 420;
+    uint32_t i;
+
+    if (g_browser_win) {
+        gui_window_set_on_close(g_browser_win, 0, 0);
+        gui_destroy_window(g_browser_win);
+        g_browser_win = 0;
+        g_browser_address_box = 0;
+        g_browser_status_label = 0;
+        for (i = 0; i < GUI_BROWSER_CONTENT_LINES; i++) g_browser_content_lines[i] = 0;
+    }
+
+    g_browser_win = gui_create_window(120, 86, win_w, win_h, i18n_t(I18N_KEY_WIN_BROWSER));
+    if (!g_browser_win) return;
+    gui_window_set_on_close(g_browser_win, browser_on_close, 0);
+
+    gui_add_button(g_browser_win, 14, 18, 34, 26, i18n_t(I18N_KEY_BROWSER_BACK), browser_on_nav, 0);
+    gui_add_button(g_browser_win, 54, 18, 34, 26, i18n_t(I18N_KEY_BROWSER_FORWARD), browser_on_nav, 0);
+    gui_add_button(g_browser_win, 94, 18, 70, 26, i18n_t(I18N_KEY_BROWSER_REFRESH), browser_on_nav, 0);
+    gui_add_label(g_browser_win, 176, 24, 62, 16, i18n_t(I18N_KEY_BROWSER_ADDRESS));
+    g_browser_address_box = gui_add_textbox(g_browser_win, 238, 18, 282, 26, "http://example.com/");
+    gui_add_button(g_browser_win, 530, 18, 62, 26, i18n_t(I18N_KEY_BROWSER_GO), browser_on_nav, 0);
+
+    gui_add_panel(g_browser_win, 14, 56, win_w - 28, win_h - 104, gui_rgb(246, 249, 253));
+    g_browser_content_lines[0] = gui_add_label(g_browser_win, 34, 82, win_w - 68, 18, i18n_t(I18N_KEY_BROWSER_HOME_TITLE));
+    g_browser_content_lines[1] = gui_add_label(g_browser_win, 34, 104, win_w - 68, 18, i18n_t(I18N_KEY_BROWSER_HOME_HINT));
+    g_browser_content_lines[2] = gui_add_label(g_browser_win, 34, 126, win_w - 68, 18, i18n_t(I18N_KEY_BROWSER_STATUS_PLACEHOLDER));
+    for (i = 3; i < GUI_BROWSER_CONTENT_LINES; i++) {
+        g_browser_content_lines[i] = gui_add_label(g_browser_win, 34, 82 + (int)i * 22, win_w - 68, 18, "");
+    }
+    g_browser_status_label = gui_add_label(g_browser_win, 14, win_h - 34, win_w - 28, 16, i18n_t(I18N_KEY_BROWSER_STATUS_READY));
+
     gui_render();
 }
 

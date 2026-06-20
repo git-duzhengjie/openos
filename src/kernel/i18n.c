@@ -28,6 +28,7 @@ static const char *const k_strings_en[I18N_KEY_COUNT] = {
     /* desktop icons */
     [I18N_KEY_ICON_FILES]                = "Files",
     [I18N_KEY_ICON_RECYCLE_BIN]          = "Recycle Bin",
+    [I18N_KEY_ICON_BROWSER]              = "Browser",
 
     /* launcher */
     [I18N_KEY_LAUNCHER_TITLE]            = "OpenOS Launcher",
@@ -119,6 +120,18 @@ static const char *const k_strings_en[I18N_KEY_COUNT] = {
     /* terminal */
     [I18N_KEY_WIN_TERMINAL]              = "Terminal",
 
+    /* network browser */
+    [I18N_KEY_WIN_BROWSER]               = "Browser",
+    [I18N_KEY_BROWSER_ADDRESS]           = "Address",
+    [I18N_KEY_BROWSER_BACK]              = "<",
+    [I18N_KEY_BROWSER_FORWARD]           = ">",
+    [I18N_KEY_BROWSER_REFRESH]           = "Refresh",
+    [I18N_KEY_BROWSER_GO]                = "Go",
+    [I18N_KEY_BROWSER_HOME_TITLE]        = "OpenOS Browser",
+    [I18N_KEY_BROWSER_HOME_HINT]         = "Enter an address above to browse the network.",
+    [I18N_KEY_BROWSER_STATUS_READY]      = "Ready",
+    [I18N_KEY_BROWSER_STATUS_PLACEHOLDER] = "HTTP rendering will be connected to the network stack next.",
+
     /* files browser */
     [I18N_KEY_WIN_FILES]                 = "Files",
     [I18N_KEY_WIN_FILE_VIEWER]           = "File Viewer",
@@ -202,6 +215,7 @@ static const char *const k_strings_zh[I18N_KEY_COUNT] = {
     /* desktop icons */
     [I18N_KEY_ICON_FILES]                = "文件",
     [I18N_KEY_ICON_RECYCLE_BIN]          = "回收站",
+    [I18N_KEY_ICON_BROWSER]              = "浏览器",
 
     /* launcher */
     [I18N_KEY_LAUNCHER_TITLE]            = "OpenOS 应用启动器",
@@ -292,6 +306,18 @@ static const char *const k_strings_zh[I18N_KEY_COUNT] = {
 
     /* terminal */
     [I18N_KEY_WIN_TERMINAL]              = "终端",
+
+    /* network browser */
+    [I18N_KEY_WIN_BROWSER]               = "浏览器",
+    [I18N_KEY_BROWSER_ADDRESS]           = "地址",
+    [I18N_KEY_BROWSER_BACK]              = "<",
+    [I18N_KEY_BROWSER_FORWARD]           = ">",
+    [I18N_KEY_BROWSER_REFRESH]           = "刷新",
+    [I18N_KEY_BROWSER_GO]                = "前往",
+    [I18N_KEY_BROWSER_HOME_TITLE]        = "OpenOS 浏览器",
+    [I18N_KEY_BROWSER_HOME_HINT]         = "在上方输入地址，开始访问网络。",
+    [I18N_KEY_BROWSER_STATUS_READY]      = "就绪",
+    [I18N_KEY_BROWSER_STATUS_PLACEHOLDER] = "下一步会接入 HTTP 渲染和网络协议栈。",
 
     /* files browser */
     [I18N_KEY_WIN_FILES]                 = "文件",
