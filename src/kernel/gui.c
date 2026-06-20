@@ -6405,7 +6405,14 @@ static void browser_fetch_current(void) {
     }
     net_tcp_close(conn);
     response[total] = 0;
+    if (total <= 0) {
+        browser_clear_content();
+        browser_set_widget_text(g_browser_content_lines[0], "No HTTP response received before timeout.");
+        browser_set_status("Timeout");
+        return;
+    }
     (void)browser_render_response_summary((char *)response, browser_find_body((char *)response));
+    browser_set_status("Done");
 }
 
 static void browser_on_nav(gui_widget_t *w, void *ud) {
