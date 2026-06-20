@@ -61,7 +61,41 @@ typedef struct font_cjk_resource {
     const uint8_t *bitmaps;
 } font_cjk_resource_t;
 
+#define FONT_CJK_GLYPH_CACHE_SIZE 32u
+
+typedef struct font_cjk_glyph_cache_entry {
+    uint32_t codepoint;
+    const uint16_t *rows;
+    uint8_t valid;
+} font_cjk_glyph_cache_entry_t;
+
 static font_cjk_resource_t g_cjk_resource;
+static font_cjk_glyph_cache_entry_t g_cjk_glyph_cache[FONT_CJK_GLYPH_CACHE_SIZE];
+
+static void font_clear_cjk_glyph_cache(void) {
+    memset(g_cjk_glyph_cache, 0, sizeof(g_cjk_glyph_cache));
+}
+
+static uint32_t font_cjk_glyph_cache_slot(uint32_t codepoint) {
+    return (codepoint ^ (codepoint >> 8) ^ (codepoint >> 16)) & (FONT_CJK_GLYPH_CACHE_SIZE - 1u);
+}
+
+static const uint16_t *font_cjk_glyph_cache_get(uint32_t codepoint) {
+    uint32_t slot = font_cjk_glyph_cache_slot(codepoint);
+    if (g_cjk_glyph_cache[slot].valid && g_cjk_glyph_cache[slot].codepoint == codepoint) {
+        return g_cjk_glyph_cache[slot].rows;
+    }
+    return 0;
+}
+
+static void font_cjk_glyph_cache_put(uint32_t codepoint, const uint16_t *rows) {
+    uint32_t slot;
+    if (!rows) return;
+    slot = font_cjk_glyph_cache_slot(codepoint);
+    g_cjk_glyph_cache[slot].codepoint = codepoint;
+    g_cjk_glyph_cache[slot].rows = rows;
+    g_cjk_glyph_cache[slot].valid = 1;
+}
 
 static int font_u32_add_overflows(uint32_t a, uint32_t b) {
     return a > (0xffffffffu - b);
@@ -189,15 +223,24 @@ static const uint16_t *font_find_cjk_rows(uint32_t codepoint) {
     uint32_t left;
     uint32_t right;
 
-    rows = font_find_external_cjk_rows(codepoint);
+    rows = font_cjk_glyph_cache_get(codepoint);
     if (rows) return rows;
+
+    rows = font_find_external_cjk_rows(codepoint);
+    if (rows) {
+        font_cjk_glyph_cache_put(codepoint, rows);
+        return rows;
+    }
 
     left = 0;
     right = g_generated_cjk_glyph_count;
     while (left < right) {
         uint32_t mid = left + ((right - left) / 2u);
         uint32_t mid_codepoint = g_generated_cjk_glyphs[mid].codepoint;
-        if (mid_codepoint == codepoint) return g_generated_cjk_glyphs[mid].rows;
+        if (mid_codepoint == codepoint) {
+            font_cjk_glyph_cache_put(codepoint, g_generated_cjk_glyphs[mid].rows);
+            return g_generated_cjk_glyphs[mid].rows;
+        }
         if (mid_codepoint < codepoint) {
             left = mid + 1u;
         } else {
@@ -208,6 +251,7 @@ static const uint16_t *font_find_cjk_rows(uint32_t codepoint) {
 }
 
 void font_unload_cjk_resource(void) {
+    font_clear_cjk_glyph_cache();
     if (g_cjk_resource.owned_data) {
         kfree(g_cjk_resource.owned_data);
     }
