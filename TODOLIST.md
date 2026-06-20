@@ -356,7 +356,7 @@
 - [√] 简单 HTML 转纯文本显示
 - [√] 支持页面链接点击导航
 - [√] HTTPS/TLS 基础加密模块：新增 SHA-256、HMAC-SHA256、HKDF-SHA256 并加入单元测试
-- [ ] HTTPS/TLS 响应解析：解析 TLS record、ServerHello、Certificate 等握手消息摘要
+- [√] HTTPS/TLS 响应解析：解析 TLS record、ServerHello、Certificate 等握手消息摘要
 - [ ] 浏览器 HTTPS 页面显示握手摘要：展示 TLS 版本、握手类型、证书条目数量和下一步限制说明
 
 ### 17.4 国际化（i18n / 翻译键）
