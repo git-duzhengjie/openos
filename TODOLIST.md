@@ -372,7 +372,7 @@
   - [√] 设计用户态 GUI 应用 ABI：窗口创建、绘制、输入事件、定时器、剪贴板/文本输入等接口
   - [√] 落地最小用户态 GUI syscall ABI：创建/销毁窗口、添加标签/按钮、按钮事件轮询，并用 `/bin/guiprobe` 验证
   - [√] 浏览器崩溃不应拖垮内核，错误通过进程退出或窗口关闭处理：用户态 GUI 窗口绑定进程 PID，`sys_exit` 自动回收窗口和事件
-  - [ ] 网络访问统一走用户态 socket/libc API，而不是直接调用内核内部函数
+  - [√] 网络访问统一走用户态 socket/libc API，而不是直接调用内核内部函数：新增 `/bin/browser` 用户态原型，使用 `openos_getaddrinfo/openos_socket/openos_connect/openos_send/openos_recv` 拉取 HTTP 页面
 - [ ] 补齐移植开源浏览器内核所需的基础运行环境
   - [ ] libc/POSIX 子集：malloc/free/realloc、stdio、string、time、errno、文件 API、目录 API
   - [√] socket API：getaddrinfo/gethostbyname、connect/send/recv/close、select/poll、非阻塞 socket

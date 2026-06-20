@@ -331,6 +331,13 @@
 #define OPENOS_HAS_GUIPROBE 0
 #endif
 
+#if __has_include("embed_browser.h")
+#include "embed_browser.h"  /* browser user command */
+#define OPENOS_HAS_USER_BROWSER 1
+#else
+#define OPENOS_HAS_USER_BROWSER 0
+#endif
+
 #if __has_include("embed_ping.h")
 #include "embed_ping.h"  /* ping user command */
 #define OPENOS_HAS_PING 1
@@ -1276,6 +1283,17 @@ void kernel_main(void) {
         serial_write("[OK] Installed /bin/guiprobe user ELF\n");
     } else {
         serial_write("[WARN] Failed to install /bin/guiprobe\n");
+    }
+#endif
+
+#if OPENOS_HAS_USER_BROWSER
+    fd = vfs_open("/bin/browser", O_CREAT | O_RDWR, 0755);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)browser_elf, browser_elf_size);
+        vfs_close(fd);
+        serial_write("[OK] Installed /bin/browser user ELF\n");
+    } else {
+        serial_write("[WARN] Failed to install /bin/browser\n");
     }
 #endif
 

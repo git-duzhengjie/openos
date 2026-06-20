@@ -330,6 +330,15 @@ if [ -f $USR/guiprobe.c ]; then
     echo "  Embedded: guiprobe.elf"
 fi
 
+if [ -f $USR/browser.c ]; then
+    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+        -fno-stack-protector -fno-builtin \
+        -c $USR/browser.c -o $BUILD/browser.o
+    ld -m elf_i386 -T $USR/user.ld -o $BUILD/browser.elf $BUILD/browser.o
+    python3 _embed_elf.py $BUILD/browser.elf $SRC/include/embed_browser.h browser_elf
+    echo "  Embedded: browser.elf"
+fi
+
 if [ -f $USR/fault.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \
