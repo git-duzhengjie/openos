@@ -1427,6 +1427,16 @@ static int test_socketpair_poll(void)
         return CAP_FAIL;
     }
 
+    pfd.fd = sv[1];
+    pfd.events = OPENOS_POLLIN;
+    pfd.revents = 0;
+    ready = openos_poll(&pfd, 1, 0);
+    if (ready != 0 || (pfd.revents & OPENOS_POLLIN)) {
+        openos_close(sv[0]);
+        openos_close(sv[1]);
+        return CAP_FAIL;
+    }
+
     if (openos_send(sv[0], &ch, 1, 0) != 1) {
         openos_close(sv[0]);
         openos_close(sv[1]);
@@ -1449,7 +1459,32 @@ static int test_socketpair_poll(void)
         return CAP_FAIL;
     }
 
+    if (openos_recv(sv[1], &out, 1, 0) >= 0) {
+        openos_close(sv[0]);
+        openos_close(sv[1]);
+        return CAP_FAIL;
+    }
+
+    pfd.fd = sv[1];
+    pfd.events = OPENOS_POLLIN | OPENOS_POLLOUT;
+    pfd.revents = 0;
+    ready = openos_poll(&pfd, 1, 0);
+    if (ready != 1 || !(pfd.revents & OPENOS_POLLOUT) || (pfd.revents & OPENOS_POLLIN)) {
+        openos_close(sv[0]);
+        openos_close(sv[1]);
+        return CAP_FAIL;
+    }
+
     openos_close(sv[0]);
+    pfd.fd = sv[1];
+    pfd.events = OPENOS_POLLIN | OPENOS_POLLOUT;
+    pfd.revents = 0;
+    ready = openos_poll(&pfd, 1, 0);
+    if (ready != 1 || !(pfd.revents & OPENOS_POLLHUP)) {
+        openos_close(sv[1]);
+        return CAP_FAIL;
+    }
+
     openos_close(sv[1]);
     return CAP_PASS;
 }

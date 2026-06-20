@@ -462,6 +462,7 @@
     - [√] 已新增 DNS IPv4 字面量快路径，用户态 `openos_dnslookup/openos_getaddrinfo/openos_gethostbyname` 可离线解析 IPv4 地址，并接入 `/bin/chromiumcaptest` 验收
   - [ ] 引入或实现可维护 TLS 库，支撑 HTTPS、证书链校验和系统信任根
   - [ ] 为 Chromium net stack 所需 socket 行为补齐错误码、非阻塞、poll 边界语义
+    - [√] 已增强 `/bin/chromiumcaptest` 的 `socketpair` poll 边界验收，覆盖空队列不报 `POLLIN`、可写端 `POLLOUT`、空读失败和对端关闭 `POLLHUP`
 - [ ] M7 图形、字体与输入
   - [ ] 为 Skia software raster 提供窗口 framebuffer / shared bitmap / dirty rect present 能力
     - [√] 已将用户态窗口创建、控件、fill/text/blit/scroll/present 基础绘制 smoke 并入 `/bin/chromiumcaptest`
