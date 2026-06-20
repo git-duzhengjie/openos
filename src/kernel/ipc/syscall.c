@@ -1408,6 +1408,17 @@ static uint32_t sys_munmap_user(uint32_t addr, uint32_t len)
     return 0;
 }
 
+static uint32_t sys_chromium_memory_policy(void)
+{
+    /*
+     * OpenOS is currently built as 32-bit i386 without an NX-capable page-table
+     * policy. Chromium/V8 must default to jitless mode until executable memory
+     * can enforce W^X at the MMU level.
+     */
+    return OPENOS_CHROMIUM_MEM_JITLESS_DEFAULT |
+           OPENOS_CHROMIUM_MEM_EXEC_PROT_RESERVED;
+}
+
 static uint32_t sys_mprotect_user(uint32_t addr, uint32_t len, uint32_t prot)
 {
     process_t *proc;
@@ -1652,6 +1663,9 @@ uint32_t syscall_dispatch(uint32_t num,
 
     case SYS_MMAP_FILE:
         return sys_mmap_file(a, b, c, d);
+
+    case SYS_CHROMIUM_MEMORY_POLICY:
+        return sys_chromium_memory_policy();
 
     case SYS_MPROTECT:
         return sys_mprotect_user(a, b, c);

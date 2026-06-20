@@ -122,6 +122,12 @@
 #define SYS_GUI_SET_TEXT 325
 #define SYS_GUI_DRAW 326
 #define SYS_MMAP_FILE    328
+#define SYS_CHROMIUM_MEMORY_POLICY 329
+
+#define OPENOS_CHROMIUM_MEM_JITLESS_DEFAULT     (1u << 0)
+#define OPENOS_CHROMIUM_MEM_EXEC_PROT_RESERVED  (1u << 1)
+#define OPENOS_CHROMIUM_MEM_WX_ENFORCED         (1u << 2)
+#define OPENOS_CHROMIUM_MEM_EXEC_MMAP_ENABLED   (1u << 3)
 
 #define OPENOS_PROT_NONE  0x0
 #define OPENOS_PROT_READ  0x1
@@ -2057,6 +2063,11 @@ static inline int openos_munmap(void *addr, int len)
 static inline int openos_mprotect(void *addr, int len, int prot)
 {
     return openos_syscall_result(openos_syscall3(SYS_MPROTECT, (int)addr, len, prot));
+}
+
+static inline unsigned int openos_chromium_memory_policy(void)
+{
+    return (unsigned int)openos_syscall0(SYS_CHROMIUM_MEMORY_POLICY);
 }
 
 static inline int openos_brk(void *addr)

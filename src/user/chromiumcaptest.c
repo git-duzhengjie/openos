@@ -137,6 +137,20 @@ static int test_mmap_fixed(void)
     return openos_munmap(fixed, 4096) == 0 ? CAP_PASS : CAP_FAIL;
 }
 
+static int test_v8_memory_policy(void)
+{
+    unsigned int policy = openos_chromium_memory_policy();
+
+    if ((policy & OPENOS_CHROMIUM_MEM_JITLESS_DEFAULT) == 0)
+        return CAP_FAIL;
+    if ((policy & OPENOS_CHROMIUM_MEM_EXEC_PROT_RESERVED) == 0)
+        return CAP_FAIL;
+    if ((policy & OPENOS_CHROMIUM_MEM_EXEC_MMAP_ENABLED) != 0 &&
+        (policy & OPENOS_CHROMIUM_MEM_WX_ENFORCED) == 0)
+        return CAP_FAIL;
+    return CAP_PASS;
+}
+
 static int test_mprotect(void)
 {
     unsigned char *mem;
@@ -378,7 +392,7 @@ int main(int argc, char **argv)
     (void)argv;
 
     openos_printf("Chromium core capability test\n");
-    openos_printf("target: mmap file-mmap mprotect brk thread shm eventfd socketpair poll time\n");
+    openos_printf("target: mmap file-mmap mprotect v8-memory-policy brk thread shm eventfd socketpair poll time\n");
 
     status = test_uptime();
     print_result("monotonic uptime", status);
@@ -398,6 +412,10 @@ int main(int argc, char **argv)
 
     status = test_mprotect();
     print_result("mprotect page permission changes", status);
+    failed += status == CAP_FAIL;
+
+    status = test_v8_memory_policy();
+    print_result("V8 executable memory policy", status);
     failed += status == CAP_FAIL;
 
     status = test_file_mmap();

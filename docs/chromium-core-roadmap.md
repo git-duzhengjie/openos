@@ -37,7 +37,7 @@ Chromium/V8/Skia 需要强内存能力：
 - `brk/sbrk`：已具备堆增长雏形，需要大分配压力测试。
 - 共享内存：已有 `shm_create/shm_map/shm_destroy` 雏形，需要跨进程引用计数、大小参数、权限和生命周期。
 - demand paging：已有匿名 mmap 预留思路，需要稳定 page fault 分配和 OOM 处理。
-- 可执行内存策略：V8 初期可先走 jitless，长期需要受控 JIT 映射。
+- 可执行内存策略：已新增 `SYS_CHROMIUM_MEMORY_POLICY` 原生策略查询；V8 初期默认 jitless，长期在 NX/W^X 可验证后启用受控 JIT 映射。
 
 验收程序：`/bin/chromiumcaptest` 覆盖 mmap、brk、shm 基础行为。
 

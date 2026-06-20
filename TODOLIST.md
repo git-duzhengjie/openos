@@ -419,6 +419,7 @@
   - [ ] 文件 mmap 与 page cache 协同，支持只读资源映射和私有 COW 映射
     - [√] 已完成基础 file-backed private snapshot mmap：`SYS_MMAP_FILE` 可将 fd 内容映射到用户地址空间，并接入 `/bin/chromiumcaptest` 验收
   - [ ] 为 V8 预留 executable memory / jitless 两条路线的内核策略
+    - [√] 已完成原生 `SYS_CHROMIUM_MEMORY_POLICY` 策略查询：当前 i386 阶段声明默认 jitless，`PROT_EXEC` 语义已保留，待 NX/W^X 后启用 executable mmap
 - [ ] M3 线程、同步与调度增强
   - [ ] 用户态线程 TLS / thread-local storage 基础 ABI
   - [ ] futex wait/wake 语义稳定化，补齐超时、唤醒数量和错误码
