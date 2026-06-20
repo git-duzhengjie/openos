@@ -306,6 +306,21 @@ nasm -f elf32 $SRC/kernel_thread_trampoline.asm -o $BUILD/kernel_thread_trampoli
 echo "[2.5] Building user program..."
 USR=src/user
 OPENOS_EMBED_TESTS=${OPENOS_EMBED_TESTS:-0}
+gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+    -fno-stack-protector -fno-builtin \
+    -I $SRC/include \
+    -c $USR/crt0.c -o $BUILD/crt0.o
+verify_user_start() {
+    local elf="$1"
+    local name="$2"
+    local first_text
+    first_text=$(nm -n "$elf" | awk '$2 ~ /^[Tt]$/ { print $3; exit }')
+    if [ "$first_text" != "_start" ]; then
+        echo "ERROR: $name entry text symbol is '$first_text', expected '_start'" >&2
+        echo "       Link $name with $BUILD/crt0.o before application objects." >&2
+        exit 1
+    fi
+}
 TEST_EMBED_HEADERS="isotest waittest forktest threadtest mutextest semtest condtest futextest nicetest exit42 orphan argtest envtest libctest maintest systest kaddrtest malloctest errnotest stdiotest fstest alarmtest mmaptest sbrktest"
 if [ "$OPENOS_EMBED_TESTS" != "1" ]; then
     for app in $TEST_EMBED_HEADERS; do
@@ -325,7 +340,8 @@ if [ -f $USR/guiprobe.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \
         -c $USR/guiprobe.c -o $BUILD/guiprobe.o
-    ld -m elf_i386 -T $USR/user.ld -o $BUILD/guiprobe.elf $BUILD/guiprobe.o
+    ld -m elf_i386 -T $USR/user.ld -o $BUILD/guiprobe.elf $BUILD/crt0.o $BUILD/guiprobe.o
+    verify_user_start $BUILD/guiprobe.elf guiprobe.elf
     python3 _embed_elf.py $BUILD/guiprobe.elf $SRC/include/embed_guiprobe.h guiprobe_elf
     echo "  Embedded: guiprobe.elf"
 fi
@@ -334,7 +350,8 @@ if [ -f $USR/browser.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \
         -c $USR/browser.c -o $BUILD/browser.o
-    ld -m elf_i386 -T $USR/user.ld -o $BUILD/browser.elf $BUILD/browser.o
+    ld -m elf_i386 -T $USR/user.ld -o $BUILD/browser.elf $BUILD/crt0.o $BUILD/browser.o
+    verify_user_start $BUILD/browser.elf browser.elf
     python3 _embed_elf.py $BUILD/browser.elf $SRC/include/embed_browser.h browser_elf
     echo "  Embedded: browser.elf"
 fi
@@ -343,7 +360,8 @@ if [ -f $USR/fontprobe.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \
         -c $USR/fontprobe.c -o $BUILD/fontprobe.o
-    ld -m elf_i386 -T $USR/user.ld -o $BUILD/fontprobe.elf $BUILD/fontprobe.o
+    ld -m elf_i386 -T $USR/user.ld -o $BUILD/fontprobe.elf $BUILD/crt0.o $BUILD/fontprobe.o
+    verify_user_start $BUILD/fontprobe.elf fontprobe.elf
     python3 _embed_elf.py $BUILD/fontprobe.elf $SRC/include/embed_fontprobe.h fontprobe_elf
     echo "  Embedded: fontprobe.elf"
 fi
@@ -355,7 +373,8 @@ if [ -f $USR/nsdemo.c ] && [ -f $USR/openos_netsurf_platform.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \
         -c $USR/nsdemo.c -o $BUILD/nsdemo.o
-    ld -m elf_i386 -T $USR/user.ld -o $BUILD/nsdemo.elf $BUILD/openos_netsurf_platform.o $BUILD/nsdemo.o
+    ld -m elf_i386 -T $USR/user.ld -o $BUILD/nsdemo.elf $BUILD/crt0.o $BUILD/openos_netsurf_platform.o $BUILD/nsdemo.o
+    verify_user_start $BUILD/nsdemo.elf nsdemo.elf
     python3 _embed_elf.py $BUILD/nsdemo.elf $SRC/include/embed_nsdemo.h nsdemo_elf
     echo "  Embedded: nsdemo.elf"
 fi
