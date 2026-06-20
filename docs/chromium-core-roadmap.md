@@ -46,7 +46,7 @@ Chromium/V8/Skia 需要强内存能力：
 Chromium base、V8、网络栈和渲染流水线依赖稳定线程模型：
 
 - 用户线程：已有 `openos_thread_create/thread_exit/gettid`。
-- futex：已有测试入口，需要覆盖 wait/wake/timeout/多等待者。
+- futex：已有 wait/wake 测试入口，并补充跨线程阻塞/唤醒验收；后续需要覆盖 timeout/多等待者。
 - mutex/semaphore/condition：已有基础测试入口；已补充 `openos_pthread_*` 用户态薄封装，并纳入 `chromiumcaptest` mutex/cond 同步验收。
 - 线程局部存储 TLS：已完成轻量 `SYS_TLS_SET/SYS_TLS_GET` base 指针 ABI，C++ runtime 和 Chromium base 后续可在此基础上扩展。
 - 调度公平性和优先级：需要补足 timer、yield、sleep、nice/priority 行为。

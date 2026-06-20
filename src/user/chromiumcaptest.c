@@ -14,6 +14,10 @@ static openos_pthread_cond_t g_sync_cond = 0;
 static volatile int g_sync_ready = 0;
 static volatile int g_tls_done = 0;
 static volatile int g_tls_ok = 0;
+static volatile unsigned int g_futex_word = 0;
+static volatile int g_futex_waiting = 0;
+static volatile int g_futex_done = 0;
+static volatile int g_futex_ok = 0;
 
 static void print_result(const char *name, int status)
 {
@@ -408,6 +412,48 @@ static int test_shm(void)
     return openos_shm_destroy(&shm) == 0 ? CAP_PASS : CAP_FAIL;
 }
 
+static void futex_worker(void *arg)
+{
+    (void)arg;
+    g_futex_waiting = 1;
+    if (openos_futex_wait(&g_futex_word, 0) == 0 && g_futex_word == 1)
+        g_futex_ok = 1;
+    g_futex_done = 1;
+    openos_thread_exit(0);
+}
+
+static int test_futex(void)
+{
+    openos_thread_t tid;
+    int spin = 0;
+    int woke;
+
+    g_futex_word = 0;
+    g_futex_waiting = 0;
+    g_futex_done = 0;
+    g_futex_ok = 0;
+
+    if (openos_thread_create(&tid, futex_worker, 0) != 0)
+        return CAP_FAIL;
+    while (!g_futex_waiting && spin++ < 100000)
+        openos_yield();
+    if (!g_futex_waiting)
+        return CAP_FAIL;
+    for (spin = 0; spin < 64; ++spin)
+        openos_yield();
+
+    g_futex_word = 1;
+    woke = openos_futex_wake(&g_futex_word, 1);
+    if (woke != 1)
+        return CAP_FAIL;
+
+    spin = 0;
+    while (!g_futex_done && spin++ < 100000)
+        openos_yield();
+    (void)tid;
+    return (g_futex_done && g_futex_ok) ? CAP_PASS : CAP_FAIL;
+}
+
 static int test_eventfd(void)
 {
     openos_eventfd_t efd;
@@ -480,7 +526,7 @@ int main(int argc, char **argv)
     (void)argv;
 
     openos_printf("Chromium core capability test\n");
-    openos_printf("target: mmap file-mmap mprotect v8-memory-policy brk thread tls pthread-sync shm eventfd socketpair poll time\n");
+    openos_printf("target: mmap file-mmap mprotect v8-memory-policy brk thread tls pthread-sync futex shm eventfd socketpair poll time\n");
 
     status = test_uptime();
     print_result("monotonic uptime", status);
@@ -524,6 +570,10 @@ int main(int argc, char **argv)
 
     status = test_pthread_sync();
     print_result("pthread-like mutex/cond synchronization", status);
+    failed += status == CAP_FAIL;
+
+    status = test_futex();
+    print_result("futex wait/wake synchronization", status);
     failed += status == CAP_FAIL;
 
     status = test_shm();
