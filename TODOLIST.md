@@ -447,6 +447,7 @@
   - [ ] 支持大文件、稀疏文件、资源 pak 文件读取与缓存目录
     - [√] 已新增 `/usr/share/openos/browser/pak` 资源目录常量与启动目录，并将 pak 文件创建、读取、stat、目录发现、删除并入 `/bin/chromiumcaptest`
     - [√] 已将 `seek(SEEK_SET/SEEK_END)`、稀疏写入、洞区零填充读取和大偏移文件 size 校验并入 `/bin/chromiumcaptest`
+    - [√] 已新增 `SYS_STATFS` / `SYS_FSTATFS` 与用户态 `openos_statfs/openos_fstatfs`，并将文件系统容量/命名长度信息验收并入 `/bin/chromiumcaptest`
   - [√] 统一应用数据目录：cache、cookies、certs、profiles、downloads
     - [√] 已在内核启动时创建 `/home/browser/profiles`，并在 `openos.h` 暴露 `OPENOS_BROWSER_PROFILES_DIR`
     - [√] 已将 cache 文件创建/删除、profiles/Default/Preferences 写入和目录遍历并入 `/bin/chromiumcaptest`

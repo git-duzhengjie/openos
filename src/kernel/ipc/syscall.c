@@ -1058,6 +1058,22 @@ static void syscall_fill_user_stat(openos_stat_t *user_st, const inode_t *st)
     user_st->gid = st->gid;
 }
 
+static void syscall_fill_user_statfs(openos_statfs_t *user_st, const inode_t *st)
+{
+    uint32_t fs_type = st ? st->fs_type : 0x4f534653u;
+
+    memset(user_st, 0, sizeof(*user_st));
+    user_st->f_type = fs_type ? fs_type : 0x4f534653u;
+    user_st->f_bsize = 4096u;
+    user_st->f_blocks = 16384u;
+    user_st->f_bfree = 8192u;
+    user_st->f_bavail = 8192u;
+    user_st->f_files = 4096u;
+    user_st->f_ffree = 2048u;
+    user_st->f_namelen = MAX_NAME - 1u;
+    user_st->f_flags = 0u;
+}
+
 #define SYS_MMAP_BASE  ASLR_MMAP_BASE_MIN
 #define SYS_MMAP_LIMIT ASLR_MMAP_LIMIT
 #define SYS_MMAP_MAX_REQUEST (16u * 1024u * 1024u)
@@ -2020,6 +2036,38 @@ uint32_t syscall_dispatch(uint32_t num,
             if (!f || !f->inode)
                 return (uint32_t)-1;
             syscall_fill_user_stat(&user_st, f->inode);
+            if (copy_to_user((void *)b, &user_st, sizeof(user_st)) < 0)
+                return (uint32_t)-1;
+            return 0;
+        }
+
+    case SYS_STATFS:
+        {
+            char path[USERMEM_CSTR_MAX];
+            inode_t st;
+            openos_statfs_t user_st;
+            if (!b || !user_ptr_valid((void *)b, sizeof(user_st), USERMEM_WRITE))
+                return (uint32_t)-1;
+            if (syscall_copy_user_path(path, (const char *)a) < 0)
+                return (uint32_t)-1;
+            if (vfs_stat(path, &st) < 0)
+                return (uint32_t)-1;
+            syscall_fill_user_statfs(&user_st, &st);
+            if (copy_to_user((void *)b, &user_st, sizeof(user_st)) < 0)
+                return (uint32_t)-1;
+            return 0;
+        }
+
+    case SYS_FSTATFS:
+        {
+            file_t *f;
+            openos_statfs_t user_st;
+            if (!b || !user_ptr_valid((void *)b, sizeof(user_st), USERMEM_WRITE))
+                return (uint32_t)-1;
+            f = vfs_get_file((int)a);
+            if (!f || !f->inode)
+                return (uint32_t)-1;
+            syscall_fill_user_statfs(&user_st, f->inode);
             if (copy_to_user((void *)b, &user_st, sizeof(user_st)) < 0)
                 return (uint32_t)-1;
             return 0;

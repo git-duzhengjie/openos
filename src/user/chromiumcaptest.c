@@ -702,6 +702,44 @@ static int test_sparse_seek_file(void)
     return CAP_PASS;
 }
 
+static int test_statfs(void)
+{
+    const char *path = "/tmp/chromiumcaptest_statfs.tmp";
+    openos_statfs_t root_st;
+    openos_statfs_t fd_st;
+    int fd;
+
+    openos_memset(&root_st, 0, sizeof(root_st));
+    openos_memset(&fd_st, 0, sizeof(fd_st));
+
+    if (openos_statfs("/", &root_st) < 0)
+        return CAP_FAIL;
+    if (root_st.f_bsize == 0 || root_st.f_namelen == 0)
+        return CAP_FAIL;
+    if (root_st.f_bavail > root_st.f_blocks || root_st.f_bfree > root_st.f_blocks)
+        return CAP_FAIL;
+    if (root_st.f_ffree > root_st.f_files)
+        return CAP_FAIL;
+
+    openos_unlink(path);
+    fd = openos_open(path, O_CREAT | O_TRUNC | O_RDWR, 0644);
+    if (fd < 0)
+        return CAP_FAIL;
+    if (openos_fstatfs(fd, &fd_st) < 0) {
+        openos_close(fd);
+        openos_unlink(path);
+        return CAP_FAIL;
+    }
+    openos_close(fd);
+    openos_unlink(path);
+
+    if (fd_st.f_bsize != root_st.f_bsize)
+        return CAP_FAIL;
+    if (fd_st.f_namelen != root_st.f_namelen)
+        return CAP_FAIL;
+    return CAP_PASS;
+}
+
 static int test_sbrk(void)
 {
     unsigned char *old_break;
@@ -1248,6 +1286,10 @@ int main(int argc, char **argv)
 
     status = test_sparse_seek_file();
     print_result("sparse file seek/read/write", status);
+    failed += status == CAP_FAIL;
+
+    status = test_statfs();
+    print_result("statfs/fstatfs filesystem info", status);
     failed += status == CAP_FAIL;
 
     status = test_sbrk();

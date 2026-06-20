@@ -130,6 +130,8 @@
 #define SYS_TLS_GET     331
 #define SYS_CLOCK_GETTIME 332
 #define SYS_SHM_INFO 333
+#define SYS_STATFS 334
+#define SYS_FSTATFS 335
 
 #define OPENOS_CHROMIUM_MEM_JITLESS_DEFAULT     (1u << 0)
 #define OPENOS_CHROMIUM_MEM_EXEC_PROT_RESERVED  (1u << 1)
@@ -178,6 +180,18 @@ typedef struct openos_stat {
     uint32_t uid;
     uint32_t gid;
 } openos_stat_t;
+
+typedef struct openos_statfs {
+    uint32_t f_type;
+    uint32_t f_bsize;
+    uint32_t f_blocks;
+    uint32_t f_bfree;
+    uint32_t f_bavail;
+    uint32_t f_files;
+    uint32_t f_ffree;
+    uint32_t f_namelen;
+    uint32_t f_flags;
+} openos_statfs_t;
 
 typedef struct openos_dirent {
     uint32_t ino;

@@ -127,6 +127,8 @@
 #define SYS_TLS_GET     331
 #define SYS_CLOCK_GETTIME 332
 #define SYS_SHM_INFO 333
+#define SYS_STATFS 334
+#define SYS_FSTATFS 335
 
 #define OPENOS_CHROMIUM_MEM_JITLESS_DEFAULT     (1u << 0)
 #define OPENOS_CHROMIUM_MEM_EXEC_PROT_RESERVED  (1u << 1)
@@ -489,6 +491,18 @@ typedef struct openos_stat {
     openos_uint32_t uid;
     openos_uint32_t gid;
 } openos_stat_t;
+
+typedef struct openos_statfs {
+    openos_uint32_t f_type;
+    openos_uint32_t f_bsize;
+    openos_uint32_t f_blocks;
+    openos_uint32_t f_bfree;
+    openos_uint32_t f_bavail;
+    openos_uint32_t f_files;
+    openos_uint32_t f_ffree;
+    openos_uint32_t f_namelen;
+    openos_uint32_t f_flags;
+} openos_statfs_t;
 
 typedef struct openos_dirent {
     openos_uint32_t ino;
@@ -2841,6 +2855,16 @@ static inline int openos_stat(const char *path, openos_stat_t *st)
 static inline int openos_fstat(int fd, openos_stat_t *st)
 {
     return openos_syscall_result(openos_syscall2(SYS_FSTAT, fd, (int)st));
+}
+
+static inline int openos_statfs(const char *path, openos_statfs_t *st)
+{
+    return openos_syscall_result(openos_syscall2(SYS_STATFS, (int)path, (int)st));
+}
+
+static inline int openos_fstatfs(int fd, openos_statfs_t *st)
+{
+    return openos_syscall_result(openos_syscall2(SYS_FSTATFS, fd, (int)st));
 }
 
 static inline int openos_lstat(const char *path, openos_stat_t *st)
