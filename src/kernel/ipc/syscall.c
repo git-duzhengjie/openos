@@ -1074,6 +1074,48 @@ static void syscall_fill_user_statfs(openos_statfs_t *user_st, const inode_t *st
     user_st->f_flags = 0u;
 }
 
+static uint32_t syscall_getdents(uint32_t fd, uint32_t user_buf, uint32_t count)
+{
+    file_t *f;
+    dentry_t *de;
+    openos_dirent_t user_de;
+    uint32_t copied = 0;
+
+    if (!user_buf || count < sizeof(openos_dirent_t))
+        return (uint32_t)-1;
+    if (!user_ptr_valid((void *)user_buf, count, USERMEM_WRITE))
+        return (uint32_t)-1;
+
+    f = vfs_get_file((int)fd);
+    if (!f || !f->inode || !f->dentry || (f->inode->mode & FS_DIR) != FS_DIR)
+        return (uint32_t)-1;
+
+    while (copied + sizeof(openos_dirent_t) <= count) {
+        uint32_t idx = 0;
+        de = f->dentry->child;
+        while (de && idx < f->offset) {
+            de = de->sibling;
+            idx++;
+        }
+        if (!de || !de->inode)
+            break;
+        f->offset++;
+
+        memset(&user_de, 0, sizeof(user_de));
+        user_de.ino = de->inode->ino;
+        user_de.mode = de->inode->mode;
+        user_de.size = de->inode->size;
+        strncpy(user_de.name, de->name, sizeof(user_de.name) - 1);
+        user_de.name[sizeof(user_de.name) - 1] = 0;
+
+        if (copy_to_user((void *)(user_buf + copied), &user_de, sizeof(user_de)) < 0)
+            return (uint32_t)-1;
+        copied += sizeof(openos_dirent_t);
+    }
+
+    return copied;
+}
+
 #define SYS_MMAP_BASE  ASLR_MMAP_BASE_MIN
 #define SYS_MMAP_LIMIT ASLR_MMAP_LIMIT
 #define SYS_MMAP_MAX_REQUEST (16u * 1024u * 1024u)
@@ -2482,6 +2524,9 @@ uint32_t syscall_dispatch(uint32_t num,
 
     case SYS_FSYNC:
         return (uint32_t)vfs_fsync((int)a);
+
+    case SYS_GETDENTS:
+        return syscall_getdents(a, b, c);
 
     case SYS_READDIR:
         {

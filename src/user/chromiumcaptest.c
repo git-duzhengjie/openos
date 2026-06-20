@@ -740,6 +740,41 @@ static int test_statfs(void)
     return CAP_PASS;
 }
 
+static int test_getdents(void)
+{
+    openos_dirent_t entries[8];
+    int fd;
+    int bytes;
+    unsigned int count;
+    unsigned int i;
+    int saw_bin = 0;
+    int saw_tmp = 0;
+
+    openos_memset(entries, 0, sizeof(entries));
+    fd = openos_open("/", O_RDONLY, 0);
+    if (fd < 0)
+        return CAP_FAIL;
+
+    bytes = openos_getdents(fd, entries, sizeof(entries));
+    openos_close(fd);
+    if (bytes <= 0 || (bytes % (int)sizeof(openos_dirent_t)) != 0)
+        return CAP_FAIL;
+
+    count = (unsigned int)bytes / sizeof(openos_dirent_t);
+    for (i = 0; i < count; i++) {
+        if (!entries[i].name[0])
+            return CAP_FAIL;
+        if (openos_strcmp(entries[i].name, "bin") == 0)
+            saw_bin = 1;
+        if (openos_strcmp(entries[i].name, "tmp") == 0)
+            saw_tmp = 1;
+    }
+
+    if (!saw_bin || !saw_tmp)
+        return CAP_FAIL;
+    return CAP_PASS;
+}
+
 static int test_sbrk(void)
 {
     unsigned char *old_break;
@@ -1230,7 +1265,7 @@ int main(int argc, char **argv)
     (void)argv;
 
     openos_printf("Chromium core capability test\n");
-    openos_printf("target: mmap file-mmap fs-metadata path-normalization fs-mutations browser-dirs resource-pak sparse-seek mprotect v8-memory-policy brk thread tls pthread-sync futex shm eventfd message-queue service-channel socketpair poll time spawn fork pipe fd argv env\n");
+    openos_printf("target: mmap file-mmap fs-metadata path-normalization fs-mutations getdents browser-dirs resource-pak sparse-seek mprotect v8-memory-policy brk thread tls pthread-sync futex shm eventfd message-queue service-channel socketpair poll time spawn fork pipe fd argv env\n");
 
     status = test_uptime();
     print_result("monotonic uptime", status);
@@ -1290,6 +1325,10 @@ int main(int argc, char **argv)
 
     status = test_statfs();
     print_result("statfs/fstatfs filesystem info", status);
+    failed += status == CAP_FAIL;
+
+    status = test_getdents();
+    print_result("getdents directory enumeration", status);
     failed += status == CAP_FAIL;
 
     status = test_sbrk();

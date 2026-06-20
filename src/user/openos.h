@@ -129,6 +129,7 @@
 #define SYS_SHM_INFO 333
 #define SYS_STATFS 334
 #define SYS_FSTATFS 335
+#define SYS_GETDENTS 336
 
 #define OPENOS_CHROMIUM_MEM_JITLESS_DEFAULT     (1u << 0)
 #define OPENOS_CHROMIUM_MEM_EXEC_PROT_RESERVED  (1u << 1)
@@ -2865,6 +2866,11 @@ static inline int openos_statfs(const char *path, openos_statfs_t *st)
 static inline int openos_fstatfs(int fd, openos_statfs_t *st)
 {
     return openos_syscall_result(openos_syscall2(SYS_FSTATFS, fd, (int)st));
+}
+
+static inline int openos_getdents(int fd, openos_dirent_t *entries, unsigned int count)
+{
+    return openos_syscall_result(openos_syscall3(SYS_GETDENTS, fd, (int)entries, (int)count));
 }
 
 static inline int openos_lstat(const char *path, openos_stat_t *st)
