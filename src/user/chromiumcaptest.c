@@ -267,6 +267,27 @@ static int test_file_mmap(void)
         openos_close(fd);
         return CAP_FAIL;
     }
+
+    if (openos_seek(fd, 0, SEEK_SET) != 0) {
+        openos_close(fd);
+        return CAP_FAIL;
+    }
+    mapped = (char *)openos_mmap_file(fd, 4096, OPENOS_PROT_READ,
+                                      OPENOS_MAP_PRIVATE | OPENOS_MAP_FILE);
+    if ((int)mapped == -1 || !mapped) {
+        openos_close(fd);
+        return CAP_FAIL;
+    }
+    if (mapped[0] != payload[0] || mapped[1] != payload[1]) {
+        openos_munmap(mapped, 4096);
+        openos_close(fd);
+        return CAP_FAIL;
+    }
+    if (openos_munmap(mapped, 4096) != 0) {
+        openos_close(fd);
+        return CAP_FAIL;
+    }
+
     openos_close(fd);
     return CAP_PASS;
 }
@@ -1202,7 +1223,7 @@ int main(int argc, char **argv)
     failed += status == CAP_FAIL;
 
     status = test_file_mmap();
-    print_result("file mmap private snapshot", status);
+    print_result("file mmap private snapshot/copy-on-write", status);
     failed += status == CAP_FAIL;
 
     status = test_filesystem_metadata();
