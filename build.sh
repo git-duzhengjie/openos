@@ -275,6 +275,11 @@ if [ "$OPENOS_CJK_RESOURCE" = "1" ]; then
         if [ "$OPENOS_CJK_RESOURCE_PATH" != "$BUILD/cjk.ofnt" ]; then
             cp "$OPENOS_CJK_RESOURCE_PATH" "$BUILD/cjk.ofnt"
         fi
+        CJK_COVERAGE_CHECK_ARGS=("$BUILD/cjk.ofnt")
+        if [ "${OPENOS_CJK_COVERAGE_STRICT:-0}" = "1" ]; then
+            CJK_COVERAGE_CHECK_ARGS+=(--fail-on-missing)
+        fi
+        PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_cjk_coverage.py "${CJK_COVERAGE_CHECK_ARGS[@]}"
     else
         echo "  CJK resource kept external at $OPENOS_CJK_RESOURCE_PATH (OPENOS_CJK_EMBED=0)"
         printf '' > "$BUILD/cjk.ofnt"

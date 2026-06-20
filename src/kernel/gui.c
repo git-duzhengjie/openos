@@ -5714,10 +5714,27 @@ static int browser_str_starts_ci(const char *p, const char *prefix) {
 static int browser_html_tag_break(const char *tag) {
     while (*tag == ' ' || *tag == '\t' || *tag == '/') tag++;
     return browser_str_starts_ci(tag, "br") || browser_str_starts_ci(tag, "p") ||
-           browser_str_starts_ci(tag, "div") || browser_str_starts_ci(tag, "li") ||
-           browser_str_starts_ci(tag, "tr") || browser_str_starts_ci(tag, "h1") ||
+           browser_str_starts_ci(tag, "div") || browser_str_starts_ci(tag, "section") ||
+           browser_str_starts_ci(tag, "article") || browser_str_starts_ci(tag, "header") ||
+           browser_str_starts_ci(tag, "footer") || browser_str_starts_ci(tag, "main") ||
+           browser_str_starts_ci(tag, "nav") || browser_str_starts_ci(tag, "blockquote") ||
+           browser_str_starts_ci(tag, "ul") || browser_str_starts_ci(tag, "ol") ||
+           browser_str_starts_ci(tag, "li") || browser_str_starts_ci(tag, "tr") ||
+           browser_str_starts_ci(tag, "table") || browser_str_starts_ci(tag, "h1") ||
            browser_str_starts_ci(tag, "h2") || browser_str_starts_ci(tag, "h3") ||
-           browser_str_starts_ci(tag, "title");
+           browser_str_starts_ci(tag, "h4") || browser_str_starts_ci(tag, "h5") ||
+           browser_str_starts_ci(tag, "h6") || browser_str_starts_ci(tag, "title") ||
+           browser_str_starts_ci(tag, "pre");
+}
+
+static int browser_html_tag_is_pre(const char *tag) {
+    while (*tag == ' ' || *tag == '\t' || *tag == '/') tag++;
+    return browser_str_starts_ci(tag, "pre") || browser_str_starts_ci(tag, "code");
+}
+
+static int browser_html_tag_is_list_item(const char *tag) {
+    while (*tag == ' ' || *tag == '\t' || *tag == '/') tag++;
+    return browser_str_starts_ci(tag, "li");
 }
 
 static char browser_decode_entity(const char **pp) {
@@ -5726,7 +5743,39 @@ static char browser_decode_entity(const char **pp) {
     if (browser_str_starts_ci(p, "lt;")) { *pp = p + 3; return '<'; }
     if (browser_str_starts_ci(p, "gt;")) { *pp = p + 3; return '>'; }
     if (browser_str_starts_ci(p, "quot;")) { *pp = p + 5; return '"'; }
+    if (browser_str_starts_ci(p, "apos;")) { *pp = p + 5; return '\''; }
+    if (browser_str_starts_ci(p, "#39;")) { *pp = p + 4; return '\''; }
     if (browser_str_starts_ci(p, "nbsp;")) { *pp = p + 5; return ' '; }
+    if (browser_str_starts_ci(p, "copy;")) { *pp = p + 5; return 'c'; }
+    if (browser_str_starts_ci(p, "reg;")) { *pp = p + 4; return 'r'; }
+    if (browser_str_starts_ci(p, "mdash;")) { *pp = p + 6; return '-'; }
+    if (browser_str_starts_ci(p, "ndash;")) { *pp = p + 6; return '-'; }
+    if (browser_str_starts_ci(p, "hellip;")) { *pp = p + 7; return '.'; }
+    if (browser_str_starts_ci(p, "lsquo;")) { *pp = p + 6; return '\''; }
+    if (browser_str_starts_ci(p, "rsquo;")) { *pp = p + 6; return '\''; }
+    if (browser_str_starts_ci(p, "ldquo;")) { *pp = p + 6; return '"'; }
+    if (browser_str_starts_ci(p, "rdquo;")) { *pp = p + 6; return '"'; }
+    if (p[0] == '#') {
+        uint32_t value = 0;
+        const char *q = p + 1;
+        int hex = 0;
+        if (*q == 'x' || *q == 'X') { hex = 1; q++; }
+        while (*q && *q != ';') {
+            char c = *q;
+            uint32_t digit;
+            if (c >= '0' && c <= '9') digit = (uint32_t)(c - '0');
+            else if (hex && c >= 'a' && c <= 'f') digit = 10u + (uint32_t)(c - 'a');
+            else if (hex && c >= 'A' && c <= 'F') digit = 10u + (uint32_t)(c - 'A');
+            else return '&';
+            value = value * (hex ? 16u : 10u) + digit;
+            if (value > 255u) return '?';
+            q++;
+        }
+        if (*q == ';' && value > 0) {
+            *pp = q + 1;
+            return (value < 32u) ? ' ' : (char)value;
+        }
+    }
     return '&';
 }
 
@@ -5750,7 +5799,7 @@ static int browser_html_tag_name_eq(const char *tag, const char *name) {
 static int browser_html_hidden_tag(const char *tag) {
     return browser_html_tag_name_eq(tag, "head") || browser_html_tag_name_eq(tag, "style") ||
            browser_html_tag_name_eq(tag, "script") || browser_html_tag_name_eq(tag, "svg") ||
-           browser_html_tag_name_eq(tag, "noscript");
+           browser_html_tag_name_eq(tag, "noscript") || browser_html_tag_name_eq(tag, "template");
 }
 
 static const char *browser_html_skip_hidden(const char *p, const char *tag) {
@@ -5761,6 +5810,7 @@ static const char *browser_html_skip_hidden(const char *p, const char *tag) {
     else if (browser_html_tag_name_eq(tag, "script")) name = "script";
     else if (browser_html_tag_name_eq(tag, "svg")) name = "svg";
     else if (browser_html_tag_name_eq(tag, "noscript")) name = "noscript";
+    else if (browser_html_tag_name_eq(tag, "template")) name = "template";
     if (!name) return p;
     while (*q) {
         if (q[0] == '<' && q[1] == '/' && browser_html_tag_name_eq(q + 2, name)) {
@@ -5789,6 +5839,7 @@ static const char *browser_html_find_body_start(const char *html) {
 static void browser_html_to_text(const char *html, char *out, uint32_t cap) {
     uint32_t n = 0;
     int last_space = 1;
+    int preserve_ws = 0;
     const char *p = html;
     if (!out || cap == 0) return;
     out[0] = '\0';
@@ -5807,13 +5858,28 @@ static void browser_html_to_text(const char *html, char *out, uint32_t cap) {
                 continue;
             }
             if (browser_html_tag_break(tag_start) && n > 0 && out[n - 1] != '\n') {
-                out[n++] = '\n';
+                while (n > 0 && out[n - 1] == ' ') n--;
+                if (n > 0 && n + 1u < cap) out[n++] = '\n';
                 last_space = 1;
             }
+            if (!is_close && browser_html_tag_is_list_item(tag_start) && n + 3u < cap) {
+                out[n++] = '-';
+                out[n++] = ' ';
+                last_space = 0;
+            }
+            if (browser_html_tag_is_pre(tag_start)) preserve_ws = !is_close;
             p = tag_end + 1;
             continue;
         }
         if (ch == '&') ch = browser_decode_entity(&p);
+        if (preserve_ws) {
+            if (ch == '\r') continue;
+            if (ch == '\t') ch = ' ';
+            if ((unsigned char)ch < 32u && ch != '\n') continue;
+            out[n++] = ch;
+            last_space = (ch == ' ' || ch == '\n');
+            continue;
+        }
         if (ch == '\r' || ch == '\n' || ch == '\t') ch = ' ';
         if ((unsigned char)ch < 32u) continue;
         if (ch == ' ') {
@@ -6604,6 +6670,7 @@ static void gui_browser_open(void) {
     uint32_t i;
 
     if (g_browser_win) {
+        browser_load_finish(0);
         gui_window_set_on_close(g_browser_win, 0, 0);
         gui_destroy_window(g_browser_win);
         g_browser_win = 0;

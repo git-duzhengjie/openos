@@ -45,6 +45,14 @@ bash scripts/package-release.sh --version nightly
 
 发布包输出到 `target/release/`，包含 `openos.img`、`kernel.elf`、`kernel.bin`、文档、调试脚本和 SHA256 校验文件。详见 `docs/release.md`。
 
+## Browser 当前能力边界
+
+OpenOS 当前内置 Browser 是过渡性的轻量浏览器，用于验证 GUI、DNS、TCP、HTTP 和基础 HTML 文本化显示能力。
+
+当前支持基础 HTTP 页面访问、非阻塞 DNS/TCP/HTTP 加载、简单 HTML 转可读文本，以及基础链接点击导航；HTTPS 目前仅支持 TLS 握手摘要探测，不支持完整 TLS 加密通道内的网页解密加载。
+
+它暂不等同于 Chromium / WebKit / Gecko 级完整浏览器，不支持完整 DOM、CSS 布局、JavaScript、图片、复杂表单和现代网页兼容。后续路线见 [`docs/browser-engine-roadmap.md`](docs/browser-engine-roadmap.md)。
+
 ## 中文字库资源
 
 默认构建会生成并嵌入 GB2312 覆盖的压缩 CJK 字库资源，启动时以 `/fonts/cjk.ofnt` 路径安装到 ramfs 并由 GUI 加载；加载失败时会回退到内核内置小字库。
