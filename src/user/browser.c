@@ -6,7 +6,9 @@
 #define BROWSER_RECV_MAX 1536
 #define BROWSER_NET_WAIT_TRIES 80
 #define BROWSER_DNS_RETRIES 8
-#define BROWSER_CONNECT_RETRIES 12
+#define BROWSER_CONNECT_TIMEOUT_MS 4000
+#define BROWSER_RESPONSE_TIMEOUT_MS 6000
+#define BROWSER_POLL_SLICE_MS 100
 
 static void browser_format_ip(unsigned int ip, char *out, int out_size)
 {
@@ -71,6 +73,29 @@ static void browser_format_connect_error(char *out, int out_size, const char *ho
              "connect() failed host=%s dst=%s port=%u ip=%s gw=%s dns=%s arp=%u flags=0x%x last_tx_dst=%s nh=%s tx_result=%d",
              host ? host : "?", dst, (unsigned int)port,
              ip, gw, dns, arp_entries, flags, txdst, nexthop, (int)tx_result);
+}
+
+static int browser_poll_fd(int fd, unsigned int events, unsigned int timeout_ms)
+{
+    openos_pollfd_t pfd;
+    int rc;
+
+    memset(&pfd, 0, sizeof(pfd));
+    pfd.fd = fd;
+    pfd.events = (short)events;
+    pfd.revents = 0;
+
+    rc = openos_poll(&pfd, 1, timeout_ms);
+    if (rc > 0) {
+        if (pfd.revents & (OPENOS_POLLERR | OPENOS_POLLHUP))
+            return -1;
+        if (pfd.revents & events)
+            return 1;
+        return -1;
+    }
+    if (rc < 0)
+        return -1;
+    return 0;
 }
 
 static const char *find_body(const char *response)
@@ -163,21 +188,25 @@ static int browser_fetch_http(const char *host, const char *path, char *out, int
     }
 
     {
-        int connected = 0;
-        for (int attempt = 0; attempt < BROWSER_CONNECT_RETRIES; ++attempt) {
-            openos_sockaddr_in_t connect_addr;
-            memset(&connect_addr, 0, sizeof(connect_addr));
-            connect_addr.sin_family = OPENOS_AF_INET;
-            connect_addr.sin_port = openos_htons(dst_port);
-            connect_addr.sin_addr = dst_ip;
-            if (openos_connect(fd, (openos_sockaddr_t *)&connect_addr, sizeof(connect_addr)) == 0) {
-                connected = 1;
-                break;
-            }
-            openos_sleep(10);
-        }
-        if (!connected) {
+        openos_sockaddr_in_t connect_addr;
+        int ready;
+        memset(&connect_addr, 0, sizeof(connect_addr));
+        connect_addr.sin_family = OPENOS_AF_INET;
+        connect_addr.sin_port = openos_htons(dst_port);
+        connect_addr.sin_addr = dst_ip;
+        if (openos_connect(fd, (openos_sockaddr_t *)&connect_addr, sizeof(connect_addr)) < 0) {
             browser_format_connect_error(out, out_size, host, dst_ip, dst_port);
+            openos_close(fd);
+            return -1;
+        }
+        ready = browser_poll_fd(fd, OPENOS_POLLOUT, BROWSER_CONNECT_TIMEOUT_MS);
+        if (ready <= 0) {
+            browser_format_connect_error(out, out_size, host, dst_ip, dst_port);
+            if (ready == 0) {
+                char detail[512];
+                snprintf(detail, sizeof(detail), "%s", out);
+                snprintf(out, out_size, "connect timeout; %s", detail);
+            }
             openos_close(fd);
             return -1;
         }
@@ -192,16 +221,42 @@ static int browser_fetch_http(const char *host, const char *path, char *out, int
         return -1;
     }
 
-    while (total < out_size - 1) {
-        int n = openos_recv(fd, out + total, (unsigned int)(out_size - 1 - total), 0);
-        if (n <= 0) break;
-        total += n;
-        if (total >= BROWSER_RECV_MAX) break;
+    {
+        unsigned int waited = 0;
+        while (waited < BROWSER_RESPONSE_TIMEOUT_MS && total < out_size - 1) {
+            int ready = browser_poll_fd(fd, OPENOS_POLLIN, BROWSER_POLL_SLICE_MS);
+            if (ready < 0) {
+                snprintf(out, out_size, "recv() poll failed from %s", host);
+                openos_close(fd);
+                return -1;
+            }
+            if (ready == 0) {
+                waited += BROWSER_POLL_SLICE_MS;
+                continue;
+            }
+
+            int n = openos_recv(fd, out + total, (unsigned int)(out_size - 1 - total), 0);
+            if (n < 0) {
+                snprintf(out, out_size, "recv() failed from %s", host);
+                openos_close(fd);
+                return -1;
+            }
+            if (n == 0)
+                break;
+            total += n;
+            out[total] = 0;
+            if (total >= BROWSER_RECV_MAX)
+                break;
+        }
     }
     out[total] = 0;
 
     openos_close(fd);
-    return total > 0 ? 0 : -1;
+    if (total <= 0) {
+        snprintf(out, out_size, "HTTP response timeout from %s", host);
+        return -1;
+    }
+    return 0;
 }
 
 int main(int argc, char **argv)
@@ -216,8 +271,10 @@ int main(int argc, char **argv)
     int close_button;
     int rc;
 
-    if (argc > 1 && argv[1] && argv[1][0]) host = argv[1];
-    if (argc > 2 && argv[2] && argv[2][0]) path = argv[2];
+    if (argc > 1 && argv && argv[1] && argv[1][0]) host = argv[1];
+    if (argc > 2 && argv && argv[2] && argv[2][0]) path = argv[2];
+    if (!host || !host[0]) host = BROWSER_DEFAULT_HOST;
+    if (!path || !path[0]) path = BROWSER_DEFAULT_PATH;
 
     win = openos_gui_create_window("用户态浏览器", 80, 80, 560, 260);
     if (win < 0) {

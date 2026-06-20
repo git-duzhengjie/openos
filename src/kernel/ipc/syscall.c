@@ -899,27 +899,38 @@ static uint32_t sys_ai_request(uint32_t user_req_ptr)
 
 static uint32_t syscall_poll(openos_pollfd_t *user_fds, uint32_t nfds, uint32_t timeout_ms)
 {
-    openos_pollfd_t pfd;
-    uint32_t ready = 0;
+    uint32_t start_ms;
 
-    (void)timeout_ms;
     if (nfds > 64)
         return (uint32_t)-1;
     if (nfds > 0 && (!user_fds || !user_ptr_valid(user_fds, nfds * sizeof(openos_pollfd_t), USERMEM_READ | USERMEM_WRITE)))
         return (uint32_t)-1;
 
-    for (uint32_t i = 0; i < nfds; i++) {
-        if (copy_from_user(&pfd, &user_fds[i], sizeof(pfd)) < 0)
-            return (uint32_t)-1;
-        pfd.revents = 0;
-        if (pfd.fd >= 0 && pfd.events != 0)
-            pfd.revents = (short)vfs_poll_fd(pfd.fd, (uint32_t)pfd.events);
-        if (pfd.revents != 0)
-            ready++;
-        if (copy_to_user(&user_fds[i], &pfd, sizeof(pfd)) < 0)
-            return (uint32_t)-1;
+    start_ms = sched_time_ms();
+    for (;;) {
+        uint32_t ready = 0;
+
+        for (uint32_t i = 0; i < nfds; i++) {
+            openos_pollfd_t pfd;
+            if (copy_from_user(&pfd, &user_fds[i], sizeof(pfd)) < 0)
+                return (uint32_t)-1;
+            pfd.revents = 0;
+            if (pfd.fd >= 0 && pfd.events != 0)
+                pfd.revents = (short)vfs_poll_fd(pfd.fd, (uint32_t)pfd.events);
+            if (pfd.revents != 0)
+                ready++;
+            if (copy_to_user(&user_fds[i], &pfd, sizeof(pfd)) < 0)
+                return (uint32_t)-1;
+        }
+
+        if (ready != 0 || timeout_ms == 0)
+            return ready;
+        if ((uint32_t)(sched_time_ms() - start_ms) >= timeout_ms)
+            return 0;
+
+        thread_sleep(1);
+        sched_yield();
     }
-    return ready;
 }
 
 static uint32_t syscall_select(uint32_t nfds, uint32_t *readfds, uint32_t *writefds, uint32_t *exceptfds, uint32_t timeout_ms)

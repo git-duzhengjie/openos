@@ -10,6 +10,7 @@
 #include "net.h"
 #include "../fs/vfs.h"
 #include "../include/fd.h"
+#include "../include/heap.h"
 #include "../include/pmm.h"
 #include "../include/string.h"
 
@@ -52,6 +53,21 @@ typedef struct socket_bind_slot {
 static uint32_t next_socket_id = 1;
 static uint16_t next_ephemeral_port = SOCKET_EPHEMERAL_FIRST;
 static socket_bind_slot_t bind_slots[SOCKET_MAX_BINDS];
+
+static socket_file_t *socket_alloc_file(void) {
+    socket_file_t *sock = (socket_file_t *)kmalloc(sizeof(socket_file_t));
+    if (!sock) {
+        return NULL;
+    }
+    memset(sock, 0, sizeof(socket_file_t));
+    return sock;
+}
+
+static void socket_free_file(socket_file_t *sock) {
+    if (sock) {
+        kfree(sock);
+    }
+}
 
 static uint16_t socket_bswap16(uint16_t v) {
     return (uint16_t)((v >> 8) | (v << 8));
@@ -176,6 +192,8 @@ static int socket_close(file_t *f) {
         }
         sock->info.state = OPENOS_SOCKET_STATE_CLOSED;
         sock->magic = 0;
+        f->fs_data = NULL;
+        socket_free_file(sock);
     }
     return 0;
 }
@@ -359,11 +377,11 @@ int socket_create_fd(int domain, int type, int protocol) {
     }
     memset(file, 0, sizeof(file_t));
 
-    sock = (socket_file_t *)pmm_alloc_page();
+    sock = socket_alloc_file();
     if (!sock) {
+        pmm_free_page(file);
         return -1;
     }
-    memset(sock, 0, sizeof(socket_file_t));
 
     sock->magic = SOCKET_MAGIC;
     sock->info.id = next_socket_id++;
@@ -416,9 +434,11 @@ int socketpair_create_fds(int domain, int type, int protocol, int sv[2]) {
         return -1;
     }
 
-    a = (socket_file_t *)pmm_alloc_page();
-    b = (socket_file_t *)pmm_alloc_page();
+    a = socket_alloc_file();
+    b = socket_alloc_file();
     if (!a || !b) {
+        if (a) socket_free_file(a);
+        if (b) socket_free_file(b);
         if (fd0 >= 0) vfs_put_file(fd0, NULL);
         if (fd1 >= 0) vfs_put_file(fd1, NULL);
         return -1;
@@ -514,12 +534,11 @@ int socket_accept_fd(int fd, openos_sockaddr_t *addr, uint32_t *addrlen) {
     if (new_fd < 0) {
         return -1;
     }
-    accepted = (socket_file_t *)pmm_alloc_page();
+    accepted = socket_alloc_file();
     if (!accepted) {
         vfs_put_file(new_fd, NULL);
         return -1;
     }
-    memset(accepted, 0, sizeof(socket_file_t));
     accepted->magic = SOCKET_MAGIC;
     accepted->info.id = next_socket_id++;
 
