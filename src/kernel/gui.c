@@ -3648,7 +3648,13 @@ static void gui_desktop_run_action(uint32_t action) {
         return;
     }
     if (action == GUI_DESKTOP_ACTION_BROWSER) {
-        gui_browser_open();
+        int pid = spawn_user_process("/bin/browser", 0);
+        if (pid < 0) {
+            serial_write("[GUI] /bin/browser unavailable, falling back to kernel browser\n");
+            gui_browser_open();
+        } else {
+            serial_write("[GUI] launched /bin/browser\n");
+        }
         return;
     }
     if (action == GUI_DESKTOP_ACTION_SETTINGS) {

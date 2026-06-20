@@ -121,6 +121,7 @@ int main(int argc, char **argv)
     int win;
     int status_label;
     int body_label;
+    int close_button;
     int rc;
 
     if (argc > 1 && argv[1] && argv[1][0]) host = argv[1];
@@ -134,6 +135,7 @@ int main(int argc, char **argv)
 
     status_label = openos_gui_add_label(win, 16, 24, 500, 20, "Loading http://example.com/ ...");
     body_label = openos_gui_add_label(win, 16, 56, 520, 150, "Waiting for HTTP response...");
+    close_button = openos_gui_add_button(win, 16, 216, 80, 24, "Close");
 
     snprintf(summary, sizeof(summary), "Loading http://%s%s ...", host, path);
     openos_gui_set_text(win, status_label, summary);
@@ -142,13 +144,23 @@ int main(int argc, char **argv)
         openos_gui_set_text(win, status_label, "Failed");
         openos_gui_set_text(win, body_label, response);
         printf("browser: %s\n", response);
-        return 1;
+    } else {
+        collapse_html_text(summary, sizeof(summary), find_body(response));
+        openos_gui_set_text(win, status_label, "Done");
+        openos_gui_set_text(win, body_label, summary[0] ? summary : "Empty response");
+        printf("browser: loaded http://%s%s\n", host, path);
+        printf("%s\n", summary);
     }
 
-    collapse_html_text(summary, sizeof(summary), find_body(response));
-    openos_gui_set_text(win, status_label, "Done");
-    openos_gui_set_text(win, body_label, summary[0] ? summary : "Empty response");
-    printf("browser: loaded http://%s%s\n", host, path);
-    printf("%s\n", summary);
-    return 0;
+    for (;;) {
+        openos_gui_event_t event;
+        int ev = openos_gui_poll_event(&event);
+        if (ev > 0 && event.window_id == (unsigned int)win && event.widget_id == (unsigned int)close_button) {
+            break;
+        }
+        openos_sleep(10);
+    }
+
+    openos_gui_destroy_window(win);
+    return rc < 0 ? 1 : 0;
 }

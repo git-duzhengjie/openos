@@ -368,12 +368,12 @@
   - [√] 保持当前轻量浏览器继续可用：HTTP 访问、DNS/TCP/HTTP 非阻塞加载、基础 HTML 转可读文本、简单链接导航
   - [√] 增强当前 HTML 文本化渲染：更完整的 entity 解码、空白压缩、段落/标题/列表/pre/code 基础处理
   - [√] 增强浏览器加载状态机：DNS/TCP/HTTP 分阶段超时、失败状态显示、连续 Go/Refresh 取消旧请求、关闭窗口取消加载上下文
-- [ ] 将 Browser 从 `src/kernel/gui.c` 内核 GUI 中拆出，迁移为用户态 `/bin/browser`
+- [√] 将 Browser 从 `src/kernel/gui.c` 内核 GUI 中拆出，迁移为用户态 `/bin/browser`；桌面 Browser 入口优先启动用户态 `/bin/browser`，内核内置 Browser 仅作 fallback
   - [√] 设计用户态 GUI 应用 ABI：窗口创建、绘制、输入事件、定时器、剪贴板/文本输入等接口
   - [√] 落地最小用户态 GUI syscall ABI：创建/销毁窗口、添加标签/按钮、按钮事件轮询，并用 `/bin/guiprobe` 验证
   - [√] 浏览器崩溃不应拖垮内核，错误通过进程退出或窗口关闭处理：用户态 GUI 窗口绑定进程 PID，`sys_exit` 自动回收窗口和事件
   - [√] 网络访问统一走用户态 socket/libc API，而不是直接调用内核内部函数：新增 `/bin/browser` 用户态原型，使用 `openos_getaddrinfo/openos_socket/openos_connect/openos_send/openos_recv` 拉取 HTTP 页面
-- [ ] 补齐移植开源浏览器内核所需的基础运行环境
+- [√] 补齐移植开源浏览器内核所需的基础运行环境
   - [√] libc/POSIX 子集：malloc/free/realloc、stdio、string、time、errno、文件 API、目录 API；新增 `SYS_UPTIME_MS` 与用户态 `time/gettimeofday/clock` 兼容封装
   - [√] socket API：getaddrinfo/gethostbyname、connect/send/recv/close、select/poll、非阻塞 socket
   - [√] TLS/HTTPS 用户态库适配：优先评估 mbedTLS / BearSSL / wolfSSL 等轻量方案
@@ -381,7 +381,7 @@
   - [√] 图形接口：framebuffer/窗口绘制、矩形裁剪、位图 blit、滚动、双缓冲；扩展 `SYS_GUI_DRAW` 支持 fill/text/blit/scroll/present，并由 `/bin/guiprobe` 验证
   - [√] 图片解码依赖评估：PNG/JPEG/GIF/WebP 可分阶段接入
   - [√] 文件与配置目录：缓存、cookie、证书、字体资源、下载目录；启动时创建 `/home/browser/{cache,cookies,certs,downloads}` 并在用户态暴露路径常量
-- [ ] 优先评估并移植 NetSurf 作为 OpenOS 第一代开源浏览器内核
+- [√] 优先评估并移植 NetSurf 作为 OpenOS 第一代开源浏览器内核；完成平台层 smoke、OpenOS 用户态平台适配和 `/bin/nsdemo` HTTP 文本化页面演示
   - [√] 阅读 NetSurf framebuffer frontend、libdom、libcss、hubbub、utils 等依赖结构
   - [√] 先在宿主机完成最小 framebuffer frontend 构建验证：新增 `ports/netsurf-openos` 平台层 smoke，覆盖 surface/clip/fill/blit/scroll/present/time/file/text/http 占位接口
   - [√] 为 OpenOS 编写 NetSurf 平台层：framebuffer 绘制、输入事件、定时器、文件、socket、字体；新增 `src/user/openos_netsurf_platform.c`
