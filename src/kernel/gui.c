@@ -28,6 +28,7 @@ static void gui_desktop_run_action(uint32_t action);
 static int  gui_taskbar_search_handle_key(int key);
 static int  gui_is_enter_key(int key);
 static int  browser_handle_address_enter(int key);
+static int  browser_header_name_eq(const char *p, const char *name);
 static void gui_taskbar_search_open_result(uint32_t index);
 static int  gui_taskbar_search_result_index_at(int x, int y);
 static void gui_taskbar_search_reset_results(void);
@@ -5666,6 +5667,98 @@ static uint32_t browser_render_text_at(const char *text, uint32_t start_line) {
     return line;
 }
 
+static int browser_str_starts_ci(const char *p, const char *prefix) {
+    uint32_t i = 0;
+    if (!p || !prefix) return 0;
+    while (prefix[i]) {
+        char a = p[i];
+        char b = prefix[i];
+        if (a >= 'A' && a <= 'Z') a = (char)(a - 'A' + 'a');
+        if (b >= 'A' && b <= 'Z') b = (char)(b - 'A' + 'a');
+        if (a != b) return 0;
+        i++;
+    }
+    return 1;
+}
+
+static int browser_html_tag_break(const char *tag) {
+    while (*tag == ' ' || *tag == '\t' || *tag == '/') tag++;
+    return browser_str_starts_ci(tag, "br") || browser_str_starts_ci(tag, "p") ||
+           browser_str_starts_ci(tag, "div") || browser_str_starts_ci(tag, "li") ||
+           browser_str_starts_ci(tag, "tr") || browser_str_starts_ci(tag, "h1") ||
+           browser_str_starts_ci(tag, "h2") || browser_str_starts_ci(tag, "h3") ||
+           browser_str_starts_ci(tag, "title");
+}
+
+static char browser_decode_entity(const char **pp) {
+    const char *p = *pp;
+    if (browser_str_starts_ci(p, "amp;")) { *pp = p + 4; return '&'; }
+    if (browser_str_starts_ci(p, "lt;")) { *pp = p + 3; return '<'; }
+    if (browser_str_starts_ci(p, "gt;")) { *pp = p + 3; return '>'; }
+    if (browser_str_starts_ci(p, "quot;")) { *pp = p + 5; return '"'; }
+    if (browser_str_starts_ci(p, "nbsp;")) { *pp = p + 5; return ' '; }
+    return '&';
+}
+
+static void browser_html_to_text(const char *html, char *out, uint32_t cap) {
+    uint32_t n = 0;
+    int in_tag = 0;
+    int last_space = 1;
+    const char *tag_start = 0;
+    const char *p = html;
+    if (!out || cap == 0) return;
+    out[0] = '\0';
+    if (!html) return;
+    while (*p && n + 1u < cap) {
+        char ch = *p++;
+        if (in_tag) {
+            if (ch == '>') {
+                if (tag_start && browser_html_tag_break(tag_start) && n > 0 && out[n - 1] != '\n') {
+                    out[n++] = '\n';
+                    last_space = 1;
+                }
+                in_tag = 0;
+                tag_start = 0;
+            }
+            continue;
+        }
+        if (ch == '<') {
+            in_tag = 1;
+            tag_start = p;
+            continue;
+        }
+        if (ch == '&') ch = browser_decode_entity(&p);
+        if (ch == '\r' || ch == '\n' || ch == '\t') ch = ' ';
+        if ((unsigned char)ch < 32u) continue;
+        if (ch == ' ') {
+            if (last_space) continue;
+            last_space = 1;
+        } else {
+            last_space = 0;
+        }
+        out[n++] = ch;
+    }
+    out[n] = '\0';
+}
+
+static int browser_response_is_html(char *response, const char *body) {
+    const char *p = response;
+    while (p && *p && p < body) {
+        if (browser_header_name_eq(p, "Content-Type")) {
+            const char *v = p;
+            while (*v && *v != ':' && *v != '\n') v++;
+            if (*v == ':') v++;
+            while (*v && *v != '\r' && *v != '\n') {
+                if (browser_str_starts_ci(v, "text/html") || browser_str_starts_ci(v, "application/xhtml")) return 1;
+                v++;
+            }
+        }
+        while (*p && *p != '\n') p++;
+        if (*p == '\n') p++;
+    }
+    return body && (browser_str_starts_ci(body, "<!doctype html") || browser_str_starts_ci(body, "<html"));
+}
+
 static uint32_t browser_render_body_at(const char *body, uint32_t start_line) {
     if (!body || !*body) {
         if (start_line < GUI_BROWSER_CONTENT_LINES) browser_set_widget_text(g_browser_content_lines[start_line++], "HTTP response has no body.");
@@ -5731,6 +5824,11 @@ static uint32_t browser_render_response_summary(char *response, const char *body
         if (*p == '\n') p++;
     }
     if (line < GUI_BROWSER_CONTENT_LINES) browser_set_widget_text(g_browser_content_lines[line++], "");
+    if (browser_response_is_html(response, body)) {
+        static char html_text[1024];
+        browser_html_to_text(body, html_text, sizeof(html_text));
+        return browser_render_body_at(html_text, line);
+    }
     return browser_render_body_at(body, line);
 }
 
