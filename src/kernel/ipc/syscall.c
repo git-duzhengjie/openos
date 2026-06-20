@@ -2155,6 +2155,17 @@ uint32_t syscall_dispatch(uint32_t num,
             return 0;
         }
 
+    case SYS_GUI_SET_TEXT:
+        {
+            gui_user_widget_request_t req;
+            if (!a || !user_ptr_valid((void *)a, sizeof(req), USERMEM_READ))
+                return (uint32_t)-1;
+            if (copy_from_user(&req, (const void *)a, sizeof(req)) < 0)
+                return (uint32_t)-1;
+            req.text[sizeof(req.text) - 1] = 0;
+            return (uint32_t)gui_user_set_text(req.window_id, req.widget_id, req.text);
+        }
+
     default:
         return 0xFFFFFFFF;
     }

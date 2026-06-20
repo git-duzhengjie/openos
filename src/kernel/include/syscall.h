@@ -119,6 +119,7 @@
 #define SYS_GUI_ADD_LABEL 322
 #define SYS_GUI_ADD_BUTTON 323
 #define SYS_GUI_POLL_EVENT 324
+#define SYS_GUI_SET_TEXT 325
 
 #define OPENOS_CAP_SETUID    (1u << 0)
 #define OPENOS_CAP_SETGID    (1u << 1)

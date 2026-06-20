@@ -159,3 +159,21 @@ int gui_user_poll_event(gui_user_event_t *out_event) {
     out_event->button = 0;
     return 0;
 }
+
+int gui_user_set_text(uint32_t window_id, uint32_t widget_id, const char *text) {
+    gui_window_t *win = gui_find_window(window_id);
+    if (!win || !text) {
+        return -1;
+    }
+
+    gui_widget_t *widget = gui_find_widget(win, widget_id);
+    if (!widget) {
+        return -1;
+    }
+
+    char safe_text[GUI_USER_TEXT_MAX + 1];
+    gui_user_copy_text(safe_text, sizeof(safe_text), text);
+    gui_widget_set_text(widget, safe_text);
+    gui_invalidate_rect(win->rect.x, win->rect.y, win->rect.w, win->rect.h);
+    return 0;
+}

@@ -116,6 +116,7 @@
 #define SYS_GUI_ADD_LABEL 322
 #define SYS_GUI_ADD_BUTTON 323
 #define SYS_GUI_POLL_EVENT 324
+#define SYS_GUI_SET_TEXT 325
 
 #define OPENOS_CAP_SETUID    (1u << 0)
 #define OPENOS_CAP_SETGID    (1u << 1)
@@ -431,6 +432,7 @@ typedef struct openos_gui_event {
 
 typedef struct openos_gui_widget_request {
     unsigned int window_id;
+    unsigned int widget_id;
     int x;
     int y;
     int w;
@@ -562,6 +564,7 @@ static inline int openos_gui_add_label(int window_id, int x, int y, int w, int h
 {
     openos_gui_widget_request_t req;
     req.window_id = (unsigned int)window_id;
+    req.widget_id = 0;
     req.x = x;
     req.y = y;
     req.w = w;
@@ -574,6 +577,7 @@ static inline int openos_gui_add_button(int window_id, int x, int y, int w, int 
 {
     openos_gui_widget_request_t req;
     req.window_id = (unsigned int)window_id;
+    req.widget_id = 0;
     req.x = x;
     req.y = y;
     req.w = w;
@@ -585,6 +589,19 @@ static inline int openos_gui_add_button(int window_id, int x, int y, int w, int 
 static inline int openos_gui_poll_event(openos_gui_event_t *event)
 {
     return openos_syscall_result(openos_syscall1(SYS_GUI_POLL_EVENT, (int)event));
+}
+
+static inline int openos_gui_set_text(int window_id, int widget_id, const char *text)
+{
+    openos_gui_widget_request_t req;
+    req.window_id = (unsigned int)window_id;
+    req.widget_id = (unsigned int)widget_id;
+    req.x = 0;
+    req.y = 0;
+    req.w = 0;
+    req.h = 0;
+    openos_gui_copy_text64(req.text, text);
+    return openos_syscall_result(openos_syscall1(SYS_GUI_SET_TEXT, (int)&req));
 }
 
 static inline int openos_sendto(int fd, const void *buf, unsigned int len, int flags,
