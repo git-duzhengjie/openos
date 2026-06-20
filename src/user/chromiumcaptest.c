@@ -271,6 +271,77 @@ static int test_file_mmap(void)
     return CAP_PASS;
 }
 
+static int test_filesystem_metadata(void)
+{
+    openos_stat_t bin_st;
+    openos_stat_t file_st;
+    openos_stat_t lstat_st;
+    openos_stat_t fstat_st;
+    openos_dirent_t entry;
+    openos_DIR *dir;
+    openos_dirent_t *de;
+    int found_bin = 0;
+    int found_self = 0;
+    int fd;
+    int i;
+
+    if (openos_stat("/bin", &bin_st) != 0 ||
+        (bin_st.mode & FS_DIR) != FS_DIR) {
+        return CAP_FAIL;
+    }
+
+    if (openos_stat("/bin/chromiumcaptest", &file_st) != 0 ||
+        (file_st.mode & FS_FILE) != FS_FILE || file_st.size == 0) {
+        return CAP_FAIL;
+    }
+
+    if (openos_lstat("/bin/chromiumcaptest", &lstat_st) != 0 ||
+        (lstat_st.mode & FS_FILE) != FS_FILE ||
+        lstat_st.size != file_st.size) {
+        return CAP_FAIL;
+    }
+
+    fd = openos_open("/bin/chromiumcaptest", O_RDONLY, 0);
+    if (fd < 0) {
+        return CAP_FAIL;
+    }
+    if (openos_fstat(fd, &fstat_st) != 0 ||
+        (fstat_st.mode & FS_FILE) != FS_FILE ||
+        fstat_st.size != file_st.size) {
+        openos_close(fd);
+        return CAP_FAIL;
+    }
+    openos_close(fd);
+
+    for (i = 0; i < 64; ++i) {
+        if (openos_readdir_path("/", i, &entry) <= 0)
+            break;
+        if (openos_strcmp(entry.name, "bin") == 0 &&
+            (entry.mode & FS_DIR) == FS_DIR) {
+            found_bin = 1;
+        }
+    }
+    if (!found_bin) {
+        return CAP_FAIL;
+    }
+
+    dir = openos_opendir("/bin");
+    if (!dir) {
+        return CAP_FAIL;
+    }
+    while ((de = openos_readdir(dir)) != 0) {
+        if (openos_strcmp(de->name, "chromiumcaptest") == 0 &&
+            (de->mode & FS_FILE) == FS_FILE && de->size == file_st.size) {
+            found_self = 1;
+        }
+    }
+    if (openos_closedir(dir) != 0) {
+        return CAP_FAIL;
+    }
+
+    return found_self ? CAP_PASS : CAP_FAIL;
+}
+
 static int test_sbrk(void)
 {
     unsigned char *old_break;
@@ -761,7 +832,7 @@ int main(int argc, char **argv)
     (void)argv;
 
     openos_printf("Chromium core capability test\n");
-    openos_printf("target: mmap file-mmap mprotect v8-memory-policy brk thread tls pthread-sync futex shm eventfd message-queue service-channel socketpair poll time spawn fork pipe fd argv env\n");
+    openos_printf("target: mmap file-mmap fs-metadata mprotect v8-memory-policy brk thread tls pthread-sync futex shm eventfd message-queue service-channel socketpair poll time spawn fork pipe fd argv env\n");
 
     status = test_uptime();
     print_result("monotonic uptime", status);
@@ -793,6 +864,10 @@ int main(int argc, char **argv)
 
     status = test_file_mmap();
     print_result("file mmap private snapshot", status);
+    failed += status == CAP_FAIL;
+
+    status = test_filesystem_metadata();
+    print_result("filesystem stat/fstat/lstat/readdir", status);
     failed += status == CAP_FAIL;
 
     status = test_sbrk();

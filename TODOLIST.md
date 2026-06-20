@@ -440,6 +440,7 @@
   - [√] 设计 `/bin/chromium` 第一版单进程模式与后续多进程模型边界：已新增 `docs/chromium-process-model.md`，明确 single-process/content_shell 起步、多进程恢复顺序和 `/bin/chromiumcaptest` 最低验收线
 - [ ] M5 文件系统与资源管理
   - [ ] 完善 `stat/fstat/lstat`、权限、mtime/ctime/atime、目录遍历和路径规范化
+    - [√] 已将 `stat/fstat/lstat/readdir/opendir` 基础元数据与目录遍历语义并入 `/bin/chromiumcaptest`，覆盖 Chromium 资源发现和 pak 文件探测所需最小文件系统查询能力
   - [ ] 支持大文件、稀疏文件、资源 pak 文件读取与缓存目录
   - [ ] 统一应用数据目录：cache、cookies、certs、profiles、downloads
 - [ ] M6 网络与 TLS
