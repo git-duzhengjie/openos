@@ -514,6 +514,45 @@ static int test_eventfd(void)
     return openos_eventfd_destroy(&efd) == 0 ? CAP_PASS : CAP_FAIL;
 }
 
+static int test_message_queue(void)
+{
+    openos_mq_t mq;
+    char buf[32];
+    int ret;
+
+    if (openos_mq_create(&mq) != 0) {
+        return CAP_FAIL;
+    }
+
+    ret = openos_mq_send(&mq, "hello", 6);
+    if (ret != 6) {
+        openos_mq_destroy(&mq);
+        return CAP_FAIL;
+    }
+
+    ret = openos_mq_recv(&mq, buf, sizeof(buf));
+    if (ret != 6 || buf[0] != 'h' || buf[1] != 'e' || buf[2] != 'l' ||
+        buf[3] != 'l' || buf[4] != 'o' || buf[5] != 0) {
+        openos_mq_destroy(&mq);
+        return CAP_FAIL;
+    }
+
+    ret = openos_mq_send(&mq, "second", 7);
+    if (ret != 7) {
+        openos_mq_destroy(&mq);
+        return CAP_FAIL;
+    }
+
+    ret = openos_mq_recv(&mq, buf, 4);
+    if (ret != 4 || buf[0] != 's' || buf[1] != 'e' ||
+        buf[2] != 'c' || buf[3] != 'o') {
+        openos_mq_destroy(&mq);
+        return CAP_FAIL;
+    }
+
+    return openos_mq_destroy(&mq) == 0 && mq == 0 ? CAP_PASS : CAP_FAIL;
+}
+
 static int test_spawn_argv_env_wait(void)
 {
     char *argv[] = { (char *)"/bin/argtest", (char *)"alpha", (char *)"beta", 0 };
@@ -653,7 +692,7 @@ int main(int argc, char **argv)
     (void)argv;
 
     openos_printf("Chromium core capability test\n");
-    openos_printf("target: mmap file-mmap mprotect v8-memory-policy brk thread tls pthread-sync futex shm eventfd socketpair poll time spawn fork pipe fd argv env\n");
+    openos_printf("target: mmap file-mmap mprotect v8-memory-policy brk thread tls pthread-sync futex shm eventfd message-queue socketpair poll time spawn fork pipe fd argv env\n");
 
     status = test_uptime();
     print_result("monotonic uptime", status);
@@ -713,6 +752,10 @@ int main(int argc, char **argv)
 
     status = test_eventfd();
     print_result("eventfd counter", status);
+    failed += status == CAP_FAIL;
+
+    status = test_message_queue();
+    print_result("message queue send/recv/truncate", status);
     failed += status == CAP_FAIL;
 
     status = test_socketpair_poll();
