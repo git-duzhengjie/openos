@@ -1725,17 +1725,20 @@ static int sys_dnslookup(uint32_t user_name, uint32_t user_ip)
     if (!name[0]) return -1;
 
     if (dns_query_a(name) < 0) return -1;
-    for (i = 0; i < 600000; i++) {
+    for (i = 0; i < 250; i++) {
+        uint32_t start_ms = sched_time_ms();
         net_poll();
         if (dns_get_state() == DNS_STATE_RESOLVED) {
             ip = dns_get_last_result();
             break;
         }
         if (dns_get_state() == DNS_STATE_FAILED) break;
-        if ((i & 0x3ff) == 0) asm volatile ("pause");
+        while (sched_time_ms() == start_ms)
+            asm volatile ("pause");
     }
 
     if (!ip) {
+        dns_mark_failed();
         vga_write("dns: lookup timed out or failed\n");
         dns_print_info();
         return -1;

@@ -4,12 +4,16 @@
  * ============================================================ */
 #include "dns.h"
 #include "dhcp.h"
+#include "process.h"
 #include "string.h"
 #include "vga.h"
 
 #define DNS_CLIENT_PORT 5300
 #define DNS_MAX_PACKET 512
 #define DNS_MAX_NAME   128
+#define DNS_CACHE_SIZE 8
+#define DNS_CACHE_SUCCESS_TTL_MS 300000U
+#define DNS_CACHE_FAILURE_TTL_MS 30000U
 #define DNS_TYPE_A     1
 #define DNS_CLASS_IN   1
 #define DNS_FLAG_QUERY 0x0100
@@ -24,6 +28,14 @@ typedef struct dns_header {
     uint16_t arcount;
 } __attribute__((packed)) dns_header_t;
 
+typedef struct dns_cache_entry {
+    int valid;
+    int negative;
+    uint32_t ip;
+    uint32_t expires_ms;
+    char name[DNS_MAX_NAME];
+} dns_cache_entry_t;
+
 typedef struct dns_client {
     dns_state_t state;
     uint16_t next_id;
@@ -33,6 +45,10 @@ typedef struct dns_client {
     char last_name[DNS_MAX_NAME];
     uint32_t queries_tx;
     uint32_t replies_rx;
+    dns_cache_entry_t cache[DNS_CACHE_SIZE];
+    uint32_t cache_cursor;
+    uint32_t cache_hits;
+    uint32_t cache_negative_hits;
 } dns_client_t;
 
 static dns_client_t dns;
@@ -60,6 +76,21 @@ static void dns_print_ip(uint32_t ip) {
     char text[16];
     net_format_ipv4(ip, text);
     vga_write(text);
+}
+
+static void dns_print_dec(uint32_t value) {
+    char text[11];
+    int pos = 10;
+    text[pos] = '\0';
+    if (value == 0) {
+        vga_write("0");
+        return;
+    }
+    while (value && pos > 0) {
+        text[--pos] = (char)('0' + (value % 10U));
+        value /= 10U;
+    }
+    vga_write(&text[pos]);
 }
 
 static int dns_name_len(const char *name) {
@@ -160,6 +191,53 @@ static void dns_copy_name(char *dst, const char *src) {
     dst[i] = '\0';
 }
 
+static int dns_name_equals(const char *a, const char *b) {
+    uint16_t i = 0;
+    if (!a || !b) return 0;
+    while (a[i] && b[i] && i < DNS_MAX_NAME) {
+        if (a[i] != b[i]) return 0;
+        i++;
+    }
+    return a[i] == b[i];
+}
+
+static dns_cache_entry_t *dns_find_cache(const char *name, uint32_t now_ms) {
+    uint32_t i;
+    for (i = 0; i < DNS_CACHE_SIZE; i++) {
+        dns_cache_entry_t *entry = &dns.cache[i];
+        if (!entry->valid) continue;
+        if ((int32_t)(entry->expires_ms - now_ms) <= 0) {
+            entry->valid = 0;
+            continue;
+        }
+        if (dns_name_equals(entry->name, name)) return entry;
+    }
+    return 0;
+}
+
+static void dns_store_cache(const char *name, uint32_t ip, int negative) {
+    uint32_t now_ms = sched_time_ms();
+    uint32_t i;
+    dns_cache_entry_t *entry = 0;
+
+    for (i = 0; i < DNS_CACHE_SIZE; i++) {
+        if (dns.cache[i].valid && dns_name_equals(dns.cache[i].name, name)) {
+            entry = &dns.cache[i];
+            break;
+        }
+    }
+    if (!entry) {
+        entry = &dns.cache[dns.cache_cursor % DNS_CACHE_SIZE];
+        dns.cache_cursor++;
+    }
+    memset(entry, 0, sizeof(*entry));
+    entry->valid = 1;
+    entry->negative = negative ? 1 : 0;
+    entry->ip = negative ? 0 : ip;
+    entry->expires_ms = now_ms + (negative ? DNS_CACHE_FAILURE_TTL_MS : DNS_CACHE_SUCCESS_TTL_MS);
+    dns_copy_name(entry->name, name);
+}
+
 static int dns_parse_answer(const uint8_t *packet, uint16_t len) {
     const dns_header_t *hdr;
     uint16_t qd;
@@ -195,6 +273,7 @@ static int dns_parse_answer(const uint8_t *packet, uint16_t len) {
         if ((uint16_t)(pos + rdlen) > len) return -1;
         if (type == DNS_TYPE_A && klass == DNS_CLASS_IN && rdlen == 4U) {
             dns.last_result = dns_ntohl(*(const uint32_t *)(packet + pos));
+            dns_store_cache(dns.last_name, dns.last_result, 0);
             dns.state = DNS_STATE_RESOLVED;
             return 0;
         }
@@ -254,6 +333,14 @@ dns_state_t dns_get_state(void) {
     return dns.state;
 }
 
+uint32_t dns_get_cache_hits(void) {
+    return dns.cache_hits;
+}
+
+uint32_t dns_get_cache_negative_hits(void) {
+    return dns.cache_negative_hits;
+}
+
 int dns_query_a(const char *name) {
     uint8_t packet[DNS_MAX_PACKET];
     dns_header_t *hdr;
@@ -263,15 +350,30 @@ int dns_query_a(const char *name) {
     uint32_t server;
 
     if (dns_name_len(name) <= 0) return -1;
+    dns_copy_name(dns.last_name, name);
+    {
+        dns_cache_entry_t *entry = dns_find_cache(name, sched_time_ms());
+        if (entry) {
+            if (entry->negative) {
+                dns.last_result = 0;
+                dns.state = DNS_STATE_FAILED;
+                dns.cache_negative_hits++;
+                return -1;
+            }
+            dns.last_result = entry->ip;
+            dns.state = DNS_STATE_RESOLVED;
+            dns.cache_hits++;
+            return 0;
+        }
+    }
     if (dns_parse_ipv4_literal(name, &dns.last_result) == 0) {
-        dns_copy_name(dns.last_name, name);
+        dns_store_cache(name, dns.last_result, 0);
         dns.state = DNS_STATE_RESOLVED;
         return 0;
     }
     memset(packet, 0, sizeof(packet));
     dns.active_id = ++dns.next_id;
     dns.last_result = 0;
-    dns_copy_name(dns.last_name, name);
     dns.state = DNS_STATE_QUERYING;
 
     hdr = (dns_header_t *)packet;
@@ -280,10 +382,12 @@ int dns_query_a(const char *name) {
     hdr->qdcount = dns_htons(1);
     pos = sizeof(dns_header_t);
     if (dns_encode_name(name, packet, &pos, sizeof(packet)) < 0) {
+        dns_store_cache(name, 0, 1);
         dns.state = DNS_STATE_FAILED;
         return -1;
     }
     if ((uint16_t)(pos + 4U) > sizeof(packet)) {
+        dns_store_cache(name, 0, 1);
         dns.state = DNS_STATE_FAILED;
         return -1;
     }
@@ -300,11 +404,19 @@ int dns_query_a(const char *name) {
         vga_write("dns: send query failed server=");
         dns_print_ip(server);
         vga_write("\n");
+        dns_store_cache(name, 0, 1);
         dns.state = DNS_STATE_FAILED;
         return -1;
     }
     dns.queries_tx++;
     return 0;
+}
+
+void dns_mark_failed(void) {
+    if (dns.last_name[0])
+        dns_store_cache(dns.last_name, 0, 1);
+    dns.last_result = 0;
+    dns.state = DNS_STATE_FAILED;
 }
 
 void dns_print_info(void) {
@@ -319,5 +431,9 @@ void dns_print_info(void) {
     vga_write(dns.last_name[0] ? dns.last_name : "-");
     vga_write(" -> ");
     dns_print_ip(dns.last_result);
+    vga_write("\ncache hits: ");
+    dns_print_dec(dns.cache_hits);
+    vga_write(" negative hits: ");
+    dns_print_dec(dns.cache_negative_hits);
     vga_write("\n");
 }

@@ -19,6 +19,9 @@ void dns_set_server(uint32_t server_ip);
 uint32_t dns_get_server(void);
 uint32_t dns_get_last_result(void);
 dns_state_t dns_get_state(void);
+uint32_t dns_get_cache_hits(void);
+uint32_t dns_get_cache_negative_hits(void);
+void dns_mark_failed(void);
 void dns_print_info(void);
 
 #endif /* OPENOS_DNS_H */

@@ -1627,6 +1627,13 @@ static int test_dns_resolver_literal(void)
     if (openos_dnslookup("127.0.0.1", &ip) != 0 || ip != 0x7f000001U) {
         return CAP_FAIL;
     }
+    ip = 0;
+    if (openos_dnslookup("127.0.0.1", &ip) != 0 || ip != 0x7f000001U) {
+        return CAP_FAIL;
+    }
+    if (openos_dnslookup("256.1.1.1", &ip) == 0) {
+        return CAP_FAIL;
+    }
     if (openos_dnslookup("256.1.1.1", &ip) == 0) {
         return CAP_FAIL;
     }

@@ -464,6 +464,7 @@
   - [ ] TCP 长连接、半关闭、RST、超时、窗口与重传压力测试
   - [ ] DNS resolver 完善：缓存、超时、失败回退、IPv4 优先策略
     - [√] 已新增 DNS IPv4 字面量快路径，用户态 `openos_dnslookup/openos_getaddrinfo/openos_gethostbyname` 可离线解析 IPv4 地址，并接入 `/bin/chromiumcaptest` 验收
+    - [√] 已为 DNS resolver 增加成功缓存、失败负缓存、毫秒级超时回退，并在 `/bin/chromiumcaptest` 覆盖重复解析快路径
   - [ ] 引入或实现可维护 TLS 库，支撑 HTTPS、证书链校验和系统信任根
   - [ ] 为 Chromium net stack 所需 socket 行为补齐错误码、非阻塞、poll 边界语义
     - [√] 已增强 `/bin/chromiumcaptest` 的 `socketpair` poll 边界验收，覆盖空队列不报 `POLLIN`、可写端 `POLLOUT`、空读失败和对端关闭 `POLLHUP`
