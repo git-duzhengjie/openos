@@ -123,6 +123,8 @@
 #define SYS_GUI_DRAW 326
 #define SYS_MMAP_FILE    328
 #define SYS_CHROMIUM_MEMORY_POLICY 329
+#define SYS_TLS_SET     330
+#define SYS_TLS_GET     331
 
 #define OPENOS_CHROMIUM_MEM_JITLESS_DEFAULT     (1u << 0)
 #define OPENOS_CHROMIUM_MEM_EXEC_PROT_RESERVED  (1u << 1)
@@ -2125,6 +2127,16 @@ static inline int openos_mprotect(void *addr, int len, int prot)
 static inline unsigned int openos_chromium_memory_policy(void)
 {
     return (unsigned int)openos_syscall0(SYS_CHROMIUM_MEMORY_POLICY);
+}
+
+static inline int openos_tls_set(void *base)
+{
+    return openos_syscall_result(openos_syscall1(SYS_TLS_SET, (int)base));
+}
+
+static inline void *openos_tls_get(void)
+{
+    return (void *)openos_syscall0(SYS_TLS_GET);
 }
 
 static inline int openos_brk(void *addr)

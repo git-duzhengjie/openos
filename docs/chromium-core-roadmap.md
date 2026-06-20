@@ -48,7 +48,7 @@ Chromium base、V8、网络栈和渲染流水线依赖稳定线程模型：
 - 用户线程：已有 `openos_thread_create/thread_exit/gettid`。
 - futex：已有测试入口，需要覆盖 wait/wake/timeout/多等待者。
 - mutex/semaphore/condition：已有基础测试入口；已补充 `openos_pthread_*` 用户态薄封装，并纳入 `chromiumcaptest` mutex/cond 同步验收。
-- 线程局部存储 TLS：需要实现，C++ runtime 和 Chromium base 必需。
+- 线程局部存储 TLS：已完成轻量 `SYS_TLS_SET/SYS_TLS_GET` base 指针 ABI，C++ runtime 和 Chromium base 后续可在此基础上扩展。
 - 调度公平性和优先级：需要补足 timer、yield、sleep、nice/priority 行为。
 - 栈管理：线程栈 guard page、栈溢出诊断。
 
@@ -153,7 +153,7 @@ Chromium 主体是 C++，OpenOS 需要：
 
 ### M3：线程与 IPC 增强
 
-- TLS。
+- TLS base syscall。
 - futex timeout 和多等待者。
 - fd poll 统一。
 - event loop 可承载 Chromium base message pump。

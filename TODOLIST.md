@@ -422,6 +422,7 @@
     - [√] 已完成原生 `SYS_CHROMIUM_MEMORY_POLICY` 策略查询：当前 i386 阶段声明默认 jitless，`PROT_EXEC` 语义已保留，待 NX/W^X 后启用 executable mmap
 - [ ] M3 线程、同步与调度增强
   - [ ] 用户态线程 TLS / thread-local storage 基础 ABI
+    - [√] 已完成轻量 TLS base syscall：`SYS_TLS_SET/SYS_TLS_GET`，线程结构保存 `tls_base`，并接入 `/bin/chromiumcaptest` 验收
   - [ ] futex wait/wake 语义稳定化，补齐超时、唤醒数量和错误码
   - [ ] 条件变量、mutex、semaphore 压测，确保可支撑 Chromium base::Thread / TaskRunner
     - [√] 已补充 pthread-like 用户态薄封装 `openos_pthread_*`，并在 `/bin/chromiumcaptest` 中增加 mutex/cond 同步验收

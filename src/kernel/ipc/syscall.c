@@ -1408,6 +1408,23 @@ static uint32_t sys_munmap_user(uint32_t addr, uint32_t len)
     return 0;
 }
 
+static uint32_t sys_tls_set(uint32_t base)
+{
+    thread_t *thread = sched_get_current();
+    if (!thread)
+        return (uint32_t)-1;
+    thread->tls_base = base;
+    return 0;
+}
+
+static uint32_t sys_tls_get(void)
+{
+    thread_t *thread = sched_get_current();
+    if (!thread)
+        return 0;
+    return thread->tls_base;
+}
+
 static uint32_t sys_chromium_memory_policy(void)
 {
     /*
@@ -1666,6 +1683,12 @@ uint32_t syscall_dispatch(uint32_t num,
 
     case SYS_CHROMIUM_MEMORY_POLICY:
         return sys_chromium_memory_policy();
+
+    case SYS_TLS_SET:
+        return sys_tls_set(a);
+
+    case SYS_TLS_GET:
+        return sys_tls_get();
 
     case SYS_MPROTECT:
         return sys_mprotect_user(a, b, c);

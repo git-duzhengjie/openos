@@ -12,6 +12,8 @@ static volatile int g_thread_value = 0;
 static openos_pthread_mutex_t g_sync_mutex = 0;
 static openos_pthread_cond_t g_sync_cond = 0;
 static volatile int g_sync_ready = 0;
+static volatile int g_tls_done = 0;
+static volatile int g_tls_ok = 0;
 
 static void print_result(const char *name, int status)
 {
@@ -272,6 +274,39 @@ static void sync_worker(void *arg)
     openos_thread_exit(0);
 }
 
+static void tls_worker(void *arg)
+{
+    int *worker_tls = (int *)arg;
+    if (openos_tls_set(worker_tls) == 0 && openos_tls_get() == worker_tls)
+        g_tls_ok = 1;
+    g_tls_done = 1;
+    openos_thread_exit(0);
+}
+
+static int test_tls(void)
+{
+    int main_tls = 0x1111;
+    int worker_tls = 0x2222;
+    openos_thread_t tid;
+    int spin = 0;
+
+    g_tls_done = 0;
+    g_tls_ok = 0;
+    if (openos_tls_set(&main_tls) != 0)
+        return CAP_FAIL;
+    if (openos_tls_get() != &main_tls)
+        return CAP_FAIL;
+    if (openos_thread_create(&tid, tls_worker, &worker_tls) != 0)
+        return CAP_FAIL;
+    while (!g_tls_done && spin++ < 100000)
+        openos_yield();
+    if (!g_tls_done || !g_tls_ok)
+        return CAP_FAIL;
+    if (openos_tls_get() != &main_tls)
+        return CAP_FAIL;
+    return CAP_PASS;
+}
+
 static int test_pthread_sync(void)
 {
     openos_pthread_t tid;
@@ -445,7 +480,7 @@ int main(int argc, char **argv)
     (void)argv;
 
     openos_printf("Chromium core capability test\n");
-    openos_printf("target: mmap file-mmap mprotect v8-memory-policy brk thread pthread-sync shm eventfd socketpair poll time\n");
+    openos_printf("target: mmap file-mmap mprotect v8-memory-policy brk thread tls pthread-sync shm eventfd socketpair poll time\n");
 
     status = test_uptime();
     print_result("monotonic uptime", status);
@@ -481,6 +516,10 @@ int main(int argc, char **argv)
 
     status = test_thread();
     print_result("thread create shared address space", status);
+    failed += status == CAP_FAIL;
+
+    status = test_tls();
+    print_result("thread-local storage base", status);
     failed += status == CAP_FAIL;
 
     status = test_pthread_sync();

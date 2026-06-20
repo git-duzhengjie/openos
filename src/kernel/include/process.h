@@ -93,6 +93,7 @@ typedef struct thread {
     uint32_t kernel_ip;      /* 恢复执行点 */
     uint32_t kernel_stack;    /* 内核栈基址 */
     uint32_t kernel_stack_top;
+    uint32_t tls_base;        /* 线程局部存储基址 */
 
     /* 寄存器快照 */
     uint32_t eax, ebx, ecx, edx;
