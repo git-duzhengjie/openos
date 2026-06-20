@@ -72,6 +72,36 @@ static int dns_name_len(const char *name) {
     return len;
 }
 
+static int dns_parse_ipv4_literal(const char *name, uint32_t *out_ip) {
+    uint32_t parts[4];
+    uint32_t value = 0;
+    uint32_t part = 0;
+    int saw_digit = 0;
+    const char *p;
+
+    if (!name || !out_ip) return -1;
+    p = name;
+    while (*p) {
+        if (*p >= '0' && *p <= '9') {
+            value = value * 10U + (uint32_t)(*p - '0');
+            if (value > 255U) return -1;
+            saw_digit = 1;
+        } else if (*p == '.') {
+            if (!saw_digit || part >= 3U) return -1;
+            parts[part++] = value;
+            value = 0;
+            saw_digit = 0;
+        } else {
+            return -1;
+        }
+        p++;
+    }
+    if (!saw_digit || part != 3U) return -1;
+    parts[part] = value;
+    *out_ip = NET_IP4(parts[0], parts[1], parts[2], parts[3]);
+    return 0;
+}
+
 static int dns_encode_name(const char *name, uint8_t *out, uint16_t *pos, uint16_t max) {
     uint16_t label_start = 0;
     uint16_t label_len = 0;
@@ -233,6 +263,11 @@ int dns_query_a(const char *name) {
     uint32_t server;
 
     if (dns_name_len(name) <= 0) return -1;
+    if (dns_parse_ipv4_literal(name, &dns.last_result) == 0) {
+        dns_copy_name(dns.last_name, name);
+        dns.state = DNS_STATE_RESOLVED;
+        return 0;
+    }
     memset(packet, 0, sizeof(packet));
     dns.active_id = ++dns.next_id;
     dns.last_result = 0;

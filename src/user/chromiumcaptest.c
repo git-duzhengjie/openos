@@ -1296,6 +1296,49 @@ static int test_fork_pipe_fd_inheritance(void)
     return CAP_PASS;
 }
 
+static int test_dns_resolver_literal(void)
+{
+    unsigned int ip = 0;
+    openos_addrinfo_t hints;
+    openos_addrinfo_t *res = 0;
+    openos_sockaddr_in_t *addr;
+    openos_hostent_t *host;
+
+    if (openos_dnslookup("127.0.0.1", &ip) != 0 || ip != 0x7f000001U) {
+        return CAP_FAIL;
+    }
+    if (openos_dnslookup("256.1.1.1", &ip) == 0) {
+        return CAP_FAIL;
+    }
+
+    openos_memset(&hints, 0, sizeof(hints));
+    hints.ai_family = OPENOS_AF_INET;
+    hints.ai_socktype = OPENOS_SOCK_STREAM;
+    if (openos_getaddrinfo("10.20.30.40", "443", &hints, &res) != 0 || !res) {
+        return CAP_FAIL;
+    }
+    if (res->ai_family != OPENOS_AF_INET || res->ai_socktype != OPENOS_SOCK_STREAM ||
+        res->ai_addrlen != sizeof(openos_sockaddr_in_t) || !res->ai_addr) {
+        openos_freeaddrinfo(res);
+        return CAP_FAIL;
+    }
+    addr = (openos_sockaddr_in_t *)res->ai_addr;
+    if (addr->sin_family != OPENOS_AF_INET || addr->sin_addr != 0x0a141e28U ||
+        addr->sin_port != openos_htons(443)) {
+        openos_freeaddrinfo(res);
+        return CAP_FAIL;
+    }
+    openos_freeaddrinfo(res);
+
+    host = openos_gethostbyname("192.168.0.1");
+    if (!host || host->h_addrtype != OPENOS_AF_INET || host->h_length != 4 ||
+        !host->h_addr_list || !host->h_addr_list[0] ||
+        *(unsigned int *)host->h_addr_list[0] != 0xc0a80001U) {
+        return CAP_FAIL;
+    }
+    return CAP_PASS;
+}
+
 static int test_socketpair_poll(void)
 {
     int sv[2];
@@ -1444,6 +1487,10 @@ int main(int argc, char **argv)
 
     status = test_service_channel();
     print_result("service channel request/reply", status);
+    failed += status == CAP_FAIL;
+
+    status = test_dns_resolver_literal();
+    print_result("dns resolver ipv4 literal", status);
     failed += status == CAP_FAIL;
 
     status = test_socketpair_poll();
