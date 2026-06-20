@@ -506,6 +506,97 @@ static int test_eventfd(void)
     return openos_eventfd_destroy(&efd) == 0 ? CAP_PASS : CAP_FAIL;
 }
 
+static int test_spawn_argv_env_wait(void)
+{
+    char *argv[] = { (char *)"/bin/argtest", (char *)"alpha", (char *)"beta", 0 };
+    char *envp[] = { (char *)"OPENOS_CAP=chromium", (char *)"OPENOS_MODE=test", 0 };
+    int status = -1;
+    int pid = openos_spawn_env("/bin/argtest", argv, envp);
+    if (pid <= 0) {
+        openos_puts("spawn_env failed");
+        return CAP_FAIL;
+    }
+    if (openos_waitpid(pid, &status, 0) != pid) {
+        openos_puts("waitpid did not reap spawned child");
+        return CAP_FAIL;
+    }
+    if (status != 0) {
+        openos_puts("spawned argv child exited nonzero");
+        return CAP_FAIL;
+    }
+
+    argv[0] = (char *)"/bin/envtest";
+    pid = openos_spawn_env("/bin/envtest", argv, envp);
+    if (pid <= 0) {
+        openos_puts("spawn_env env child failed");
+        return CAP_FAIL;
+    }
+    status = -1;
+    if (openos_waitpid(pid, &status, 0) != pid) {
+        openos_puts("waitpid did not reap env child");
+        return CAP_FAIL;
+    }
+    if (status != 0) {
+        openos_puts("spawned env child exited nonzero");
+        return CAP_FAIL;
+    }
+    return CAP_PASS;
+}
+
+static int test_fork_pipe_fd_inheritance(void)
+{
+    int pipefd[2];
+    char buf[16];
+    int status = -1;
+    int pid;
+    int n;
+
+    if (openos_pipe(pipefd) != 0) {
+        openos_puts("pipe create failed");
+        return CAP_FAIL;
+    }
+
+    pid = openos_fork();
+    if (pid < 0) {
+        openos_puts("fork failed");
+        openos_close(pipefd[0]);
+        openos_close(pipefd[1]);
+        return CAP_FAIL;
+    }
+
+    if (pid == 0) {
+        const char *msg = "ipc-ok";
+        openos_close(pipefd[0]);
+        if (openos_write_fd(pipefd[1], msg, 6) != 6) {
+            openos_exit(31);
+        }
+        openos_close(pipefd[1]);
+        openos_exit(0);
+    }
+
+    openos_close(pipefd[1]);
+    n = openos_read(pipefd[0], buf, 6);
+    openos_close(pipefd[0]);
+    if (n != 6) {
+        openos_puts("parent failed to read inherited pipe fd");
+        return CAP_FAIL;
+    }
+    buf[6] = 0;
+    if (openos_strcmp(buf, "ipc-ok") != 0) {
+        openos_puts("pipe payload mismatch");
+        return CAP_FAIL;
+    }
+    if (openos_waitpid(pid, &status, 0) != pid) {
+        openos_puts("waitpid fork child failed");
+        return CAP_FAIL;
+    }
+    if (status != 0) {
+        openos_puts("fork child exited nonzero");
+        return CAP_FAIL;
+    }
+    return CAP_PASS;
+}
+
 static int test_socketpair_poll(void)
 {
     int sv[2];
@@ -554,7 +645,7 @@ int main(int argc, char **argv)
     (void)argv;
 
     openos_printf("Chromium core capability test\n");
-    openos_printf("target: mmap file-mmap mprotect v8-memory-policy brk thread tls pthread-sync futex shm eventfd socketpair poll time\n");
+    openos_printf("target: mmap file-mmap mprotect v8-memory-policy brk thread tls pthread-sync futex shm eventfd socketpair poll time spawn fork pipe fd argv env\n");
 
     status = test_uptime();
     print_result("monotonic uptime", status);
@@ -618,6 +709,14 @@ int main(int argc, char **argv)
 
     status = test_socketpair_poll();
     print_result("socketpair send/recv/poll", status);
+    failed += status == CAP_FAIL;
+
+    status = test_spawn_argv_env_wait();
+    print_result("spawn argv env waitpid", status);
+    failed += status == CAP_FAIL;
+
+    status = test_fork_pipe_fd_inheritance();
+    print_result("fork pipe fd inheritance", status);
     failed += status == CAP_FAIL;
 
     if (failed) {

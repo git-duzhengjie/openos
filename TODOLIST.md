@@ -431,6 +431,7 @@
     - [√] 已新增 `SYS_CLOCK_GETTIME` / `OPENOS_CLOCK_MONOTONIC` 单调 timespec 接口，并接入 `/bin/chromiumcaptest` 验收
 - [ ] M4 进程、加载器与 IPC 能力增强
   - [ ] 稳定 fork/exec/spawn 与 fd/env/argv 继承语义
+    - [√] 已在 `/bin/chromiumcaptest` 增加 spawn_env + argv/envp + waitpid 验收，以及 fork 后 pipe fd 继承读写验收，覆盖 Chromium 多进程启动的最小基础语义
   - [ ] 共享内存引用计数、权限、名称/handle 传递和生命周期管理
   - [ ] socketpair / message queue / service channel 压测，支撑 Chromium 多进程 IPC
   - [ ] 设计 `/bin/chromium` 第一版单进程模式与后续多进程模型边界
