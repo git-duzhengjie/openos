@@ -1061,6 +1061,11 @@ gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -I $SRC/include \
     -c $SRC/i18n.c -o $BUILD/i18n.o
 
+gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
+    -I $SRC/include \
+    -c $SRC/tls_crypto.c -o $BUILD/tls_crypto.o
+
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -Os \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
     -I $SRC/include \
@@ -1230,6 +1235,7 @@ ld -m elf_i386 -T $SRC/linker.ld \
     $BUILD/vga.o \
     $BUILD/framebuffer.o \
     $BUILD/i18n.o \
+    $BUILD/tls_crypto.o \
     $BUILD/gui.o \
     $BUILD/image.o \
     $BUILD/window_manager.o \

@@ -27,6 +27,7 @@ CFLAGS=(
     -O2
     -DOPENOS_UNIT_TEST=1
     -I"$TEST_DIR"
+    -idirafter "$ROOT_DIR/src/kernel/include"
 )
 
 PASS_COUNT=0
