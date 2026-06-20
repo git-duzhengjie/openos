@@ -6109,6 +6109,12 @@ static uint32_t browser_render_response_summary(char *response, const char *body
     char status[64];
     char header[64];
     browser_clear_content();
+    if (browser_response_is_html(response, body)) {
+        static char html_text[1024];
+        browser_html_to_text(body, html_text, sizeof(html_text));
+        line = browser_render_body_text_at(html_text, line);
+        return browser_render_links(body, line);
+    }
     browser_copy_header_line(status, sizeof(status), response);
     if (status[0]) browser_set_widget_text(g_browser_content_lines[line++], status);
     p = response;
@@ -6127,12 +6133,6 @@ static uint32_t browser_render_response_summary(char *response, const char *body
         if (*p == '\n') p++;
     }
     if (line < GUI_BROWSER_CONTENT_LINES) browser_set_widget_text(g_browser_content_lines[line++], "");
-    if (browser_response_is_html(response, body)) {
-        static char html_text[1024];
-        browser_html_to_text(body, html_text, sizeof(html_text));
-        line = browser_render_body_text_at(html_text, line);
-        return browser_render_links(body, line);
-    }
     return browser_render_body_at(body, line);
 }
 
