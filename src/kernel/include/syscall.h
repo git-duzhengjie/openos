@@ -115,6 +115,7 @@
 #define SYS_NETDEVCTL    315
 #define SYS_DNSLOOKUP    316
 #define SYS_UPTIME_MS    317
+#define SYS_FONT_QUERY   318
 #define SYS_GUI_CREATE_WINDOW 320
 #define SYS_GUI_DESTROY_WINDOW 321
 #define SYS_GUI_ADD_LABEL 322
@@ -220,6 +221,27 @@ typedef struct openos_group {
     uint32_t gid;
     char name[32];
 } openos_group_t;
+
+typedef struct openos_font_query {
+    uint32_t codepoint;
+    uint32_t flags;
+    uint32_t ascii_width;
+    uint32_t ascii_height;
+    uint32_t unicode_width;
+    uint32_t unicode_height;
+    uint32_t line_height;
+    uint32_t scale_percent;
+    uint32_t font_size;
+    uint32_t cjk_loaded;
+    uint32_t cjk_glyph_count;
+    uint32_t cjk_width;
+    uint32_t cjk_height;
+    uint32_t codepoint_width;
+    uint32_t text_width;
+    uint32_t text_height;
+    uint32_t text_lines;
+    char text[128];
+} openos_font_query_t;
 
 /* 调用号通过 EAX 传递，参数通过 EBX/ECX/EDX/ESI/EDI */
 uint32_t syscall_handler(uint32_t syscall_num,

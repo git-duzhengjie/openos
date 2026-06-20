@@ -338,6 +338,13 @@
 #define OPENOS_HAS_USER_BROWSER 0
 #endif
 
+#if __has_include("embed_fontprobe.h")
+#include "embed_fontprobe.h"  /* fontprobe user command */
+#define OPENOS_HAS_FONTPROBE 1
+#else
+#define OPENOS_HAS_FONTPROBE 0
+#endif
+
 #if __has_include("embed_ping.h")
 #include "embed_ping.h"  /* ping user command */
 #define OPENOS_HAS_PING 1
@@ -1294,6 +1301,17 @@ void kernel_main(void) {
         serial_write("[OK] Installed /bin/browser user ELF\n");
     } else {
         serial_write("[WARN] Failed to install /bin/browser\n");
+    }
+#endif
+
+#if OPENOS_HAS_FONTPROBE
+    fd = vfs_open("/bin/fontprobe", O_CREAT | O_RDWR, 0755);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)fontprobe_elf, fontprobe_elf_size);
+        vfs_close(fd);
+        serial_write("[OK] Installed /bin/fontprobe user ELF\n");
+    } else {
+        serial_write("[WARN] Failed to install /bin/fontprobe\n");
     }
 #endif
 

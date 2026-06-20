@@ -9,6 +9,7 @@
 #include "../include/vga.h"
 #include "../include/gui.h"
 #include "../include/gui_user.h"
+#include "../include/font.h"
 #include "../include/input_buffer.h"
 #include "../include/usermem.h"
 #include "../include/vmm.h"
@@ -1369,6 +1370,40 @@ uint32_t syscall_dispatch(uint32_t num,
 
     case SYS_UPTIME_MS:
         return sched_time_ms();
+
+    case SYS_FONT_QUERY:
+        {
+            openos_font_query_t query;
+            font_cjk_resource_info_t cjk;
+            font_text_metrics_t metrics;
+            const font_renderer_t *font = font_get_default();
+            if (!a || !user_ptr_valid((void *)a, sizeof(query), USERMEM_READ | USERMEM_WRITE))
+                return (uint32_t)-1;
+            if (copy_from_user(&query, (const void *)a, sizeof(query)) < 0)
+                return (uint32_t)-1;
+            query.text[sizeof(query.text) - 1] = 0;
+
+            font_get_cjk_resource_info(&cjk);
+            font_measure_text(font, query.text, &metrics);
+            query.ascii_width = font_get_ascii_width(font);
+            query.ascii_height = font_get_ascii_height(font);
+            query.unicode_width = font_get_unicode_width();
+            query.unicode_height = font_get_unicode_height();
+            query.line_height = font_get_line_height(font);
+            query.scale_percent = font_get_scale_percent();
+            query.font_size = font_get_size();
+            query.cjk_loaded = cjk.loaded ? 1u : 0u;
+            query.cjk_glyph_count = cjk.glyph_count;
+            query.cjk_width = cjk.width;
+            query.cjk_height = cjk.height;
+            query.codepoint_width = font_measure_codepoint_width(font, query.codepoint);
+            query.text_width = metrics.width;
+            query.text_height = metrics.height;
+            query.text_lines = metrics.lines;
+            if (copy_to_user((void *)a, &query, sizeof(query)) < 0)
+                return (uint32_t)-1;
+            return 0;
+        }
 
     case SYS_YIELD:
         sched_yield();

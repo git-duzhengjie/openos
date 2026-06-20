@@ -112,6 +112,7 @@
 #define SYS_NETDEVCTL    315
 #define SYS_DNSLOOKUP    316
 #define SYS_UPTIME_MS    317
+#define SYS_FONT_QUERY   318
 #define SYS_GUI_CREATE_WINDOW 320
 #define SYS_GUI_DESTROY_WINDOW 321
 #define SYS_GUI_ADD_LABEL 322
@@ -179,6 +180,27 @@ typedef struct openos_timezone {
     int tz_minuteswest;
     int tz_dsttime;
 } openos_timezone_t;
+
+typedef struct openos_font_query {
+    unsigned int codepoint;
+    unsigned int flags;
+    unsigned int ascii_width;
+    unsigned int ascii_height;
+    unsigned int unicode_width;
+    unsigned int unicode_height;
+    unsigned int line_height;
+    unsigned int scale_percent;
+    unsigned int font_size;
+    unsigned int cjk_loaded;
+    unsigned int cjk_glyph_count;
+    unsigned int cjk_width;
+    unsigned int cjk_height;
+    unsigned int codepoint_width;
+    unsigned int text_width;
+    unsigned int text_height;
+    unsigned int text_lines;
+    char text[128];
+} openos_font_query_t;
 
 #define NET_DEVICE_FLAG_PRESENT 0x00000001u
 #define NET_DEVICE_FLAG_UP      0x00000002u
@@ -1020,6 +1042,16 @@ static inline int openos_gettimeofday(openos_timeval_t *tv, openos_timezone_t *t
 static inline openos_clock_t openos_clock(void)
 {
     return (openos_clock_t)openos_uptime_ms();
+}
+
+static inline int openos_font_query(openos_font_query_t *query)
+{
+    if (!query) {
+        openos_set_errno(OPENOS_EINVAL);
+        return -1;
+    }
+    query->text[sizeof(query->text) - 1] = 0;
+    return openos_syscall_result(openos_syscall1(SYS_FONT_QUERY, (int)query));
 }
 
 static inline int openos_strlen(const char *s)

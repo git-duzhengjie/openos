@@ -339,6 +339,15 @@ if [ -f $USR/browser.c ]; then
     echo "  Embedded: browser.elf"
 fi
 
+if [ -f $USR/fontprobe.c ]; then
+    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+        -fno-stack-protector -fno-builtin \
+        -c $USR/fontprobe.c -o $BUILD/fontprobe.o
+    ld -m elf_i386 -T $USR/user.ld -o $BUILD/fontprobe.elf $BUILD/fontprobe.o
+    python3 _embed_elf.py $BUILD/fontprobe.elf $SRC/include/embed_fontprobe.h fontprobe_elf
+    echo "  Embedded: fontprobe.elf"
+fi
+
 if [ -f $USR/fault.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \

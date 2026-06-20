@@ -377,7 +377,7 @@
   - [√] libc/POSIX 子集：malloc/free/realloc、stdio、string、time、errno、文件 API、目录 API；新增 `SYS_UPTIME_MS` 与用户态 `time/gettimeofday/clock` 兼容封装
   - [√] socket API：getaddrinfo/gethostbyname、connect/send/recv/close、select/poll、非阻塞 socket
   - [√] TLS/HTTPS 用户态库适配：优先评估 mbedTLS / BearSSL / wolfSSL 等轻量方案
-  - [ ] 字体接口：字体枚举、字形查询、UTF-8/Unicode 文本测量、基础 fallback
+  - [√] 字体接口：字体枚举、字形查询、UTF-8/Unicode 文本测量、基础 fallback；新增 `SYS_FONT_QUERY` 与 `/bin/fontprobe` 验证
   - [ ] 图形接口：framebuffer/窗口绘制、矩形裁剪、位图 blit、滚动、双缓冲
   - [√] 图片解码依赖评估：PNG/JPEG/GIF/WebP 可分阶段接入
   - [ ] 文件与配置目录：缓存、cookie、证书、字体资源、下载目录
