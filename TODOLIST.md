@@ -488,7 +488,8 @@
   - [ ] libstdc++/libc++ 子集或 OpenOS C++ runtime 路线
     - [√] 已新增 `docs/chromium-cpp-runtime-roadmap.md`，明确工具链探测、最小 C++ ABI、new/delete、静态初始化、异常/RTTI 策略与 `/bin/cppsmoke` 验收顺序
   - [ ] 原子操作、内存序、TLS、new/delete、静态初始化
-  - [ ] 宿主机交叉编译 Chromium 依赖的 GN/Ninja/Clang 构建链设计
+  - [√] 宿主机交叉编译 Chromium 依赖的 GN/Ninja/Clang 构建链设计
+    - [√] 已新增 `docs/chromium-build-chain.md`，固定 i386-openos-elf 目标、GN args 初始草案、OpenOS sysroot/CRT/runtime 产物边界，以及 skia_demo -> v8_shell -> blink_smoke -> content_shell -> chromium 的分阶段构建验收顺序
 - [ ] M9 Skia / V8 / Blink / Chromium 分阶段落地
   - [ ] `/bin/skia_demo`：软件绘制矩形、文本、图片到 OpenOS 窗口
   - [ ] `/bin/v8_shell`：优先 jitless 运行基础 JavaScript
