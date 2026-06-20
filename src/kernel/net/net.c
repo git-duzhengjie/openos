@@ -855,6 +855,7 @@ int net_tcp_open(uint32_t local_ip, uint16_t local_port,
     c->remote_port = remote_port;
     c->snd_nxt = 1;
     c->rcv_nxt = 0;
+    c->snd_wnd = TCP_DEFAULT_WINDOW;
     tcp_set_state(c, active ? TCP_STATE_SYN_SENT : TCP_STATE_LISTEN);
     if (active) {
         if (!remote_ip || !remote_port || tcp_send_for_conn(c, TCP_FLAG_SYN, 0, 0) != 0) {
