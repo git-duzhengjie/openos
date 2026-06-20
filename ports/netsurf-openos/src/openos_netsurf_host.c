@@ -115,6 +115,17 @@ int openos_ns_surface_blit(openos_ns_surface_t *surface, int x, int y, int w, in
     return 0;
 }
 
+int openos_ns_surface_draw_text(openos_ns_surface_t *surface, int x, int y, const char *utf8, uint32_t rgba)
+{
+    openos_ns_rect_t rect;
+    (void)utf8;
+    rect.x = x;
+    rect.y = y;
+    rect.w = 8;
+    rect.h = 16;
+    return openos_ns_surface_fill(surface, &rect, rgba);
+}
+
 int openos_ns_surface_scroll(openos_ns_surface_t *surface, const openos_ns_rect_t *rect, int dx, int dy)
 {
     openos_ns_rect_t r;

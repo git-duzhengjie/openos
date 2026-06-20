@@ -51,6 +51,7 @@ void openos_ns_surface_set_clip(openos_ns_surface_t *surface, const openos_ns_re
 void openos_ns_surface_clear(openos_ns_surface_t *surface, uint32_t rgba);
 int openos_ns_surface_fill(openos_ns_surface_t *surface, const openos_ns_rect_t *rect, uint32_t rgba);
 int openos_ns_surface_blit(openos_ns_surface_t *surface, int x, int y, int w, int h, const uint32_t *pixels, int stride);
+int openos_ns_surface_draw_text(openos_ns_surface_t *surface, int x, int y, const char *utf8, uint32_t rgba);
 int openos_ns_surface_scroll(openos_ns_surface_t *surface, const openos_ns_rect_t *rect, int dx, int dy);
 int openos_ns_surface_present(openos_ns_surface_t *surface);
 

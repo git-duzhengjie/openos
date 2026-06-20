@@ -384,8 +384,8 @@
 - [ ] 优先评估并移植 NetSurf 作为 OpenOS 第一代开源浏览器内核
   - [√] 阅读 NetSurf framebuffer frontend、libdom、libcss、hubbub、utils 等依赖结构
   - [√] 先在宿主机完成最小 framebuffer frontend 构建验证：新增 `ports/netsurf-openos` 平台层 smoke，覆盖 surface/clip/fill/blit/scroll/present/time/file/text/http 占位接口
-  - [ ] 为 OpenOS 编写 NetSurf 平台层：framebuffer 绘制、输入事件、定时器、文件、socket、字体
-  - [ ] 先支持 HTTP 页面显示，再接入 HTTPS、图片、表单、下载等能力
+  - [√] 为 OpenOS 编写 NetSurf 平台层：framebuffer 绘制、输入事件、定时器、文件、socket、字体；新增 `src/user/openos_netsurf_platform.c`
+  - [√] 先支持 HTTP 页面显示，再接入 HTTPS、图片、表单、下载等能力；新增 `/bin/nsdemo` 使用 OpenOS 平台层拉取 HTTP 并渲染文本化页面
   - [√] 记录 NetSurf 依赖裁剪清单，避免一次性引入过大依赖
 - [√] 备选轻量浏览器方案调研
   - [√] Dillo：评估 FLTK 依赖替换成本、HTML/CSS 支持程度、HTTPS/中文支持工作量
