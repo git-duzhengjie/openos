@@ -5634,18 +5634,15 @@ static int browser_wait_tcp_state(int conn, int want_state, uint32_t timeout_ms)
     return -1;
 }
 
-static void browser_render_body(const char *body) {
-    uint32_t line = 0;
+static uint32_t browser_render_text_at(const char *text, uint32_t start_line) {
+    uint32_t line = start_line;
     uint32_t col = 0;
     char linebuf[64];
     const char *p;
-    browser_clear_content();
-    if (!body || !*body) {
-        browser_set_widget_text(g_browser_content_lines[0], "HTTP response has no body.");
-        return;
-    }
+    if (line >= GUI_BROWSER_CONTENT_LINES) return line;
+    if (!text || !*text) return line;
     linebuf[0] = '\0';
-    p = body;
+    p = text;
     while (*p && line < GUI_BROWSER_CONTENT_LINES) {
         char ch = *p++;
         if (ch == '\r') continue;
@@ -5656,12 +5653,85 @@ static void browser_render_body(const char *body) {
             col = 0;
             linebuf[0] = '\0';
             if (ch == '\n') continue;
+            if (line >= GUI_BROWSER_CONTENT_LINES) break;
         }
         if ((unsigned char)ch < 32u) ch = ' ';
         linebuf[col++] = ch;
         linebuf[col] = '\0';
     }
-    if (line < GUI_BROWSER_CONTENT_LINES && col > 0) browser_set_widget_text(g_browser_content_lines[line], linebuf);
+    if (line < GUI_BROWSER_CONTENT_LINES && col > 0) {
+        browser_set_widget_text(g_browser_content_lines[line], linebuf);
+        line++;
+    }
+    return line;
+}
+
+static uint32_t browser_render_body_at(const char *body, uint32_t start_line) {
+    if (!body || !*body) {
+        if (start_line < GUI_BROWSER_CONTENT_LINES) browser_set_widget_text(g_browser_content_lines[start_line++], "HTTP response has no body.");
+        return start_line;
+    }
+    return browser_render_text_at(body, start_line);
+}
+
+static void browser_render_body(const char *body) {
+    browser_clear_content();
+    (void)browser_render_body_at(body, 0);
+}
+
+static int browser_header_name_eq(const char *p, const char *name) {
+    uint32_t i = 0;
+    if (!p || !name) return 0;
+    while (name[i]) {
+        char a = p[i];
+        char b = name[i];
+        if (a >= 'A' && a <= 'Z') a = (char)(a - 'A' + 'a');
+        if (b >= 'A' && b <= 'Z') b = (char)(b - 'A' + 'a');
+        if (a != b) return 0;
+        i++;
+    }
+    return p[i] == ':';
+}
+
+static void browser_copy_header_line(char *out, uint32_t cap, const char *line) {
+    uint32_t i = 0;
+    if (!out || cap == 0) return;
+    if (!line) {
+        out[0] = '\0';
+        return;
+    }
+    while (line[i] && line[i] != '\r' && line[i] != '\n' && i + 1u < cap) {
+        out[i] = line[i];
+        i++;
+    }
+    out[i] = '\0';
+}
+
+static uint32_t browser_render_response_summary(char *response, const char *body) {
+    const char *p;
+    uint32_t line = 0;
+    char status[64];
+    char header[64];
+    browser_clear_content();
+    browser_copy_header_line(status, sizeof(status), response);
+    if (status[0]) browser_set_widget_text(g_browser_content_lines[line++], status);
+    p = response;
+    while (*p && *p != '\n') p++;
+    if (*p == '\n') p++;
+    while (*p && p < body && line + 1u < GUI_BROWSER_CONTENT_LINES) {
+        if (*p == '\r' || *p == '\n') break;
+        if (browser_header_name_eq(p, "Content-Type") ||
+            browser_header_name_eq(p, "Content-Length") ||
+            browser_header_name_eq(p, "Location") ||
+            browser_header_name_eq(p, "Server")) {
+            browser_copy_header_line(header, sizeof(header), p);
+            browser_set_widget_text(g_browser_content_lines[line++], header);
+        }
+        while (*p && *p != '\n') p++;
+        if (*p == '\n') p++;
+    }
+    if (line < GUI_BROWSER_CONTENT_LINES) browser_set_widget_text(g_browser_content_lines[line++], "");
+    return browser_render_body_at(body, line);
 }
 
 static const char *browser_find_body(char *response) {
@@ -5762,7 +5832,7 @@ static void browser_http_get_current(void) {
         browser_set_status("No response");
         return;
     }
-    browser_render_body(browser_find_body(response));
+    browser_render_response_summary(response, browser_find_body(response));
     browser_set_status("Loaded HTTP response");
 }
 
