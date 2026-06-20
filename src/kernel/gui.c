@@ -20,6 +20,7 @@
 #include "net/dhcp.h"
 #include "net/dns.h"
 #include "net/net_config.h"
+#include "tls_parser.h"
 #include "process.h"
 extern int spawn_user_process(const char *path, char *const argv[]);
 extern uint32_t sched_time_ms(void);
@@ -6164,32 +6165,74 @@ static void browser_append_hex4(char *dst, int *pos, int cap, uint16_t v) {
 }
 
 static void browser_render_https_probe(const char *host, const uint8_t *record, uint32_t len) {
-    char line[96];
+    char line[128];
     int pos;
-    uint8_t type = len > 0u ? record[0] : 0;
-    uint16_t version = len > 2u ? (uint16_t)(((uint16_t)record[1] << 8) | record[2]) : 0;
-    uint16_t record_len = len > 4u ? (uint16_t)(((uint16_t)record[3] << 8) | record[4]) : 0;
+    tls_parser_summary_t summary;
+    int parsed_records;
+
+    parsed_records = tls_parse_records(record, len, &summary);
     browser_clear_content();
-    browser_set_widget_text(g_browser_content_lines[0], "HTTPS/TLS server answered.");
+    browser_set_widget_text(g_browser_content_lines[0], "HTTPS/TLS handshake summary.");
+
     pos = 0;
     line[0] = '\0';
     pos = fp_str_append(line, pos, sizeof(line), "Host: ");
     pos = fp_str_append(line, pos, sizeof(line), host ? host : "");
     browser_set_widget_text(g_browser_content_lines[1], line);
+
     pos = 0;
     line[0] = '\0';
-    pos = fp_str_append(line, pos, sizeof(line), "TLS record type: ");
-    pos = gui_append_uint(line, pos, sizeof(line), type);
-    pos = fp_str_append(line, pos, sizeof(line), " version: 0x");
-    browser_append_hex4(line, &pos, sizeof(line), version);
+    pos = fp_str_append(line, pos, sizeof(line), "TLS records parsed: ");
+    pos = gui_append_uint(line, pos, sizeof(line), parsed_records > 0 ? (uint32_t)parsed_records : 0u);
+    pos = fp_str_append(line, pos, sizeof(line), " type: ");
+    pos = fp_str_append(line, pos, sizeof(line), tls_record_type_name(summary.record_type));
     browser_set_widget_text(g_browser_content_lines[2], line);
+
     pos = 0;
     line[0] = '\0';
-    pos = fp_str_append(line, pos, sizeof(line), "TLS record length: ");
-    pos = gui_append_uint(line, pos, sizeof(line), record_len);
+    pos = fp_str_append(line, pos, sizeof(line), "Record TLS version: 0x");
+    browser_append_hex4(line, &pos, sizeof(line), summary.record_version);
+    pos = fp_str_append(line, pos, sizeof(line), " length: ");
+    pos = gui_append_uint(line, pos, sizeof(line), summary.record_length);
     browser_set_widget_text(g_browser_content_lines[3], line);
-    browser_set_widget_text(g_browser_content_lines[5], "Full HTTPS page loading needs TLS cipher support.");
-    browser_set_widget_text(g_browser_content_lines[6], "Next: X.509, ECDHE/RSA, AES-GCM and HMAC/SHA.");
+
+    pos = 0;
+    line[0] = '\0';
+    pos = fp_str_append(line, pos, sizeof(line), "Handshake messages: ");
+    pos = gui_append_uint(line, pos, sizeof(line), summary.handshake_count);
+    if (summary.handshake_count > 0u) {
+        pos = fp_str_append(line, pos, sizeof(line), " first: ");
+        pos = fp_str_append(line, pos, sizeof(line), tls_handshake_type_name(summary.handshake_types[0]));
+    }
+    browser_set_widget_text(g_browser_content_lines[4], line);
+
+    pos = 0;
+    line[0] = '\0';
+    pos = fp_str_append(line, pos, sizeof(line), "Server version: 0x");
+    browser_append_hex4(line, &pos, sizeof(line), summary.server_version);
+    pos = fp_str_append(line, pos, sizeof(line), " cipher: 0x");
+    browser_append_hex4(line, &pos, sizeof(line), summary.cipher_suite);
+    browser_set_widget_text(g_browser_content_lines[5], line);
+
+    pos = 0;
+    line[0] = '\0';
+    pos = fp_str_append(line, pos, sizeof(line), "Certificates: ");
+    pos = gui_append_uint(line, pos, sizeof(line), summary.certificate_count);
+    pos = fp_str_append(line, pos, sizeof(line), " bytes: ");
+    pos = gui_append_uint(line, pos, sizeof(line), summary.certificate_bytes);
+    browser_set_widget_text(g_browser_content_lines[6], line);
+
+    if (summary.alert_level || summary.alert_description) {
+        pos = 0;
+        line[0] = '\0';
+        pos = fp_str_append(line, pos, sizeof(line), "TLS alert level: ");
+        pos = gui_append_uint(line, pos, sizeof(line), summary.alert_level);
+        pos = fp_str_append(line, pos, sizeof(line), " description: ");
+        pos = gui_append_uint(line, pos, sizeof(line), summary.alert_description);
+        browser_set_widget_text(g_browser_content_lines[7], line);
+    } else {
+        browser_set_widget_text(g_browser_content_lines[7], "HTTPS page loading still needs TLS cipher/decrypt support.");
+    }
 }
 
 static void browser_https_probe_current(const char *host, uint32_t ip, uint16_t port) {
