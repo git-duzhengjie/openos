@@ -43,7 +43,7 @@ static int browser_wait_for_network(char *out, int out_size)
     return -1;
 }
 
-static void browser_format_connect_error(char *out, int out_size, const char *host, const openos_sockaddr_in_t *addr)
+static void browser_format_connect_error(char *out, int out_size, const char *host, unsigned int dst_ip, unsigned short port)
 {
     openos_netinfo_t info;
     char dst[24] = "0.0.0.0";
@@ -56,7 +56,7 @@ static void browser_format_connect_error(char *out, int out_size, const char *ho
     unsigned int arp_entries = 0;
     unsigned int flags = 0;
 
-    if (addr) browser_format_ip(addr->sin_addr, dst, sizeof(dst));
+    browser_format_ip(dst_ip, dst, sizeof(dst));
     if (openos_netinfo(&info) == 0) {
         browser_format_ip(info.ip, ip, sizeof(ip));
         browser_format_ip(info.gateway, gw, sizeof(gw));
@@ -69,7 +69,7 @@ static void browser_format_connect_error(char *out, int out_size, const char *ho
     }
     snprintf(out, out_size,
              "connect() failed host=%s dst=%s port=%u ip=%s gw=%s dns=%s arp=%u flags=0x%x last_tx_dst=%s nh=%s tx_result=%d",
-             host ? host : "?", dst, addr ? (unsigned int)addr->sin_port : 0U,
+             host ? host : "?", dst, (unsigned int)port,
              ip, gw, dns, arp_entries, flags, txdst, nexthop, (int)tx_result);
 }
 
@@ -126,11 +126,11 @@ static void collapse_html_text(char *dst, int dst_size, const char *src)
 
 static int browser_fetch_http(const char *host, const char *path, char *out, int out_size)
 {
-    openos_addrinfo_t hints;
-    openos_addrinfo_t *res = 0;
     int fd;
     int total = 0;
     char request[256];
+    unsigned int dst_ip = 0;
+    unsigned short dst_port = 80;
 
     if (!host || !path || !out || out_size <= 0) return -1;
     out[0] = 0;
@@ -138,19 +138,13 @@ static int browser_fetch_http(const char *host, const char *path, char *out, int
     if (browser_wait_for_network(out, out_size) < 0)
         return -1;
 
-    memset(&hints, 0, sizeof(hints));
-    hints.ai_family = OPENOS_AF_INET;
-    hints.ai_socktype = OPENOS_SOCK_STREAM;
     for (int attempt = 0; attempt < BROWSER_DNS_RETRIES; ++attempt) {
-        if (openos_getaddrinfo(host, BROWSER_HTTP_PORT, &hints, &res) == 0 && res)
+        if (openos_dnslookup(host, &dst_ip) == 0 && dst_ip != 0)
             break;
-        if (res) {
-            openos_freeaddrinfo(res);
-            res = 0;
-        }
+        dst_ip = 0;
         openos_sleep(10);
     }
-    if (!res) {
+    if (dst_ip == 0) {
         openos_netinfo_t info;
         char ip[24] = "0.0.0.0";
         char dns[24] = "0.0.0.0";
@@ -162,22 +156,6 @@ static int browser_fetch_http(const char *host, const char *path, char *out, int
         return -1;
     }
 
-    /* Copy the resolved address before making any further syscall.  Optimized
-     * builds must not depend on keeping the addrinfo pointer live across the
-     * inline syscall wrappers.
-     */
-    openos_sockaddr_in_t connect_addr;
-    unsigned int connect_addrlen = res->ai_addrlen;
-    if (!res->ai_addr || connect_addrlen > sizeof(connect_addr) || connect_addrlen == 0) {
-        openos_freeaddrinfo(res);
-        snprintf(out, out_size, "invalid DNS address");
-        return -1;
-    }
-    memset(&connect_addr, 0, sizeof(connect_addr));
-    memcpy(&connect_addr, res->ai_addr, connect_addrlen);
-    openos_freeaddrinfo(res);
-    res = 0;
-
     fd = openos_socket(OPENOS_AF_INET, OPENOS_SOCK_STREAM, 0);
     if (fd < 0) {
         snprintf(out, out_size, "socket() failed");
@@ -187,14 +165,19 @@ static int browser_fetch_http(const char *host, const char *path, char *out, int
     {
         int connected = 0;
         for (int attempt = 0; attempt < BROWSER_CONNECT_RETRIES; ++attempt) {
-            if (openos_connect(fd, (openos_sockaddr_t *)&connect_addr, connect_addrlen) == 0) {
+            openos_sockaddr_in_t connect_addr;
+            memset(&connect_addr, 0, sizeof(connect_addr));
+            connect_addr.sin_family = OPENOS_AF_INET;
+            connect_addr.sin_port = openos_htons(dst_port);
+            connect_addr.sin_addr = dst_ip;
+            if (openos_connect(fd, (openos_sockaddr_t *)&connect_addr, sizeof(connect_addr)) == 0) {
                 connected = 1;
                 break;
             }
             openos_sleep(10);
         }
         if (!connected) {
-            browser_format_connect_error(out, out_size, host, &connect_addr);
+            browser_format_connect_error(out, out_size, host, dst_ip, dst_port);
             openos_close(fd);
             return -1;
         }

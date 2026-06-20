@@ -543,14 +543,18 @@ static inline int openos_syscall2(int num, int a, int b)
 
 static inline int openos_syscall4(int num, int a, int b, int c, int d)
 {
-    int ret;
+    register int eax __asm__("eax") = num;
+    register int ebx __asm__("ebx") = a;
+    register int ecx __asm__("ecx") = b;
+    register int edx __asm__("edx") = c;
+    register int esi __asm__("esi") = d;
     __asm__ volatile(
         "int $0x80"
-        : "=a"(ret)
-        : "a"(num), "b"(a), "c"(b), "d"(c), "S"(d)
-        : "memory"
+        : "+a"(eax), "+b"(ebx), "+c"(ecx), "+d"(edx), "+S"(esi)
+        :
+        : "memory", "cc"
     );
-    return ret;
+    return eax;
 }
 
 static inline int openos_socket(int domain, int type, int protocol)
@@ -597,14 +601,19 @@ static inline int openos_recv(int fd, void *buf, unsigned int len, int flags)
 
 static inline int openos_syscall5(int num, int a, int b, int c, int d, int e)
 {
-    int ret;
+    register int eax __asm__("eax") = num;
+    register int ebx __asm__("ebx") = a;
+    register int ecx __asm__("ecx") = b;
+    register int edx __asm__("edx") = c;
+    register int esi __asm__("esi") = d;
+    register int edi __asm__("edi") = e;
     __asm__ volatile(
         "int $0x80"
-        : "=a"(ret)
-        : "a"(num), "b"(a), "c"(b), "d"(c), "S"(d), "D"(e)
-        : "memory"
+        : "+a"(eax), "+b"(ebx), "+c"(ecx), "+d"(edx), "+S"(esi), "+D"(edi)
+        :
+        : "memory", "cc"
     );
-    return ret;
+    return eax;
 }
 
 static inline int openos_gui_create_window(const char *title, int x, int y, int w, int h)
