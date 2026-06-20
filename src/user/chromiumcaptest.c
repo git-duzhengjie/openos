@@ -64,6 +64,38 @@ static int test_mmap(void)
     return openos_munmap(mem, MMAP_TEST_SIZE) == 0 ? CAP_PASS : CAP_FAIL;
 }
 
+static int test_mmap_prot_flags(void)
+{
+    unsigned char *mem;
+    unsigned char value;
+
+    mem = (unsigned char *)openos_mmap_ex(0, 4096,
+                                          OPENOS_PROT_READ,
+                                          OPENOS_MAP_ANON | OPENOS_MAP_PRIVATE);
+    if (mem == (unsigned char *)-1 || !mem) {
+        return CAP_FAIL;
+    }
+
+    value = mem[0];
+    if (value != 0) {
+        openos_munmap(mem, 4096);
+        return CAP_FAIL;
+    }
+
+    if (openos_mprotect(mem, 4096, OPENOS_PROT_READ | OPENOS_PROT_WRITE) != 0) {
+        openos_munmap(mem, 4096);
+        return CAP_FAIL;
+    }
+
+    mem[0] = 0x33;
+    if (mem[0] != 0x33) {
+        openos_munmap(mem, 4096);
+        return CAP_FAIL;
+    }
+
+    return openos_munmap(mem, 4096) == 0 ? CAP_PASS : CAP_FAIL;
+}
+
 static int test_mprotect(void)
 {
     unsigned char *mem;
@@ -262,6 +294,10 @@ int main(int argc, char **argv)
 
     status = test_mmap();
     print_result("anonymous mmap read/write/munmap", status);
+    failed += status == CAP_FAIL;
+
+    status = test_mmap_prot_flags();
+    print_result("mmap prot/flags metadata", status);
     failed += status == CAP_FAIL;
 
     status = test_mprotect();

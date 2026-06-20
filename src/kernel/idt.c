@@ -237,13 +237,27 @@ static uint32_t pf_align_down(uint32_t value)
 	return value & ~(PAGE_SIZE - 1u);
 }
 
+static process_mmap_vma_t *page_fault_find_mmap_vma(process_t *proc, uint32_t fault_addr)
+{
+	uint32_t page = pf_align_down(fault_addr);
+
+	if (!proc)
+		return 0;
+	for (int i = 0; i < PROCESS_MMAP_VMA_MAX; i++) {
+		process_mmap_vma_t *vma = &proc->mmap_vmas[i];
+		if (vma->start && page >= vma->start && page < vma->end)
+			return vma;
+	}
+	return 0;
+}
+
 static int page_fault_is_demand_region(process_t *proc, uint32_t fault_addr)
 {
 	if (!proc)
 		return 0;
 	if (proc->heap_start && fault_addr >= proc->heap_start && fault_addr < proc->heap_end)
 		return 1;
-	if (proc->mmap_base && fault_addr >= proc->mmap_base && fault_addr < proc->mmap_end)
+	if (page_fault_find_mmap_vma(proc, fault_addr))
 		return 1;
 	return 0;
 }
@@ -302,8 +316,10 @@ static int page_fault_handle_demand(registers_t *regs, uint32_t fault_addr)
 {
 	thread_t *cur = sched_get_current();
 	process_t *proc;
+	process_mmap_vma_t *vma;
 	uint32_t va;
 	uint32_t pa;
+	uint32_t map_flags;
 
 	if (!cur || cur->pid == 0)
 		return 0;
@@ -329,7 +345,11 @@ static int page_fault_handle_demand(registers_t *regs, uint32_t fault_addr)
 		return 0;
 	}
 	memset((void *)pa, 0, PAGE_SIZE);
-	vmm_map_page(va, pa, VMM_USER);
+	vma = page_fault_find_mmap_vma(proc, fault_addr);
+	map_flags = PTE_PRESENT | PTE_USER;
+	if (!vma || (vma->prot & PROCESS_MMAP_PROT_WRITE))
+		map_flags |= PTE_RW;
+	vmm_map_page(va, pa, map_flags);
 	serial_write("[PF] demand mapped va=");
 	serial_write_hex(va);
 	serial_write(" pa=");

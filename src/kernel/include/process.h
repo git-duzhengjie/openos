@@ -45,6 +45,24 @@ typedef enum {
 #define OPENOS_CAP_ALL       0xffffffffu
 #define OPENOS_CAP_BASIC     0u
 
+#define PROCESS_MMAP_VMA_MAX 32
+
+#define PROCESS_MMAP_PROT_NONE  0x0u
+#define PROCESS_MMAP_PROT_READ  0x1u
+#define PROCESS_MMAP_PROT_WRITE 0x2u
+#define PROCESS_MMAP_PROT_EXEC  0x4u
+
+#define PROCESS_MMAP_FLAG_ANON    0x01u
+#define PROCESS_MMAP_FLAG_PRIVATE 0x02u
+#define PROCESS_MMAP_FLAG_FIXED   0x10u
+
+typedef struct process_mmap_vma {
+    uint32_t start;
+    uint32_t end;
+    uint32_t prot;
+    uint32_t flags;
+} process_mmap_vma_t;
+
 /* ============================================================
  * 线程控制块 (TCB)
  * ============================================================ */
@@ -102,6 +120,7 @@ typedef struct process {
     uint32_t heap_end;        /* 堆结束 */
     uint32_t mmap_base;       /* 匿名 mmap 区起始 */
     uint32_t mmap_end;        /* 匿名 mmap 区当前结束 */
+    process_mmap_vma_t mmap_vmas[PROCESS_MMAP_VMA_MAX];
 
     /* 文件系统 */
     void *fds[MAX_FD];        /* 文件描述符表 (per-process fd table) */

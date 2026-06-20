@@ -127,6 +127,9 @@
 #define OPENOS_PROT_WRITE 0x2
 #define OPENOS_PROT_EXEC  0x4
 
+#define OPENOS_MAP_ANON    0x01
+#define OPENOS_MAP_PRIVATE 0x02
+
 #define OPENOS_CAP_SETUID    (1u << 0)
 #define OPENOS_CAP_SETGID    (1u << 1)
 #define OPENOS_CAP_NET_ADMIN (1u << 2)
@@ -2020,12 +2023,18 @@ static inline int openos_readlink(const char *path, char *buf, int size)
     return openos_syscall_result(openos_syscall3(SYS_READLINK, (int)path, (int)buf, size));
 }
 
-static inline void *openos_mmap(void *addr, int len, int flags)
+static inline void *openos_mmap_ex(void *addr, int len, int prot, int flags)
 {
-    int result = openos_syscall3(SYS_MMAP, (int)addr, len, flags);
+    int result = openos_syscall4(SYS_MMAP, (int)addr, len, prot, flags);
     if (result == -1)
         openos_errno = OPENOS_EINVAL;
     return (void *)result;
+}
+
+static inline void *openos_mmap(void *addr, int len, int flags)
+{
+    int mmap_flags = flags ? flags : (OPENOS_MAP_ANON | OPENOS_MAP_PRIVATE);
+    return openos_mmap_ex(addr, len, OPENOS_PROT_READ | OPENOS_PROT_WRITE, mmap_flags);
 }
 
 static inline int openos_munmap(void *addr, int len)

@@ -411,7 +411,8 @@
   - [√] 覆盖 uptime、匿名 mmap/munmap、sbrk、thread、shared memory、eventfd、socketpair、poll 等现有基础能力
   - [√] 接入 `build.sh`、内核嵌入头文件和 `/bin` 安装流程
 - [ ] M2 内存与地址空间能力增强
-  - [ ] `mmap` 支持 `prot` / `flags` 语义：read/write/exec、private/shared、anonymous/file-backed
+  - [ ] `mmap` 支持完整 `prot` / `flags` 语义：read/write/exec、private/shared、anonymous/file-backed
+    - [√] 已完成匿名私有 VMA 记录、基础 prot/flags 参数、按需分页按 VMA 写权限映射
   - [√] 实现 `mprotect` 页级权限切换基础能力，已接入 `/bin/chromiumcaptest` 验收
   - [ ] 支持固定地址映射、地址空间保留、解除映射后的 VMA 合并与冲突检测
   - [ ] 文件 mmap 与 page cache 协同，支持只读资源映射和私有 COW 映射

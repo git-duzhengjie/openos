@@ -1179,6 +1179,72 @@ static uint32_t syscall_eventfd_destroy(uint32_t handle)
     return 0;
 }
 
+static process_mmap_vma_t *sys_mmap_find_vma(process_t *proc, uint32_t addr, uint32_t len)
+{
+    uint32_t end;
+
+    if (!proc || len == 0)
+        return 0;
+    end = addr + len;
+    if (end <= addr)
+        return 0;
+
+    for (int i = 0; i < PROCESS_MMAP_VMA_MAX; i++) {
+        process_mmap_vma_t *vma = &proc->mmap_vmas[i];
+        if (vma->start && addr >= vma->start && end <= vma->end)
+            return vma;
+    }
+    return 0;
+}
+
+static int sys_mmap_add_vma(process_t *proc, uint32_t start, uint32_t len, uint32_t prot, uint32_t flags)
+{
+    uint32_t end = start + len;
+
+    if (!proc || end <= start)
+        return -1;
+
+    for (int i = 0; i < PROCESS_MMAP_VMA_MAX; i++) {
+        process_mmap_vma_t *vma = &proc->mmap_vmas[i];
+        if (!vma->start)
+            continue;
+        if (start < vma->end && end > vma->start)
+            return -1;
+    }
+
+    for (int i = 0; i < PROCESS_MMAP_VMA_MAX; i++) {
+        process_mmap_vma_t *vma = &proc->mmap_vmas[i];
+        if (vma->start)
+            continue;
+        vma->start = start;
+        vma->end = end;
+        vma->prot = prot;
+        vma->flags = flags;
+        return 0;
+    }
+    return -1;
+}
+
+static void sys_mmap_remove_vma(process_t *proc, uint32_t addr, uint32_t len)
+{
+    uint32_t end = addr + len;
+
+    if (!proc || end <= addr)
+        return;
+
+    for (int i = 0; i < PROCESS_MMAP_VMA_MAX; i++) {
+        process_mmap_vma_t *vma = &proc->mmap_vmas[i];
+        if (!vma->start)
+            continue;
+        if (addr <= vma->start && end >= vma->end) {
+            vma->start = 0;
+            vma->end = 0;
+            vma->prot = 0;
+            vma->flags = 0;
+        }
+    }
+}
+
 static void sys_munmap_range(uint32_t addr, uint32_t len)
 {
     uint32_t end = addr + len;
@@ -1192,13 +1258,16 @@ static void sys_munmap_range(uint32_t addr, uint32_t len)
     }
 }
 
-static uint32_t sys_mmap_anonymous(uint32_t addr, uint32_t len, uint32_t flags)
+static uint32_t sys_mmap_anonymous(uint32_t addr, uint32_t len, uint32_t prot, uint32_t flags)
 {
-    (void)flags;
     process_t *proc;
     uint32_t start;
 
     if (addr != 0 || len == 0 || len > SYS_MMAP_MAX_REQUEST)
+        return (uint32_t)-1;
+    if ((prot & ~(uint32_t)0x7u) != 0)
+        return (uint32_t)-1;
+    if ((flags & ~(PROCESS_MMAP_FLAG_ANON | PROCESS_MMAP_FLAG_PRIVATE)) != 0)
         return (uint32_t)-1;
 
     len = page_align_up_u32(len);
@@ -1216,6 +1285,9 @@ static uint32_t sys_mmap_anonymous(uint32_t addr, uint32_t len, uint32_t flags)
 
     start = page_align_up_u32(proc->mmap_end);
     if (start < SYS_MMAP_BASE || start > SYS_MMAP_LIMIT || len > (SYS_MMAP_LIMIT - start))
+        return (uint32_t)-1;
+
+    if (sys_mmap_add_vma(proc, start, len, prot, flags | PROCESS_MMAP_FLAG_ANON) < 0)
         return (uint32_t)-1;
 
     /* Demand paging: reserve virtual range only. Physical pages are allocated on #PF. */
@@ -1239,6 +1311,7 @@ static uint32_t sys_munmap_user(uint32_t addr, uint32_t len)
     sys_munmap_range(addr, len);
 
     proc = proc_find(proc_current_pid());
+    sys_mmap_remove_vma(proc, addr, len);
     if (proc && end == proc->mmap_end)
         proc->mmap_end = addr;
 
@@ -1263,9 +1336,12 @@ static uint32_t sys_mprotect_user(uint32_t addr, uint32_t len, uint32_t prot)
     if (!proc)
         return (uint32_t)-1;
 
-    if (!((addr >= SYS_MMAP_BASE && end <= SYS_MMAP_LIMIT) ||
-          (addr >= proc->heap_start && end <= proc->heap_end)))
+    if (addr >= SYS_MMAP_BASE && end <= SYS_MMAP_LIMIT) {
+        if (!sys_mmap_find_vma(proc, addr, len))
+            return (uint32_t)-1;
+    } else if (!(addr >= proc->heap_start && end <= proc->heap_end)) {
         return (uint32_t)-1;
+    }
 
     if ((prot & ~(uint32_t)0x7u) != 0)
         return (uint32_t)-1;
@@ -1282,6 +1358,12 @@ static uint32_t sys_mprotect_user(uint32_t addr, uint32_t len, uint32_t prot)
 
     for (uint32_t va = addr; va < end; va += PAGE_SIZE)
         vmm_update_page_flags(va, page_flags);
+
+    if (addr >= SYS_MMAP_BASE && end <= SYS_MMAP_LIMIT) {
+        process_mmap_vma_t *vma = sys_mmap_find_vma(proc, addr, len);
+        if (vma)
+            vma->prot = prot;
+    }
 
     return 0;
 }
@@ -1473,7 +1555,7 @@ uint32_t syscall_dispatch(uint32_t num,
         return 0;
 
     case SYS_MMAP:
-        return sys_mmap_anonymous(a, b, c);
+        return sys_mmap_anonymous(a, b, c, d);
 
     case SYS_MUNMAP:
         return sys_munmap_user(a, b);
