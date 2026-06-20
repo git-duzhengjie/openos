@@ -121,6 +121,7 @@
 #define SYS_GUI_POLL_EVENT 324
 #define SYS_GUI_SET_TEXT 325
 #define SYS_GUI_DRAW 326
+#define SYS_MMAP_FILE    328
 
 #define OPENOS_PROT_NONE  0x0
 #define OPENOS_PROT_READ  0x1
@@ -130,6 +131,7 @@
 #define OPENOS_MAP_ANON    0x01
 #define OPENOS_MAP_PRIVATE 0x02
 #define OPENOS_MAP_FIXED   0x10
+#define OPENOS_MAP_FILE    0x20
 
 #define OPENOS_CAP_SETUID    (1u << 0)
 #define OPENOS_CAP_SETGID    (1u << 1)
@@ -2036,6 +2038,15 @@ static inline void *openos_mmap(void *addr, int len, int flags)
 {
     int mmap_flags = flags ? flags : (OPENOS_MAP_ANON | OPENOS_MAP_PRIVATE);
     return openos_mmap_ex(addr, len, OPENOS_PROT_READ | OPENOS_PROT_WRITE, mmap_flags);
+}
+
+static inline void *openos_mmap_file(int fd, int len, int prot, int flags)
+{
+    int mmap_flags = flags ? flags : OPENOS_MAP_PRIVATE;
+    int result = openos_syscall4(SYS_MMAP_FILE, fd, len, prot, mmap_flags);
+    if (result == -1)
+        openos_errno = OPENOS_EINVAL;
+    return (void *)result;
 }
 
 static inline int openos_munmap(void *addr, int len)

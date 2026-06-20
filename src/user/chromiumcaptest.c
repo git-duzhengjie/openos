@@ -169,6 +169,57 @@ static int test_mprotect(void)
     return openos_munmap(mem, 4096) == 0 ? CAP_PASS : CAP_FAIL;
 }
 
+static int test_file_mmap(void)
+{
+    const char *path = "/tmp/chromiumcaptest_mmap.txt";
+    const char *payload = "OpenOS Chromium file mmap capability";
+    int len = openos_strlen(payload);
+    int fd = openos_open(path, O_CREAT | O_TRUNC | O_RDWR, 0644);
+    char *mapped;
+    int i;
+
+    if (fd < 0)
+        return CAP_FAIL;
+    if (openos_write_fd(fd, payload, len) != len) {
+        openos_close(fd);
+        return CAP_FAIL;
+    }
+
+    mapped = (char *)openos_mmap_file(fd, 4096, OPENOS_PROT_READ | OPENOS_PROT_WRITE,
+                                      OPENOS_MAP_PRIVATE | OPENOS_MAP_FILE);
+    if ((int)mapped == -1 || !mapped) {
+        openos_close(fd);
+        return CAP_FAIL;
+    }
+
+    for (i = 0; i < len; ++i) {
+        if (mapped[i] != payload[i]) {
+            openos_munmap(mapped, 4096);
+            openos_close(fd);
+            return CAP_FAIL;
+        }
+    }
+    if (mapped[len] != 0) {
+        openos_munmap(mapped, 4096);
+        openos_close(fd);
+        return CAP_FAIL;
+    }
+
+    mapped[0] = 'o';
+    if (mapped[0] != 'o') {
+        openos_munmap(mapped, 4096);
+        openos_close(fd);
+        return CAP_FAIL;
+    }
+
+    if (openos_munmap(mapped, 4096) != 0) {
+        openos_close(fd);
+        return CAP_FAIL;
+    }
+    openos_close(fd);
+    return CAP_PASS;
+}
+
 static int test_sbrk(void)
 {
     unsigned char *old_break;
@@ -327,7 +378,7 @@ int main(int argc, char **argv)
     (void)argv;
 
     openos_printf("Chromium core capability test\n");
-    openos_printf("target: mmap mprotect brk thread shm eventfd socketpair poll time\n");
+    openos_printf("target: mmap file-mmap mprotect brk thread shm eventfd socketpair poll time\n");
 
     status = test_uptime();
     print_result("monotonic uptime", status);
@@ -347,6 +398,10 @@ int main(int argc, char **argv)
 
     status = test_mprotect();
     print_result("mprotect page permission changes", status);
+    failed += status == CAP_FAIL;
+
+    status = test_file_mmap();
+    print_result("file mmap private snapshot", status);
     failed += status == CAP_FAIL;
 
     status = test_sbrk();

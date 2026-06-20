@@ -32,8 +32,8 @@ OpenOS process/thread/mm/ipc/fs/net/gui/font core
 
 Chromium/V8/Skia 需要强内存能力：
 
-- `mmap/munmap`：已具备匿名映射雏形，当前需扩展固定地址、保护位和文件映射。
-- `mprotect`：V8 JIT、只读页、W^X 需要。
+- `mmap/munmap`：已具备匿名映射、基础 `MAP_FIXED` 和文件私有快照映射雏形，后续需扩展 shared/file page cache/COW 语义。
+- `mprotect`：已具备页级权限切换基础能力，V8 JIT、只读页、W^X 仍需策略化增强。
 - `brk/sbrk`：已具备堆增长雏形，需要大分配压力测试。
 - 共享内存：已有 `shm_create/shm_map/shm_destroy` 雏形，需要跨进程引用计数、大小参数、权限和生命周期。
 - demand paging：已有匿名 mmap 预留思路，需要稳定 page fault 分配和 OOM 处理。
@@ -134,6 +134,8 @@ Chromium 主体是 C++，OpenOS 需要：
 初版覆盖：
 
 - mmap/munmap。
+- mprotect。
+- file-backed private snapshot mmap。
 - brk/sbrk。
 - thread create/gettid/yield/sleep。
 - shm 双映射一致性。
@@ -145,7 +147,7 @@ Chromium 主体是 C++，OpenOS 需要：
 
 - `mprotect`。
 - 固定地址 mmap。
-- 文件 mmap。
+- 文件 mmap：已完成 fd 内容到用户地址空间的基础私有快照映射，后续接入 page cache、shared/COW 和只读资源映射。
 - shm 大小参数和跨进程映射。
 - COW fork。
 

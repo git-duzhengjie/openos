@@ -55,6 +55,7 @@ typedef enum {
 #define PROCESS_MMAP_FLAG_ANON    0x01u
 #define PROCESS_MMAP_FLAG_PRIVATE 0x02u
 #define PROCESS_MMAP_FLAG_FIXED   0x10u
+#define PROCESS_MMAP_FLAG_FILE    0x20u
 
 typedef struct process_mmap_vma {
     uint32_t start;

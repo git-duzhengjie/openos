@@ -417,6 +417,7 @@
   - [ ] 支持固定地址映射、地址空间保留、解除映射后的 VMA 合并与冲突检测
     - [√] 已完成 `MAP_FIXED` 基础固定地址预留与重叠 VMA 冲突拒绝
   - [ ] 文件 mmap 与 page cache 协同，支持只读资源映射和私有 COW 映射
+    - [√] 已完成基础 file-backed private snapshot mmap：`SYS_MMAP_FILE` 可将 fd 内容映射到用户地址空间，并接入 `/bin/chromiumcaptest` 验收
   - [ ] 为 V8 预留 executable memory / jitless 两条路线的内核策略
 - [ ] M3 线程、同步与调度增强
   - [ ] 用户态线程 TLS / thread-local storage 基础 ABI

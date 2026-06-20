@@ -1300,6 +1300,91 @@ static uint32_t sys_mmap_anonymous(uint32_t addr, uint32_t len, uint32_t prot, u
     return start;
 }
 
+static uint32_t sys_mmap_file(uint32_t fd_raw, uint32_t len_raw, uint32_t prot_raw, uint32_t flags_raw)
+{
+    int fd = (int)fd_raw;
+    uint32_t length = len_raw;
+    uint32_t prot = prot_raw;
+    uint32_t flags = flags_raw;
+
+    if (fd < 0 || length == 0 || length > SYS_MMAP_MAX_REQUEST)
+        return (uint32_t)-1;
+    if ((prot & ~(PROCESS_MMAP_PROT_READ | PROCESS_MMAP_PROT_WRITE)) != 0)
+        return (uint32_t)-1;
+    if ((flags & PROCESS_MMAP_FLAG_FIXED) != 0)
+        return (uint32_t)-1;
+
+    process_t *proc = proc_find(proc_current_pid());
+    if (!proc)
+        return (uint32_t)-1;
+
+    if (proc->mmap_base == 0 || proc->mmap_end < SYS_MMAP_BASE || proc->mmap_end >= SYS_MMAP_LIMIT) {
+        proc->mmap_base = aslr_pick_mmap_base(proc->pid);
+        proc->mmap_end = proc->mmap_base;
+    }
+
+    uint32_t pages = (length + PAGE_SIZE - 1u) / PAGE_SIZE;
+    uint32_t mapped_len = pages * PAGE_SIZE;
+    uint32_t base = page_align_up_u32(proc->mmap_end);
+    if (base < SYS_MMAP_BASE || base > SYS_MMAP_LIMIT || mapped_len > (SYS_MMAP_LIMIT - base))
+        return (uint32_t)-1;
+    if (sys_mmap_add_vma(proc, base, mapped_len, prot, PROCESS_MMAP_FLAG_FILE | (flags & PROCESS_MMAP_FLAG_PRIVATE)) < 0)
+        return (uint32_t)-1;
+
+    for (uint32_t page = 0; page < pages; ++page) {
+        void *phys = pmm_alloc_page();
+        if (!phys) {
+            sys_mmap_remove_vma(proc, base, mapped_len);
+            sys_munmap_range(base, page * PAGE_SIZE);
+            return (uint32_t)-1;
+        }
+        memset(phys, 0, PAGE_SIZE);
+        vmm_map_page(base + page * PAGE_SIZE, (uint32_t)phys, VMM_USER);
+    }
+
+    int saved_pos = vfs_seek(fd, 0, 1);
+    if (saved_pos < 0) {
+        sys_mmap_remove_vma(proc, base, mapped_len);
+        sys_munmap_range(base, mapped_len);
+        return (uint32_t)-1;
+    }
+    if (vfs_seek(fd, 0, 0) < 0) {
+        vfs_seek(fd, saved_pos, 0);
+        sys_mmap_remove_vma(proc, base, mapped_len);
+        sys_munmap_range(base, mapped_len);
+        return (uint32_t)-1;
+    }
+
+    uint8_t chunk[512];
+    uint32_t copied = 0;
+    while (copied < length) {
+        uint32_t want = length - copied;
+        if (want > sizeof(chunk))
+            want = sizeof(chunk);
+        int n = vfs_read(fd, chunk, want);
+        if (n < 0) {
+            vfs_seek(fd, saved_pos, 0);
+            sys_mmap_remove_vma(proc, base, mapped_len);
+        sys_munmap_range(base, mapped_len);
+            return (uint32_t)-1;
+        }
+        if (n == 0)
+            break;
+        if (copy_to_user((void *)(uintptr_t)(base + copied), chunk, (uint32_t)n) < 0) {
+            vfs_seek(fd, saved_pos, 0);
+            sys_mmap_remove_vma(proc, base, mapped_len);
+        sys_munmap_range(base, mapped_len);
+            return (uint32_t)-1;
+        }
+        copied += (uint32_t)n;
+    }
+    vfs_seek(fd, saved_pos, 0);
+
+    if (base + mapped_len > proc->mmap_end)
+        proc->mmap_end = base + mapped_len;
+    return base;
+}
+
 static uint32_t sys_munmap_user(uint32_t addr, uint32_t len)
 {
     process_t *proc;
@@ -1482,7 +1567,7 @@ uint32_t syscall_dispatch(uint32_t num,
                           uint32_t a, uint32_t b, uint32_t c,
                           uint32_t d, uint32_t e)
 {
-    (void)d; (void)e;
+    (void)e;
     uint32_t current_pid = proc_current_pid();
     if (current_pid)
         proc_handle_pending_signals(current_pid);
@@ -1564,6 +1649,9 @@ uint32_t syscall_dispatch(uint32_t num,
 
     case SYS_MUNMAP:
         return sys_munmap_user(a, b);
+
+    case SYS_MMAP_FILE:
+        return sys_mmap_file(a, b, c, d);
 
     case SYS_MPROTECT:
         return sys_mprotect_user(a, b, c);
