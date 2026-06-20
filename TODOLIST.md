@@ -374,27 +374,27 @@
   - [ ] 网络访问统一走用户态 socket/libc API，而不是直接调用内核内部函数
 - [ ] 补齐移植开源浏览器内核所需的基础运行环境
   - [ ] libc/POSIX 子集：malloc/free/realloc、stdio、string、time、errno、文件 API、目录 API
-  - [ ] socket API：getaddrinfo/gethostbyname、connect/send/recv/close、select/poll、非阻塞 socket
-  - [ ] TLS/HTTPS 用户态库适配：优先评估 mbedTLS / BearSSL / wolfSSL 等轻量方案
+  - [√] socket API：getaddrinfo/gethostbyname、connect/send/recv/close、select/poll、非阻塞 socket
+  - [√] TLS/HTTPS 用户态库适配：优先评估 mbedTLS / BearSSL / wolfSSL 等轻量方案
   - [ ] 字体接口：字体枚举、字形查询、UTF-8/Unicode 文本测量、基础 fallback
   - [ ] 图形接口：framebuffer/窗口绘制、矩形裁剪、位图 blit、滚动、双缓冲
-  - [ ] 图片解码依赖评估：PNG/JPEG/GIF/WebP 可分阶段接入
+  - [√] 图片解码依赖评估：PNG/JPEG/GIF/WebP 可分阶段接入
   - [ ] 文件与配置目录：缓存、cookie、证书、字体资源、下载目录
 - [ ] 优先评估并移植 NetSurf 作为 OpenOS 第一代开源浏览器内核
-  - [ ] 阅读 NetSurf framebuffer frontend、libdom、libcss、hubbub、utils 等依赖结构
+  - [√] 阅读 NetSurf framebuffer frontend、libdom、libcss、hubbub、utils 等依赖结构
   - [ ] 先在宿主机完成最小 framebuffer frontend 构建验证
   - [ ] 为 OpenOS 编写 NetSurf 平台层：framebuffer 绘制、输入事件、定时器、文件、socket、字体
   - [ ] 先支持 HTTP 页面显示，再接入 HTTPS、图片、表单、下载等能力
-  - [ ] 记录 NetSurf 依赖裁剪清单，避免一次性引入过大依赖
-- [ ] 备选轻量浏览器方案调研
-  - [ ] Dillo：评估 FLTK 依赖替换成本、HTML/CSS 支持程度、HTTPS/中文支持工作量
-  - [ ] Links2/Lynx：作为文本/半图形浏览器验证方案，不作为最终 GUI 浏览器目标
-  - [ ] SerenityOS LibWeb / Ladybird：作为远期现代内核参考，待 C++ 运行时、线程、图形、JS 环境成熟后再评估
-  - [ ] Chromium/WebKit/Gecko：暂不作为近期目标，仅作为长期参考，原因是依赖体量和平台适配成本过高
-- [ ] JavaScript 后续路线
-  - [ ] 短期不在内核内置 Browser 中实现 JS
-  - [ ] 中期评估 QuickJS 作为轻量 JS 引擎
-  - [ ] 长期随 NetSurf/LibWeb 等内核路线决定 JS/DOM/CSSOM 支持深度
+  - [√] 记录 NetSurf 依赖裁剪清单，避免一次性引入过大依赖
+- [√] 备选轻量浏览器方案调研
+  - [√] Dillo：评估 FLTK 依赖替换成本、HTML/CSS 支持程度、HTTPS/中文支持工作量
+  - [√] Links2/Lynx：作为文本/半图形浏览器验证方案，不作为最终 GUI 浏览器目标
+  - [√] SerenityOS LibWeb / Ladybird：作为远期现代内核参考，待 C++ 运行时、线程、图形、JS 环境成熟后再评估
+  - [√] Chromium/WebKit/Gecko：暂不作为近期目标，仅作为长期参考，原因是依赖体量和平台适配成本过高
+- [√] JavaScript 后续路线
+  - [√] 短期不在内核内置 Browser 中实现 JS
+  - [√] 中期评估 QuickJS 作为轻量 JS 引擎
+  - [√] 长期随 NetSurf/LibWeb 等内核路线决定 JS/DOM/CSSOM 支持深度
 - [√] 文档化浏览器路线
   - [√] 新增 `docs/browser-engine-roadmap.md`，记录当前轻量浏览器、用户态化、NetSurf 移植、HTTPS/JS 后续路线
   - [√] 在 README 中说明当前 Browser 能力边界：支持基础 HTTP/HTML 文本化，不等同于 Chromium/WebKit 级完整浏览器

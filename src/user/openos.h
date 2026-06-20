@@ -139,6 +139,25 @@ typedef struct openos_sockaddr_in {
     unsigned char sin_zero[8];
 } openos_sockaddr_in_t;
 
+typedef struct openos_addrinfo {
+    int ai_flags;
+    int ai_family;
+    int ai_socktype;
+    int ai_protocol;
+    unsigned int ai_addrlen;
+    openos_sockaddr_t *ai_addr;
+    char *ai_canonname;
+    struct openos_addrinfo *ai_next;
+} openos_addrinfo_t;
+
+typedef struct openos_hostent {
+    char *h_name;
+    char **h_aliases;
+    int h_addrtype;
+    int h_length;
+    char **h_addr_list;
+} openos_hostent_t;
+
 #define NET_DEVICE_FLAG_PRESENT 0x00000001u
 #define NET_DEVICE_FLAG_UP      0x00000002u
 #define NET_DEVICE_FLAG_LINK_UP 0x00000004u
@@ -1975,11 +1994,82 @@ static inline void *openos_realloc(void *ptr, int size)
     return next;
 }
 
+static inline void openos_freeaddrinfo(openos_addrinfo_t *res)
+{
+    while (res) {
+        openos_addrinfo_t *next = res->ai_next;
+        if (res->ai_addr) openos_free(res->ai_addr);
+        if (res->ai_canonname) openos_free(res->ai_canonname);
+        openos_free(res);
+        res = next;
+    }
+}
+
+static inline int openos_getaddrinfo(const char *node, const char *service,
+                                     const openos_addrinfo_t *hints,
+                                     openos_addrinfo_t **res)
+{
+    unsigned int ip = 0;
+    unsigned int port = 0;
+    openos_addrinfo_t *ai;
+    openos_sockaddr_in_t *addr;
+    if (!node || !res) {
+        openos_set_errno(OPENOS_EINVAL);
+        return -1;
+    }
+    *res = 0;
+    if (hints && hints->ai_family != OPENOS_AF_UNSPEC && hints->ai_family != OPENOS_AF_INET) {
+        openos_set_errno(OPENOS_EINVAL);
+        return -1;
+    }
+    if (service) port = (unsigned int)openos_atoi(service);
+    if (openos_dnslookup(node, &ip) < 0) return -1;
+    ai = (openos_addrinfo_t *)openos_calloc(1, sizeof(openos_addrinfo_t));
+    addr = (openos_sockaddr_in_t *)openos_calloc(1, sizeof(openos_sockaddr_in_t));
+    if (!ai || !addr) {
+        if (ai) openos_free(ai);
+        if (addr) openos_free(addr);
+        openos_set_errno(OPENOS_ENOMEM);
+        return -1;
+    }
+    addr->sin_family = OPENOS_AF_INET;
+    addr->sin_port = openos_htons((unsigned short)port);
+    addr->sin_addr = ip;
+    ai->ai_family = OPENOS_AF_INET;
+    ai->ai_socktype = hints ? hints->ai_socktype : 0;
+    ai->ai_protocol = hints ? hints->ai_protocol : 0;
+    ai->ai_addrlen = sizeof(openos_sockaddr_in_t);
+    ai->ai_addr = (openos_sockaddr_t *)addr;
+    *res = ai;
+    return 0;
+}
+
+static inline openos_hostent_t *openos_gethostbyname(const char *name)
+{
+    static openos_hostent_t host;
+    static char *aliases[1];
+    static char *addr_list[2];
+    static unsigned int addr;
+    if (!name) {
+        openos_set_errno(OPENOS_EINVAL);
+        return 0;
+    }
+    if (openos_dnslookup(name, &addr) < 0) return 0;
+    aliases[0] = 0;
+    addr_list[0] = (char *)&addr;
+    addr_list[1] = 0;
+    host.h_name = (char *)name;
+    host.h_aliases = aliases;
+    host.h_addrtype = OPENOS_AF_INET;
+    host.h_length = 4;
+    host.h_addr_list = addr_list;
+    return &host;
+}
+
 static inline int openos_seek(int fd, int offset, int whence)
 {
     return openos_syscall_result(openos_syscall3(SYS_SEEK, fd, offset, whence));
 }
-
 
 
 typedef struct openos_FILE {
