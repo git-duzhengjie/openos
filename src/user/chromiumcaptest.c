@@ -113,8 +113,27 @@ static int test_mmap_prot_flags(void)
         return CAP_FAIL;
     }
 
+    if (openos_mmap_ex(0, 4096,
+                       OPENOS_PROT_READ | 0x80,
+                       OPENOS_MAP_ANON | OPENOS_MAP_PRIVATE) != (void *)-1) {
+        openos_munmap(mem, 4096);
+        return CAP_FAIL;
+    }
+
+    if (openos_mmap_ex(0, 4096,
+                       OPENOS_PROT_READ,
+                       OPENOS_MAP_PRIVATE | 0x4000) != (void *)-1) {
+        openos_munmap(mem, 4096);
+        return CAP_FAIL;
+    }
+
     value = mem[0];
     if (value != 0) {
+        openos_munmap(mem, 4096);
+        return CAP_FAIL;
+    }
+
+    if (openos_mprotect(mem, 4096, OPENOS_PROT_READ | 0x80) == 0) {
         openos_munmap(mem, 4096);
         return CAP_FAIL;
     }
