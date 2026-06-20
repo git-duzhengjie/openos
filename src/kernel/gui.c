@@ -27,6 +27,7 @@ extern uint32_t sched_time_ms(void);
 static void gui_desktop_run_action(uint32_t action);
 static int  gui_taskbar_search_handle_key(int key);
 static int  gui_is_enter_key(int key);
+static int  browser_handle_address_enter(int key);
 static void gui_taskbar_search_open_result(uint32_t index);
 static int  gui_taskbar_search_result_index_at(int x, int y);
 static void gui_taskbar_search_reset_results(void);
@@ -2505,6 +2506,8 @@ void gui_process_events(void) {
                 gui_toggle_start_menu();
             } else if (ev.key == GUI_KEY_TAB) {
                 gui_focus_next_widget();
+            } else if (browser_handle_address_enter(ev.key)) {
+                /* Browser address bar consumed Enter. */
             } else if (g_gui.focused_widget && g_gui.focused_widget->focused &&
                        g_gui.focused_widget->type == GUI_WIDGET_TEXTBOX) {
                 gui_textbox_on_key(g_gui.focused_widget, ev.key);
@@ -5767,6 +5770,13 @@ static void browser_on_nav(gui_widget_t *w, void *ud) {
     (void)w;
     (void)ud;
     browser_http_get_current();
+}
+
+static int browser_handle_address_enter(int key) {
+    if (!g_browser_address_box || g_gui.focused_widget != g_browser_address_box) return 0;
+    if (!gui_is_enter_key(key)) return 0;
+    browser_http_get_current();
+    return 1;
 }
 
 static void gui_browser_open(void) {
