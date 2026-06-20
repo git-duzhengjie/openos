@@ -200,6 +200,8 @@ typedef struct syscall_mq {
 typedef struct syscall_shm_segment {
     uint8_t used;
     uint32_t phys;
+    uint32_t refcount;
+    uint32_t flags;
 } syscall_shm_segment_t;
 
 typedef struct syscall_eventfd {
@@ -1087,6 +1089,8 @@ static uint32_t syscall_shm_create(void)
         memset((void *)phys, 0, PAGE_SIZE);
         syscall_shm_segments[i].used = SHM_READY;
         syscall_shm_segments[i].phys = (uint32_t)phys;
+        syscall_shm_segments[i].refcount = 0;
+        syscall_shm_segments[i].flags = 0;
         return i + 1;
     }
 
@@ -1117,6 +1121,7 @@ static uint32_t syscall_shm_map(uint32_t handle)
 
     pmm_ref_page((void *)seg->phys);
     vmm_map_page(start, seg->phys, VMM_USER);
+    seg->refcount++;
     proc->mmap_end = start + PAGE_SIZE;
     return start;
 }
@@ -1127,8 +1132,29 @@ static uint32_t syscall_shm_destroy(uint32_t handle)
 
     if (!seg || !seg->phys)
         return (uint32_t)-1;
+    if (seg->refcount != 0)
+        return (uint32_t)-1;
     pmm_free_page((void *)seg->phys);
     memset(seg, 0, sizeof(*seg));
+    return 0;
+}
+
+static uint32_t syscall_shm_info(uint32_t handle, uint32_t user_info)
+{
+    syscall_shm_segment_t *seg = syscall_shm_from_handle(handle);
+    uint32_t info[4];
+
+    if (!seg || !seg->phys || !user_info)
+        return (uint32_t)-1;
+    if (!user_ptr_valid((void *)user_info, sizeof(info), USERMEM_WRITE))
+        return (uint32_t)-1;
+
+    info[0] = handle;
+    info[1] = PAGE_SIZE;
+    info[2] = seg->refcount;
+    info[3] = seg->flags;
+    if (copy_to_user((void *)user_info, info, sizeof(info)) < 0)
+        return (uint32_t)-1;
     return 0;
 }
 
@@ -2390,6 +2416,9 @@ uint32_t syscall_dispatch(uint32_t num,
 
     case SYS_SHM_DESTROY:
         return syscall_shm_destroy((uint32_t)a);
+
+    case SYS_SHM_INFO:
+        return syscall_shm_info((uint32_t)a, (uint32_t)b);
 
     case SYS_EVENTFD_CREATE:
         return syscall_eventfd_create((uint32_t)a);

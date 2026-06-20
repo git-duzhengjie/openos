@@ -408,6 +408,7 @@ static int test_shm(void)
     openos_shm_t shm;
     volatile unsigned int *a;
     volatile unsigned int *b;
+    openos_shm_info_t info;
     int i;
 
     if (openos_shm_create(&shm) != 0) {
@@ -418,6 +419,13 @@ static int test_shm(void)
     b = (volatile unsigned int *)openos_shm_map(&shm);
     if (a == (volatile unsigned int *)-1 || b == (volatile unsigned int *)-1 || !a || !b) {
         openos_shm_destroy(&shm);
+        return CAP_FAIL;
+    }
+    if (openos_shm_info(&shm, &info) != 0 || info.refcount != 2 || info.size < 4096u) {
+        openos_shm_destroy(&shm);
+        return CAP_FAIL;
+    }
+    if (openos_shm_destroy(&shm) == 0) {
         return CAP_FAIL;
     }
 

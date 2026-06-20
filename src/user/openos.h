@@ -126,6 +126,7 @@
 #define SYS_TLS_SET     330
 #define SYS_TLS_GET     331
 #define SYS_CLOCK_GETTIME 332
+#define SYS_SHM_INFO 333
 
 #define OPENOS_CHROMIUM_MEM_JITLESS_DEFAULT     (1u << 0)
 #define OPENOS_CHROMIUM_MEM_EXEC_PROT_RESERVED  (1u << 1)
@@ -1177,6 +1178,19 @@ static inline int openos_shm_destroy(openos_shm_t *shm)
     ret = openos_syscall_result(openos_syscall1(SYS_SHM_DESTROY, *shm));
     if (ret == 0) *shm = 0;
     return ret;
+}
+
+typedef struct openos_shm_info {
+    unsigned int id;
+    unsigned int size;
+    unsigned int refcount;
+    unsigned int flags;
+} openos_shm_info_t;
+
+static inline int openos_shm_info(openos_shm_t *shm, openos_shm_info_t *info)
+{
+    if (!shm || *shm <= 0 || !info) return -1;
+    return openos_syscall_result(openos_syscall2(SYS_SHM_INFO, *shm, (unsigned int)info));
 }
 
 static inline int openos_eventfd_create(openos_eventfd_t *efd, unsigned int initval)
