@@ -443,6 +443,7 @@
   - [ ] 完善 `stat/fstat/lstat`、权限、mtime/ctime/atime、目录遍历和路径规范化
     - [√] 已将 `stat/fstat/lstat/readdir/opendir` 基础元数据与目录遍历语义并入 `/bin/chromiumcaptest`，覆盖 Chromium 资源发现和 pak 文件探测所需最小文件系统查询能力
     - [√] 已将 `.` / `..` / 重复斜杠 / 相对路径 / cwd 语义并入 `/bin/chromiumcaptest`，覆盖 Chromium 资源路径规范化的最小验收
+    - [√] 已补充尾斜杠目录、越过根目录 `..` 截断、归一化前后 inode/size 一致性验收，强化 Chromium 资源路径解析边界
     - [√] 已将 `mkdir/link/symlink/readlink/unlink/rmdir` 基础变更语义并入 `/bin/chromiumcaptest`，覆盖 Chromium 资源/缓存文件生命周期的最小验收
   - [ ] 支持大文件、稀疏文件、资源 pak 文件读取与缓存目录
     - [√] 已新增 `/usr/share/openos/browser/pak` 资源目录常量与启动目录，并将 pak 文件创建、读取、stat、目录发现、删除并入 `/bin/chromiumcaptest`

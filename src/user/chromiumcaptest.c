@@ -378,6 +378,7 @@ static int test_path_normalization(void)
     openos_stat_t direct_st;
     openos_stat_t norm_st;
     openos_stat_t rel_st;
+    openos_stat_t dir_st;
     char cwd[64];
 
     if (openos_stat("/bin/chromiumcaptest", &direct_st) != 0 ||
@@ -387,7 +388,13 @@ static int test_path_normalization(void)
 
     if (openos_stat("//bin/./../bin//chromiumcaptest", &norm_st) != 0 ||
         (norm_st.mode & FS_FILE) != FS_FILE ||
-        norm_st.size != direct_st.size) {
+        norm_st.size != direct_st.size ||
+        norm_st.ino != direct_st.ino) {
+        return CAP_FAIL;
+    }
+
+    if (openos_stat("/../../bin/./", &dir_st) != 0 ||
+        (dir_st.mode & FS_DIR) != FS_DIR) {
         return CAP_FAIL;
     }
 
@@ -402,7 +409,14 @@ static int test_path_normalization(void)
 
     if (openos_stat("./chromiumcaptest", &rel_st) != 0 ||
         (rel_st.mode & FS_FILE) != FS_FILE ||
-        rel_st.size != direct_st.size) {
+        rel_st.size != direct_st.size ||
+        rel_st.ino != direct_st.ino) {
+        openos_chdir("/");
+        return CAP_FAIL;
+    }
+
+    if (openos_stat("../../../../bin/chromiumcaptest", &norm_st) != 0 ||
+        norm_st.ino != direct_st.ino || norm_st.size != direct_st.size) {
         openos_chdir("/");
         return CAP_FAIL;
     }
