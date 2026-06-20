@@ -412,7 +412,7 @@
   - [√] 接入 `build.sh`、内核嵌入头文件和 `/bin` 安装流程
 - [ ] M2 内存与地址空间能力增强
   - [ ] `mmap` 支持 `prot` / `flags` 语义：read/write/exec、private/shared、anonymous/file-backed
-  - [ ] 实现 `mprotect` / `munprotect` 等价能力，支持页级权限切换
+  - [√] 实现 `mprotect` 页级权限切换基础能力，已接入 `/bin/chromiumcaptest` 验收
   - [ ] 支持固定地址映射、地址空间保留、解除映射后的 VMA 合并与冲突检测
   - [ ] 文件 mmap 与 page cache 协同，支持只读资源映射和私有 COW 映射
   - [ ] 为 V8 预留 executable memory / jitless 两条路线的内核策略

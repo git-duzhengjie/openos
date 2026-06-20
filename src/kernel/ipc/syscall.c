@@ -1245,6 +1245,47 @@ static uint32_t sys_munmap_user(uint32_t addr, uint32_t len)
     return 0;
 }
 
+static uint32_t sys_mprotect_user(uint32_t addr, uint32_t len, uint32_t prot)
+{
+    process_t *proc;
+    uint32_t end;
+    uint32_t page_flags;
+
+    if (len == 0 || (addr & (PAGE_SIZE - 1u)) != 0)
+        return (uint32_t)-1;
+
+    len = page_align_up_u32(len);
+    end = addr + len;
+    if (end <= addr)
+        return (uint32_t)-1;
+
+    proc = proc_find(proc_current_pid());
+    if (!proc)
+        return (uint32_t)-1;
+
+    if (!((addr >= SYS_MMAP_BASE && end <= SYS_MMAP_LIMIT) ||
+          (addr >= proc->heap_start && end <= proc->heap_end)))
+        return (uint32_t)-1;
+
+    if ((prot & ~(uint32_t)0x7u) != 0)
+        return (uint32_t)-1;
+
+    for (uint32_t va = addr; va < end; va += PAGE_SIZE) {
+        uint32_t pte = vmm_get_mapping(va);
+        if ((pte & (PTE_PRESENT | PTE_USER)) != (PTE_PRESENT | PTE_USER))
+            return (uint32_t)-1;
+    }
+
+    page_flags = PTE_PRESENT | PTE_USER;
+    if (prot & 0x2u)
+        page_flags |= PTE_RW;
+
+    for (uint32_t va = addr; va < end; va += PAGE_SIZE)
+        vmm_update_page_flags(va, page_flags);
+
+    return 0;
+}
+
 static uint32_t sys_brk_set(uint32_t new_end)
 {
     process_t *proc = proc_find(proc_current_pid());
@@ -1436,6 +1477,9 @@ uint32_t syscall_dispatch(uint32_t num,
 
     case SYS_MUNMAP:
         return sys_munmap_user(a, b);
+
+    case SYS_MPROTECT:
+        return sys_mprotect_user(a, b, c);
 
     case SYS_BRK:
         return sys_brk_set(a);

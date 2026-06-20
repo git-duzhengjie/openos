@@ -113,6 +113,7 @@
 #define SYS_DNSLOOKUP    316
 #define SYS_UPTIME_MS    317
 #define SYS_FONT_QUERY   318
+#define SYS_MPROTECT     319
 #define SYS_GUI_CREATE_WINDOW 320
 #define SYS_GUI_DESTROY_WINDOW 321
 #define SYS_GUI_ADD_LABEL 322
@@ -120,6 +121,11 @@
 #define SYS_GUI_POLL_EVENT 324
 #define SYS_GUI_SET_TEXT 325
 #define SYS_GUI_DRAW 326
+
+#define OPENOS_PROT_NONE  0x0
+#define OPENOS_PROT_READ  0x1
+#define OPENOS_PROT_WRITE 0x2
+#define OPENOS_PROT_EXEC  0x4
 
 #define OPENOS_CAP_SETUID    (1u << 0)
 #define OPENOS_CAP_SETGID    (1u << 1)
@@ -2025,6 +2031,11 @@ static inline void *openos_mmap(void *addr, int len, int flags)
 static inline int openos_munmap(void *addr, int len)
 {
     return openos_syscall_result(openos_syscall2(SYS_MUNMAP, (int)addr, len));
+}
+
+static inline int openos_mprotect(void *addr, int len, int prot)
+{
+    return openos_syscall_result(openos_syscall3(SYS_MPROTECT, (int)addr, len, prot));
 }
 
 static inline int openos_brk(void *addr)

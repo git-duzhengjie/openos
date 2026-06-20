@@ -64,6 +64,38 @@ static int test_mmap(void)
     return openos_munmap(mem, MMAP_TEST_SIZE) == 0 ? CAP_PASS : CAP_FAIL;
 }
 
+static int test_mprotect(void)
+{
+    unsigned char *mem;
+
+    mem = (unsigned char *)openos_mmap(0, 4096, 0);
+    if (mem == (unsigned char *)-1 || !mem) {
+        return CAP_FAIL;
+    }
+
+    mem[0] = 0x5a;
+    if (openos_mprotect(mem, 4096, OPENOS_PROT_READ) != 0) {
+        openos_munmap(mem, 4096);
+        return CAP_FAIL;
+    }
+    if (mem[0] != 0x5a) {
+        openos_munmap(mem, 4096);
+        return CAP_FAIL;
+    }
+    if (openos_mprotect(mem, 4096, OPENOS_PROT_READ | OPENOS_PROT_WRITE) != 0) {
+        openos_munmap(mem, 4096);
+        return CAP_FAIL;
+    }
+
+    mem[0] = 0xa5;
+    if (mem[0] != 0xa5) {
+        openos_munmap(mem, 4096);
+        return CAP_FAIL;
+    }
+
+    return openos_munmap(mem, 4096) == 0 ? CAP_PASS : CAP_FAIL;
+}
+
 static int test_sbrk(void)
 {
     unsigned char *old_break;
@@ -222,7 +254,7 @@ int main(int argc, char **argv)
     (void)argv;
 
     openos_printf("Chromium core capability test\n");
-    openos_printf("target: mmap brk thread shm eventfd socketpair poll time\n");
+    openos_printf("target: mmap mprotect brk thread shm eventfd socketpair poll time\n");
 
     status = test_uptime();
     print_result("monotonic uptime", status);
@@ -230,6 +262,10 @@ int main(int argc, char **argv)
 
     status = test_mmap();
     print_result("anonymous mmap read/write/munmap", status);
+    failed += status == CAP_FAIL;
+
+    status = test_mprotect();
+    print_result("mprotect page permission changes", status);
     failed += status == CAP_FAIL;
 
     status = test_sbrk();
