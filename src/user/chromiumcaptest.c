@@ -622,6 +622,65 @@ static int test_browser_resource_paths(void)
     return CAP_PASS;
 }
 
+static int test_sparse_seek_file(void)
+{
+    const char *path = "/tmp/chromiumcaptest_sparse.bin";
+    const int hole_offset = 8192;
+    char buf[8];
+    openos_stat_t st;
+    int fd;
+
+    openos_unlink(path);
+    fd = openos_open(path, O_CREAT | O_TRUNC | O_RDWR, 0644);
+    if (fd < 0) {
+        return CAP_FAIL;
+    }
+
+    if (openos_write_fd(fd, "HEAD", 4) != 4) {
+        openos_close(fd);
+        return CAP_FAIL;
+    }
+    if (openos_seek(fd, hole_offset, SEEK_SET) != hole_offset) {
+        openos_close(fd);
+        return CAP_FAIL;
+    }
+    if (openos_write_fd(fd, "TAIL", 4) != 4) {
+        openos_close(fd);
+        return CAP_FAIL;
+    }
+    if (openos_seek(fd, -4, SEEK_END) != hole_offset) {
+        openos_close(fd);
+        return CAP_FAIL;
+    }
+    openos_memset(buf, 0, sizeof(buf));
+    if (openos_read(fd, buf, 4) != 4 ||
+        buf[0] != 'T' || buf[1] != 'A' || buf[2] != 'I' || buf[3] != 'L') {
+        openos_close(fd);
+        return CAP_FAIL;
+    }
+    if (openos_seek(fd, 4, SEEK_SET) != 4) {
+        openos_close(fd);
+        return CAP_FAIL;
+    }
+    openos_memset(buf, 0x7f, sizeof(buf));
+    if (openos_read(fd, buf, 4) != 4 ||
+        buf[0] != 0 || buf[1] != 0 || buf[2] != 0 || buf[3] != 0) {
+        openos_close(fd);
+        return CAP_FAIL;
+    }
+    openos_close(fd);
+
+    if (openos_stat(path, &st) != 0 ||
+        (st.mode & FS_FILE) != FS_FILE || st.size != hole_offset + 4) {
+        return CAP_FAIL;
+    }
+    if (openos_unlink(path) != 0) {
+        return CAP_FAIL;
+    }
+
+    return CAP_PASS;
+}
+
 static int test_sbrk(void)
 {
     unsigned char *old_break;
@@ -1112,7 +1171,7 @@ int main(int argc, char **argv)
     (void)argv;
 
     openos_printf("Chromium core capability test\n");
-    openos_printf("target: mmap file-mmap fs-metadata path-normalization fs-mutations browser-dirs resource-pak mprotect v8-memory-policy brk thread tls pthread-sync futex shm eventfd message-queue service-channel socketpair poll time spawn fork pipe fd argv env\n");
+    openos_printf("target: mmap file-mmap fs-metadata path-normalization fs-mutations browser-dirs resource-pak sparse-seek mprotect v8-memory-policy brk thread tls pthread-sync futex shm eventfd message-queue service-channel socketpair poll time spawn fork pipe fd argv env\n");
 
     status = test_uptime();
     print_result("monotonic uptime", status);
@@ -1164,6 +1223,10 @@ int main(int argc, char **argv)
 
     status = test_browser_resource_paths();
     print_result("browser resource pak paths", status);
+    failed += status == CAP_FAIL;
+
+    status = test_sparse_seek_file();
+    print_result("sparse file seek/read/write", status);
     failed += status == CAP_FAIL;
 
     status = test_sbrk();
