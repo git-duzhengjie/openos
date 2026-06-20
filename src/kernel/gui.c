@@ -5730,31 +5730,73 @@ static char browser_decode_entity(const char **pp) {
     return '&';
 }
 
+static int browser_html_tag_name_eq(const char *tag, const char *name) {
+    uint32_t i = 0;
+    if (!tag || !name) return 0;
+    while (*tag == ' ' || *tag == '\t' || *tag == '\r' || *tag == '\n') tag++;
+    if (*tag == '/') tag++;
+    while (name[i]) {
+        char a = tag[i];
+        char b = name[i];
+        if (a >= 'A' && a <= 'Z') a = (char)(a - 'A' + 'a');
+        if (b >= 'A' && b <= 'Z') b = (char)(b - 'A' + 'a');
+        if (a != b) return 0;
+        i++;
+    }
+    return tag[i] == '\0' || tag[i] == '>' || tag[i] == ' ' || tag[i] == '\t' ||
+           tag[i] == '\r' || tag[i] == '\n' || tag[i] == '/';
+}
+
+static int browser_html_hidden_tag(const char *tag) {
+    return browser_html_tag_name_eq(tag, "head") || browser_html_tag_name_eq(tag, "style") ||
+           browser_html_tag_name_eq(tag, "script") || browser_html_tag_name_eq(tag, "svg") ||
+           browser_html_tag_name_eq(tag, "noscript");
+}
+
+static const char *browser_html_skip_hidden(const char *p, const char *tag) {
+    const char *q = p;
+    const char *name = 0;
+    if (browser_html_tag_name_eq(tag, "head")) name = "head";
+    else if (browser_html_tag_name_eq(tag, "style")) name = "style";
+    else if (browser_html_tag_name_eq(tag, "script")) name = "script";
+    else if (browser_html_tag_name_eq(tag, "svg")) name = "svg";
+    else if (browser_html_tag_name_eq(tag, "noscript")) name = "noscript";
+    if (!name) return p;
+    while (*q) {
+        if (q[0] == '<' && q[1] == '/' && browser_html_tag_name_eq(q + 2, name)) {
+            while (*q && *q != '>') q++;
+            if (*q == '>') q++;
+            return q;
+        }
+        q++;
+    }
+    return q;
+}
+
 static void browser_html_to_text(const char *html, char *out, uint32_t cap) {
     uint32_t n = 0;
-    int in_tag = 0;
     int last_space = 1;
-    const char *tag_start = 0;
     const char *p = html;
     if (!out || cap == 0) return;
     out[0] = '\0';
     if (!html) return;
     while (*p && n + 1u < cap) {
         char ch = *p++;
-        if (in_tag) {
-            if (ch == '>') {
-                if (tag_start && browser_html_tag_break(tag_start) && n > 0 && out[n - 1] != '\n') {
-                    out[n++] = '\n';
-                    last_space = 1;
-                }
-                in_tag = 0;
-                tag_start = 0;
-            }
-            continue;
-        }
         if (ch == '<') {
-            in_tag = 1;
-            tag_start = p;
+            const char *tag_start = p;
+            const char *tag_end = p;
+            int is_close = (*tag_start == '/');
+            while (*tag_end && *tag_end != '>') tag_end++;
+            if (!*tag_end) break;
+            if (!is_close && browser_html_hidden_tag(tag_start)) {
+                p = browser_html_skip_hidden(tag_end + 1, tag_start);
+                continue;
+            }
+            if (browser_html_tag_break(tag_start) && n > 0 && out[n - 1] != '\n') {
+                out[n++] = '\n';
+                last_space = 1;
+            }
+            p = tag_end + 1;
             continue;
         }
         if (ch == '&') ch = browser_decode_entity(&p);
@@ -5768,6 +5810,7 @@ static void browser_html_to_text(const char *html, char *out, uint32_t cap) {
         }
         out[n++] = ch;
     }
+    while (n > 0 && (out[n - 1] == ' ' || out[n - 1] == '\n')) n--;
     out[n] = '\0';
 }
 
@@ -6032,9 +6075,9 @@ static uint32_t browser_render_response_summary(char *response, const char *body
     if (line < GUI_BROWSER_CONTENT_LINES) browser_set_widget_text(g_browser_content_lines[line++], "");
     if (browser_response_is_html(response, body)) {
         static char html_text[1024];
-        line = browser_render_links(body, line);
         browser_html_to_text(body, html_text, sizeof(html_text));
-        return browser_render_body_at(html_text, line);
+        line = browser_render_body_at(html_text, line);
+        return browser_render_links(body, line);
     }
     return browser_render_body_at(body, line);
 }
