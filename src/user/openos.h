@@ -200,6 +200,9 @@ typedef int openos_clock_t;
 #define OPENOS_BROWSER_CERT_DIR "/home/browser/certs"
 #define OPENOS_BROWSER_PROFILES_DIR "/home/browser/profiles"
 #define OPENOS_BROWSER_DOWNLOAD_DIR "/home/browser/downloads"
+#define OPENOS_RESOURCE_DIR "/usr/share/openos"
+#define OPENOS_BROWSER_RESOURCE_DIR "/usr/share/openos/browser"
+#define OPENOS_BROWSER_PAK_DIR "/usr/share/openos/browser/pak"
 #define OPENOS_FONT_DIR "/fonts"
 
 typedef struct openos_timeval {

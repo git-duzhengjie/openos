@@ -549,6 +549,79 @@ static int test_browser_data_directories(void)
     return CAP_PASS;
 }
 
+static int test_browser_resource_paths(void)
+{
+    const char *dirs[] = {
+        OPENOS_RESOURCE_DIR,
+        OPENOS_BROWSER_RESOURCE_DIR,
+        OPENOS_BROWSER_PAK_DIR,
+    };
+    const char *pak = OPENOS_BROWSER_PAK_DIR "/chromiumcaptest.pak";
+    const char *payload = "PAK\0OpenOS Chromium resource payload";
+    char buf[64];
+    openos_stat_t st;
+    openos_dirent_t entry;
+    int found_pak = 0;
+    int fd;
+    int i;
+    int payload_len = 35;
+
+    for (i = 0; i < (int)(sizeof(dirs) / sizeof(dirs[0])); ++i) {
+        if (openos_stat(dirs[i], &st) != 0 || (st.mode & FS_DIR) != FS_DIR) {
+            return CAP_FAIL;
+        }
+    }
+
+    openos_unlink(pak);
+    fd = openos_open(pak, O_CREAT | O_TRUNC | O_RDWR, 0644);
+    if (fd < 0) {
+        return CAP_FAIL;
+    }
+    if (openos_write_fd(fd, payload, payload_len) != payload_len) {
+        openos_close(fd);
+        return CAP_FAIL;
+    }
+    openos_close(fd);
+
+    if (openos_stat(pak, &st) != 0 ||
+        (st.mode & FS_FILE) != FS_FILE || st.size != payload_len) {
+        return CAP_FAIL;
+    }
+
+    fd = openos_open(pak, O_RDONLY, 0);
+    if (fd < 0) {
+        return CAP_FAIL;
+    }
+    openos_memset(buf, 0, sizeof(buf));
+    if (openos_read(fd, buf, sizeof(buf)) != payload_len) {
+        openos_close(fd);
+        return CAP_FAIL;
+    }
+    openos_close(fd);
+    if (buf[0] != 'P' || buf[1] != 'A' || buf[2] != 'K' || buf[3] != 0 ||
+        buf[4] != 'O' || buf[payload_len - 1] != 'd') {
+        return CAP_FAIL;
+    }
+
+    for (i = 0; i < 64; ++i) {
+        if (openos_readdir_path(OPENOS_BROWSER_PAK_DIR, i, &entry) <= 0)
+            break;
+        if (openos_strcmp(entry.name, "chromiumcaptest.pak") == 0 &&
+            (entry.mode & FS_FILE) == FS_FILE && entry.size == payload_len) {
+            found_pak = 1;
+        }
+    }
+    if (!found_pak) {
+        return CAP_FAIL;
+    }
+
+    if (openos_unlink(pak) != 0) {
+        return CAP_FAIL;
+    }
+
+    return CAP_PASS;
+}
+
 static int test_sbrk(void)
 {
     unsigned char *old_break;
@@ -1039,7 +1112,7 @@ int main(int argc, char **argv)
     (void)argv;
 
     openos_printf("Chromium core capability test\n");
-    openos_printf("target: mmap file-mmap fs-metadata path-normalization fs-mutations browser-dirs mprotect v8-memory-policy brk thread tls pthread-sync futex shm eventfd message-queue service-channel socketpair poll time spawn fork pipe fd argv env\n");
+    openos_printf("target: mmap file-mmap fs-metadata path-normalization fs-mutations browser-dirs resource-pak mprotect v8-memory-policy brk thread tls pthread-sync futex shm eventfd message-queue service-channel socketpair poll time spawn fork pipe fd argv env\n");
 
     status = test_uptime();
     print_result("monotonic uptime", status);
@@ -1087,6 +1160,10 @@ int main(int argc, char **argv)
 
     status = test_browser_data_directories();
     print_result("browser cache/profile directories", status);
+    failed += status == CAP_FAIL;
+
+    status = test_browser_resource_paths();
+    print_result("browser resource pak paths", status);
     failed += status == CAP_FAIL;
 
     status = test_sbrk();

@@ -794,6 +794,11 @@ void kernel_main(void) {
     vfs_mkdir("/home/browser/certs", 0755);
     vfs_mkdir("/home/browser/profiles", 0755);
     vfs_mkdir("/home/browser/downloads", 0755);
+    vfs_mkdir("/usr", 0755);
+    vfs_mkdir("/usr/share", 0755);
+    vfs_mkdir("/usr/share/openos", 0755);
+    vfs_mkdir("/usr/share/openos/browser", 0755);
+    vfs_mkdir("/usr/share/openos/browser/pak", 0755);
     serial_write("[OK] Browser profile directories\n");
 
     fd = vfs_open("/bin/hello", O_CREAT | O_RDWR, 0755);
