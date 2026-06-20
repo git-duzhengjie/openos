@@ -1981,6 +1981,92 @@ static int test_socketpair_shutdown(void)
     return CAP_PASS;
 }
 
+static int test_socket_options(void)
+{
+    int sv[2];
+    int value;
+    int out;
+    unsigned int optlen;
+    openos_timeval_t tv;
+    openos_timeval_t tvout;
+
+    if (openos_socketpair(OPENOS_AF_UNSPEC, OPENOS_SOCK_STREAM, 0, sv) != 0) {
+        return CAP_FAIL;
+    }
+
+    value = 1;
+    if (openos_setsockopt(sv[0], OPENOS_SOL_SOCKET, OPENOS_SO_REUSEADDR, &value, sizeof(value)) != 0 ||
+        openos_setsockopt(sv[0], OPENOS_SOL_SOCKET, OPENOS_SO_KEEPALIVE, &value, sizeof(value)) != 0 ||
+        openos_setsockopt(sv[0], OPENOS_IPPROTO_TCP, OPENOS_TCP_NODELAY, &value, sizeof(value)) != 0) {
+        openos_close(sv[0]);
+        openos_close(sv[1]);
+        return CAP_FAIL;
+    }
+
+    out = 0;
+    optlen = sizeof(out);
+    if (openos_getsockopt(sv[0], OPENOS_SOL_SOCKET, OPENOS_SO_REUSEADDR, &out, &optlen) != 0 ||
+        optlen != sizeof(out) || out != 1) {
+        openos_close(sv[0]);
+        openos_close(sv[1]);
+        return CAP_FAIL;
+    }
+    out = 0;
+    optlen = sizeof(out);
+    if (openos_getsockopt(sv[0], OPENOS_SOL_SOCKET, OPENOS_SO_KEEPALIVE, &out, &optlen) != 0 ||
+        optlen != sizeof(out) || out != 1) {
+        openos_close(sv[0]);
+        openos_close(sv[1]);
+        return CAP_FAIL;
+    }
+    out = 0;
+    optlen = sizeof(out);
+    if (openos_getsockopt(sv[0], OPENOS_IPPROTO_TCP, OPENOS_TCP_NODELAY, &out, &optlen) != 0 ||
+        optlen != sizeof(out) || out != 1) {
+        openos_close(sv[0]);
+        openos_close(sv[1]);
+        return CAP_FAIL;
+    }
+
+    tv.tv_sec = 1;
+    tv.tv_usec = 250000;
+    if (openos_setsockopt(sv[0], OPENOS_SOL_SOCKET, OPENOS_SO_RCVTIMEO, &tv, sizeof(tv)) != 0 ||
+        openos_setsockopt(sv[0], OPENOS_SOL_SOCKET, OPENOS_SO_SNDTIMEO, &tv, sizeof(tv)) != 0) {
+        openos_close(sv[0]);
+        openos_close(sv[1]);
+        return CAP_FAIL;
+    }
+    openos_memset(&tvout, 0, sizeof(tvout));
+    optlen = sizeof(tvout);
+    if (openos_getsockopt(sv[0], OPENOS_SOL_SOCKET, OPENOS_SO_RCVTIMEO, &tvout, &optlen) != 0 ||
+        optlen != sizeof(tvout) || tvout.tv_sec != 1 || tvout.tv_usec != 250000) {
+        openos_close(sv[0]);
+        openos_close(sv[1]);
+        return CAP_FAIL;
+    }
+    openos_memset(&tvout, 0, sizeof(tvout));
+    optlen = sizeof(tvout);
+    if (openos_getsockopt(sv[0], OPENOS_SOL_SOCKET, OPENOS_SO_SNDTIMEO, &tvout, &optlen) != 0 ||
+        optlen != sizeof(tvout) || tvout.tv_sec != 1 || tvout.tv_usec != 250000) {
+        openos_close(sv[0]);
+        openos_close(sv[1]);
+        return CAP_FAIL;
+    }
+
+    optlen = sizeof(out) - 1;
+    if (openos_getsockopt(sv[0], OPENOS_SOL_SOCKET, OPENOS_SO_REUSEADDR, &out, &optlen) == 0 ||
+        openos_setsockopt(sv[0], OPENOS_SOL_SOCKET, 999, &value, sizeof(value)) == 0 ||
+        openos_getsockopt(-1, OPENOS_SOL_SOCKET, OPENOS_SO_REUSEADDR, &out, &optlen) == 0) {
+        openos_close(sv[0]);
+        openos_close(sv[1]);
+        return CAP_FAIL;
+    }
+
+    openos_close(sv[0]);
+    openos_close(sv[1]);
+    return CAP_PASS;
+}
+
 static int test_kernel_pressure_smoke(void)
 {
     int i;
@@ -2015,7 +2101,7 @@ int main(int argc, char **argv)
     (void)argv;
 
     openos_printf("Chromium core capability test\n");
-    openos_printf("target: mmap file-mmap fs-metadata path-normalization fs-mutations getdents browser-dirs resource-pak sparse-seek mprotect v8-memory-policy brk thread tls pthread-sync futex shm eventfd message-queue service-channel socketpair poll fcntl shutdown time spawn fork pipe fd argv env dns font gui clipboard pressure-smoke\n");
+    openos_printf("target: mmap file-mmap fs-metadata path-normalization fs-mutations getdents browser-dirs resource-pak sparse-seek mprotect v8-memory-policy brk thread tls pthread-sync futex shm eventfd message-queue service-channel socketpair poll fcntl shutdown sockopt time spawn fork pipe fd argv env dns font gui clipboard pressure-smoke\n");
 
     status = test_uptime();
     print_result("monotonic uptime", status);
@@ -2143,6 +2229,10 @@ int main(int argc, char **argv)
 
     status = test_fcntl_nonblock_flags();
     print_result("fcntl O_NONBLOCK flags", status);
+    failed += status == CAP_FAIL;
+
+    status = test_socket_options();
+    print_result("socket options setsockopt/getsockopt", status);
     failed += status == CAP_FAIL;
 
     status = test_spawn_argv_env_wait();

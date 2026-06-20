@@ -138,6 +138,8 @@
 #define SYS_FUTEX_WAIT_TIMEOUT 339
 #define SYS_SHUTDOWN 340
 #define SYS_FCNTL 341
+#define SYS_SETSOCKOPT 342
+#define SYS_GETSOCKOPT 343
 
 #define OPENOS_CHROMIUM_MEM_JITLESS_DEFAULT     (1u << 0)
 #define OPENOS_CHROMIUM_MEM_EXEC_PROT_RESERVED  (1u << 1)
@@ -163,6 +165,11 @@ typedef struct openos_timespec {
     int64_t tv_sec;
     int64_t tv_nsec;
 } openos_timespec_t;
+
+typedef struct openos_timeval {
+    int64_t tv_sec;
+    int64_t tv_usec;
+} openos_timeval_t;
 
 typedef struct openos_pollfd {
     int fd;

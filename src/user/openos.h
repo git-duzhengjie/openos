@@ -135,6 +135,8 @@
 #define SYS_FUTEX_WAIT_TIMEOUT 339
 #define SYS_SHUTDOWN 340
 #define SYS_FCNTL 341
+#define SYS_SETSOCKOPT 342
+#define SYS_GETSOCKOPT 343
 
 #define OPENOS_CHROMIUM_MEM_JITLESS_DEFAULT     (1u << 0)
 #define OPENOS_CHROMIUM_MEM_EXEC_PROT_RESERVED  (1u << 1)
@@ -164,6 +166,13 @@
 #define OPENOS_SOCK_STREAM 1
 #define OPENOS_SOCK_DGRAM  2
 #define OPENOS_SOCK_RAW    3
+#define OPENOS_SOL_SOCKET  1
+#define OPENOS_IPPROTO_TCP 6
+#define OPENOS_SO_REUSEADDR 2
+#define OPENOS_SO_KEEPALIVE 9
+#define OPENOS_SO_RCVTIMEO 20
+#define OPENOS_SO_SNDTIMEO 21
+#define OPENOS_TCP_NODELAY 1
 #define OPENOS_INADDR_ANY  0u
 
 typedef struct openos_sockaddr {
@@ -692,6 +701,16 @@ static inline int openos_syscall5(int num, int a, int b, int c, int d, int e)
         : "memory", "cc"
     );
     return eax;
+}
+
+static inline int openos_setsockopt(int fd, int level, int optname, const void *optval, unsigned int optlen)
+{
+    return openos_syscall_result(openos_syscall5(SYS_SETSOCKOPT, fd, level, optname, (int)optval, (int)optlen));
+}
+
+static inline int openos_getsockopt(int fd, int level, int optname, void *optval, unsigned int *optlen)
+{
+    return openos_syscall_result(openos_syscall5(SYS_GETSOCKOPT, fd, level, optname, (int)optval, (int)optlen));
 }
 
 static inline int openos_gui_create_window(const char *title, int x, int y, int w, int h)
@@ -2871,6 +2890,8 @@ static inline void openos_clearerr(openos_FILE *stream)
 #define connect(fd, addr, len) openos_connect((fd), (addr), (len))
 #define send(fd, buf, len, flags) openos_send((fd), (buf), (len), (flags))
 #define recv(fd, buf, len, flags) openos_recv((fd), (buf), (len), (flags))
+#define setsockopt(fd, level, optname, optval, optlen) openos_setsockopt((fd), (level), (optname), (optval), (optlen))
+#define getsockopt(fd, level, optname, optval, optlen) openos_getsockopt((fd), (level), (optname), (optval), (optlen))
 #define sendto(fd, buf, len, flags, addr, addrlen) openos_sendto((fd), (buf), (len), (flags), (addr), (addrlen))
 #define recvfrom(fd, buf, len, flags, addr, addrlen) openos_recvfrom((fd), (buf), (len), (flags), (addr), (addrlen))
 #define feof(stream)            openos_feof((stream))

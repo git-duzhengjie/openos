@@ -2436,6 +2436,36 @@ uint32_t syscall_dispatch(uint32_t num,
     case SYS_SHUTDOWN:
         return (uint32_t)socket_shutdown_fd((int)a, (int)b);
 
+    case SYS_SETSOCKOPT:
+        {
+            uint8_t kopt[sizeof(openos_timeval_t)];
+            if (!d || e == 0 || e > sizeof(kopt))
+                return (uint32_t)-1;
+            if (copy_from_user(kopt, (const void *)d, e) < 0)
+                return (uint32_t)-1;
+            return (uint32_t)socket_setsockopt_fd((int)a, (int)b, (int)c, kopt, e);
+        }
+
+    case SYS_GETSOCKOPT:
+        {
+            uint8_t kopt[sizeof(openos_timeval_t)];
+            uint32_t koptlen;
+            if (!d || !e)
+                return (uint32_t)-1;
+            if (copy_from_user(&koptlen, (const void *)e, sizeof(koptlen)) < 0)
+                return (uint32_t)-1;
+            if (koptlen == 0 || koptlen > sizeof(kopt))
+                return (uint32_t)-1;
+            memset(kopt, 0, sizeof(kopt));
+            if (socket_getsockopt_fd((int)a, (int)b, (int)c, kopt, &koptlen) < 0)
+                return (uint32_t)-1;
+            if (copy_to_user((void *)d, kopt, koptlen) < 0)
+                return (uint32_t)-1;
+            if (copy_to_user((void *)e, &koptlen, sizeof(koptlen)) < 0)
+                return (uint32_t)-1;
+            return 0;
+        }
+
     case SYS_SENDTO:
         {
             void *kbuf;

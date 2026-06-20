@@ -13,6 +13,7 @@
 #include "../include/heap.h"
 #include "../include/pmm.h"
 #include "../include/string.h"
+#include "../include/syscall.h"
 
 #define SOCKET_MAGIC 0x534F434Bu /* 'SOCK' */
 #define SOCKET_MAX_BINDS 64
@@ -21,6 +22,14 @@
 #define SOCKET_RECV_QUEUE_LEN 8
 #define SOCKET_RECV_PACKET_MAX (NET_ETH_MTU - 8u)
 #define SOCKET_FLAG_PAIR 0x1u
+
+#define OPENOS_SOL_SOCKET 1
+#define OPENOS_IPPROTO_TCP 6
+#define OPENOS_SO_REUSEADDR 2
+#define OPENOS_SO_KEEPALIVE 9
+#define OPENOS_SO_RCVTIMEO 20
+#define OPENOS_SO_SNDTIMEO 21
+#define OPENOS_TCP_NODELAY 1
 
 typedef struct socket_packet {
     uint8_t used;
@@ -75,6 +84,45 @@ static uint16_t socket_bswap16(uint16_t v) {
 
 static int socket_type_base(int type) {
     return type & 0xF;
+}
+
+static uint32_t socket_timeval_to_ms(const openos_timeval_t *tv) {
+    uint32_t sec;
+    uint32_t usec;
+    if (!tv || tv->tv_sec < 0 || tv->tv_usec < 0 || tv->tv_sec > 0x418936u) {
+        return 0xffffffffu;
+    }
+    sec = (uint32_t)tv->tv_sec;
+    usec = (uint32_t)tv->tv_usec;
+    return (sec * 1000u) + (usec / 1000u);
+}
+
+static void socket_ms_to_timeval(uint32_t ms, openos_timeval_t *tv) {
+    uint32_t sec;
+    if (!tv) {
+        return;
+    }
+    sec = ms / 1000u;
+    tv->tv_sec = (int64_t)sec;
+    tv->tv_usec = (int64_t)((ms - (sec * 1000u)) * 1000u);
+}
+
+static int socket_copyout_int(void *optval, uint32_t *optlen, int value) {
+    if (!optval || !optlen || *optlen < sizeof(int)) {
+        return -1;
+    }
+    *((int *)optval) = value;
+    *optlen = sizeof(int);
+    return 0;
+}
+
+static int socket_copyout_timeval(void *optval, uint32_t *optlen, uint32_t ms) {
+    if (!optval || !optlen || *optlen < sizeof(openos_timeval_t)) {
+        return -1;
+    }
+    socket_ms_to_timeval(ms, (openos_timeval_t *)optval);
+    *optlen = sizeof(openos_timeval_t);
+    return 0;
 }
 
 static int socket_validate_args(int domain, int type, int protocol) {
@@ -801,6 +849,94 @@ int socket_shutdown_fd(int fd, int how) {
         sock->info.write_shutdown = 1;
     }
     return 0;
+}
+
+int socket_setsockopt_fd(int fd, int level, int optname, const void *optval, uint32_t optlen) {
+    file_t *file;
+    socket_file_t *sock;
+    int enabled;
+
+    file = vfs_get_file(fd);
+    sock = socket_from_file(file);
+    if (!sock || sock->info.state == OPENOS_SOCKET_STATE_CLOSED || !optval) {
+        return -1;
+    }
+
+    if (level == OPENOS_SOL_SOCKET) {
+        switch (optname) {
+            case OPENOS_SO_REUSEADDR:
+                if (optlen < sizeof(int)) {
+                    return -1;
+                }
+                enabled = *((const int *)optval) ? 1 : 0;
+                sock->info.reuse_addr = (uint8_t)enabled;
+                return 0;
+            case OPENOS_SO_KEEPALIVE:
+                if (optlen < sizeof(int)) {
+                    return -1;
+                }
+                enabled = *((const int *)optval) ? 1 : 0;
+                sock->info.keep_alive = (uint8_t)enabled;
+                return 0;
+            case OPENOS_SO_RCVTIMEO:
+                if (optlen < sizeof(openos_timeval_t)) {
+                    return -1;
+                }
+                sock->info.recv_timeout_ms = socket_timeval_to_ms((const openos_timeval_t *)optval);
+                return 0;
+            case OPENOS_SO_SNDTIMEO:
+                if (optlen < sizeof(openos_timeval_t)) {
+                    return -1;
+                }
+                sock->info.send_timeout_ms = socket_timeval_to_ms((const openos_timeval_t *)optval);
+                return 0;
+            default:
+                return -1;
+        }
+    }
+
+    if (level == OPENOS_IPPROTO_TCP && optname == OPENOS_TCP_NODELAY) {
+        if (optlen < sizeof(int)) {
+            return -1;
+        }
+        enabled = *((const int *)optval) ? 1 : 0;
+        sock->info.no_delay = (uint8_t)enabled;
+        return 0;
+    }
+
+    return -1;
+}
+
+int socket_getsockopt_fd(int fd, int level, int optname, void *optval, uint32_t *optlen) {
+    file_t *file;
+    socket_file_t *sock;
+
+    file = vfs_get_file(fd);
+    sock = socket_from_file(file);
+    if (!sock || sock->info.state == OPENOS_SOCKET_STATE_CLOSED || !optval || !optlen) {
+        return -1;
+    }
+
+    if (level == OPENOS_SOL_SOCKET) {
+        switch (optname) {
+            case OPENOS_SO_REUSEADDR:
+                return socket_copyout_int(optval, optlen, sock->info.reuse_addr ? 1 : 0);
+            case OPENOS_SO_KEEPALIVE:
+                return socket_copyout_int(optval, optlen, sock->info.keep_alive ? 1 : 0);
+            case OPENOS_SO_RCVTIMEO:
+                return socket_copyout_timeval(optval, optlen, sock->info.recv_timeout_ms);
+            case OPENOS_SO_SNDTIMEO:
+                return socket_copyout_timeval(optval, optlen, sock->info.send_timeout_ms);
+            default:
+                return -1;
+        }
+    }
+
+    if (level == OPENOS_IPPROTO_TCP && optname == OPENOS_TCP_NODELAY) {
+        return socket_copyout_int(optval, optlen, sock->info.no_delay ? 1 : 0);
+    }
+
+    return -1;
 }
 
 int socket_bind_fd(int fd, const openos_sockaddr_t *addr, uint32_t addrlen) {

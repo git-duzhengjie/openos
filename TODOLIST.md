@@ -472,6 +472,7 @@
   - [ ] 为 Chromium net stack 所需 socket 行为补齐错误码、非阻塞、poll 边界语义
     - [√] 已增强 `/bin/chromiumcaptest` 的 `socketpair` poll/select 边界验收，覆盖空队列不报 `POLLIN`、多 fd poll、负 fd 忽略、非法 fd `POLLERR`、select 读写位图、可写端 `POLLOUT`、空读失败和对端关闭 `POLLHUP`
     - [√] 已新增 `SYS_FCNTL` / `openos_fcntl` 最小 flags ABI，覆盖 `F_GETFL/F_SETFL/O_NONBLOCK` 开关、非法 fd 和非法 cmd，为后续 socket 非阻塞 I/O 语义打底
+    - [√] 已新增 `SYS_SETSOCKOPT` / `SYS_GETSOCKOPT` 最小 socket options ABI，覆盖 `SO_REUSEADDR`、`SO_KEEPALIVE`、`SO_RCVTIMEO`、`SO_SNDTIMEO`、`TCP_NODELAY`、非法 opt 和短 optlen 边界
 - [ ] M7 图形、字体与输入
   - [ ] 为 Skia software raster 提供窗口 framebuffer / shared bitmap / dirty rect present 能力
     - [√] 已将用户态窗口创建、控件、fill/text/blit/scroll/present 基础绘制 smoke 并入 `/bin/chromiumcaptest`
