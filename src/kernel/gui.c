@@ -5773,6 +5773,19 @@ static const char *browser_html_skip_hidden(const char *p, const char *tag) {
     return q;
 }
 
+static const char *browser_html_find_body_start(const char *html) {
+    const char *p = html;
+    if (!p) return html;
+    while (*p) {
+        if (*p == '<' && browser_str_starts_ci(p + 1, "body")) {
+            while (*p && *p != '>') p++;
+            return (*p == '>') ? p + 1 : p;
+        }
+        p++;
+    }
+    return html;
+}
+
 static void browser_html_to_text(const char *html, char *out, uint32_t cap) {
     uint32_t n = 0;
     int last_space = 1;
@@ -5780,6 +5793,7 @@ static void browser_html_to_text(const char *html, char *out, uint32_t cap) {
     if (!out || cap == 0) return;
     out[0] = '\0';
     if (!html) return;
+    p = browser_html_find_body_start(html);
     while (*p && n + 1u < cap) {
         char ch = *p++;
         if (ch == '<') {
@@ -5814,9 +5828,39 @@ static void browser_html_to_text(const char *html, char *out, uint32_t cap) {
     out[n] = '\0';
 }
 
+static int browser_text_contains_ci(const char *p, const char *needle, uint32_t max_scan) {
+    uint32_t i = 0;
+    if (!p || !needle || !needle[0]) return 0;
+    while (p[i] && i < max_scan) {
+        if (browser_str_starts_ci(p + i, needle)) return 1;
+        i++;
+    }
+    return 0;
+}
+
+static const char *browser_skip_text_prefix(const char *p) {
+    while (p && (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n')) p++;
+    return p ? p : "";
+}
+
+static int browser_body_looks_html(const char *body) {
+    const char *p = browser_skip_text_prefix(body);
+    if (!p || !*p) return 0;
+    if (browser_str_starts_ci(p, "<!doctype") || browser_str_starts_ci(p, "<html") ||
+        browser_str_starts_ci(p, "<head") || browser_str_starts_ci(p, "<body") ||
+        browser_str_starts_ci(p, "<style") || browser_str_starts_ci(p, "</style") ||
+        browser_str_starts_ci(p, "</head")) return 1;
+    return browser_text_contains_ci(p, "<html", 512u) ||
+           browser_text_contains_ci(p, "<body", 512u) ||
+           browser_text_contains_ci(p, "<div", 512u) ||
+           browser_text_contains_ci(p, "<p", 512u) ||
+           browser_text_contains_ci(p, "<h1", 512u) ||
+           browser_text_contains_ci(p, "<title", 512u);
+}
+
 static int browser_response_is_html(char *response, const char *body) {
     const char *p = response;
-    while (p && *p && p < body) {
+    while (p && *p && body && p < body) {
         if (browser_header_name_eq(p, "Content-Type")) {
             const char *v = p;
             while (*v && *v != ':' && *v != '\n') v++;
@@ -5829,7 +5873,7 @@ static int browser_response_is_html(char *response, const char *body) {
         while (*p && *p != '\n') p++;
         if (*p == '\n') p++;
     }
-    return body && (browser_str_starts_ci(body, "<!doctype html") || browser_str_starts_ci(body, "<html"));
+    return browser_body_looks_html(body);
 }
 
 static void browser_copy_url(char *dst, uint32_t cap, const char *src) {
@@ -6008,12 +6052,22 @@ static uint32_t browser_render_links(const char *html, uint32_t start_line) {
     return line;
 }
 
-static uint32_t browser_render_body_at(const char *body, uint32_t start_line) {
+static uint32_t browser_render_body_text_at(const char *body, uint32_t start_line) {
     if (!body || !*body) {
         if (start_line < GUI_BROWSER_CONTENT_LINES) browser_set_widget_text(g_browser_content_lines[start_line++], "HTTP response has no body.");
         return start_line;
     }
     return browser_render_text_at(body, start_line);
+}
+
+static uint32_t browser_render_body_at(const char *body, uint32_t start_line) {
+    static char html_text[1024];
+    if (!body || !*body) return browser_render_body_text_at(body, start_line);
+    if (browser_body_looks_html(body)) {
+        browser_html_to_text(body, html_text, sizeof(html_text));
+        return browser_render_body_text_at(html_text, start_line);
+    }
+    return browser_render_body_text_at(body, start_line);
 }
 
 static void browser_render_body(const char *body) {
@@ -6076,7 +6130,7 @@ static uint32_t browser_render_response_summary(char *response, const char *body
     if (browser_response_is_html(response, body)) {
         static char html_text[1024];
         browser_html_to_text(body, html_text, sizeof(html_text));
-        line = browser_render_body_at(html_text, line);
+        line = browser_render_body_text_at(html_text, line);
         return browser_render_links(body, line);
     }
     return browser_render_body_at(body, line);
