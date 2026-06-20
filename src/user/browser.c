@@ -9,6 +9,7 @@
 #define BROWSER_CONNECT_TIMEOUT_MS 4000
 #define BROWSER_RESPONSE_TIMEOUT_MS 6000
 #define BROWSER_POLL_SLICE_MS 100
+#define BROWSER_RECV_CHUNK_MAX 1400
 
 static void browser_format_ip(unsigned int ip, char *out, int out_size)
 {
@@ -235,7 +236,9 @@ static int browser_fetch_http(const char *host, const char *path, char *out, int
                 continue;
             }
 
-            int n = openos_recv(fd, out + total, (unsigned int)(out_size - 1 - total), 0);
+            unsigned int room = (unsigned int)(out_size - 1 - total);
+            unsigned int chunk = room > BROWSER_RECV_CHUNK_MAX ? BROWSER_RECV_CHUNK_MAX : room;
+            int n = openos_recv(fd, out + total, chunk, 0);
             if (n < 0) {
                 snprintf(out, out_size, "recv() failed from %s", host);
                 openos_close(fd);

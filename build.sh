@@ -366,6 +366,17 @@ if [ -f $USR/fontprobe.c ]; then
     echo "  Embedded: fontprobe.elf"
 fi
 
+if [ -f $USR/chromiumcaptest.c ]; then
+    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+        -fno-stack-protector -fno-builtin \
+        -I $SRC/include \
+        -c $USR/chromiumcaptest.c -o $BUILD/chromiumcaptest.o
+    ld -m elf_i386 -T $USR/user.ld -o $BUILD/chromiumcaptest.elf $BUILD/crt0.o $BUILD/chromiumcaptest.o
+    verify_user_start $BUILD/chromiumcaptest.elf chromiumcaptest.elf
+    python3 _embed_elf.py $BUILD/chromiumcaptest.elf $SRC/include/embed_chromiumcaptest.h chromiumcaptest_elf
+    echo "  Embedded: chromiumcaptest.elf"
+fi
+
 if [ -f $USR/nsdemo.c ] && [ -f $USR/openos_netsurf_platform.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \

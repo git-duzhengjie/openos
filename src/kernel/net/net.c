@@ -872,6 +872,12 @@ int net_tcp_send(int conn_id, const uint8_t *data, uint16_t len) {
     return tcp_send_for_conn(c, TCP_FLAG_ACK | (len ? TCP_FLAG_PSH : 0), data, len);
 }
 
+int net_tcp_available(int conn_id) {
+    struct tcp_connection *c = tcp_find_conn(conn_id);
+    if (!c) return -1;
+    return c->rx_len;
+}
+
 int net_tcp_recv(int conn_id, uint8_t *data, uint16_t len) {
     struct tcp_connection *c = tcp_find_conn(conn_id);
     uint16_t n;

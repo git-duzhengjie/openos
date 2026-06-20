@@ -1,0 +1,262 @@
+#include "openos.h"
+
+#define CAP_PASS 0
+#define CAP_FAIL 1
+#define CAP_SKIP 2
+
+#define MMAP_TEST_SIZE 4096
+#define SHM_TEST_WORDS 16
+
+static volatile int g_thread_done = 0;
+static volatile int g_thread_value = 0;
+
+static void print_result(const char *name, int status)
+{
+    if (status == CAP_PASS) {
+        openos_printf("[PASS] %s\n", name);
+    } else if (status == CAP_SKIP) {
+        openos_printf("[SKIP] %s\n", name);
+    } else {
+        openos_printf("[FAIL] %s\n", name);
+    }
+}
+
+static void cap_thread_entry(void *arg)
+{
+    volatile int *value = (volatile int *)arg;
+    int tid = openos_gettid();
+
+    if (value) {
+        *value = tid > 0 ? tid : 1;
+    }
+    g_thread_value = 0x4348524f;
+    g_thread_done = 1;
+    openos_thread_exit(0);
+}
+
+static int test_uptime(void)
+{
+    unsigned int before = openos_uptime_ms();
+    openos_sleep(2);
+    return openos_uptime_ms() >= before ? CAP_PASS : CAP_FAIL;
+}
+
+static int test_mmap(void)
+{
+    unsigned char *mem;
+    int i;
+
+    mem = (unsigned char *)openos_mmap(0, MMAP_TEST_SIZE, 0);
+    if (mem == (unsigned char *)-1 || !mem) {
+        return CAP_FAIL;
+    }
+
+    for (i = 0; i < MMAP_TEST_SIZE; ++i) {
+        mem[i] = (unsigned char)(i & 0xff);
+    }
+    for (i = 0; i < MMAP_TEST_SIZE; ++i) {
+        if (mem[i] != (unsigned char)(i & 0xff)) {
+            openos_munmap(mem, MMAP_TEST_SIZE);
+            return CAP_FAIL;
+        }
+    }
+
+    return openos_munmap(mem, MMAP_TEST_SIZE) == 0 ? CAP_PASS : CAP_FAIL;
+}
+
+static int test_sbrk(void)
+{
+    unsigned char *old_break;
+    unsigned char *block;
+    int i;
+
+    old_break = (unsigned char *)openos_sbrk(0);
+    block = (unsigned char *)openos_sbrk(256);
+    if (old_break == (unsigned char *)-1 || block == (unsigned char *)-1) {
+        return CAP_FAIL;
+    }
+
+    for (i = 0; i < 256; ++i) {
+        block[i] = (unsigned char)(0xa0 + (i & 0x0f));
+    }
+    for (i = 0; i < 256; ++i) {
+        if (block[i] != (unsigned char)(0xa0 + (i & 0x0f))) {
+            return CAP_FAIL;
+        }
+    }
+
+    return CAP_PASS;
+}
+
+static int test_thread(void)
+{
+    openos_thread_t thread;
+    volatile int child_tid = 0;
+    unsigned int start;
+
+    g_thread_done = 0;
+    g_thread_value = 0;
+
+    if (openos_thread_create(&thread, cap_thread_entry, (void *)&child_tid) != 0) {
+        return CAP_FAIL;
+    }
+
+    start = openos_uptime_ms();
+    while (!g_thread_done && openos_uptime_ms() - start < 1000u) {
+        openos_sleep(1);
+    }
+
+    if (!g_thread_done || child_tid <= 0 || g_thread_value != 0x4348524f) {
+        return CAP_FAIL;
+    }
+
+    return CAP_PASS;
+}
+
+static int test_shm(void)
+{
+    openos_shm_t shm;
+    volatile unsigned int *a;
+    volatile unsigned int *b;
+    int i;
+
+    if (openos_shm_create(&shm) != 0) {
+        return CAP_FAIL;
+    }
+
+    a = (volatile unsigned int *)openos_shm_map(&shm);
+    b = (volatile unsigned int *)openos_shm_map(&shm);
+    if (a == (volatile unsigned int *)-1 || b == (volatile unsigned int *)-1 || !a || !b) {
+        openos_shm_destroy(&shm);
+        return CAP_FAIL;
+    }
+
+    for (i = 0; i < SHM_TEST_WORDS; ++i) {
+        a[i] = 0x1000u + (unsigned int)i;
+    }
+    for (i = 0; i < SHM_TEST_WORDS; ++i) {
+        if (b[i] != 0x1000u + (unsigned int)i) {
+            openos_shm_destroy(&shm);
+            return CAP_FAIL;
+        }
+    }
+
+    b[3] = 0xfeedbeefu;
+    if (a[3] != 0xfeedbeefu) {
+        openos_shm_destroy(&shm);
+        return CAP_FAIL;
+    }
+
+    return openos_shm_destroy(&shm) == 0 ? CAP_PASS : CAP_FAIL;
+}
+
+static int test_eventfd(void)
+{
+    openos_eventfd_t efd;
+    unsigned int value = 0;
+
+    if (openos_eventfd_create(&efd, 1) != 0) {
+        return CAP_FAIL;
+    }
+    if (openos_eventfd_write(&efd, 41) != 0) {
+        openos_eventfd_destroy(&efd);
+        return CAP_FAIL;
+    }
+    if (openos_eventfd_read(&efd, &value) != 0) {
+        openos_eventfd_destroy(&efd);
+        return CAP_FAIL;
+    }
+    if (value != 42) {
+        openos_eventfd_destroy(&efd);
+        return CAP_FAIL;
+    }
+
+    return openos_eventfd_destroy(&efd) == 0 ? CAP_PASS : CAP_FAIL;
+}
+
+static int test_socketpair_poll(void)
+{
+    int sv[2];
+    char ch = 'C';
+    char out = 0;
+    openos_pollfd_t pfd;
+    int ready;
+
+    if (openos_socketpair(OPENOS_AF_UNSPEC, OPENOS_SOCK_STREAM, 0, sv) != 0) {
+        return CAP_FAIL;
+    }
+
+    if (openos_send(sv[0], &ch, 1, 0) != 1) {
+        openos_close(sv[0]);
+        openos_close(sv[1]);
+        return CAP_FAIL;
+    }
+
+    pfd.fd = sv[1];
+    pfd.events = OPENOS_POLLIN;
+    pfd.revents = 0;
+    ready = openos_poll(&pfd, 1, 100);
+    if (ready <= 0 || !(pfd.revents & OPENOS_POLLIN)) {
+        openos_close(sv[0]);
+        openos_close(sv[1]);
+        return CAP_FAIL;
+    }
+
+    if (openos_recv(sv[1], &out, 1, 0) != 1 || out != ch) {
+        openos_close(sv[0]);
+        openos_close(sv[1]);
+        return CAP_FAIL;
+    }
+
+    openos_close(sv[0]);
+    openos_close(sv[1]);
+    return CAP_PASS;
+}
+
+int main(int argc, char **argv)
+{
+    int failed = 0;
+    int status;
+
+    (void)argc;
+    (void)argv;
+
+    openos_printf("Chromium core capability test\n");
+    openos_printf("target: mmap brk thread shm eventfd socketpair poll time\n");
+
+    status = test_uptime();
+    print_result("monotonic uptime", status);
+    failed += status == CAP_FAIL;
+
+    status = test_mmap();
+    print_result("anonymous mmap read/write/munmap", status);
+    failed += status == CAP_FAIL;
+
+    status = test_sbrk();
+    print_result("sbrk heap growth", status);
+    failed += status == CAP_FAIL;
+
+    status = test_thread();
+    print_result("thread create shared address space", status);
+    failed += status == CAP_FAIL;
+
+    status = test_shm();
+    print_result("shared memory double map coherence", status);
+    failed += status == CAP_FAIL;
+
+    status = test_eventfd();
+    print_result("eventfd counter", status);
+    failed += status == CAP_FAIL;
+
+    status = test_socketpair_poll();
+    print_result("socketpair send/recv/poll", status);
+    failed += status == CAP_FAIL;
+
+    if (failed) {
+        openos_printf("Chromium core capability test: %d failure(s)\n", failed);
+        return 1;
+    }
+
+    openos_printf("Chromium core capability test: all passed\n");
+    return 0;
+}

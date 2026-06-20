@@ -194,6 +194,7 @@ int net_tcp_listen(uint16_t port, tcp_recv_func_t cb);
 int net_tcp_open(uint32_t local_ip, uint16_t local_port,
                  uint32_t remote_ip, uint16_t remote_port, int active);
 int net_tcp_send(int conn_id, const uint8_t *data, uint16_t len);
+int net_tcp_available(int conn_id);
 int net_tcp_recv(int conn_id, uint8_t *data, uint16_t len);
 int net_tcp_close(int conn_id);
 int net_tcp_state(int conn_id);

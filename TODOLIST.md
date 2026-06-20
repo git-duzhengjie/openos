@@ -1,12 +1,12 @@
 # openos 待开发功能清单
 
-> 更新时间：2026-06-18
+> 更新时间：2026-06-20
 >
 > 当前状态：openos 已具备 32 位 x86 原型内核能力，能够启动、显示、输入、调度、运行基础用户程序，并具备基础 syscall、VFS、ramfs/tmpfs、shell、GUI Terminal 等模块。以下清单记录后续仍需开发或完善的功能。
 >
 > 最近完成：已补齐 shell 后台任务、`Ctrl+C` / `Ctrl+D`、`jobs` / `fg`、Tab 命令补全、脚本执行；本轮完成用户态运行库 libc 子集，并新增 `/bin/libctest` 回归程序；已补充 `/bin/touch`、`/bin/cp`、`/bin/mv`、`/bin/tee`、`/bin/head`、`/bin/tail`、`/bin/sort`、`/bin/env` 常用文件工具；已完善 `grep -n/-v/-c` 与 `wc -l/-w/-c` 选项；已支持 shell 环境变量 `$VAR` / `${VAR}` 参数展开；已新增最小 `kill` syscall 与 `/bin/kill`；已补充最小 signal pending/default terminate 机制；已新增 alarm/timer signal 与 `/bin/alarmtest`。
 >
-> 当前推荐下一步：继续增强 shell 和用户态工具；本轮已同步作业控制基础状态，并已增强 syscall 用户指针安全访问检查；建议后续继续补齐更多用户态工具、完善信号处理器或推进 P1 内存管理。
+> 当前推荐下一步：进入 Chromium 长期路线，不做兼容层包装，优先补齐 OpenOS 原生内核/用户态核心能力；以 `/bin/chromiumcaptest` 作为底座验收程序，逐步推进内存保护、线程同步、进程 IPC、文件 mmap、TLS、字体图形和 C++ runtime。
 
 ---
 
@@ -399,6 +399,62 @@
 - [√] 文档化浏览器路线
   - [√] 新增 `docs/browser-engine-roadmap.md`，记录当前轻量浏览器、用户态化、NetSurf 移植、HTTPS/JS 后续路线
   - [√] 在 README 中说明当前 Browser 能力边界：支持基础 HTTP/HTML 文本化，不等同于 Chromium/WebKit 级完整浏览器
+
+### 17.3.1.2 Chromium 长期路线 / 原生核心能力补齐
+
+> 目标：不把 Chromium 当作简单兼容移植对象，也不继续扩展玩具 HTML 渲染器；OpenOS 需要补齐 Chromium 所需的原生底层能力，最终承载 Chromium content / Blink / V8 / Skia，并提供真正浏览器实现。
+
+- [√] 建立 Chromium 核心能力路线文档：`docs/chromium-core-roadmap.md`
+  - [√] 明确第一目标为 OpenOS 原生核心能力补齐，而不是 POSIX/Linux 兼容层堆叠
+  - [√] 明确第一阶段验收入口为 `/bin/chromiumcaptest`
+- [√] 新增 `/bin/chromiumcaptest` 底座验收程序
+  - [√] 覆盖 uptime、匿名 mmap/munmap、sbrk、thread、shared memory、eventfd、socketpair、poll 等现有基础能力
+  - [√] 接入 `build.sh`、内核嵌入头文件和 `/bin` 安装流程
+- [ ] M2 内存与地址空间能力增强
+  - [ ] `mmap` 支持 `prot` / `flags` 语义：read/write/exec、private/shared、anonymous/file-backed
+  - [ ] 实现 `mprotect` / `munprotect` 等价能力，支持页级权限切换
+  - [ ] 支持固定地址映射、地址空间保留、解除映射后的 VMA 合并与冲突检测
+  - [ ] 文件 mmap 与 page cache 协同，支持只读资源映射和私有 COW 映射
+  - [ ] 为 V8 预留 executable memory / jitless 两条路线的内核策略
+- [ ] M3 线程、同步与调度增强
+  - [ ] 用户态线程 TLS / thread-local storage 基础 ABI
+  - [ ] futex wait/wake 语义稳定化，补齐超时、唤醒数量和错误码
+  - [ ] 条件变量、mutex、semaphore 压测，确保可支撑 Chromium base::Thread / TaskRunner
+  - [ ] 高精度单调时钟、定时器队列、睡眠唤醒精度改进
+- [ ] M4 进程、加载器与 IPC 能力增强
+  - [ ] 稳定 fork/exec/spawn 与 fd/env/argv 继承语义
+  - [ ] 共享内存引用计数、权限、名称/handle 传递和生命周期管理
+  - [ ] socketpair / message queue / service channel 压测，支撑 Chromium 多进程 IPC
+  - [ ] 设计 `/bin/chromium` 第一版单进程模式与后续多进程模型边界
+- [ ] M5 文件系统与资源管理
+  - [ ] 完善 `stat/fstat/lstat`、权限、mtime/ctime/atime、目录遍历和路径规范化
+  - [ ] 支持大文件、稀疏文件、资源 pak 文件读取与缓存目录
+  - [ ] 统一应用数据目录：cache、cookies、certs、profiles、downloads
+- [ ] M6 网络与 TLS
+  - [ ] TCP 长连接、半关闭、RST、超时、窗口与重传压力测试
+  - [ ] DNS resolver 完善：缓存、超时、失败回退、IPv4 优先策略
+  - [ ] 引入或实现可维护 TLS 库，支撑 HTTPS、证书链校验和系统信任根
+  - [ ] 为 Chromium net stack 所需 socket 行为补齐错误码、非阻塞、poll 边界语义
+- [ ] M7 图形、字体与输入
+  - [ ] 为 Skia software raster 提供窗口 framebuffer / shared bitmap / dirty rect present 能力
+  - [ ] 完善字体枚举、字体 fallback、字形缓存、文本测量、UTF-8/Unicode 输入
+  - [ ] 输入事件队列支持鼠标、键盘、组合键、文本输入、滚轮和窗口焦点
+  - [ ] 剪贴板、光标、DPI/缩放和窗口 resize 事件
+- [ ] M8 C/C++ runtime 与工具链
+  - [ ] 用户态 C++ 编译、链接、构造/析构、异常策略、RTTI 策略
+  - [ ] libstdc++/libc++ 子集或 OpenOS C++ runtime 路线
+  - [ ] 原子操作、内存序、TLS、new/delete、静态初始化
+  - [ ] 宿主机交叉编译 Chromium 依赖的 GN/Ninja/Clang 构建链设计
+- [ ] M9 Skia / V8 / Blink / Chromium 分阶段落地
+  - [ ] `/bin/skia_demo`：软件绘制矩形、文本、图片到 OpenOS 窗口
+  - [ ] `/bin/v8_shell`：优先 jitless 运行基础 JavaScript
+  - [ ] `/bin/blink_smoke`：最小 HTML/CSS layout smoke
+  - [ ] `/bin/content_shell`：单进程、disable-gpu、disable-sandbox 打开 `http://example.com`
+  - [ ] `/bin/chromium`：单窗口、单标签、地址栏、导航、刷新、错误页、下载基础能力
+- [ ] M10 持续验收与回归
+  - [ ] 扩展 `/bin/chromiumcaptest` 覆盖每个新底层能力
+  - [ ] 增加内核压力测试：内存、线程、IPC、socket、文件 mmap、GUI present
+  - [ ] 文档同步：每完成一个里程碑更新 `docs/chromium-core-roadmap.md` 和本 TODOLIST
 
 ### 17.4 国际化（i18n / 翻译键）
 

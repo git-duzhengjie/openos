@@ -304,6 +304,9 @@ static int socket_poll(file_t *f, uint32_t events) {
     } else if (socket_type_base(sock->info.type) == OPENOS_SOCK_STREAM) {
         int state = sock->info.tcp_conn_id >= 0 ? net_tcp_state(sock->info.tcp_conn_id) : -1;
         if (state == NET_TCP_STATE_CLOSED || state < 0) ready |= VFS_POLLHUP;
+        if ((events & VFS_POLLIN) && sock->info.tcp_conn_id >= 0 && net_tcp_available(sock->info.tcp_conn_id) > 0) {
+            ready |= VFS_POLLIN;
+        }
         if ((events & VFS_POLLOUT) && state == NET_TCP_STATE_ESTABLISHED) ready |= VFS_POLLOUT;
     } else {
         if ((events & VFS_POLLIN) && sock->recv_count > 0) {
