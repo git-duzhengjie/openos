@@ -6182,10 +6182,11 @@ static void browser_append_hex4(char *dst, int *pos, int cap, uint16_t v) {
 }
 
 static void browser_render_https_probe(const char *host, const uint8_t *record, uint32_t len) {
-    char line[128];
+    char line[160];
     int pos;
     tls_parser_summary_t summary;
     int parsed_records;
+    uint8_t i;
 
     parsed_records = tls_parse_records(record, len, &summary);
     browser_clear_content();
@@ -6215,20 +6216,22 @@ static void browser_render_https_probe(const char *host, const uint8_t *record, 
 
     pos = 0;
     line[0] = '\0';
-    pos = fp_str_append(line, pos, sizeof(line), "Handshake messages: ");
-    pos = gui_append_uint(line, pos, sizeof(line), summary.handshake_count);
-    if (summary.handshake_count > 0u) {
-        pos = fp_str_append(line, pos, sizeof(line), " first: ");
-        pos = fp_str_append(line, pos, sizeof(line), tls_handshake_type_name(summary.handshake_types[0]));
+    pos = fp_str_append(line, pos, sizeof(line), "Handshake list: ");
+    for (i = 0; i < summary.handshake_count && i < TLS_PARSER_MAX_HANDSHAKES; i++) {
+        if (i > 0) pos = fp_str_append(line, pos, sizeof(line), ", ");
+        pos = fp_str_append(line, pos, sizeof(line), tls_handshake_type_name(summary.handshake_types[i]));
     }
+    if (summary.handshake_count == 0u) pos = fp_str_append(line, pos, sizeof(line), "none");
     browser_set_widget_text(g_browser_content_lines[4], line);
 
     pos = 0;
     line[0] = '\0';
-    pos = fp_str_append(line, pos, sizeof(line), "Server version: 0x");
+    pos = fp_str_append(line, pos, sizeof(line), "Server: 0x");
     browser_append_hex4(line, &pos, sizeof(line), summary.server_version);
     pos = fp_str_append(line, pos, sizeof(line), " cipher: 0x");
     browser_append_hex4(line, &pos, sizeof(line), summary.cipher_suite);
+    pos = fp_str_append(line, pos, sizeof(line), " extLen: ");
+    pos = gui_append_uint(line, pos, sizeof(line), summary.extensions_length);
     browser_set_widget_text(g_browser_content_lines[5], line);
 
     pos = 0;
@@ -6239,6 +6242,24 @@ static void browser_render_https_probe(const char *host, const uint8_t *record, 
     pos = gui_append_uint(line, pos, sizeof(line), summary.certificate_bytes);
     browser_set_widget_text(g_browser_content_lines[6], line);
 
+    pos = 0;
+    line[0] = '\0';
+    pos = fp_str_append(line, pos, sizeof(line), "ECDHE: curveType ");
+    pos = gui_append_uint(line, pos, sizeof(line), summary.key_exchange_curve_type);
+    pos = fp_str_append(line, pos, sizeof(line), " namedCurve 0x");
+    browser_append_hex4(line, &pos, sizeof(line), summary.key_exchange_named_curve);
+    pos = fp_str_append(line, pos, sizeof(line), " pubKeyLen ");
+    pos = gui_append_uint(line, pos, sizeof(line), summary.key_exchange_public_key_length);
+    browser_set_widget_text(g_browser_content_lines[7], line);
+
+    pos = 0;
+    line[0] = '\0';
+    pos = fp_str_append(line, pos, sizeof(line), "ECDHE signature: alg 0x");
+    browser_append_hex4(line, &pos, sizeof(line), summary.key_exchange_signature_algorithm);
+    pos = fp_str_append(line, pos, sizeof(line), " sigLen ");
+    pos = gui_append_uint(line, pos, sizeof(line), summary.key_exchange_signature_length);
+    browser_set_widget_text(g_browser_content_lines[8], line);
+
     if (summary.alert_level || summary.alert_description) {
         pos = 0;
         line[0] = '\0';
@@ -6246,10 +6267,11 @@ static void browser_render_https_probe(const char *host, const uint8_t *record, 
         pos = gui_append_uint(line, pos, sizeof(line), summary.alert_level);
         pos = fp_str_append(line, pos, sizeof(line), " description: ");
         pos = gui_append_uint(line, pos, sizeof(line), summary.alert_description);
-        browser_set_widget_text(g_browser_content_lines[7], line);
+        browser_set_widget_text(g_browser_content_lines[9], line);
     } else {
-        browser_set_widget_text(g_browser_content_lines[7], "HTTPS page loading still needs TLS cipher/decrypt support.");
+        browser_set_widget_text(g_browser_content_lines[9], "Next: derive ECDHE secret and TLS traffic keys.");
     }
+    browser_set_widget_text(g_browser_content_lines[10], "HTTPS pages still need cipher/decrypt + Finished verify.");
 }
 
 static void browser_https_probe_current(const char *host, uint32_t ip, uint16_t port) {
