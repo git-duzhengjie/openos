@@ -64,7 +64,7 @@ Chromium 默认多进程，OpenOS 必须具备可靠的用户态进程模型：
 - 句柄/FD 生命周期：需要 close-on-exec、dup/dup2、poll 语义。
 - 崩溃隔离：渲染进程崩溃不能拖垮浏览器主进程。
 
-第一阶段可允许单进程 content shell；第二阶段恢复 Chromium 多进程架构。
+第一阶段可允许单进程 content shell；第二阶段恢复 Chromium 多进程架构。详细边界见 `docs/chromium-process-model.md`。
 
 ### 4. 文件系统与资源管理
 
