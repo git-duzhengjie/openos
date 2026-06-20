@@ -1910,6 +1910,30 @@ static int gui_taskbar_search_width(void) {
     return w;
 }
 
+static int gui_taskbar_center_y(int item_h) {
+    int bar_y = (int)g_gui.height - GUI_TASKBAR_HEIGHT;
+    if (item_h < 0) item_h = 0;
+    return bar_y + (GUI_TASKBAR_HEIGHT - item_h) / 2;
+}
+
+static int gui_taskbar_item_y(void) {
+    return gui_taskbar_center_y(GUI_TASKBAR_HEIGHT - 6);
+}
+
+static int gui_taskbar_tray_y(int h) {
+    return gui_taskbar_center_y(h);
+}
+
+static int gui_taskbar_icon_y(gui_rect_t rect, int icon_h) {
+    if (icon_h < 0) icon_h = 0;
+    return rect.y + (rect.h - icon_h) / 2;
+}
+
+static int gui_taskbar_text_y(gui_rect_t rect, int text_h) {
+    if (text_h < 0) text_h = 0;
+    return rect.y + (rect.h - text_h) / 2;
+}
+
 static int gui_taskbar_content_width(void) {
     uint32_t i;
     int width = GUI_TASKBAR_START_W + 6 + GUI_TASKBAR_START_W;
@@ -1950,20 +1974,20 @@ static void gui_taskbar_get_layout(gui_taskbar_layout_t *layout) {
     layout->bar.w = bar_w;
     layout->bar.h = GUI_TASKBAR_HEIGHT;
     layout->search_box.x = margin;
-    layout->search_box.y = y + 3;
-    layout->search_box.w = gui_taskbar_search_width();
     layout->search_box.h = GUI_TASKBAR_HEIGHT - 6;
+    layout->search_box.y = gui_taskbar_item_y();
+    layout->search_box.w = gui_taskbar_search_width();
     layout->start_button.x = layout->bar.x + padding;
-    layout->start_button.y = y + 3;
-    layout->start_button.w = GUI_TASKBAR_START_W;
     layout->start_button.h = GUI_TASKBAR_HEIGHT - 6;
+    layout->start_button.y = gui_taskbar_item_y();
+    layout->start_button.w = GUI_TASKBAR_START_W;
     layout->terminal_button.x = layout->start_button.x + layout->start_button.w + 6;
-    layout->terminal_button.y = y + 3;
-    layout->terminal_button.w = GUI_TASKBAR_START_W;
     layout->terminal_button.h = GUI_TASKBAR_HEIGHT - 6;
+    layout->terminal_button.y = gui_taskbar_item_y();
+    layout->terminal_button.w = GUI_TASKBAR_START_W;
     layout->first_window_x = layout->terminal_button.x + layout->terminal_button.w + 6;
-    layout->item_y = y + 3;
     layout->item_h = GUI_TASKBAR_HEIGHT - 6;
+    layout->item_y = gui_taskbar_item_y();
 }
 
 static int gui_taskbar_terminal_button_at(int x, int y) {
@@ -2878,6 +2902,16 @@ static void gui_desktop_init(void) {
     g_gui.desktop_icon_count = 6;
 }
 
+static void gui_draw_folder_icon_art(int x, int y, uint32_t color) {
+    gui_raw_fill_rect(x + 2, y + 6, 11, 6, gui_rgb(255, 220, 105));
+    gui_raw_fill_rect(x, y + 11, 28, 20, color);
+    gui_raw_fill_rect(x + 2, y + 15, 24, 14, gui_rgb(255, 211, 86));
+    gui_raw_line(x, y + 11, x + 27, y + 11, gui_rgb(255, 238, 160));
+    gui_raw_line(x, y + 11, x, y + 30, gui_rgb(255, 238, 160));
+    gui_raw_line(x + 27, y + 11, x + 27, y + 30, gui_rgb(130, 90, 24));
+    gui_raw_line(x, y + 30, x + 27, y + 30, gui_rgb(130, 90, 24));
+}
+
 static void gui_desktop_draw_icon(gui_desktop_icon_t *icon) {
     int cx;
     int iy;
@@ -2914,13 +2948,7 @@ static void gui_desktop_draw_icon(gui_desktop_icon_t *icon) {
     if (top_pad < 0) top_pad = 0;
     iy = icon->rect.y + top_pad;
     if (icon->action == GUI_DESKTOP_ACTION_FILES) {
-        gui_raw_fill_rect(cx + 2, iy + 6, 11, 6, gui_rgb(255, 220, 105));
-        gui_raw_fill_rect(cx, iy + 11, 28, 20, icon->color);
-        gui_raw_fill_rect(cx + 2, iy + 15, 24, 14, gui_rgb(255, 211, 86));
-        gui_raw_line(cx, iy + 11, cx + 27, iy + 11, gui_rgb(255, 238, 160));
-        gui_raw_line(cx, iy + 11, cx, iy + 30, gui_rgb(255, 238, 160));
-        gui_raw_line(cx + 27, iy + 11, cx + 27, iy + 30, gui_rgb(130, 90, 24));
-        gui_raw_line(cx, iy + 30, cx + 27, iy + 30, gui_rgb(130, 90, 24));
+        gui_draw_folder_icon_art(cx, iy, icon->color);
     } else if (icon->action == GUI_DESKTOP_ACTION_RECYCLE) {
         uint32_t lid    = gui_rgb(150, 152, 162);
         uint32_t body   = icon->color;
@@ -4524,7 +4552,7 @@ static void gui_terminal_invalidate_cursor(void) {
 static void gui_draw_taskbar_start_icon(gui_rect_t rect) {
     int hover = gui_taskbar_icon_hovered(rect);
     int x = rect.x + (rect.w - 17) / 2;
-    int y = rect.y + (rect.h - 17) / 2;
+    int y = gui_taskbar_icon_y(rect, 17);
     uint32_t blue = hover ? gui_rgb(118, 184, 255) : gui_rgb(86, 160, 255);
     uint32_t green = hover ? gui_rgb(154, 255, 188) : gui_rgb(120, 255, 160);
     uint32_t yellow = hover ? gui_rgb(255, 214, 112) : gui_rgb(255, 196, 86);
@@ -4547,7 +4575,7 @@ static void gui_draw_taskbar_start_icon(gui_rect_t rect) {
 static void gui_draw_taskbar_terminal_icon(gui_rect_t rect) {
     int hover = gui_taskbar_icon_hovered(rect);
     int x = rect.x + (rect.w - 26) / 2;
-    int y = rect.y + (rect.h - 22) / 2;
+    int y = gui_taskbar_icon_y(rect, 22);
     uint32_t bg = hover ? gui_rgb(14, 24, 40) : gui_rgb(8, 14, 24);
     uint32_t border = hover ? gui_rgb(230, 242, 255) : gui_rgb(205, 225, 255);
     uint32_t shadow = hover ? gui_rgb(24, 32, 48) : gui_rgb(60, 80, 115);
@@ -4569,14 +4597,36 @@ static void gui_draw_taskbar_terminal_icon(gui_rect_t rect) {
     gui_raw_line(x + 13, y + 15, x + 21, y + 15, text);
 }
 
-static void gui_draw_taskbar_window_icon(gui_rect_t rect, int minimized) {
+static gui_window_t *fp_window;
+
+static void gui_draw_taskbar_window_icon(gui_rect_t rect, gui_window_t *w) {
     int hover = gui_taskbar_icon_hovered(rect);
-    int x = rect.x + (rect.w - 26) / 2;
-    int y = rect.y + (rect.h - 22) / 2;
-    uint32_t title = minimized ? gui_rgb(95, 125, 175) : gui_rgb(86, 130, 210);
-    uint32_t body = minimized ? gui_rgb(28, 36, 55) : gui_rgb(32, 44, 70);
+    int minimized = w && ((w->flags & GUI_WINDOW_FLAG_MINIMIZED) != 0);
+    int x;
+    int y;
+    uint32_t title;
+    uint32_t body;
     uint32_t border = gui_rgb(205, 225, 255);
     uint32_t shadow = gui_rgb(60, 76, 110);
+
+    if (w == fp_window) {
+        const int folder_w = 28;
+        const int folder_visible_top = 6;
+        const int folder_visible_h = 25;
+        x = rect.x + (rect.w - folder_w) / 2;
+        y = gui_taskbar_icon_y(rect, folder_visible_h) - folder_visible_top;
+        if (hover) {
+            y -= gui_taskbar_icon_hover_lift(rect);
+            gui_taskbar_draw_icon_shadow(x, y + folder_visible_top, folder_w, folder_visible_h);
+        }
+        gui_draw_folder_icon_art(x, y, gui_rgb(242, 194, 74));
+        return;
+    }
+
+    x = rect.x + (rect.w - 26) / 2;
+    y = gui_taskbar_icon_y(rect, 22);
+    title = minimized ? gui_rgb(95, 125, 175) : gui_rgb(86, 130, 210);
+    body = minimized ? gui_rgb(28, 36, 55) : gui_rgb(32, 44, 70);
     if (hover) {
         y -= gui_taskbar_icon_hover_lift(rect);
         title = minimized ? gui_rgb(118, 150, 205) : gui_rgb(112, 158, 232);
@@ -4646,7 +4696,7 @@ static gui_rect_t gui_get_clock_rect(const char *time_str) {
 
     return (gui_rect_t){
         (int)g_gui.width - w - 6,
-        (int)g_gui.height - h - 3,
+        gui_taskbar_tray_y(h),
         w,
         h,
     };
@@ -4663,7 +4713,7 @@ static gui_rect_t gui_get_network_widget_rect(const gui_rect_t *clock_rect) {
 
     return (gui_rect_t){
         clock_rect->x - w - gap,
-        (int)g_gui.height - h - 3,
+        gui_taskbar_tray_y(h),
         w,
         h,
     };
@@ -4680,7 +4730,7 @@ static gui_rect_t gui_get_notification_widget_rect(const gui_rect_t *network_rec
 
     return (gui_rect_t){
         network_rect->x - w - gap,
-        (int)g_gui.height - h - 3,
+        gui_taskbar_tray_y(h),
         w,
         h,
     };
@@ -4721,7 +4771,7 @@ static void gui_draw_taskbar_network_error(int x, int y, uint32_t color) {
 
 static void gui_draw_taskbar_network_icon(gui_rect_t net_rect) {
     int gx = net_rect.x + (net_rect.w - 15) / 2;
-    int gy = net_rect.y + (net_rect.h - 12) / 2;
+    int gy = gui_taskbar_icon_y(net_rect, 12);
     int ok = 0;
     gui_tray_network_kind_t kind = gui_get_tray_network_state(&ok);
     uint32_t nc = ok ? gui_rgb(120, 220, 255) : gui_rgb(255, 120, 120);
@@ -4777,11 +4827,14 @@ static void gui_draw_taskbar_search_box(gui_rect_t r) {
     gui_raw_line(r.x + r.w - 1, r.y, r.x + r.w - 1, r.y + r.h - 1, gui_rgb(12, 16, 24));
 
     /* magnifier glyph */
-    gui_raw_line(r.x + 6, r.y + 5, r.x + 10, r.y + 5, gui_rgb(170, 190, 220));
-    gui_raw_line(r.x + 5, r.y + 6, r.x + 5, r.y + 9, gui_rgb(170, 190, 220));
-    gui_raw_line(r.x + 11, r.y + 6, r.x + 11, r.y + 9, gui_rgb(170, 190, 220));
-    gui_raw_line(r.x + 6, r.y + 10, r.x + 10, r.y + 10, gui_rgb(170, 190, 220));
-    gui_raw_line(r.x + 10, r.y + 10, r.x + 14, r.y + 14, gui_rgb(170, 190, 220));
+    {
+        int gy = gui_taskbar_icon_y(r, 12);
+        gui_raw_line(r.x + 6, gy + 0, r.x + 10, gy + 0, gui_rgb(170, 190, 220));
+        gui_raw_line(r.x + 5, gy + 1, r.x + 5, gy + 4, gui_rgb(170, 190, 220));
+        gui_raw_line(r.x + 11, gy + 1, r.x + 11, gy + 4, gui_rgb(170, 190, 220));
+        gui_raw_line(r.x + 6, gy + 5, r.x + 10, gy + 5, gui_rgb(170, 190, 220));
+        gui_raw_line(r.x + 10, gy + 5, r.x + 14, gy + 9, gui_rgb(170, 190, 220));
+    }
 
     max_chars = (r.w - 28) / cw;
     if (max_chars < 1) max_chars = 1;
@@ -4972,7 +5025,7 @@ static void gui_draw_taskbar(void) {
         button.h = layout.item_h;
         if (button.x + button.w > layout.bar.x + layout.bar.w - 8) button.w = layout.bar.x + layout.bar.w - 8 - button.x;
         if (button.w <= 0) break;
-        gui_draw_taskbar_window_icon(button, (w->flags & GUI_WINDOW_FLAG_MINIMIZED) != 0);
+        gui_draw_taskbar_window_icon(button, w);
         bx += gui_taskbar_button_width(w) + 6;
     }
 
@@ -5004,7 +5057,7 @@ static void gui_draw_taskbar(void) {
         clock_rect = gui_get_clock_rect(clk);
         net_rect = gui_get_network_widget_rect(&clock_rect);
         notif_rect = gui_get_notification_widget_rect(&net_rect);
-        text_y = clock_rect.y + (clock_rect.h - text_h) / 2;
+        text_y = gui_taskbar_text_y(clock_rect, text_h);
 
         gui_raw_fill_rect(clock_rect.x, clock_rect.y, clock_rect.w, clock_rect.h, gui_rgb(36, 44, 60));
         gui_raw_line(clock_rect.x, clock_rect.y, clock_rect.x + clock_rect.w - 1, clock_rect.y, gui_rgb(80, 92, 120));
@@ -5021,8 +5074,8 @@ static void gui_draw_taskbar(void) {
             char cbuf[8];
             int n = (int)g_notif_count;
             int cp = 0;
-            int glyph_y = notif_rect.y + (notif_rect.h - 8) / 2;
-            int count_text_y = notif_rect.y + (notif_rect.h - text_h) / 2;
+            int glyph_y = gui_taskbar_icon_y(notif_rect, 8);
+            int count_text_y = gui_taskbar_text_y(notif_rect, text_h);
             if (n > 99) n = 99;
             if (n >= 10) cbuf[cp++] = (char)('0' + (n / 10) % 10);
             cbuf[cp++] = (char)('0' + n % 10);
@@ -5755,7 +5808,7 @@ static void notif_on_clear(gui_widget_t *w, void *ud) {
 #define GUI_FP_ROW_HEIGHT      20
 #define GUI_FP_ICON_SIZE       14
 
-static gui_window_t *fp_window = 0;
+
 static char          fp_path[GUI_FP_MAX_PATH];
 static int           fp_page = 0;
 static int           fp_mode = 0;            /* 0=list, 1=view, 2=edit */
