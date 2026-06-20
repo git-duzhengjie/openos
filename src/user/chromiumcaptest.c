@@ -342,6 +342,53 @@ static int test_filesystem_metadata(void)
     return found_self ? CAP_PASS : CAP_FAIL;
 }
 
+static int test_path_normalization(void)
+{
+    openos_stat_t direct_st;
+    openos_stat_t norm_st;
+    openos_stat_t rel_st;
+    char cwd[64];
+
+    if (openos_stat("/bin/chromiumcaptest", &direct_st) != 0 ||
+        (direct_st.mode & FS_FILE) != FS_FILE || direct_st.size == 0) {
+        return CAP_FAIL;
+    }
+
+    if (openos_stat("//bin/./../bin//chromiumcaptest", &norm_st) != 0 ||
+        (norm_st.mode & FS_FILE) != FS_FILE ||
+        norm_st.size != direct_st.size) {
+        return CAP_FAIL;
+    }
+
+    if (openos_chdir("/bin/./../bin") != 0) {
+        return CAP_FAIL;
+    }
+    if (openos_getcwd(cwd, sizeof(cwd)) != 0 ||
+        openos_strcmp(cwd, "/bin") != 0) {
+        openos_chdir("/");
+        return CAP_FAIL;
+    }
+
+    if (openos_stat("./chromiumcaptest", &rel_st) != 0 ||
+        (rel_st.mode & FS_FILE) != FS_FILE ||
+        rel_st.size != direct_st.size) {
+        openos_chdir("/");
+        return CAP_FAIL;
+    }
+
+    if (openos_chdir("../bin/../../") != 0) {
+        openos_chdir("/");
+        return CAP_FAIL;
+    }
+    if (openos_getcwd(cwd, sizeof(cwd)) != 0 ||
+        openos_strcmp(cwd, "/") != 0) {
+        openos_chdir("/");
+        return CAP_FAIL;
+    }
+
+    return CAP_PASS;
+}
+
 static int test_sbrk(void)
 {
     unsigned char *old_break;
@@ -832,7 +879,7 @@ int main(int argc, char **argv)
     (void)argv;
 
     openos_printf("Chromium core capability test\n");
-    openos_printf("target: mmap file-mmap fs-metadata mprotect v8-memory-policy brk thread tls pthread-sync futex shm eventfd message-queue service-channel socketpair poll time spawn fork pipe fd argv env\n");
+    openos_printf("target: mmap file-mmap fs-metadata path-normalization mprotect v8-memory-policy brk thread tls pthread-sync futex shm eventfd message-queue service-channel socketpair poll time spawn fork pipe fd argv env\n");
 
     status = test_uptime();
     print_result("monotonic uptime", status);
@@ -868,6 +915,10 @@ int main(int argc, char **argv)
 
     status = test_filesystem_metadata();
     print_result("filesystem stat/fstat/lstat/readdir", status);
+    failed += status == CAP_FAIL;
+
+    status = test_path_normalization();
+    print_result("path normalization and cwd", status);
     failed += status == CAP_FAIL;
 
     status = test_sbrk();
