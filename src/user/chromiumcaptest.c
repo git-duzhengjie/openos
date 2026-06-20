@@ -1104,6 +1104,14 @@ static int test_futex(void)
         return CAP_FAIL;
     if (openos_futex_wake(&g_futex_word, 1) != 0)
         return CAP_FAIL;
+    if (openos_futex_wait_timeout(&g_futex_word, 0, 0) != 2)
+        return CAP_FAIL;
+    if (openos_futex_wait_timeout(&g_futex_word, 1, 5) != 1)
+        return CAP_FAIL;
+    if (openos_futex_wait_timeout((volatile unsigned int *)1, 0, 5) >= 0)
+        return CAP_FAIL;
+    if (openos_futex_wait_timeout(&g_futex_word, 0, 2) != 2)
+        return CAP_FAIL;
 
     g_futex_word = 0;
     g_futex_waiting = 0;
@@ -1910,7 +1918,7 @@ int main(int argc, char **argv)
     failed += status == CAP_FAIL;
 
     status = test_futex();
-    print_result("futex wait/wake synchronization", status);
+    print_result("futex wait/wake timeout synchronization", status);
     failed += status == CAP_FAIL;
 
     status = test_semaphore();

@@ -132,6 +132,7 @@
 #define SYS_GETDENTS 336
 #define SYS_CLIPBOARD_SET 337
 #define SYS_CLIPBOARD_GET 338
+#define SYS_FUTEX_WAIT_TIMEOUT 339
 
 #define OPENOS_CHROMIUM_MEM_JITLESS_DEFAULT     (1u << 0)
 #define OPENOS_CHROMIUM_MEM_EXEC_PROT_RESERVED  (1u << 1)
@@ -1091,6 +1092,16 @@ static inline int openos_futex_wait(volatile unsigned int *uaddr, unsigned int e
 static inline int openos_futex_wake(volatile unsigned int *uaddr, unsigned int max_wake)
 {
     return openos_syscall_result(openos_syscall2(SYS_FUTEX_WAKE, (int)uaddr, (int)max_wake));
+}
+
+static inline int openos_futex_wait_timeout(volatile unsigned int *uaddr,
+                                            unsigned int expected,
+                                            unsigned int timeout_ms)
+{
+    return openos_syscall_result(openos_syscall3(SYS_FUTEX_WAIT_TIMEOUT,
+                                                (int)uaddr,
+                                                (int)expected,
+                                                (int)timeout_ms));
 }
 
 static inline int openos_pthread_create(openos_pthread_t *thread,

@@ -673,19 +673,9 @@ static void syscall_futex_remove_waiter(thread_t *thread)
     }
 }
 
-static uint32_t syscall_futex_wait(uint32_t uaddr, uint32_t expected)
+static syscall_futex_waiter_t *syscall_futex_alloc_waiter(thread_t *current, uint32_t pid, uint32_t uaddr)
 {
-    uint32_t current_value = 0;
-    thread_t *current = sched_get_current();
-    uint32_t pid = proc_current_pid();
     syscall_futex_waiter_t *slot = NULL;
-
-    if (!current || uaddr == 0 || (uaddr & 0x3u) != 0)
-        return (uint32_t)-1;
-    if (copy_from_user(&current_value, (const void *)uaddr, sizeof(current_value)) < 0)
-        return (uint32_t)-1;
-    if (current_value != expected)
-        return 1;
 
     for (uint32_t i = 0; i < SYSCALL_MAX_FUTEX_WAITERS; i++) {
         if (syscall_futex_waiters[i].used != FUTEX_WAIT_ACTIVE) {
@@ -694,18 +684,61 @@ static uint32_t syscall_futex_wait(uint32_t uaddr, uint32_t expected)
         }
     }
     if (!slot)
-        return (uint32_t)-1;
+        return NULL;
 
     slot->used = FUTEX_WAIT_ACTIVE;
     slot->pid = pid;
     slot->uaddr = uaddr;
     slot->thread = current;
+    return slot;
+}
 
-    current->state = PROC_BLOCKED;
+static uint32_t syscall_futex_wait_common(uint32_t uaddr, uint32_t expected,
+                                          uint32_t timeout_ms, uint32_t has_timeout)
+{
+    uint32_t current_value = 0;
+    thread_t *current = sched_get_current();
+    uint32_t pid = proc_current_pid();
+    syscall_futex_waiter_t *slot;
+
+    if (!current || uaddr == 0 || (uaddr & 0x3u) != 0)
+        return (uint32_t)-1;
+    if (copy_from_user(&current_value, (const void *)uaddr, sizeof(current_value)) < 0)
+        return (uint32_t)-1;
+    if (current_value != expected)
+        return 1;
+    if (has_timeout && timeout_ms == 0)
+        return 2;
+
+    slot = syscall_futex_alloc_waiter(current, pid, uaddr);
+    if (!slot)
+        return (uint32_t)-1;
+
+    if (has_timeout) {
+        current->wake_time = sched_time_ms() + timeout_ms;
+        current->state = PROC_SLEEPING;
+    } else {
+        current->state = PROC_BLOCKED;
+    }
     sched_yield();
+
+    if (has_timeout && slot->used == FUTEX_WAIT_ACTIVE && slot->thread == current) {
+        memset(slot, 0, sizeof(*slot));
+        return 2;
+    }
 
     syscall_futex_remove_waiter(current);
     return 0;
+}
+
+static uint32_t syscall_futex_wait(uint32_t uaddr, uint32_t expected)
+{
+    return syscall_futex_wait_common(uaddr, expected, 0, 0);
+}
+
+static uint32_t syscall_futex_wait_timeout(uint32_t uaddr, uint32_t expected, uint32_t timeout_ms)
+{
+    return syscall_futex_wait_common(uaddr, expected, timeout_ms, 1);
 }
 
 static uint32_t syscall_futex_wake(uint32_t uaddr, uint32_t max_wake)
@@ -1910,6 +1943,8 @@ uint32_t syscall_dispatch(uint32_t num,
         return syscall_futex_wait(a, b);
     case SYS_FUTEX_WAKE:
         return syscall_futex_wake(a, b);
+    case SYS_FUTEX_WAIT_TIMEOUT:
+        return syscall_futex_wait_timeout(a, b, c);
     case SYS_GETPRIORITY:
         return syscall_getpriority(a);
     case SYS_SETPRIORITY:

@@ -201,3 +201,5 @@ Chromium 主体是 C++，OpenOS 需要：
 ```
 
 后续每补一个内核核心能力，都必须加入该测试或对应专项测试，保证 Chromium 工程不会建立在不稳定基础上。
+
+- futex wait/wake 已补充 openos_futex_wait_timeout 超时等待验收。
