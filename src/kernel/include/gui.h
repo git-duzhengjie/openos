@@ -399,6 +399,7 @@ gui_app_t *gui_get_active_app(void);
 gui_app_t *gui_get_window_app(gui_window_t *window);
 gui_window_t *gui_create_app_window(gui_app_t *app, int x, int y, int w, int h, const char *title);
 gui_window_t *gui_create_window(int x, int y, int w, int h, const char *title);
+gui_window_t *gui_find_window(uint32_t window_id);
 void gui_destroy_window(gui_window_t *window);
 void gui_window_set_on_close(gui_window_t *window,
                              void (*cb)(gui_window_t *win, void *user_data),

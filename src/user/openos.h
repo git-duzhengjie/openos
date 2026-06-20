@@ -111,6 +111,11 @@
 #define SYS_AI_REQUEST   314
 #define SYS_NETDEVCTL    315
 #define SYS_DNSLOOKUP    316
+#define SYS_GUI_CREATE_WINDOW 320
+#define SYS_GUI_DESTROY_WINDOW 321
+#define SYS_GUI_ADD_LABEL 322
+#define SYS_GUI_ADD_BUTTON 323
+#define SYS_GUI_POLL_EVENT 324
 
 #define OPENOS_CAP_SETUID    (1u << 0)
 #define OPENOS_CAP_SETGID    (1u << 1)
@@ -414,6 +419,27 @@ typedef struct openos_pollfd {
     short revents;
 } openos_pollfd_t;
 
+typedef struct openos_gui_event {
+    unsigned int type;
+    unsigned int window_id;
+    unsigned int widget_id;
+    int x;
+    int y;
+    int key;
+    int button;
+} openos_gui_event_t;
+
+typedef struct openos_gui_widget_request {
+    unsigned int window_id;
+    int x;
+    int y;
+    int w;
+    int h;
+    char text[64];
+} openos_gui_widget_request_t;
+
+#define OPENOS_GUI_EVENT_NONE 0u
+
 static inline int openos_syscall3(int num, int a, int b, int c)
 {
     int ret;
@@ -505,6 +531,60 @@ static inline int openos_syscall5(int num, int a, int b, int c, int d, int e)
         : "memory"
     );
     return ret;
+}
+
+static inline int openos_gui_create_window(const char *title, int x, int y, int w, int h)
+{
+    return openos_syscall_result(openos_syscall5(SYS_GUI_CREATE_WINDOW, (int)title, x, y, w, h));
+}
+
+static inline int openos_gui_destroy_window(int window_id)
+{
+    return openos_syscall_result(openos_syscall1(SYS_GUI_DESTROY_WINDOW, window_id));
+}
+
+static inline void openos_gui_copy_text64(char out[64], const char *text)
+{
+    int i = 0;
+    if (!out) return;
+    if (!text) {
+        out[0] = 0;
+        return;
+    }
+    while (i < 63 && text[i]) {
+        out[i] = text[i];
+        ++i;
+    }
+    out[i] = 0;
+}
+
+static inline int openos_gui_add_label(int window_id, int x, int y, int w, int h, const char *text)
+{
+    openos_gui_widget_request_t req;
+    req.window_id = (unsigned int)window_id;
+    req.x = x;
+    req.y = y;
+    req.w = w;
+    req.h = h;
+    openos_gui_copy_text64(req.text, text);
+    return openos_syscall_result(openos_syscall1(SYS_GUI_ADD_LABEL, (int)&req));
+}
+
+static inline int openos_gui_add_button(int window_id, int x, int y, int w, int h, const char *text)
+{
+    openos_gui_widget_request_t req;
+    req.window_id = (unsigned int)window_id;
+    req.x = x;
+    req.y = y;
+    req.w = w;
+    req.h = h;
+    openos_gui_copy_text64(req.text, text);
+    return openos_syscall_result(openos_syscall1(SYS_GUI_ADD_BUTTON, (int)&req));
+}
+
+static inline int openos_gui_poll_event(openos_gui_event_t *event)
+{
+    return openos_syscall_result(openos_syscall1(SYS_GUI_POLL_EVENT, (int)event));
 }
 
 static inline int openos_sendto(int fd, const void *buf, unsigned int len, int flags,

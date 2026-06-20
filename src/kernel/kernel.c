@@ -324,6 +324,13 @@
 #define OPENOS_HAS_SBRKTEST 0
 #endif
 
+#if __has_include("embed_guiprobe.h")
+#include "embed_guiprobe.h"  /* guiprobe user command */
+#define OPENOS_HAS_GUIPROBE 1
+#else
+#define OPENOS_HAS_GUIPROBE 0
+#endif
+
 #if __has_include("embed_ping.h")
 #include "embed_ping.h"  /* ping user command */
 #define OPENOS_HAS_PING 1
@@ -1258,6 +1265,17 @@ void kernel_main(void) {
         serial_write("[OK] Installed /bin/sbrktest user ELF\n");
     } else {
         serial_write("[WARN] Failed to install /bin/sbrktest\n");
+    }
+#endif
+
+#if OPENOS_HAS_GUIPROBE
+    fd = vfs_open("/bin/guiprobe", O_CREAT | O_RDWR, 0755);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)guiprobe_elf, guiprobe_elf_size);
+        vfs_close(fd);
+        serial_write("[OK] Installed /bin/guiprobe user ELF\n");
+    } else {
+        serial_write("[WARN] Failed to install /bin/guiprobe\n");
     }
 #endif
 

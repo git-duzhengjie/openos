@@ -4221,6 +4221,16 @@ gui_window_t *gui_create_window(int x, int y, int w, int h, const char *title) {
     return win;
 }
 
+gui_window_t *gui_find_window(uint32_t window_id) {
+    uint32_t i;
+    if (window_id == 0) return 0;
+    for (i = 0; i < GUI_MAX_WINDOWS; ++i) {
+        gui_window_t *win = &g_gui.windows[i];
+        if (win->used && win->id == window_id) return win;
+    }
+    return 0;
+}
+
 static gui_widget_t *gui_alloc_widget(gui_window_t *window, gui_widget_type_t type, int x, int y, int w, int h, const char *text) {
     gui_widget_t *wg;
     if (!window || window->widget_count >= GUI_MAX_WIDGETS_PER_WIN) return 0;

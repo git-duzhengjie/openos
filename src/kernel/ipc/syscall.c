@@ -8,6 +8,7 @@
 #include "../include/serial.h"
 #include "../include/vga.h"
 #include "../include/gui.h"
+#include "../include/gui_user.h"
 #include "../include/input_buffer.h"
 #include "../include/usermem.h"
 #include "../include/vmm.h"
@@ -2105,6 +2106,54 @@ uint32_t syscall_dispatch(uint32_t num,
 
     case SYS_AI_REQUEST:
         return sys_ai_request((uint32_t)a);
+
+    case SYS_GUI_CREATE_WINDOW:
+        {
+            char title[64];
+            if (strncpy_from_user(title, (const char *)a, sizeof(title)) < 0)
+                return (uint32_t)-1;
+            title[sizeof(title) - 1] = 0;
+            return (uint32_t)gui_user_create_window(title, (int)b, (int)c, (int)d, (int)e, 0);
+        }
+
+    case SYS_GUI_DESTROY_WINDOW:
+        return (uint32_t)gui_user_destroy_window((uint32_t)a);
+
+    case SYS_GUI_ADD_LABEL:
+        {
+            gui_user_widget_request_t req;
+            if (!a || !user_ptr_valid((void *)a, sizeof(req), USERMEM_READ))
+                return (uint32_t)-1;
+            if (copy_from_user(&req, (const void *)a, sizeof(req)) < 0)
+                return (uint32_t)-1;
+            req.text[sizeof(req.text) - 1] = 0;
+            return (uint32_t)gui_user_add_label(req.window_id, req.x, req.y, req.w, req.h, req.text);
+        }
+
+    case SYS_GUI_ADD_BUTTON:
+        {
+            gui_user_widget_request_t req;
+            if (!a || !user_ptr_valid((void *)a, sizeof(req), USERMEM_READ))
+                return (uint32_t)-1;
+            if (copy_from_user(&req, (const void *)a, sizeof(req)) < 0)
+                return (uint32_t)-1;
+            req.text[sizeof(req.text) - 1] = 0;
+            return (uint32_t)gui_user_add_button(req.window_id, req.x, req.y, req.w, req.h, req.text);
+        }
+
+    case SYS_GUI_POLL_EVENT:
+        {
+            gui_user_event_t event;
+            int rc;
+            if (!a || !user_ptr_valid((void *)a, sizeof(event), USERMEM_WRITE))
+                return (uint32_t)-1;
+            rc = gui_user_poll_event(&event);
+            if (rc < 0)
+                return (uint32_t)-1;
+            if (copy_to_user((void *)a, &event, sizeof(event)) < 0)
+                return (uint32_t)-1;
+            return 0;
+        }
 
     default:
         return 0xFFFFFFFF;

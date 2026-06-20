@@ -321,6 +321,15 @@ if [ -f $USR/hello.c ]; then
     echo "  Embedded: hello.elf"
 fi
 
+if [ -f $USR/guiprobe.c ]; then
+    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+        -fno-stack-protector -fno-builtin \
+        -c $USR/guiprobe.c -o $BUILD/guiprobe.o
+    ld -m elf_i386 -T $USR/user.ld -o $BUILD/guiprobe.elf $BUILD/guiprobe.o
+    python3 _embed_elf.py $BUILD/guiprobe.elf $SRC/include/embed_guiprobe.h guiprobe_elf
+    echo "  Embedded: guiprobe.elf"
+fi
+
 if [ -f $USR/fault.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \
@@ -1084,6 +1093,11 @@ gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -Os \
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
     -I $SRC/include \
+    -c $SRC/gui_user.c -o $BUILD/gui_user.o
+
+gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
+    -I $SRC/include \
     -c $SRC/image.c -o $BUILD/image.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
@@ -1248,6 +1262,7 @@ ld -m elf_i386 -T $SRC/linker.ld \
     $BUILD/tls_crypto.o \
     $BUILD/tls_parser.o \
     $BUILD/gui.o \
+    $BUILD/gui_user.o \
     $BUILD/image.o \
     $BUILD/window_manager.o \
     $BUILD/font.o \
