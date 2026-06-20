@@ -1011,6 +1011,16 @@ static int test_futex(void)
     int spin = 0;
     int woke;
 
+    g_futex_word = 1;
+    if (openos_futex_wait(&g_futex_word, 0) != 1)
+        return CAP_FAIL;
+    if (openos_futex_wait((volatile unsigned int *)1, 0) >= 0)
+        return CAP_FAIL;
+    if (openos_futex_wake(0, 1) >= 0)
+        return CAP_FAIL;
+    if (openos_futex_wake(&g_futex_word, 1) != 0)
+        return CAP_FAIL;
+
     g_futex_word = 0;
     g_futex_waiting = 0;
     g_futex_done = 0;
@@ -1025,6 +1035,14 @@ static int test_futex(void)
     for (spin = 0; spin < 64; ++spin)
         openos_yield();
 
+    woke = openos_futex_wake(&g_futex_word, 0);
+    if (woke != 0)
+        return CAP_FAIL;
+    for (spin = 0; spin < 16; ++spin)
+        openos_yield();
+    if (g_futex_done)
+        return CAP_FAIL;
+
     g_futex_word = 1;
     woke = openos_futex_wake(&g_futex_word, 1);
     if (woke != 1)
@@ -1033,6 +1051,8 @@ static int test_futex(void)
     spin = 0;
     while (!g_futex_done && spin++ < 100000)
         openos_yield();
+    if (openos_futex_wake(&g_futex_word, 1) != 0)
+        return CAP_FAIL;
     (void)tid;
     return (g_futex_done && g_futex_ok) ? CAP_PASS : CAP_FAIL;
 }
