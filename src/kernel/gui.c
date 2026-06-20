@@ -4168,6 +4168,17 @@ void gui_exit_app(gui_app_t *app) {
     gui_refresh_active_app();
 }
 
+void gui_destroy_windows_by_user_owner(uint32_t owner_pid) {
+    uint32_t i;
+    if (owner_pid == 0) return;
+    for (i = 0; i < GUI_MAX_WINDOWS; i++) {
+        if (g_gui.windows[i].used && g_gui.windows[i].user_owner_pid == owner_pid) {
+            gui_destroy_window(&g_gui.windows[i]);
+        }
+    }
+    gui_refresh_active_app();
+}
+
 gui_app_t *gui_get_active_app(void) { return g_gui.active_app; }
 
 gui_app_t *gui_get_window_app(gui_window_t *window) { return gui_app_for_window(window); }

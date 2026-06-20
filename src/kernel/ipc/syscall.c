@@ -1359,6 +1359,7 @@ uint32_t syscall_dispatch(uint32_t num,
         return syscall_read_user_buffer((int)a, (void *)b, c);
 
     case SYS_EXIT:
+        gui_user_cleanup_process((uint32_t)proc_current_pid());
         sys_exit((int)a);
         return 0;
 

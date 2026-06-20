@@ -8,6 +8,7 @@
 #include "types.h"
 
 typedef struct gui_user_event {
+    uint32_t owner_pid;
     uint32_t type;
     uint32_t window_id;
     uint32_t widget_id;
@@ -33,5 +34,6 @@ int gui_user_add_label(uint32_t window_id, int x, int y, int w, int h, const cha
 int gui_user_add_button(uint32_t window_id, int x, int y, int w, int h, const char *text);
 int gui_user_poll_event(gui_user_event_t *out_event);
 int gui_user_set_text(uint32_t window_id, uint32_t widget_id, const char *text);
+void gui_user_cleanup_process(uint32_t pid);
 
 #endif /* OPENOS_GUI_USER_H */

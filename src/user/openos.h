@@ -421,6 +421,7 @@ typedef struct openos_pollfd {
 } openos_pollfd_t;
 
 typedef struct openos_gui_event {
+    unsigned int owner_pid;
     unsigned int type;
     unsigned int window_id;
     unsigned int widget_id;
