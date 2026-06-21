@@ -200,6 +200,51 @@ static int test_mmap_fixed(void)
     return openos_munmap(fixed, 4096) == 0 ? CAP_PASS : CAP_FAIL;
 }
 
+static int test_mmap_vma_split_merge(void)
+{
+    unsigned char *base;
+    unsigned char *middle;
+
+    base = (unsigned char *)openos_mmap_ex(0, 4096 * 3,
+                                          OPENOS_PROT_READ | OPENOS_PROT_WRITE,
+                                          OPENOS_MAP_ANON | OPENOS_MAP_PRIVATE);
+    if (base == (unsigned char *)-1 || !base)
+        return CAP_FAIL;
+
+    base[0] = 0x11;
+    base[4096] = 0x22;
+    base[8192] = 0x33;
+
+    if (openos_munmap(base + 4096, 4096) != 0) {
+        openos_munmap(base, 4096 * 3);
+        return CAP_FAIL;
+    }
+
+    middle = (unsigned char *)openos_mmap_ex(base + 4096, 4096,
+                                            OPENOS_PROT_READ | OPENOS_PROT_WRITE,
+                                            OPENOS_MAP_ANON | OPENOS_MAP_PRIVATE | OPENOS_MAP_FIXED);
+    if (middle != base + 4096) {
+        if (middle != (unsigned char *)-1)
+            openos_munmap(middle, 4096);
+        openos_munmap(base, 4096);
+        openos_munmap(base + 8192, 4096);
+        return CAP_FAIL;
+    }
+
+    middle[0] = 0x44;
+    if (base[0] != 0x11 || middle[0] != 0x44 || base[8192] != 0x33) {
+        openos_munmap(base, 4096 * 3);
+        return CAP_FAIL;
+    }
+
+    if (openos_mprotect(base, 4096 * 3, OPENOS_PROT_READ) != 0) {
+        openos_munmap(base, 4096 * 3);
+        return CAP_FAIL;
+    }
+
+    return openos_munmap(base, 4096 * 3) == 0 ? CAP_PASS : CAP_FAIL;
+}
+
 static int test_v8_memory_policy(void)
 {
     unsigned int policy = openos_chromium_memory_policy();
@@ -2164,6 +2209,10 @@ int main(int argc, char **argv)
 
     status = test_mmap_fixed();
     print_result("fixed-address mmap reservation", status);
+    failed += status == CAP_FAIL;
+
+    status = test_mmap_vma_split_merge();
+    print_result("munmap VMA split/merge", status);
     failed += status == CAP_FAIL;
 
     status = test_mprotect();

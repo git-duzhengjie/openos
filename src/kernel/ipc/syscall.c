@@ -1389,6 +1389,78 @@ static process_mmap_vma_t *sys_mmap_find_vma(process_t *proc, uint32_t addr, uin
     return 0;
 }
 
+static void sys_mmap_clear_vma(process_mmap_vma_t *vma)
+{
+    vma->start = 0;
+    vma->end = 0;
+    vma->prot = 0;
+    vma->flags = 0;
+}
+
+static int sys_mmap_vma_can_merge(const process_mmap_vma_t *left, const process_mmap_vma_t *right)
+{
+    if (!left || !right || !left->start || !right->start)
+        return 0;
+    if (left->end != right->start)
+        return 0;
+    if (left->prot != right->prot || left->flags != right->flags)
+        return 0;
+    if ((left->flags & PROCESS_MMAP_FLAG_FILE) != 0)
+        return 0;
+    return 1;
+}
+
+static void sys_mmap_merge_adjacent_vmas(process_t *proc)
+{
+    int merged;
+
+    if (!proc)
+        return;
+
+    do {
+        merged = 0;
+        for (int i = 0; i < PROCESS_MMAP_VMA_MAX && !merged; i++) {
+            process_mmap_vma_t *a = &proc->mmap_vmas[i];
+            if (!a->start)
+                continue;
+            for (int j = 0; j < PROCESS_MMAP_VMA_MAX; j++) {
+                process_mmap_vma_t *b = &proc->mmap_vmas[j];
+                if (i == j || !b->start)
+                    continue;
+                if (a->start > b->start) {
+                    process_mmap_vma_t *tmp = a;
+                    a = b;
+                    b = tmp;
+                }
+                if (sys_mmap_vma_can_merge(a, b)) {
+                    a->end = b->end;
+                    sys_mmap_clear_vma(b);
+                    merged = 1;
+                    break;
+                }
+            }
+        }
+    } while (merged);
+}
+
+static int sys_mmap_range_is_mapped(process_t *proc, uint32_t addr, uint32_t len)
+{
+    uint32_t end = addr + len;
+    uint32_t cursor = addr;
+
+    if (!proc || len == 0 || end <= addr)
+        return 0;
+
+    while (cursor < end) {
+        process_mmap_vma_t *cover = sys_mmap_find_vma(proc, cursor, 1);
+        if (!cover || cover->start > cursor || cover->end <= cursor)
+            return 0;
+        cursor = cover->end;
+    }
+
+    return cursor >= end;
+}
+
 static int sys_mmap_add_vma(process_t *proc, uint32_t start, uint32_t len, uint32_t prot, uint32_t flags)
 {
     uint32_t end = start + len;
@@ -1412,29 +1484,61 @@ static int sys_mmap_add_vma(process_t *proc, uint32_t start, uint32_t len, uint3
         vma->end = end;
         vma->prot = prot;
         vma->flags = flags;
+        sys_mmap_merge_adjacent_vmas(proc);
         return 0;
     }
     return -1;
 }
 
-static void sys_mmap_remove_vma(process_t *proc, uint32_t addr, uint32_t len)
+static int sys_mmap_remove_vma(process_t *proc, uint32_t addr, uint32_t len)
 {
     uint32_t end = addr + len;
 
     if (!proc || end <= addr)
-        return;
+        return -1;
 
     for (int i = 0; i < PROCESS_MMAP_VMA_MAX; i++) {
         process_mmap_vma_t *vma = &proc->mmap_vmas[i];
-        if (!vma->start)
+        uint32_t old_end;
+        int free_slot = -1;
+
+        if (!vma->start || addr >= vma->end || end <= vma->start)
             continue;
+
         if (addr <= vma->start && end >= vma->end) {
-            vma->start = 0;
-            vma->end = 0;
-            vma->prot = 0;
-            vma->flags = 0;
+            sys_mmap_clear_vma(vma);
+            continue;
         }
+
+        if (addr <= vma->start) {
+            vma->start = end;
+            continue;
+        }
+
+        if (end >= vma->end) {
+            vma->end = addr;
+            continue;
+        }
+
+        for (int j = 0; j < PROCESS_MMAP_VMA_MAX; j++) {
+            if (!proc->mmap_vmas[j].start) {
+                free_slot = j;
+                break;
+            }
+        }
+        if (free_slot < 0)
+            return -1;
+
+        old_end = vma->end;
+        vma->end = addr;
+        proc->mmap_vmas[free_slot].start = end;
+        proc->mmap_vmas[free_slot].end = old_end;
+        proc->mmap_vmas[free_slot].prot = vma->prot;
+        proc->mmap_vmas[free_slot].flags = vma->flags;
     }
+
+    sys_mmap_merge_adjacent_vmas(proc);
+    return 0;
 }
 
 static void sys_munmap_range(uint32_t addr, uint32_t len)
@@ -1590,10 +1694,15 @@ static uint32_t sys_munmap_user(uint32_t addr, uint32_t len)
     if (end <= addr || addr < SYS_MMAP_BASE || end > SYS_MMAP_LIMIT)
         return (uint32_t)-1;
 
+    proc = proc_find(proc_current_pid());
+    if (!sys_mmap_range_is_mapped(proc, addr, len))
+        return (uint32_t)-1;
+
+    if (sys_mmap_remove_vma(proc, addr, len) < 0)
+        return (uint32_t)-1;
+
     sys_munmap_range(addr, len);
 
-    proc = proc_find(proc_current_pid());
-    sys_mmap_remove_vma(proc, addr, len);
     if (proc && end == proc->mmap_end)
         proc->mmap_end = addr;
 

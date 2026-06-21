@@ -418,6 +418,7 @@
   - [√] 实现 `mprotect` 页级权限切换基础能力，已接入 `/bin/chromiumcaptest` 验收
   - [ ] 支持固定地址映射、地址空间保留、解除映射后的 VMA 合并与冲突检测
     - [√] 已完成 `MAP_FIXED` 基础固定地址预留与重叠 VMA 冲突拒绝
+    - [√] 已补齐 `munmap` 对 VMA 头/尾裁剪、中间拆分、相邻匿名兼容 VMA 合并与未映射区间拒绝，并接入 `/bin/chromiumcaptest` 验收
   - [ ] 文件 mmap 与 page cache 协同，支持只读资源映射和私有 COW 映射
     - [√] 已完成基础 file-backed private snapshot mmap：`SYS_MMAP_FILE` 可将 fd 内容映射到用户地址空间，并接入 `/bin/chromiumcaptest` 验收
     - [√] 已增强 `/bin/chromiumcaptest` 对 file-backed `MAP_PRIVATE` 的不回写校验：映射内修改后重新映射应仍看到原始文件内容
