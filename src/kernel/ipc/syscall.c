@@ -138,9 +138,9 @@ static int syscall_nanosleep(const openos_timespec_t *user_req, openos_timespec_
 {
     openos_timespec_t req;
     openos_timespec_t rem;
-    uint64_t sec_ms;
-    uint64_t nsec_ms;
-    uint64_t total_ms;
+    uint32_t sec_ms;
+    uint32_t nsec_ms;
+    uint32_t total_ms;
 
     if (!user_req)
         return -1;
@@ -148,15 +148,17 @@ static int syscall_nanosleep(const openos_timespec_t *user_req, openos_timespec_
         return -1;
     if (req.tv_sec < 0 || req.tv_nsec < 0 || req.tv_nsec >= 1000000000ll)
         return -1;
-
-    sec_ms = (uint64_t)req.tv_sec * 1000ull;
-    nsec_ms = ((uint64_t)req.tv_nsec + 999999ull) / 1000000ull;
-    total_ms = sec_ms + nsec_ms;
-    if (sec_ms / 1000ull != (uint64_t)req.tv_sec || total_ms < sec_ms || total_ms > 0xffffffffull)
+    if (req.tv_sec > (int64_t)(0xffffffffu / 1000u))
         return -1;
 
-    if (total_ms > 0ull)
-        thread_sleep((uint32_t)total_ms);
+    sec_ms = (uint32_t)req.tv_sec * 1000u;
+    nsec_ms = ((uint32_t)req.tv_nsec + 999999u) / 1000000u;
+    if (nsec_ms > 0xffffffffu - sec_ms)
+        return -1;
+    total_ms = sec_ms + nsec_ms;
+
+    if (total_ms > 0u)
+        thread_sleep(total_ms);
 
     if (user_rem) {
         rem.tv_sec = 0;
