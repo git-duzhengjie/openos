@@ -620,6 +620,23 @@ static int test_filesystem_mutations(void)
     }
     openos_close(fd);
 
+    if (openos_chmod(file, FS_FILE | 0600) != 0 ||
+        openos_stat(file, &file_st) != 0 ||
+        openos_lstat(file, &sym_st) != 0 ||
+        (file_st.mode & 0777) != 0600 ||
+        (sym_st.mode & 0777) != 0600) {
+        return CAP_FAIL;
+    }
+    fd = openos_open(file, O_RDONLY, 0);
+    if (fd < 0) {
+        return CAP_FAIL;
+    }
+    if (openos_fstat(fd, &hard_st) != 0 || (hard_st.mode & 0777) != 0600) {
+        openos_close(fd);
+        return CAP_FAIL;
+    }
+    openos_close(fd);
+
     if (openos_link(file, hardlink) != 0) {
         return CAP_FAIL;
     }

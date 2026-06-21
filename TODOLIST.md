@@ -461,6 +461,7 @@
     - [√] 已将 `.` / `..` / 重复斜杠 / 相对路径 / cwd 语义并入 `/bin/chromiumcaptest`，覆盖 Chromium 资源路径规范化的最小验收
     - [√] 已补充尾斜杠目录、越过根目录 `..` 截断、归一化前后 inode/size 一致性验收，强化 Chromium 资源路径解析边界
     - [√] 已将 `mkdir/link/symlink/readlink/unlink/rmdir` 基础变更语义并入 `/bin/chromiumcaptest`，覆盖 Chromium 资源/缓存文件生命周期的最小验收
+    - [√] 已将 `chmod` 权限位变更并入 `/bin/chromiumcaptest`，覆盖 stat/lstat/fstat 三条路径权限位一致性验收
   - [ ] 支持大文件、稀疏文件、资源 pak 文件读取与缓存目录
     - [√] 已新增 `/usr/share/openos/browser/pak` 资源目录常量与启动目录，并将 pak 文件创建、读取、stat、目录发现、删除并入 `/bin/chromiumcaptest`
     - [√] 已将 `seek(SEEK_SET/SEEK_END)`、稀疏写入、洞区零填充读取和大偏移文件 size 校验并入 `/bin/chromiumcaptest`
