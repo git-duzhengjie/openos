@@ -395,6 +395,17 @@ static void chrome_load(chrome_page_t *page, const char *url_text)
     chrome_collapse_html(page->body, sizeof(page->body), chrome_find_body(page->raw));
 }
 
+static void chrome_prepare_ready(chrome_page_t *page, const char *url_text)
+{
+    memset(page, 0, sizeof(*page));
+    chrome_parse_url(url_text, &page->url);
+    chrome_format_url(&page->url, page->display_url, sizeof(page->display_url));
+    page->loaded = 0;
+    snprintf(page->status, sizeof(page->status), "Ready");
+    snprintf(page->body, sizeof(page->body),
+             "Chromium is ready. Press Go or Refresh to load this page.");
+}
+
 static int chrome_write_file(const char *path, const char *data, int len)
 {
     int fd = openos_open(path, O_CREAT | O_TRUNC | O_WRONLY, 0644);
@@ -472,14 +483,14 @@ int main(int argc, char **argv)
     (void)download_button;
     (void)close_button;
 
-    chrome_load(&page, initial_url);
+    chrome_prepare_ready(&page, initial_url);
     chrome_render_page(win, &page);
-    printf("chromium: loaded %s status=%s\n", page.display_url, page.status);
+    printf("chromium: ready %s\n", page.display_url);
 
     for (;;) {
         openos_gui_event_t event;
         int ev = openos_gui_poll_event(&event);
-        if (ev > 0 && event.window_id == (unsigned int)win) {
+        if (ev == 0 && event.type != OPENOS_GUI_EVENT_NONE && event.window_id == (unsigned int)win) {
             if (event.widget_id == (unsigned int)close_button) break;
             if (event.widget_id == (unsigned int)refresh_button || event.widget_id == (unsigned int)go_button) {
                 char reload_url[256];
