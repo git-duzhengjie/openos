@@ -380,6 +380,16 @@ if [ -f $USR/guiprobe.c ]; then
     echo "  Embedded: guiprobe.elf"
 fi
 
+if [ -f $USR/skia_demo.c ]; then
+    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+        -fno-stack-protector -fno-builtin \
+        -c $USR/skia_demo.c -o $BUILD/skia_demo.o
+    ld -m elf_i386 -T $USR/user.ld -o $BUILD/skia_demo.elf $BUILD/crt0.o $BUILD/skia_demo.o
+    verify_user_start $BUILD/skia_demo.elf skia_demo.elf
+    python3 _embed_elf.py $BUILD/skia_demo.elf $SRC/include/embed_skia_demo.h skia_demo_elf
+    echo "  Embedded: skia_demo.elf"
+fi
+
 if [ -f $USR/browser.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \

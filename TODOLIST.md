@@ -518,7 +518,8 @@
   - [√] 宿主机交叉编译 Chromium 依赖的 GN/Ninja/Clang 构建链设计
     - [√] 已新增 `docs/chromium-build-chain.md`，固定 i386-openos-elf 目标、GN args 初始草案、OpenOS sysroot/CRT/runtime 产物边界，以及 skia_demo -> v8_shell -> blink_smoke -> content_shell -> chromium 的分阶段构建验收顺序
 - [ ] M9 Skia / V8 / Blink / Chromium 分阶段落地
-  - [ ] `/bin/skia_demo`：软件绘制矩形、文本、图片到 OpenOS 窗口
+  - [√] `/bin/skia_demo`：软件绘制矩形、文本、图片到 OpenOS 窗口
+    - [√] 已新增 `src/user/skia_demo.c`，使用 OpenOS GUI framebuffer/blit/text/font 查询接口绘制矩形、文本和内置图片，并接入构建嵌入与 `/bin/skia_demo` 安装
   - [ ] `/bin/v8_shell`：优先 jitless 运行基础 JavaScript
   - [ ] `/bin/blink_smoke`：最小 HTML/CSS layout smoke
   - [ ] `/bin/content_shell`：单进程、disable-gpu、disable-sandbox 打开 `http://example.com`

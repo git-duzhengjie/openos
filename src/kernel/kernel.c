@@ -343,6 +343,13 @@
 #define OPENOS_HAS_GUIPROBE 0
 #endif
 
+#if __has_include("embed_skia_demo.h")
+#include "embed_skia_demo.h"  /* Skia-style software raster demo */
+#define OPENOS_HAS_SKIA_DEMO 1
+#else
+#define OPENOS_HAS_SKIA_DEMO 0
+#endif
+
 #if __has_include("embed_browser.h")
 #include "embed_browser.h"  /* browser user command */
 #define OPENOS_HAS_USER_BROWSER 1
@@ -1351,6 +1358,17 @@ void kernel_main(void) {
         serial_write("[OK] Installed /bin/guiprobe user ELF\n");
     } else {
         serial_write("[WARN] Failed to install /bin/guiprobe\n");
+    }
+#endif
+
+#if OPENOS_HAS_SKIA_DEMO
+    fd = vfs_open("/bin/skia_demo", O_CREAT | O_RDWR, 0755);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)skia_demo_elf, skia_demo_elf_size);
+        vfs_close(fd);
+        serial_write("[OK] Installed /bin/skia_demo user ELF\n");
+    } else {
+        serial_write("[WARN] Failed to install /bin/skia_demo\n");
     }
 #endif
 
