@@ -287,13 +287,105 @@ int tls12_build_client_hello_record(const char* server_name,
     return 1;
 }
 
+static int tls12_cipher_suite_is_aes128_gcm(uint16_t cipher_suite);
+
+static int tls12_parse_server_hello_extension(tls12_handshake_context_t* ctx,
+                                              uint16_t extension_type,
+                                              const uint8_t* extension_data,
+                                              size_t extension_len)
+{
+    size_t alpn_len;
+    size_t name_len;
+
+    if (!ctx || (!extension_data && extension_len > 0u)) {
+        return 0;
+    }
+
+    switch (extension_type) {
+    case 0x0017u:
+        if (extension_len != 0u) {
+            return 0;
+        }
+        ctx->server_has_extended_master_secret = 1;
+        return 1;
+    case 0xff01u:
+        if (extension_len != 1u || extension_data[0] != 0u) {
+            return 0;
+        }
+        ctx->server_has_renegotiation_info = 1;
+        return 1;
+    case 0x0010u:
+        if (extension_len < 3u) {
+            return 0;
+        }
+        alpn_len = tls_hs_read_u16(extension_data);
+        if (alpn_len + 2u != extension_len || alpn_len < 1u) {
+            return 0;
+        }
+        name_len = extension_data[2];
+        if (name_len == 0u || name_len + 3u != extension_len ||
+            name_len > sizeof(ctx->server_selected_alpn)) {
+            return 0;
+        }
+        tls_copy(ctx->server_selected_alpn, extension_data + 3u, name_len);
+        ctx->server_selected_alpn_len = name_len;
+        ctx->server_has_alpn = 1;
+        return 1;
+    case 0x002bu:
+        if (extension_len != 2u) {
+            return 0;
+        }
+        ctx->server_supported_version = tls_hs_read_u16(extension_data);
+        ctx->server_has_supported_versions = 1;
+        return ctx->server_supported_version == TLS12_VERSION;
+    default:
+        return 1;
+    }
+}
+
+static int tls12_parse_server_hello_extensions(tls12_handshake_context_t* ctx,
+                                               const uint8_t* data,
+                                               size_t len)
+{
+    size_t pos = 0u;
+    uint16_t extension_type;
+    uint16_t extension_len;
+
+    if (!ctx || (!data && len > 0u)) {
+        return 0;
+    }
+
+    while (pos < len) {
+        if (len - pos < 4u) {
+            return 0;
+        }
+        extension_type = tls_hs_read_u16(data + pos);
+        extension_len = tls_hs_read_u16(data + pos + 2u);
+        pos += 4u;
+        if ((size_t)extension_len > len - pos) {
+            return 0;
+        }
+        if (!tls12_parse_server_hello_extension(ctx,
+                                                extension_type,
+                                                data + pos,
+                                                extension_len)) {
+            return 0;
+        }
+        pos += extension_len;
+    }
+
+    return pos == len;
+}
+
 static int tls12_parse_server_hello(tls12_handshake_context_t* ctx,
                                     const uint8_t* message,
                                     size_t message_len)
 {
     size_t body_len;
+    size_t body_end;
     size_t pos;
     size_t session_id_len;
+    size_t extensions_len;
 
     if (!ctx || !tls_handshake_header_valid(message,
                                             message_len,
@@ -306,26 +398,52 @@ static int tls12_parse_server_hello(tls12_handshake_context_t* ctx,
         return 0;
     }
 
+    body_end = TLS_HANDSHAKE_HEADER_SIZE + body_len;
     pos = TLS_HANDSHAKE_HEADER_SIZE;
     ctx->negotiated_version = tls_hs_read_u16(message + pos);
+    if (ctx->negotiated_version != TLS12_VERSION) {
+        return 0;
+    }
     pos += 2u;
 
     tls_copy(ctx->server_random, message + pos, TLS12_RANDOM_SIZE);
     ctx->has_server_random = 1;
     pos += TLS12_RANDOM_SIZE;
 
+    if (pos >= body_end) {
+        return 0;
+    }
     session_id_len = message[pos];
     pos += 1u;
-    if (pos + session_id_len + 3u > message_len) {
+    if (session_id_len > 32u || pos + session_id_len + 3u > body_end) {
         return 0;
     }
 
     pos += session_id_len;
     ctx->cipher_suite = tls_hs_read_u16(message + pos);
+    if (!tls12_cipher_suite_is_aes128_gcm(ctx->cipher_suite)) {
+        return 0;
+    }
     pos += 2u;
     ctx->compression_method = message[pos];
+    if (ctx->compression_method != 0u) {
+        return 0;
+    }
+    pos += 1u;
 
-    return 1;
+    if (pos == body_end) {
+        return 1;
+    }
+    if (body_end - pos < 2u) {
+        return 0;
+    }
+    extensions_len = tls_hs_read_u16(message + pos);
+    pos += 2u;
+    if (extensions_len != body_end - pos) {
+        return 0;
+    }
+
+    return tls12_parse_server_hello_extensions(ctx, message + pos, extensions_len);
 }
 
 static int tls12_capture_finished(uint8_t* out,

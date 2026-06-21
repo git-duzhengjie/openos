@@ -488,6 +488,7 @@
     - [√] 已新增 `tls_handshake` TLS 1.2 客户端握手状态机骨架，覆盖 ClientHello sent、ServerHello/Certificate/ServerHelloDone received、ClientKeyExchange/ChangeCipherSpec/Finished sent、Server ChangeCipherSpec/Finished received、transcript 累积、证书链 view 捕获、协商版本/cipher suite 记录、master secret 注入后的 client/server Finished verify_data 计算与常量时间校验，以及乱序/非法 CCS/错误 Finished 失败路径，并已接入单测与内核构建脚本
     - [√] 已将 handshake 中的 master secret 串联到 TLS 1.2 AES_128_GCM_SHA256 key block 派生与 `tls12_aes128_gcm_record_layer_t` 初始化，保存 record keys/key block，支持按 client/server role 配置 record 层，并通过 client 加密、server 解密联通单测验证
     - [√] 已新增 TLS 1.2 ClientHello record 构造器，支持 SNI、supported_groups、ec_point_formats、signature_algorithms、ALPN http/1.1、encrypt_then_mac、extended_master_secret、renegotiation_info 和 supported_versions 扩展，并接入长度/随机数/SNI/ALPN/容量边界单测
+    - [√] 已增强 TLS 1.2 ServerHello 解析，校验协商版本、AES_128_GCM_SHA256 cipher suite、null compression，解析 extended_master_secret、renegotiation_info、ALPN 和 supported_versions 扩展，并覆盖错误版本/套件/压缩/扩展版本拒绝单测
   - [ ] 为 Chromium net stack 所需 socket 行为补齐错误码、非阻塞、poll 边界语义
     - [√] 已增强 `/bin/chromiumcaptest` 的 `socketpair` poll/select 边界验收，覆盖空队列不报 `POLLIN`、多 fd poll、负 fd 忽略、非法 fd `POLLERR`、select 读写位图、可写端 `POLLOUT`、空读失败和对端关闭 `POLLHUP`
     - [√] 已新增 `SYS_FCNTL` / `openos_fcntl` 最小 flags ABI，覆盖 `F_GETFL/F_SETFL/O_NONBLOCK` 开关、非法 fd 和非法 cmd，为后续 socket 非阻塞 I/O 语义打底

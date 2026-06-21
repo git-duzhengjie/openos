@@ -28,6 +28,24 @@ static const uint8_t k_server_hello[] = {
     0x00
 };
 
+static const uint8_t k_server_hello_with_extensions[] = {
+    TLS_HANDSHAKE_SERVER_HELLO, 0x00, 0x00, 0x46,
+    0x03, 0x03,
+    0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28,
+    0x29, 0x2a, 0x2b, 0x2c, 0x2d, 0x2e, 0x2f, 0x30,
+    0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38,
+    0x39, 0x3a, 0x3b, 0x3c, 0x3d, 0x3e, 0x3f, 0x40,
+    0x00,
+    0x00, 0x9c,
+    0x00,
+    0x00, 0x1e,
+    0x00, 0x17, 0x00, 0x00,
+    0xff, 0x01, 0x00, 0x01, 0x00,
+    0x00, 0x10, 0x00, 0x0b,
+    0x00, 0x09, 0x08, 'h', 't', 't', 'p', '/', '1', '.', '1',
+    0x00, 0x2b, 0x00, 0x02, 0x03, 0x03
+};
+
 static const uint8_t k_certificate[] = {
     0x0b, 0x00, 0x00, 0x0a,
     0x00, 0x00, 0x07,
@@ -363,6 +381,74 @@ UNIT_TEST_CASE(reject_bad_finished_when_master_secret_is_available)
     ASSERT_EQ_INT(TLS12_HANDSHAKE_STATE_ERROR, ctx.state);
 }
 
+UNIT_TEST_CASE(parse_server_hello_extensions)
+{
+    tls12_handshake_context_t ctx;
+
+    tls12_handshake_context_init(&ctx);
+    ASSERT_TRUE(tls12_handshake_on_client_hello_sent(&ctx,
+                                                     k_client_hello,
+                                                     sizeof(k_client_hello)));
+    ASSERT_TRUE(tls12_handshake_on_server_handshake(&ctx,
+                                                    k_server_hello_with_extensions,
+                                                    sizeof(k_server_hello_with_extensions)));
+    ASSERT_EQ_INT(TLS12_VERSION, ctx.negotiated_version);
+    ASSERT_EQ_INT(TLS12_CIPHER_SUITE_RSA_WITH_AES_128_GCM_SHA256, ctx.cipher_suite);
+    ASSERT_EQ_INT(0, ctx.compression_method);
+    ASSERT_TRUE(ctx.server_has_extended_master_secret);
+    ASSERT_TRUE(ctx.server_has_renegotiation_info);
+    ASSERT_TRUE(ctx.server_has_alpn);
+    ASSERT_TRUE(ctx.server_has_supported_versions);
+    ASSERT_EQ_INT(TLS12_VERSION, ctx.server_supported_version);
+    ASSERT_EQ_SIZE(8u, ctx.server_selected_alpn_len);
+    ASSERT_EQ_INT(0, memcmp(ctx.server_selected_alpn, "http/1.1", 8u));
+}
+
+UNIT_TEST_CASE(reject_invalid_server_hello_negotiation)
+{
+    tls12_handshake_context_t ctx;
+    uint8_t mutated[sizeof(k_server_hello_with_extensions)];
+
+    memcpy(mutated, k_server_hello_with_extensions, sizeof(mutated));
+    mutated[4] = 0x03;
+    mutated[5] = 0x01;
+    tls12_handshake_context_init(&ctx);
+    ASSERT_TRUE(tls12_handshake_on_client_hello_sent(&ctx,
+                                                     k_client_hello,
+                                                     sizeof(k_client_hello)));
+    ASSERT_FALSE(tls12_handshake_on_server_handshake(&ctx, mutated, sizeof(mutated)));
+    ASSERT_EQ_INT(TLS12_HANDSHAKE_STATE_ERROR, ctx.state);
+
+    memcpy(mutated, k_server_hello_with_extensions, sizeof(mutated));
+    mutated[39] = 0x00;
+    mutated[40] = 0x2f;
+    tls12_handshake_context_init(&ctx);
+    ASSERT_TRUE(tls12_handshake_on_client_hello_sent(&ctx,
+                                                     k_client_hello,
+                                                     sizeof(k_client_hello)));
+    ASSERT_FALSE(tls12_handshake_on_server_handshake(&ctx, mutated, sizeof(mutated)));
+    ASSERT_EQ_INT(TLS12_HANDSHAKE_STATE_ERROR, ctx.state);
+
+    memcpy(mutated, k_server_hello_with_extensions, sizeof(mutated));
+    mutated[41] = 0x01;
+    tls12_handshake_context_init(&ctx);
+    ASSERT_TRUE(tls12_handshake_on_client_hello_sent(&ctx,
+                                                     k_client_hello,
+                                                     sizeof(k_client_hello)));
+    ASSERT_FALSE(tls12_handshake_on_server_handshake(&ctx, mutated, sizeof(mutated)));
+    ASSERT_EQ_INT(TLS12_HANDSHAKE_STATE_ERROR, ctx.state);
+
+    memcpy(mutated, k_server_hello_with_extensions, sizeof(mutated));
+    mutated[72] = 0x03;
+    mutated[73] = 0x04;
+    tls12_handshake_context_init(&ctx);
+    ASSERT_TRUE(tls12_handshake_on_client_hello_sent(&ctx,
+                                                     k_client_hello,
+                                                     sizeof(k_client_hello)));
+    ASSERT_FALSE(tls12_handshake_on_server_handshake(&ctx, mutated, sizeof(mutated)));
+    ASSERT_EQ_INT(TLS12_HANDSHAKE_STATE_ERROR, ctx.state);
+}
+
 UNIT_TEST_CASE(reject_out_of_order_messages)
 {
     tls12_handshake_context_t ctx;
@@ -396,6 +482,8 @@ int main(void)
     UNIT_TEST_RUN(verify_finished_when_master_secret_is_available);
     UNIT_TEST_RUN(derive_key_block_and_configure_record_layer);
     UNIT_TEST_RUN(reject_bad_finished_when_master_secret_is_available);
+    UNIT_TEST_RUN(parse_server_hello_extensions);
+    UNIT_TEST_RUN(reject_invalid_server_hello_negotiation);
     UNIT_TEST_RUN(reject_out_of_order_messages);
     UNIT_TEST_RUN(reject_bad_change_cipher_spec);
     return unit_test_finish();

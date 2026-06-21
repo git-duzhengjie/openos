@@ -34,6 +34,13 @@ typedef struct tls12_handshake_context {
     uint16_t negotiated_version;
     uint16_t cipher_suite;
     uint8_t compression_method;
+    uint16_t server_supported_version;
+    uint8_t server_selected_alpn[16];
+    size_t server_selected_alpn_len;
+    int server_has_extended_master_secret;
+    int server_has_renegotiation_info;
+    int server_has_alpn;
+    int server_has_supported_versions;
     uint8_t client_random[TLS12_RANDOM_SIZE];
     uint8_t server_random[TLS12_RANDOM_SIZE];
     uint8_t master_secret[TLS12_MASTER_SECRET_SIZE];
