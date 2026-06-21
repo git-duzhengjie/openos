@@ -478,6 +478,7 @@
   - [ ] DNS resolver 完善：缓存、超时、失败回退、IPv4 优先策略
     - [√] 已新增 DNS IPv4 字面量快路径，用户态 `openos_dnslookup/openos_getaddrinfo/openos_gethostbyname` 可离线解析 IPv4 地址，并接入 `/bin/chromiumcaptest` 验收
     - [√] 已为 DNS resolver 增加成功缓存、失败负缓存、毫秒级超时回退，并在 `/bin/chromiumcaptest` 覆盖重复解析快路径
+    - [√] 已新增 `/bin/chromiumcaptest` `AF_UNSPEC` getaddrinfo IPv4 优先/IPv4-only fallback 验收，确保当前 resolver 返回单一 IPv4 sockaddr 结果
   - [ ] 引入或实现可维护 TLS 库，支撑 HTTPS、证书链校验和系统信任根
     - [√] 已新增 `tls_trust` 信任根指纹底座，支持 DER 证书 SHA-256 指纹计算、常量时间指纹比较、内置系统信任根枚举、按指纹/证书信任判断、证书链尾锚定判断，并已打通 TLS Certificate record 解析到信任根锚定的桥接入口，接入单测与内核构建脚本
     - [√] 已新增 `tls_x509` 最小 DER X.509 证书结构解析底座，支持安全 TLV 长度解析、证书顶层三段解析、TBS 内版本/序列号/issuer/validity/subject/SPKI 原始切片提取、UTC/GeneralizedTime 有效期解析校验、issuer/subject 原始 DER 链接匹配，并已在 `tls_trust` 层串起证书链结构校验、有效期校验与信任根锚定，接入单测与内核构建脚本

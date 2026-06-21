@@ -1990,6 +1990,26 @@ static int test_dns_resolver_literal(void)
     }
     openos_freeaddrinfo(res);
 
+    openos_memset(&hints, 0, sizeof(hints));
+    hints.ai_family = OPENOS_AF_UNSPEC;
+    hints.ai_socktype = OPENOS_SOCK_DGRAM;
+    if (openos_getaddrinfo("8.8.4.4", "53", &hints, &res) != 0 || !res) {
+        return CAP_FAIL;
+    }
+    if (res->ai_family != OPENOS_AF_INET || res->ai_socktype != OPENOS_SOCK_DGRAM ||
+        res->ai_next != 0 || res->ai_addrlen != sizeof(openos_sockaddr_in_t) ||
+        !res->ai_addr) {
+        openos_freeaddrinfo(res);
+        return CAP_FAIL;
+    }
+    addr = (openos_sockaddr_in_t *)res->ai_addr;
+    if (addr->sin_family != OPENOS_AF_INET || addr->sin_addr != 0x08080404U ||
+        addr->sin_port != openos_htons(53)) {
+        openos_freeaddrinfo(res);
+        return CAP_FAIL;
+    }
+    openos_freeaddrinfo(res);
+
     host = openos_gethostbyname("192.168.0.1");
     if (!host || host->h_addrtype != OPENOS_AF_INET || host->h_length != 4 ||
         !host->h_addr_list || !host->h_addr_list[0] ||
