@@ -8,6 +8,7 @@
 - 当前构建环境未检测到可用的 `g++` 或 `clang++`，因此不能宣称已经具备用户态 C++ 编译和链接能力。
 - `build.sh cppsmoke` 已作为显式工具链探测入口：会查找 `OPENOS_CXX`、`i686-elf-g++`、`clang++`、`g++`，缺失时给出明确错误，默认镜像构建不静默伪装 C++ 能力。
 - 已具备 Chromium 底座所需的一批 C ABI 验收入口：内存映射、线程/TLS syscall、futex、IPC、文件系统、DNS、GUI/font smoke。
+- 已新增 `src/user/openos_cxxabi.h` 最小 C++ ABI 支撑层与 `/bin/cxxabitest`，在当前 C-only 用户态链路下先验证后端运行时语义：`new/delete`、guard variable、atomic fetch_add/load、init/fini array dispatch。
 
 ## M8 最小可交付顺序
 
@@ -22,12 +23,12 @@
 
 先支持 Chromium 依赖链前置 smoke，而不是一次性追求完整 libstdc++：
 
-- `operator new/delete`
-- 全局对象构造/析构数组：`.init_array` / `.fini_array`
+- [已接入] `operator new/delete` 后端分配语义：`openos_cxx_operator_new/delete` 与 array 版本基于 OpenOS 用户态 heap。
+- [已接入] 构造/析构函数数组调度 helper：`openos_cxx_run_array` 已在 `/bin/cxxabitest` 验证 init/fini array dispatch。
 - 禁用异常或提供最小异常策略桩：`-fno-exceptions` 起步
 - 禁用 RTTI 或提供明确策略：`-fno-rtti` 起步
-- `__cxa_atexit` / `__cxa_pure_virtual` / guard variable for local statics
-- 原子 builtins 与内存序基础
+- [部分接入] guard variable for local statics：`openos_cxx_guard_acquire/release/abort` 已覆盖一次初始化和 abort 重试语义；`__cxa_atexit` / `__cxa_pure_virtual` 仍待真正 C++ 链接后补齐。
+- [已接入] 原子 builtins 与内存序基础：`openos_cxx_atomic_fetch_add_int/load_int` 已由 smoke 验证。
 - thread-local storage 与现有 `SYS_TLS_SET/SYS_TLS_GET` 对接
 
 ### 3. 用户态 libc 子集扩展
@@ -37,7 +38,7 @@
 
 ### 4. C++ smoke 程序
 
-新增 `/bin/cppsmoke`，验证：
+新增 `/bin/cxxabitest` / 后续真正 C++ 编译器可用后再新增 `/bin/cppsmoke`，验证：
 
 - 构造/析构顺序
 - `new/delete`
@@ -46,7 +47,7 @@
 - atomic increment
 - TLS 读写
 
-通过后把 smoke 结果接入 `/bin/chromiumcaptest` 或作为嵌入式子程序由其 spawn 验收。
+`/bin/cxxabitest` 已接入默认 `./build.sh` 嵌入构建，并由 `/bin/chromiumcaptest` 通过 spawn/waitpid 汇总验收。真正 C++ 编译器就绪后，继续新增 `/bin/cppsmoke` 验证编译器生成的 `.init_array/.fini_array`、local static guard、virtual dispatch、禁用异常/RTTI 策略。
 
 ### 5. Chromium 构建链
 

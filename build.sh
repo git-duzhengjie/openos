@@ -355,7 +355,7 @@ verify_user_start() {
         exit 1
     fi
 }
-TEST_EMBED_HEADERS="isotest waittest forktest threadtest mutextest semtest condtest futextest nicetest exit42 orphan argtest envtest libctest maintest systest kaddrtest malloctest errnotest stdiotest fstest alarmtest mmaptest sbrktest"
+TEST_EMBED_HEADERS="isotest waittest forktest threadtest mutextest semtest condtest futextest nicetest exit42 orphan argtest envtest libctest maintest systest kaddrtest malloctest errnotest stdiotest fstest cxxabitest alarmtest mmaptest sbrktest"
 if [ "$OPENOS_EMBED_TESTS" != "1" ]; then
     for app in $TEST_EMBED_HEADERS; do
         rm -f "$SRC/include/embed_${app}.h"
@@ -716,6 +716,21 @@ if [ "$OPENOS_EMBED_TESTS" = "1" ] && [ -f $USR/fstest.c ]; then
     ld -m elf_i386 -T $USR/user.ld -o $BUILD/fstest.elf $BUILD/fstest.o
     python3 _embed_elf.py $BUILD/fstest.elf $SRC/include/embed_fstest.h fstest_elf
     echo "  Embedded: fstest.elf"
+fi
+
+if [ -f $USR/cxxabitest.c ]; then
+    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+        -fno-stack-protector -fno-builtin \
+        -I $SRC/include \
+        -c $USR/crt0.c -o $BUILD/crt0.o
+    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+        -fno-stack-protector -fno-builtin \
+        -I $SRC/include \
+        -c $USR/cxxabitest.c -o $BUILD/cxxabitest.o
+    ld -m elf_i386 -T $USR/user.ld -o $BUILD/cxxabitest.elf $BUILD/crt0.o $BUILD/cxxabitest.o
+    verify_user_start $BUILD/cxxabitest.elf cxxabitest.elf
+    python3 _embed_elf.py $BUILD/cxxabitest.elf $SRC/include/embed_cxxabitest.h cxxabitest_elf
+    echo "  Embedded: cxxabitest.elf"
 fi
 
 if [ -f $USR/sh.c ]; then

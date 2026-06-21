@@ -1421,6 +1421,24 @@ static int test_service_channel(void)
                : CAP_FAIL;
 }
 
+static int test_cxx_abi_runtime_hooks(void)
+{
+    char *argv[] = { (char *)"/bin/cxxabitest", 0 };
+    char *envp[] = { (char *)"OPENOS_CAP=chromium-cxxabi", 0 };
+    int status = -1;
+    int pid = openos_spawn_env("/bin/cxxabitest", argv, envp);
+
+    if (pid <= 0) {
+        openos_puts("cxxabitest spawn failed");
+        return CAP_FAIL;
+    }
+    if (openos_waitpid(pid, &status, 0) != pid) {
+        openos_puts("cxxabitest waitpid failed");
+        return CAP_FAIL;
+    }
+    return status == 0 ? CAP_PASS : CAP_FAIL;
+}
+
 static int test_spawn_argv_env_wait(void)
 {
     char *argv[] = { (char *)"/bin/argtest", (char *)"alpha", (char *)"beta", 0 };
@@ -2101,7 +2119,7 @@ int main(int argc, char **argv)
     (void)argv;
 
     openos_printf("Chromium core capability test\n");
-    openos_printf("target: mmap file-mmap fs-metadata path-normalization fs-mutations getdents browser-dirs resource-pak sparse-seek mprotect v8-memory-policy brk thread tls pthread-sync futex shm eventfd message-queue service-channel socketpair poll fcntl shutdown sockopt time spawn fork pipe fd argv env dns font gui clipboard pressure-smoke\n");
+    openos_printf("target: mmap file-mmap fs-metadata path-normalization fs-mutations getdents browser-dirs resource-pak sparse-seek mprotect v8-memory-policy brk thread tls pthread-sync futex shm eventfd message-queue service-channel socketpair poll fcntl shutdown sockopt time spawn cxxabi fork pipe fd argv env dns font gui clipboard pressure-smoke\n");
 
     status = test_uptime();
     print_result("monotonic uptime", status);
@@ -2237,6 +2255,10 @@ int main(int argc, char **argv)
 
     status = test_spawn_argv_env_wait();
     print_result("spawn argv env waitpid", status);
+    failed += status == CAP_FAIL;
+
+    status = test_cxx_abi_runtime_hooks();
+    print_result("cxx abi runtime hooks", status);
     failed += status == CAP_FAIL;
 
     status = test_fork_pipe_fd_inheritance();

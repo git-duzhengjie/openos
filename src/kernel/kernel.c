@@ -186,6 +186,12 @@
 #else
 #define OPENOS_HAS_FSTEST 0
 #endif
+#if __has_include("embed_cxxabitest.h")
+#include "embed_cxxabitest.h"  /* minimal C++ ABI hooks regression test */
+#define OPENOS_HAS_CXXABITEST 1
+#else
+#define OPENOS_HAS_CXXABITEST 0
+#endif
 #if __has_include("embed_sh.h")
 #include "embed_sh.h"  /* interactive userspace shell */
 #define OPENOS_HAS_SH 1
@@ -1070,6 +1076,17 @@ void kernel_main(void) {
         serial_write("[OK] Installed /bin/fstest user ELF\n");
     } else {
         serial_write("[WARN] Failed to install /bin/fstest\n");
+    }
+#endif
+
+#if OPENOS_HAS_CXXABITEST
+    fd = vfs_open("/bin/cxxabitest", O_CREAT | O_RDWR, 0755);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)cxxabitest_elf, cxxabitest_elf_size);
+        vfs_close(fd);
+        serial_write("[OK] Installed /bin/cxxabitest user ELF\n");
+    } else {
+        serial_write("[WARN] Failed to install /bin/cxxabitest\n");
     }
 #endif
 
