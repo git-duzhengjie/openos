@@ -532,8 +532,9 @@
   - [√] 扩展 `/bin/chromiumcaptest` 覆盖每个新底层能力
     - [√] 已持续将 mmap、mprotect、clock、同步原语、进程加载器、fd 继承、IPC、FS、socket、DNS、GUI、字体、剪贴板等底层能力并入统一验收入口
     - [√] 已新增 `/bin/chromium` 安装 smoke，校验 ELF 可读、非空安装，并覆盖 `/downloads` 下载目录写入/读取/清理链路
-  - [ ] 增加内核压力测试：内存、线程、IPC、socket、文件 mmap、GUI present
+  - [√] 增加内核压力测试：内存、线程、IPC、socket、文件 mmap、GUI present
     - [√] 已加入轻量综合压力 smoke，循环覆盖匿名 mmap、线程、message queue、socketpair poll、文件私有 mmap 和 GUI/font smoke
+    - [√] 已增强为固定多轮压力：内存 VM、线程生命周期、IPC 队列、socketpair/poll/timeout、file-backed mmap、GUI/font present 分组覆盖
   - [ ] 文档同步：每完成一个里程碑更新 `docs/chromium-core-roadmap.md` 和本 TODOLIST
     - [√] 已新增 C++ runtime / Chromium 工具链路线文档，记录 M8 到 M9 的分阶段验收边界
     - [√] 已同步近期 Chromium 底座闭环记录到 `docs/chromium-core-roadmap.md`，覆盖 mmap、clock、同步原语、fd 继承、IPC、FS、socket poll、GUI/字体/剪贴板等能力

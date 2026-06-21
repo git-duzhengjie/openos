@@ -6,6 +6,8 @@
 
 #define MMAP_TEST_SIZE 4096
 #define SHM_TEST_WORDS 16
+#define KERNEL_PRESSURE_FAST_LOOPS 5
+#define KERNEL_PRESSURE_PRESENT_LOOPS 3
 
 static volatile int g_thread_done = 0;
 static volatile int g_thread_value = 0;
@@ -2543,7 +2545,8 @@ static int test_kernel_pressure_smoke(void)
 {
     int i;
 
-    for (i = 0; i < 3; ++i) {
+    /* Fast subsystem pressure: memory VM, thread lifecycle, IPC queues and socket poll/timeout. */
+    for (i = 0; i < KERNEL_PRESSURE_FAST_LOOPS; ++i) {
         if (test_mmap() != CAP_PASS)
             return CAP_FAIL;
         if (test_thread() != CAP_PASS)
@@ -2556,7 +2559,8 @@ static int test_kernel_pressure_smoke(void)
             return CAP_FAIL;
     }
 
-    for (i = 0; i < 2; ++i) {
+    /* Slower resource pressure: file-backed mmap and GUI/font present path. */
+    for (i = 0; i < KERNEL_PRESSURE_PRESENT_LOOPS; ++i) {
         if (test_file_mmap() != CAP_PASS)
             return CAP_FAIL;
         if (test_font_gui_smoke() != CAP_PASS)
