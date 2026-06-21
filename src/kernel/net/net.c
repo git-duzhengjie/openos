@@ -326,10 +326,11 @@ static int arp_resolve(uint32_t ip, uint8_t *mac) {
     int i;
     if (arp_lookup(ip, mac) == 0) return 0;
     if (arp_send_request(ip) < 0) return -1;
-    for (i = 0; i < 200000; i++) {
+    for (i = 0; i < 200; i++) {
         net_poll();
         if (arp_lookup(ip, mac) == 0) return 0;
-        if ((i & 0x3ff) == 0) asm volatile ("pause");
+        thread_sleep(1);
+        sched_yield();
     }
     return -1;
 }

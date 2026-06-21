@@ -18,6 +18,9 @@ typedef struct browser_load_context {
     volatile int active;
     volatile int done;
     volatile int result;
+    int window_id;
+    int status_label_id;
+    int body_label_id;
     char host[BROWSER_HOST_MAX];
     char path[BROWSER_PATH_MAX];
     char response[BROWSER_RECV_MAX + 1];
@@ -298,6 +301,13 @@ static void browser_load_worker(void *arg)
         printf("browser: loaded http://%s%s\n", ctx->host, ctx->path);
         printf("%s\n", ctx->body);
     }
+
+    if (ctx->window_id >= 0 && ctx->status_label_id >= 0 && ctx->body_label_id >= 0) {
+        openos_gui_set_text(ctx->window_id, ctx->status_label_id,
+                            ctx->status[0] ? ctx->status : (rc < 0 ? "Failed" : "Done"));
+        openos_gui_set_text(ctx->window_id, ctx->body_label_id,
+                            ctx->body[0] ? ctx->body : (rc < 0 ? "Load failed" : "Empty response"));
+    }
     ctx->done = 1;
 }
 
@@ -351,6 +361,9 @@ int main(int argc, char **argv)
                     memset(&load, 0, sizeof(load));
                     snprintf(load.host, sizeof(load.host), "%s", host);
                     snprintf(load.path, sizeof(load.path), "%s", path);
+                    load.window_id = win;
+                    load.status_label_id = status_label;
+                    load.body_label_id = body_label;
                     snprintf(loading, sizeof(loading), "Loading http://%s%s ...", load.host, load.path);
                     load.active = 1;
                     load.done = 0;

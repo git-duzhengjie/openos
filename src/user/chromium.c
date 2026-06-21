@@ -37,6 +37,13 @@ typedef struct chrome_page {
     int loaded;
 } chrome_page_t;
 
+typedef struct chrome_load_context {
+    volatile int done;
+    volatile int active;
+    chrome_page_t page;
+    char url[256];
+} chrome_load_context_t;
+
 static void chrome_format_ip(unsigned int ip, char *out, int out_size)
 {
     if (!out || out_size <= 0) return;
@@ -406,6 +413,46 @@ static void chrome_prepare_ready(chrome_page_t *page, const char *url_text)
              "Chromium is ready. Press Go or Refresh to load this page.");
 }
 
+static void chrome_load_worker(void *arg)
+{
+    chrome_load_context_t *ctx = (chrome_load_context_t *)arg;
+    chrome_load(&ctx->page, ctx->url);
+    ctx->done = 1;
+}
+
+static int chrome_start_load(chrome_load_context_t *ctx, chrome_page_t *page, const char *url_text)
+{
+    openos_thread_t tid;
+    if (!ctx || !page || !url_text || !url_text[0]) return -1;
+    if (!ctx->done) return 0;
+
+    memset(ctx, 0, sizeof(*ctx));
+    ctx->active = 1;
+    chrome_copy_text(ctx->url, sizeof(ctx->url), url_text);
+    chrome_parse_url(url_text, &page->url);
+    chrome_format_url(&page->url, page->display_url, sizeof(page->display_url));
+    page->loaded = 0;
+    snprintf(page->status, sizeof(page->status), "Loading %s ...", page->display_url);
+    snprintf(page->body, sizeof(page->body), "Waiting for HTTP response ...");
+
+    if (openos_thread_create(&tid, chrome_load_worker, ctx) != 0) {
+        snprintf(page->status, sizeof(page->status), "Failed to start loader thread");
+        snprintf(page->body, sizeof(page->body), "HTTP load was not started, keeping the UI responsive.");
+        ctx->active = 0;
+        ctx->done = 1;
+        return -1;
+    }
+    return 1;
+}
+
+static int chrome_finish_load(chrome_load_context_t *ctx, chrome_page_t *page)
+{
+    if (!ctx || !page || !ctx->active || !ctx->done) return 0;
+    memcpy(page, &ctx->page, sizeof(*page));
+    ctx->active = 0;
+    return 1;
+}
+
 static int chrome_write_file(const char *path, const char *data, int len)
 {
     int fd = openos_open(path, O_CREAT | O_TRUNC | O_WRONLY, 0644);
@@ -454,6 +501,7 @@ int main(int argc, char **argv)
 {
     const char *initial_url = CHROME_DEFAULT_URL;
     chrome_page_t page;
+    chrome_load_context_t load_ctx;
     int win;
     int back_button;
     int forward_button;
@@ -483,6 +531,9 @@ int main(int argc, char **argv)
     (void)download_button;
     (void)close_button;
 
+    memset(&load_ctx, 0, sizeof(load_ctx));
+    load_ctx.done = 1;
+
     chrome_prepare_ready(&page, initial_url);
     chrome_render_page(win, &page);
     printf("chromium: ready %s\n", page.display_url);
@@ -495,18 +546,22 @@ int main(int argc, char **argv)
             if (event.widget_id == (unsigned int)refresh_button || event.widget_id == (unsigned int)go_button) {
                 char reload_url[256];
                 chrome_copy_text(reload_url, sizeof(reload_url), page.display_url);
-                chrome_load(&page, reload_url);
-                chrome_render_page(win, &page);
+                if (chrome_start_load(&load_ctx, &page, reload_url) > 0) chrome_render_page(win, &page);
             } else if (event.widget_id == (unsigned int)forward_button) {
-                chrome_load(&page, chrome_next_demo_url(page.display_url));
-                chrome_render_page(win, &page);
+                if (chrome_start_load(&load_ctx, &page, chrome_next_demo_url(page.display_url)) > 0) {
+                    chrome_render_page(win, &page);
+                }
             } else if (event.widget_id == (unsigned int)back_button) {
-                chrome_load(&page, CHROME_DEFAULT_URL);
-                chrome_render_page(win, &page);
+                if (chrome_start_load(&load_ctx, &page, CHROME_DEFAULT_URL) > 0) chrome_render_page(win, &page);
             } else if (event.widget_id == (unsigned int)download_button) {
                 chrome_download(&page);
                 chrome_render_page(win, &page);
             }
+        }
+        if (chrome_finish_load(&load_ctx, &page)) {
+            chrome_render_page(win, &page);
+            load_ctx.done = 1;
+            printf("chromium: loaded %s status=%s\n", page.display_url, page.status);
         }
         openos_sleep(10);
     }

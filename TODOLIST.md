@@ -416,7 +416,7 @@
 
 > 原则：不继续扩大自研玩具浏览器；先建立真实 Skia / V8 / Blink / Chromium Content 可逐步接入的 OpenOS SDK、构建入口和 smoke 回归链。每项任务完成后必须独立验证并提交。
 
-- [ ] P0：收尾并提交浏览器 HTTP 加载响应性修复，确保现有 `/bin/browser`、`/bin/chromium` 在方案 B 推进期间保持可用
+- [√] P0：收尾并提交浏览器 HTTP 加载响应性修复，确保现有 `/bin/browser`、`/bin/chromium` 在方案 B 推进期间保持可用
 - [ ] P1：导出 OpenOS 用户态 SDK/sysroot，提供 headers、crt0、linker script、runtime archive 占位和 manifest
 - [ ] P2：新增 SDK smoke 回归入口，验证导出的 SDK 能编译并链接最小 OpenOS 用户态 ELF
 - [ ] P3：新增真实 Skia 接入前置清单，明确 OpenOS surface、字体、图片、内存和线程缺口，不再把 `/bin/skia_demo` 误标为官方 Skia
