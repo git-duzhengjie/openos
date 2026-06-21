@@ -1,5 +1,8 @@
 # openos
 
+> 注意：当前 `/bin/chromium` 是 OpenOS Chromium Demo，用于验证 GUI/HTTP/线程/SDK；它还没有链接官方 Chromium Content、Blink、V8 或 Skia，不是真实 Chrome 引擎。
+
+
 > **开源 · 智能 · 跨端 · 优雅**
 
 openos 是一个从零开始构建的开源操作系统，旨在打造新一代智能、跨平台的操作系统体验。

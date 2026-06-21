@@ -359,8 +359,9 @@ static void chrome_render_page(int win, chrome_page_t *page)
 
     openos_gui_fill_rect(win, 18, 82, CHROME_W - 36, CHROME_H - 106, 0xffffffffU);
     if (page->loaded) {
-        openos_gui_draw_text(win, 32, 98, "OpenOS Chromium", 0xff1a73e8U);
-        openos_gui_draw_text(win, 32, 122, page->body[0] ? page->body : "Empty response", 0xff202124U);
+        openos_gui_draw_text(win, 32, 98, "OpenOS Chromium Demo", 0xff1a73e8U);
+        openos_gui_draw_text(win, 32, 122, "Not Chrome engine: Chromium Content/Blink/V8/Skia not linked yet", 0xffd93025U);
+        openos_gui_draw_text(win, 32, 146, page->body[0] ? page->body : "Empty response", 0xff202124U);
     } else {
         snprintf(line, sizeof(line), "Error loading %s", page->display_url);
         openos_gui_draw_text(win, 32, 98, line, 0xffd93025U);
@@ -410,7 +411,7 @@ static void chrome_prepare_ready(chrome_page_t *page, const char *url_text)
     page->loaded = 0;
     snprintf(page->status, sizeof(page->status), "Ready");
     snprintf(page->body, sizeof(page->body),
-             "Chromium is ready. Press Go or Refresh to load this page.");
+             "OpenOS Chromium Demo is ready. Not Chrome engine yet. Press Go or Refresh to load this page.");
 }
 
 static void chrome_load_worker(void *arg)
@@ -512,7 +513,7 @@ int main(int argc, char **argv)
 
     if (argc > 1 && argv && argv[1] && argv[1][0]) initial_url = argv[1];
 
-    win = openos_gui_create_window("chromium", 60, 60, CHROME_W, CHROME_H);
+    win = openos_gui_create_window("OpenOS Chromium Demo", 60, 60, CHROME_W, CHROME_H);
     if (win < 0) {
         printf("chromium: failed to create GUI window\n");
         return 1;

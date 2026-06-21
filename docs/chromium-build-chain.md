@@ -77,6 +77,27 @@ target/libopenos_cxx.a
 
 这个 sysroot **不是 Linux sysroot**。它只表达 OpenOS 当前 freestanding 用户态能力，后续 Skia/V8/Blink 的平台 glue 应基于它交叉编译，并把缺失的 POSIX、C/C++ runtime、线程、文件、网络、图形能力逐项补齐。
 
+## Chromium 引擎真实性门禁
+
+当前 `/bin/chromium` 仍是 OpenOS Chromium Demo，不是真实 Chrome/Chromium 引擎。门槛和检查脚本见：
+
+```text
+docs/chromium-engine-reality-gate.md
+scripts/chromium-engine-gate.sh
+```
+
+普通门禁：
+
+```bash
+./build.sh chromium-engine-gate
+```
+
+严格门禁会在官方 Skia、V8、Blink/content_shell pin 全部补齐后通过：
+
+```bash
+scripts/chromium-engine-gate.sh --strict
+```
+
 ## OpenOS Chromium GN/toolchain overlay
 
 OpenOS 的 Chromium 目标身份固定为：
