@@ -520,7 +520,8 @@
 - [ ] M9 Skia / V8 / Blink / Chromium 分阶段落地
   - [√] `/bin/skia_demo`：软件绘制矩形、文本、图片到 OpenOS 窗口
     - [√] 已新增 `src/user/skia_demo.c`，使用 OpenOS GUI framebuffer/blit/text/font 查询接口绘制矩形、文本和内置图片，并接入构建嵌入与 `/bin/skia_demo` 安装
-  - [ ] `/bin/v8_shell`：优先 jitless 运行基础 JavaScript
+  - [√] `/bin/v8_shell`：优先 jitless 运行基础 JavaScript
+    - [√] 已新增 `src/user/v8_shell.c` jitless 基础 JavaScript shell 入口，支持算术表达式、变量声明/赋值和 `print()` smoke，并接入构建嵌入与 `/bin/v8_shell` 安装
   - [ ] `/bin/blink_smoke`：最小 HTML/CSS layout smoke
   - [ ] `/bin/content_shell`：单进程、disable-gpu、disable-sandbox 打开 `http://example.com`
   - [ ] `/bin/chromium`：单窗口、单标签、地址栏、导航、刷新、错误页、下载基础能力

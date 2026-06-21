@@ -390,6 +390,16 @@ if [ -f $USR/skia_demo.c ]; then
     echo "  Embedded: skia_demo.elf"
 fi
 
+if [ -f $USR/v8_shell.c ]; then
+    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+        -fno-stack-protector -fno-builtin \
+        -c $USR/v8_shell.c -o $BUILD/v8_shell.o
+    ld -m elf_i386 -T $USR/user.ld -o $BUILD/v8_shell.elf $BUILD/crt0.o $BUILD/v8_shell.o
+    verify_user_start $BUILD/v8_shell.elf v8_shell.elf
+    python3 _embed_elf.py $BUILD/v8_shell.elf $SRC/include/embed_v8_shell.h v8_shell_elf
+    echo "  Embedded: v8_shell.elf"
+fi
+
 if [ -f $USR/browser.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \
