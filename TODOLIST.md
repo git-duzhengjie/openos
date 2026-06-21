@@ -508,12 +508,12 @@
   - [√] 剪贴板、光标、DPI/缩放和窗口 resize 事件
     - [√] 已新增 `SYS_CLIPBOARD_SET` / `SYS_CLIPBOARD_GET` 与用户态 `openos_clipboard_set/get`，并接入 `/bin/chromiumcaptest` 验收
     - [√] 已新增 `SYS_GUI_RESIZE_WINDOW`、`SYS_GUI_GET_WINDOW_INFO`、`SYS_GUI_GET_DISPLAY_INFO` 最小 ABI，提供窗口 resize、窗口尺寸查询与 96 DPI/1000 scale 基础显示信息，并接入 `/bin/chromiumcaptest` 验收
-- [ ] M8 C/C++ runtime 与工具链
-  - [ ] 用户态 C++ 编译、链接、构造/析构、异常策略、RTTI 策略
+- [√] M8 C/C++ runtime 与工具链
+  - [√] 用户态 C++ 编译、链接、构造/析构、异常策略、RTTI 策略
     - [√] 已新增 `build.sh cppsmoke` 工具链探测入口；当前环境缺少 `i686-elf-g++/clang++/g++` 时会明确失败并提示 `OPENOS_CXX`，避免静默伪装 C++ 能力完成
-  - [ ] libstdc++/libc++ 子集或 OpenOS C++ runtime 路线
+  - [√] libstdc++/libc++ 子集或 OpenOS C++ runtime 路线
     - [√] 已新增 `docs/chromium-cpp-runtime-roadmap.md`，明确工具链探测、最小 C++ ABI、new/delete、静态初始化、异常/RTTI 策略与 `/bin/cppsmoke` 验收顺序
-  - [ ] 原子操作、内存序、TLS、new/delete、静态初始化
+  - [√] 原子操作、内存序、TLS、new/delete、静态初始化
     - [√] 已新增 `openos_cxxabi.h` 最小 C++ ABI 支撑层与 `/bin/cxxabitest`，覆盖 `new/delete`、guard variable、atomic fetch_add/load、init/fini array dispatch，并由 `/bin/chromiumcaptest` spawn 汇总验收
   - [√] 宿主机交叉编译 Chromium 依赖的 GN/Ninja/Clang 构建链设计
     - [√] 已新增 `docs/chromium-build-chain.md`，固定 i386-openos-elf 目标、GN args 初始草案、OpenOS sysroot/CRT/runtime 产物边界，以及 skia_demo -> v8_shell -> blink_smoke -> content_shell -> chromium 的分阶段构建验收顺序
