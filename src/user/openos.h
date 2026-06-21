@@ -140,6 +140,7 @@
 #define SYS_GUI_RESIZE_WINDOW 344
 #define SYS_GUI_GET_WINDOW_INFO 345
 #define SYS_GUI_GET_DISPLAY_INFO 346
+#define SYS_THREAD_CREATE_TLS 347
 
 #define OPENOS_CHROMIUM_MEM_JITLESS_DEFAULT     (1u << 0)
 #define OPENOS_CHROMIUM_MEM_EXEC_PROT_RESERVED  (1u << 1)
@@ -992,6 +993,30 @@ static inline int openos_thread_create(openos_thread_t *thread,
                                                (int)start,
                                                (int)arg,
                                                (int)openos_thread_return_trampoline));
+    if (tid < 0)
+        return -1;
+    if (thread)
+        *thread = tid;
+    return 0;
+}
+
+static inline int openos_thread_create_tls(openos_thread_t *thread,
+                                           openos_thread_start_t start,
+                                           void *arg,
+                                           void *tls_base)
+{
+    int tid;
+
+    if (!start) {
+        openos_set_errno(OPENOS_EINVAL);
+        return -1;
+    }
+
+    tid = openos_syscall_result(openos_syscall4(SYS_THREAD_CREATE_TLS,
+                                               (int)start,
+                                               (int)arg,
+                                               (int)openos_thread_return_trampoline,
+                                               (int)tls_base));
     if (tid < 0)
         return -1;
     if (thread)

@@ -1033,7 +1033,8 @@ static void user_thread_trampoline(void *arg) {
     sys_thread_exit(0);
 }
 
-int sys_thread_create(uint32_t entry, uint32_t arg, uint32_t return_entry) {
+static int sys_thread_create_internal(uint32_t entry, uint32_t arg,
+                                      uint32_t return_entry, uint32_t tls_base) {
     thread_t *cur = sched_get_current();
     if (!cur || !entry) return -1;
 
@@ -1076,6 +1077,7 @@ int sys_thread_create(uint32_t entry, uint32_t arg, uint32_t return_entry) {
     thread->user_stack_top = user_stack_top;
     thread->user_stack_slot = slot;
     thread->user_return_entry = return_entry;
+    thread->tls_base = tls_base;
     thread->is_user_thread = 1;
     thread->proc_next = proc->threads;
     proc->threads = thread;
@@ -1083,6 +1085,14 @@ int sys_thread_create(uint32_t entry, uint32_t arg, uint32_t return_entry) {
 
     sched_add_thread(thread);
     return (int)thread->id;
+}
+
+int sys_thread_create(uint32_t entry, uint32_t arg, uint32_t return_entry) {
+    return sys_thread_create_internal(entry, arg, return_entry, 0);
+}
+
+int sys_thread_create_tls(uint32_t entry, uint32_t arg, uint32_t return_entry, uint32_t tls_base) {
+    return sys_thread_create_internal(entry, arg, return_entry, tls_base);
 }
 
 void sys_thread_exit(int code) {

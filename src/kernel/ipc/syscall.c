@@ -2018,6 +2018,9 @@ uint32_t syscall_dispatch(uint32_t num,
     case SYS_THREAD_CREATE:
         return (uint32_t)sys_thread_create(a, b, c);
 
+    case SYS_THREAD_CREATE_TLS:
+        return (uint32_t)sys_thread_create_tls(a, b, c, d);
+
     case SYS_THREAD_EXIT:
         sys_thread_exit((int)a);
         return 0;

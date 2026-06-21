@@ -216,6 +216,7 @@ void sys_exit(int code);
 int sys_kill(int pid, int sig);
 int sys_alarm(unsigned int seconds);
 int sys_thread_create(uint32_t entry, uint32_t arg, uint32_t return_entry);
+int sys_thread_create_tls(uint32_t entry, uint32_t arg, uint32_t return_entry, uint32_t tls_base);
 void sys_thread_exit(int code);
 
 /* 调度器核心函数 */

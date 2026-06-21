@@ -965,6 +965,15 @@ static void tls_worker(void *arg)
     openos_thread_exit(0);
 }
 
+static void tls_initial_worker(void *arg)
+{
+    int *expected_tls = (int *)arg;
+    if (openos_tls_get() == expected_tls)
+        g_tls_ok = 1;
+    g_tls_done = 1;
+    openos_thread_exit(0);
+}
+
 static int test_tls(void)
 {
     int main_tls = 0x1111;
@@ -979,6 +988,18 @@ static int test_tls(void)
     if (openos_tls_get() != &main_tls)
         return CAP_FAIL;
     if (openos_thread_create(&tid, tls_worker, &worker_tls) != 0)
+        return CAP_FAIL;
+    while (!g_tls_done && spin++ < 100000)
+        openos_yield();
+    if (!g_tls_done || !g_tls_ok)
+        return CAP_FAIL;
+    if (openos_tls_get() != &main_tls)
+        return CAP_FAIL;
+
+    g_tls_done = 0;
+    g_tls_ok = 0;
+    spin = 0;
+    if (openos_thread_create_tls(&tid, tls_initial_worker, &worker_tls, &worker_tls) != 0)
         return CAP_FAIL;
     while (!g_tls_done && spin++ < 100000)
         openos_yield();
