@@ -177,6 +177,12 @@ Chromium 主体是 C++，OpenOS 需要：
 - 单进程、禁用 GPU、禁用 sandbox 的最小 content shell。
 - 打开 `http://example.com` 并完成 Blink layout + Skia paint。
 
+### M8：OpenOS Chromium shell
+
+- 新增 `/bin/chromium` OpenOS 原生单窗口、单标签浏览器壳。
+- 具备地址栏 URL 展示、基础导航/刷新按钮、HTTP 加载、错误页渲染和 `/downloads` 基础下载保存能力。
+- 当前仍是 Chromium 落地前的 OpenOS 原生 shell，用于验证 GUI / DNS / TCP / HTTP / FS 下载链路；后续逐步替换为 content/Blink/V8/Skia 管线。
+
 ## 近期底层能力闭环记录
 
 `/bin/chromiumcaptest` 已从最早的 capability smoke 扩展为覆盖 Chromium 底座的持续验收入口。近期已并入的关键验收包括：
@@ -191,6 +197,7 @@ Chromium 主体是 C++，OpenOS 需要：
 - 图形/字体/输入：GUI smoke、字体查询、GUI event queue、用户剪贴板 syscall smoke、窗口 resize/window info/display DPI 基础 ABI。
 - C++ runtime：新增 `openos_cxxabi.h` 最小 ABI hooks 与 `/bin/cxxabitest`，覆盖 `new/delete`、guard variable、atomic fetch_add/load、init/fini array dispatch；`/bin/chromiumcaptest` 已通过 spawn/waitpid 汇总验收该子程序。
 - 工具链：`docs/chromium-build-chain.md` 已固定 Chromium GN/Ninja/Clang 交叉构建链设计，明确 `i386-openos-elf` 目标、OpenOS sysroot/CRT/runtime 边界、GN args 初始草案，以及 skia_demo -> v8_shell -> blink_smoke -> content_shell -> chromium 的分阶段验收顺序。
+- Chromium shell：已新增 `/bin/chromium` 单窗口单标签 OpenOS 原生浏览器壳，覆盖地址栏展示、导航/刷新、HTTP 错误页和 `/downloads` 下载保存基础能力，并接入构建嵌入与启动时 `/bin/chromium` 安装。
 
 这些能力仍不是完整 Chromium 运行时，但它们把后续 Skia/V8/Blink/content shell 的依赖从“规划项”推进为可重复构建验证的 OpenOS 原生底座。
 

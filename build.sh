@@ -430,6 +430,16 @@ if [ -f $USR/browser.c ]; then
     echo "  Embedded: browser.elf"
 fi
 
+if [ -f $USR/chromium.c ]; then
+    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+        -fno-stack-protector -fno-builtin \
+        -c $USR/chromium.c -o $BUILD/chromium.o
+    ld -m elf_i386 -T $USR/user.ld -o $BUILD/chromium.elf $BUILD/crt0.o $BUILD/chromium.o
+    verify_user_start $BUILD/chromium.elf chromium.elf
+    python3 _embed_elf.py $BUILD/chromium.elf $SRC/include/embed_chromium.h chromium_elf
+    echo "  Embedded: chromium.elf"
+fi
+
 if [ -f $USR/fontprobe.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \

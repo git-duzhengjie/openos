@@ -378,6 +378,13 @@
 #define OPENOS_HAS_USER_BROWSER 0
 #endif
 
+#if __has_include("embed_chromium.h")
+#include "embed_chromium.h"  /* Chromium-like single-window browser */
+#define OPENOS_HAS_USER_CHROMIUM 1
+#else
+#define OPENOS_HAS_USER_CHROMIUM 0
+#endif
+
 #if __has_include("embed_fontprobe.h")
 #include "embed_fontprobe.h"  /* fontprobe user command */
 #define OPENOS_HAS_FONTPROBE 1
@@ -1434,6 +1441,17 @@ void kernel_main(void) {
         serial_write("[OK] Installed /bin/browser user ELF\n");
     } else {
         serial_write("[WARN] Failed to install /bin/browser\n");
+    }
+#endif
+
+#if OPENOS_HAS_USER_CHROMIUM
+    fd = vfs_open("/bin/chromium", O_CREAT | O_RDWR, 0755);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)chromium_elf, chromium_elf_size);
+        vfs_close(fd);
+        serial_write("[OK] Installed /bin/chromium user ELF\n");
+    } else {
+        serial_write("[WARN] Failed to install /bin/chromium\n");
     }
 #endif
 

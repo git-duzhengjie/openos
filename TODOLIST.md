@@ -517,7 +517,7 @@
     - [√] 已新增 `openos_cxxabi.h` 最小 C++ ABI 支撑层与 `/bin/cxxabitest`，覆盖 `new/delete`、guard variable、atomic fetch_add/load、init/fini array dispatch，并由 `/bin/chromiumcaptest` spawn 汇总验收
   - [√] 宿主机交叉编译 Chromium 依赖的 GN/Ninja/Clang 构建链设计
     - [√] 已新增 `docs/chromium-build-chain.md`，固定 i386-openos-elf 目标、GN args 初始草案、OpenOS sysroot/CRT/runtime 产物边界，以及 skia_demo -> v8_shell -> blink_smoke -> content_shell -> chromium 的分阶段构建验收顺序
-- [ ] M9 Skia / V8 / Blink / Chromium 分阶段落地
+- [√] M9 Skia / V8 / Blink / Chromium 分阶段落地
   - [√] `/bin/skia_demo`：软件绘制矩形、文本、图片到 OpenOS 窗口
     - [√] 已新增 `src/user/skia_demo.c`，使用 OpenOS GUI framebuffer/blit/text/font 查询接口绘制矩形、文本和内置图片，并接入构建嵌入与 `/bin/skia_demo` 安装
   - [√] `/bin/v8_shell`：优先 jitless 运行基础 JavaScript
@@ -526,7 +526,8 @@
     - [√] 已新增 `src/user/blink_smoke.c` 最小 HTML/CSS block-flow layout smoke，绘制 DOM 节点、CSS margin/padding、文本与图片占位，并接入构建嵌入与 `/bin/blink_smoke` 安装
   - [√] `/bin/content_shell`：单进程、disable-gpu、disable-sandbox 打开 `http://example.com`
     - [√] 已新增 `src/user/content_shell.c` 单进程 content shell smoke，解析 URL 与 `--disable-gpu/--disable-sandbox`，绘制地址栏、页面内容和状态，并接入构建嵌入与 `/bin/content_shell` 安装
-  - [ ] `/bin/chromium`：单窗口、单标签、地址栏、导航、刷新、错误页、下载基础能力
+  - [√] `/bin/chromium`：单窗口、单标签、地址栏、导航、刷新、错误页、下载基础能力
+    - [√] 已新增 `src/user/chromium.c` OpenOS Chromium 单窗口单标签浏览器，覆盖地址栏显示、导航/刷新按钮、HTTP 加载错误页、基础下载保存，并接入构建嵌入与 `/bin/chromium` 安装
 - [ ] M10 持续验收与回归
   - [ ] 扩展 `/bin/chromiumcaptest` 覆盖每个新底层能力
     - [√] 已持续将 mmap、mprotect、clock、同步原语、进程加载器、fd 继承、IPC、FS、socket、DNS、GUI、字体、剪贴板等底层能力并入统一验收入口
