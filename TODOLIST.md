@@ -418,7 +418,7 @@
 
 - [√] P0：收尾并提交浏览器 HTTP 加载响应性修复，确保现有 `/bin/browser`、`/bin/chromium` 在方案 B 推进期间保持可用
 - [√] P1：导出 OpenOS 用户态 SDK/sysroot，提供 headers、crt0、linker script、runtime archive 占位和 manifest
-- [ ] P2：新增 SDK smoke 回归入口，验证导出的 SDK 能编译并链接最小 OpenOS 用户态 ELF
+- [√] P2：新增 SDK smoke 回归入口，验证导出的 SDK 能编译并链接最小 OpenOS 用户态 ELF
 - [ ] P3：新增真实 Skia 接入前置清单，明确 OpenOS surface、字体、图片、内存和线程缺口，不再把 `/bin/skia_demo` 误标为官方 Skia
 
 - [√] M2 内存与地址空间能力增强
