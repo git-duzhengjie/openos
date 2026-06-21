@@ -198,6 +198,8 @@ Chromium 主体是 C++，OpenOS 需要：
 - C++ runtime：新增 `openos_cxxabi.h` 最小 ABI hooks 与 `/bin/cxxabitest`，覆盖 `new/delete`、guard variable、atomic fetch_add/load、init/fini array dispatch；`/bin/chromiumcaptest` 已通过 spawn/waitpid 汇总验收该子程序。
 - 工具链：`docs/chromium-build-chain.md` 已固定 Chromium GN/Ninja/Clang 交叉构建链设计，明确 `i386-openos-elf` 目标、OpenOS sysroot/CRT/runtime 边界、GN args 初始草案，以及 skia_demo -> v8_shell -> blink_smoke -> content_shell -> chromium 的分阶段验收顺序。
 - Chromium shell：已新增 `/bin/chromium` 单窗口单标签 OpenOS 原生浏览器壳，覆盖地址栏展示、导航/刷新、HTTP 错误页和 `/downloads` 下载保存基础能力，并接入构建嵌入与启动时 `/bin/chromium` 安装。
+- 回归验收：`/bin/chromiumcaptest` 已新增 `/bin/chromium` 安装 smoke，校验 ELF 可读、非空安装，并覆盖 `/downloads` 下载目录写入、读取、stat 和清理链路，避免 GUI 常驻程序直接启动导致自动回归卡住。
+- 压力验收：`/bin/chromiumcaptest` 的 kernel pressure smoke 已增强为固定多轮分组覆盖，持续压测内存 VM、线程生命周期、message queue IPC、socketpair/poll/timeout、file-backed mmap 与 GUI/font present 路径。
 
 这些能力仍不是完整 Chromium 运行时，但它们把后续 Skia/V8/Blink/content shell 的依赖从“规划项”推进为可重复构建验证的 OpenOS 原生底座。
 
