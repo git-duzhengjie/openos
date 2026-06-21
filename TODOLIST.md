@@ -388,7 +388,7 @@
 - [ ] Chrome/Chromium 引擎近期落地任务
   - [√] P0：清理 NetSurf/nsdemo 活跃路线，保证镜像不再安装 `/bin/nsdemo`
   - [√] P1：固定 Chromium 上游源码获取入口，记录版本/目录/磁盘需求和 depot_tools 前置检查
-  - [ ] P2：新增 OpenOS Chromium GN/toolchain 骨架，目标为 `target_os="openos"`、`target_cpu="x86"`
+  - [√] P2：新增 OpenOS Chromium GN/toolchain 骨架，目标为 `target_os="openos"`、`target_cpu="x86"`
   - [ ] P3：新增真实 Chromium 引擎门槛文档和构建检查，禁止把 `/bin/chromium` demo 宣称为 Chrome 引擎
   - [ ] P4：接入官方 Skia 软件 raster 最小构建，替换当前自研 `/bin/skia_demo` 的“官方 Skia”缺口
   - [ ] P5：接入官方 V8 `d8`/shell 的 jitless 最小构建

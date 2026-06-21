@@ -77,6 +77,44 @@ target/libopenos_cxx.a
 
 这个 sysroot **不是 Linux sysroot**。它只表达 OpenOS 当前 freestanding 用户态能力，后续 Skia/V8/Blink 的平台 glue 应基于它交叉编译，并把缺失的 POSIX、C/C++ runtime、线程、文件、网络、图形能力逐项补齐。
 
+## OpenOS Chromium GN/toolchain overlay
+
+OpenOS 的 Chromium 目标身份固定为：
+
+```gn
+target_os = "openos"
+target_cpu = "x86"
+```
+
+Overlay 文件位于：
+
+```text
+ports/chromium-openos/
+├── args.openos-i386.gn
+├── build/config/BUILDCONFIG.gn
+└── build/toolchain/openos/BUILD.gn
+```
+
+检查命令：
+
+```bash
+./build.sh chromium-gn-check
+```
+
+如果已经有 Chromium checkout，可同步 overlay：
+
+```bash
+scripts/chromium-openos-gn.sh --sync-overlay
+```
+
+然后在 Chromium checkout 中手动尝试：
+
+```bash
+gn gen out/OpenOS-i386 --args="$(cat args.openos-i386.gn)"
+```
+
+注意：P2 只建立 OpenOS 的 GN/toolchain 骨架，不表示完整 Chromium 已能构建。真实构建仍依赖后续 Skia、V8、Blink 和 OpenOS POSIX/runtime 能力补齐。
+
 ## 目标三元组与输出约定
 
 初始目标：
