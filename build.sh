@@ -400,6 +400,16 @@ if [ -f $USR/v8_shell.c ]; then
     echo "  Embedded: v8_shell.elf"
 fi
 
+if [ -f $USR/blink_smoke.c ]; then
+    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+        -fno-stack-protector -fno-builtin \
+        -c $USR/blink_smoke.c -o $BUILD/blink_smoke.o
+    ld -m elf_i386 -T $USR/user.ld -o $BUILD/blink_smoke.elf $BUILD/crt0.o $BUILD/blink_smoke.o
+    verify_user_start $BUILD/blink_smoke.elf blink_smoke.elf
+    python3 _embed_elf.py $BUILD/blink_smoke.elf $SRC/include/embed_blink_smoke.h blink_smoke_elf
+    echo "  Embedded: blink_smoke.elf"
+fi
+
 if [ -f $USR/browser.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \

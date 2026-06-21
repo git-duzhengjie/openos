@@ -357,6 +357,13 @@
 #define OPENOS_HAS_V8_SHELL 0
 #endif
 
+#if __has_include("embed_blink_smoke.h")
+#include "embed_blink_smoke.h"  /* minimal HTML/CSS layout smoke */
+#define OPENOS_HAS_BLINK_SMOKE 1
+#else
+#define OPENOS_HAS_BLINK_SMOKE 0
+#endif
+
 #if __has_include("embed_browser.h")
 #include "embed_browser.h"  /* browser user command */
 #define OPENOS_HAS_USER_BROWSER 1
@@ -1387,6 +1394,17 @@ void kernel_main(void) {
         serial_write("[OK] Installed /bin/v8_shell user ELF\n");
     } else {
         serial_write("[WARN] Failed to install /bin/v8_shell\n");
+    }
+#endif
+
+#if OPENOS_HAS_BLINK_SMOKE
+    fd = vfs_open("/bin/blink_smoke", O_CREAT | O_RDWR, 0755);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)blink_smoke_elf, blink_smoke_elf_size);
+        vfs_close(fd);
+        serial_write("[OK] Installed /bin/blink_smoke user ELF\n");
+    } else {
+        serial_write("[WARN] Failed to install /bin/blink_smoke\n");
     }
 #endif
 
