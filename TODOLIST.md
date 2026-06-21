@@ -444,6 +444,7 @@
   - [ ] 稳定 fork/exec/spawn 与 fd/env/argv 继承语义
     - [√] 已在 `/bin/chromiumcaptest` 增加 spawn_env + argv/envp + waitpid 验收，以及 fork 后 pipe fd 继承读写验收，覆盖 Chromium 多进程启动的最小基础语义
     - [√] 已新增 `/bin/fdinherit` 子程序，并在 `/bin/chromiumcaptest` 通过 spawn/exec 后继承 pipe fd 读取数据，覆盖 Chromium 子进程启动时 fd 继承的最小语义
+    - [√] 已将 `/bin/waittest` 纳入 `/bin/chromiumcaptest` 统一验收，覆盖 spawn 后 waitpid/WNOHANG/重复 wait/reparent 边界回归
   - [ ] 共享内存引用计数、权限、名称/handle 传递和生命周期管理
     - [√] 已为匿名共享内存段增加内核 refcount/flags 元数据、`SYS_SHM_INFO` 查询接口、引用中拒绝 destroy 的生命周期保护，并在 `/bin/chromiumcaptest` 增加双映射 refcount 与 destroy 防误释放验收
   - [ ] socketpair / message queue / service channel 压测，支撑 Chromium 多进程 IPC

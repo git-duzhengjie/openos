@@ -1725,6 +1725,27 @@ static int test_spawn_argv_env_wait(void)
     return CAP_PASS;
 }
 
+static int test_waitpid_spawn_regression(void)
+{
+    char *argv[] = { (char *)"/bin/waittest", 0 };
+    int status = -1;
+    int pid = openos_spawn("/bin/waittest", argv);
+
+    if (pid <= 0) {
+        openos_puts("waittest spawn failed");
+        return CAP_FAIL;
+    }
+    if (openos_waitpid(pid, &status, 0) != pid) {
+        openos_puts("waittest waitpid failed");
+        return CAP_FAIL;
+    }
+    if (status != 0) {
+        openos_puts("waittest exited nonzero");
+        return CAP_FAIL;
+    }
+    return CAP_PASS;
+}
+
 static int test_fork_pipe_fd_inheritance(void)
 {
     int pipefd[2];
@@ -2289,7 +2310,7 @@ int main(int argc, char **argv)
     (void)argv;
 
     openos_printf("Chromium core capability test\n");
-    openos_printf("target: mmap file-mmap fs-metadata path-normalization fs-mutations getdents browser-dirs resource-pak sparse-seek mprotect v8-memory-policy brk thread tls pthread-sync futex shm eventfd message-queue service-channel socketpair poll fcntl shutdown sockopt time nanosleep spawn cxxabi fork pipe fd argv env dns font gui clipboard pressure-smoke\n");
+    openos_printf("target: mmap file-mmap fs-metadata path-normalization fs-mutations getdents browser-dirs resource-pak sparse-seek mprotect v8-memory-policy brk thread tls pthread-sync futex shm eventfd message-queue service-channel socketpair poll fcntl shutdown sockopt time nanosleep spawn waitpid cxxabi fork pipe fd argv env dns font gui clipboard pressure-smoke\n");
 
     status = test_uptime();
     print_result("monotonic uptime", status);
@@ -2433,6 +2454,10 @@ int main(int argc, char **argv)
 
     status = test_spawn_argv_env_wait();
     print_result("spawn argv env waitpid", status);
+    failed += status == CAP_FAIL;
+
+    status = test_waitpid_spawn_regression();
+    print_result("waitpid spawn regression suite", status);
     failed += status == CAP_FAIL;
 
     status = test_cxx_abi_runtime_hooks();
