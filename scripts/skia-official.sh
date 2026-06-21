@@ -7,6 +7,8 @@ DEPOT_TOOLS_DIR="${OPENOS_DEPOT_TOOLS_DIR:-$DEPS_DIR/depot_tools}"
 SKIA_ROOT="${OPENOS_SKIA_ROOT:-$DEPS_DIR/skia}"
 SKIA_OUT="${OPENOS_SKIA_OUT:-$SKIA_ROOT/out/openos-host-raster}"
 PIN_FILE="$ROOT/ports/chromium-openos/skia.official.pin"
+HOST_TOOLS_DIR="${OPENOS_HOST_TOOLS_DIR:-$DEPS_DIR/host-tools}"
+HOST_TOOLS_ROOT="$HOST_TOOLS_DIR/root"
 MIN_FREE_GB="${OPENOS_SKIA_MIN_FREE_GB:-12}"
 
 usage() {
@@ -23,6 +25,7 @@ Environment:
   OPENOS_DEPOT_TOOLS_DIR    depot_tools path, default: \$OPENOS_CHROMIUM_DEPS_DIR/depot_tools
   OPENOS_SKIA_ROOT          official Skia checkout, default: \$OPENOS_CHROMIUM_DEPS_DIR/skia
   OPENOS_SKIA_MIN_FREE_GB   required free space, default: 12
+  OPENOS_HOST_TOOLS_DIR     optional no-sudo host tools dir, default: .openos-deps/host-tools
 USAGE
 }
 
@@ -32,6 +35,9 @@ free_gb() {
     df -BG "$DEPS_DIR" | awk 'NR==2 {gsub("G", "", $4); print $4}'
 }
 with_depot_path() {
+    if [ -d "$HOST_TOOLS_ROOT/usr/bin" ]; then
+        export PATH="$HOST_TOOLS_ROOT/usr/bin:$HOST_TOOLS_ROOT/usr/lib/gcc/x86_64-linux-gnu/15:$HOST_TOOLS_ROOT/usr/libexec/gcc/x86_64-linux-gnu/15:$PATH"
+    fi
     if [ -d "$DEPOT_TOOLS_DIR" ]; then
         export PATH="$DEPOT_TOOLS_DIR:$PATH"
     fi
@@ -41,6 +47,7 @@ print_env() {
 OpenOS official Skia intake
   deps_dir:        $DEPS_DIR
   depot_tools_dir: $DEPOT_TOOLS_DIR
+  host_tools_dir:  $HOST_TOOLS_DIR
   skia_root:       $SKIA_ROOT
   skia_out:        $SKIA_OUT
   pin_file:        $PIN_FILE
@@ -66,6 +73,7 @@ check_common() {
             echo "  OK   $tool: $(command -v "$tool")"
         else
             echo "  MISS $tool (normally provided by depot_tools or host package)"
+            echo "       Try: scripts/bootstrap-host-tools.sh --download"
             fail=1
         fi
     done
@@ -73,6 +81,7 @@ check_common() {
         echo "  OK   c++ compiler: $(command -v clang++ || command -v g++)"
     else
         echo "  MISS c++ compiler: need clang++ or g++"
+        echo "       Try: scripts/bootstrap-host-tools.sh --download"
         fail=1
     fi
     local free
@@ -89,10 +98,13 @@ check_common() {
         fail=1
     fi
     if [ -d "$SKIA_ROOT/.git" ]; then
-        echo "  OK   official Skia checkout"
+        echo "  OK   official Skia git checkout"
         git -C "$SKIA_ROOT" rev-parse --short HEAD | sed 's/^/  INFO skia_head: /'
+    elif [ -s "$SKIA_ROOT/.openos-source-commit" ]; then
+        echo "  OK   official Skia source snapshot"
+        sed 's/^/  INFO skia_head: /' "$SKIA_ROOT/.openos-source-commit"
     else
-        echo "  INFO official Skia checkout missing: $SKIA_ROOT"
+        echo "  INFO official Skia source missing: $SKIA_ROOT"
     fi
     if [ -s "$PIN_FILE" ]; then
         echo "  OK   Skia official pin: $PIN_FILE"
@@ -101,31 +113,83 @@ check_common() {
     fi
     return "$fail"
 }
+resolve_skia_commit() {
+    curl --http1.1 -fsSL --retry 5 --retry-delay 3 --connect-timeout 30 \
+        https://api.github.com/repos/google/skia/commits/main \
+        | python3 -c 'import json,sys; print(json.load(sys.stdin)["sha"])'
+}
+fetch_skia_snapshot() {
+    local commit archive_dir archive_file extract_dir
+    commit="$(resolve_skia_commit)"
+    if [ -z "$commit" ]; then
+        echo "Unable to resolve official Skia main commit from GitHub API" >&2
+        return 1
+    fi
+    archive_dir="$DEPS_DIR/skia-archive"
+    archive_file="$archive_dir/skia-$commit.tar.gz"
+    extract_dir="$archive_dir/skia-$commit"
+    rm -rf "$SKIA_ROOT" "$archive_dir"
+    mkdir -p "$archive_dir"
+    echo "Downloading official Skia GitHub snapshot: $commit"
+    curl --http1.1 -fL --retry 8 --retry-delay 5 --connect-timeout 30 \
+        -o "$archive_file" \
+        "https://codeload.github.com/google/skia/tar.gz/$commit"
+    tar -xzf "$archive_file" -C "$archive_dir"
+    mv "$extract_dir" "$SKIA_ROOT"
+    printf '%s\n' "$commit" > "$SKIA_ROOT/.openos-source-commit"
+    printf '%s\n' "https://github.com/google/skia.git" > "$SKIA_ROOT/.openos-source-repository"
+    printf '%s\n' "github-codeload-tarball" > "$SKIA_ROOT/.openos-source-kind"
+}
 fetch_skia() {
     mkdir -p "$DEPS_DIR"
     if [ ! -d "$DEPOT_TOOLS_DIR/.git" ]; then
         echo "depot_tools missing; fetching it first..."
-        "$ROOT/scripts/chromium-source.sh" --fetch-depot-tools
+        "$ROOT/scripts/chromium-source.sh" --fetch-depot-tools || true
     fi
     if [ -d "$SKIA_ROOT/.git" ]; then
-        git -C "$SKIA_ROOT" fetch --tags origin
-    else
-        git clone https://skia.googlesource.com/skia.git "$SKIA_ROOT"
+        if git -C "$SKIA_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+            git -C "$SKIA_ROOT" fetch --depth 1 --tags origin || true
+        else
+            echo "Broken Skia .git directory detected; cleaning it before refetch..." >&2
+            rm -rf "$SKIA_ROOT"
+        fi
     fi
-    cd "$SKIA_ROOT"
-    python3 tools/git-sync-deps || true
+    if [ ! -d "$SKIA_ROOT/.git" ] && [ ! -s "$SKIA_ROOT/.openos-source-commit" ]; then
+        if ! git clone --depth 1 --filter=blob:none --sparse https://github.com/google/skia.git "$SKIA_ROOT"; then
+            echo "GitHub Skia clone failed; falling back to official GitHub source snapshot..." >&2
+            rm -rf "$SKIA_ROOT"
+            fetch_skia_snapshot
+        fi
+    fi
+    if [ -d "$SKIA_ROOT/.git" ]; then
+        cd "$SKIA_ROOT"
+        python3 tools/git-sync-deps || true
+    fi
+    write_pin
 }
 write_pin() {
-    if [ ! -d "$SKIA_ROOT/.git" ]; then
-        echo "Skia checkout missing: $SKIA_ROOT" >&2
+    local repository commit commit_short source_kind
+    if [ -d "$SKIA_ROOT/.git" ]; then
+        repository="$(git -C "$SKIA_ROOT" config --get remote.origin.url)"
+        commit="$(git -C "$SKIA_ROOT" rev-parse HEAD)"
+        commit_short="$(git -C "$SKIA_ROOT" rev-parse --short HEAD)"
+        source_kind="git-checkout"
+    elif [ -s "$SKIA_ROOT/.openos-source-commit" ]; then
+        repository="$(cat "$SKIA_ROOT/.openos-source-repository")"
+        commit="$(cat "$SKIA_ROOT/.openos-source-commit")"
+        commit_short="$(printf '%s' "$commit" | cut -c1-12)"
+        source_kind="$(cat "$SKIA_ROOT/.openos-source-kind")"
+    else
+        echo "Skia official source missing: $SKIA_ROOT" >&2
         exit 1
     fi
     mkdir -p "$(dirname "$PIN_FILE")"
     {
         echo "official_component=skia"
-        echo "repository=https://skia.googlesource.com/skia.git"
-        echo "commit=$(git -C "$SKIA_ROOT" rev-parse HEAD)"
-        echo "commit_short=$(git -C "$SKIA_ROOT" rev-parse --short HEAD)"
+        echo "repository=$repository"
+        echo "commit=$commit"
+        echo "commit_short=$commit_short"
+        echo "source_kind=$source_kind"
         echo "source_path=$SKIA_ROOT"
         echo "generated_at_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
         echo "note=Official Skia source pin for OpenOS Chromium route."
@@ -134,8 +198,8 @@ write_pin() {
 }
 gn_gen() {
     with_depot_path
-    if [ ! -d "$SKIA_ROOT/.git" ]; then
-        echo "Skia checkout missing: run scripts/skia-official.sh --fetch" >&2
+    if [ ! -d "$SKIA_ROOT/.git" ] && [ ! -s "$SKIA_ROOT/.openos-source-commit" ]; then
+        echo "Skia source missing: run scripts/skia-official.sh --fetch" >&2
         exit 1
     fi
     if ! have gn; then

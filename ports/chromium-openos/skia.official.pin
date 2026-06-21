@@ -1,0 +1,8 @@
+official_component=skia
+repository=https://github.com/google/skia.git
+commit=d7fe8b4e2748b971b22dec61474d45b759739ad4
+commit_short=d7fe8b4
+source_kind=git-shallow-partial-checkout
+source_path=E:\openos\.openos-deps\skia
+generated_at_utc=2026-06-21T15:35:45Z
+note=Official Skia source pin for OpenOS Chromium route.

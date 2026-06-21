@@ -87,10 +87,14 @@ check_common() {
 fetch_depot_tools() {
     mkdir -p "$DEPS_DIR"
     if [ -d "$DEPOT_TOOLS_DIR/.git" ]; then
-        git -C "$DEPOT_TOOLS_DIR" pull --ff-only
-    else
-        git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git "$DEPOT_TOOLS_DIR"
+        if git -C "$DEPOT_TOOLS_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+            git -C "$DEPOT_TOOLS_DIR" pull --ff-only || true
+            echo "depot_tools ready: $DEPOT_TOOLS_DIR"
+            return 0
+        fi
+        rm -rf "$DEPOT_TOOLS_DIR"
     fi
+    git clone --depth 1 https://github.com/chromium/depot_tools.git "$DEPOT_TOOLS_DIR"
     echo "depot_tools ready: $DEPOT_TOOLS_DIR"
 }
 fetch_chromium() {

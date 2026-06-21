@@ -393,7 +393,7 @@
   - [ ] P4：接入官方 Skia 软件 raster 最小构建，替换当前自研 `/bin/skia_demo` 的“官方 Skia”缺口
     - [√] P4.0：新增官方 Skia 获取/检查/构建入口和 `skia.official.pin` 生成规则
     - [√] P4.1：安装或提供 gn/ninja/clang++ 等宿主构建工具入口（新增无 sudo host-tools bootstrap；实际工具下载按环境执行）
-    - [ ] P4.2：拉取官方 Skia checkout 并写入 `ports/chromium-openos/skia.official.pin`
+    - [√] P4.2：拉取官方 Skia checkout 并写入 `ports/chromium-openos/skia.official.pin`
     - [ ] P4.3：完成官方 Skia 软件 raster 最小库构建
   - [ ] P5：接入官方 V8 `d8`/shell 的 jitless 最小构建
   - [ ] P6：接入 Blink/content_shell 单进程软件渲染最小启动链路

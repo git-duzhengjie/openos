@@ -121,3 +121,20 @@ ports/chromium-openos/skia.official.pin
 - depot_tools 提供或宿主提供 gn/ninja
 - clang++ 或 g++
 - 至少 12GB 可用空间用于独立 Skia checkout/build
+
+### 无 sudo 宿主工具引导
+
+如果当前 WSL/宿主环境不能 `sudo apt install`，可以用：
+
+```bash
+./build.sh host-tools-check
+./build.sh host-tools-bootstrap
+```
+
+该脚本使用 `apt-get download` 下载 `.deb`，并解包到：
+
+```text
+.openos-deps/host-tools
+```
+
+随后 `scripts/skia-official.sh` 会自动把该目录加入 PATH，用于发现 ninja/unzip/g++ 等工具。
