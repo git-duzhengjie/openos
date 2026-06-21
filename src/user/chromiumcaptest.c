@@ -248,6 +248,7 @@ static int test_mmap_vma_split_merge(void)
 static int test_v8_memory_policy(void)
 {
     unsigned int policy = openos_chromium_memory_policy();
+    unsigned char *mem;
 
     if ((policy & OPENOS_CHROMIUM_MEM_JITLESS_DEFAULT) == 0)
         return CAP_FAIL;
@@ -256,7 +257,21 @@ static int test_v8_memory_policy(void)
     if ((policy & OPENOS_CHROMIUM_MEM_EXEC_MMAP_ENABLED) != 0 &&
         (policy & OPENOS_CHROMIUM_MEM_WX_ENFORCED) == 0)
         return CAP_FAIL;
-    return CAP_PASS;
+    if ((policy & OPENOS_CHROMIUM_MEM_EXEC_MMAP_ENABLED) == 0) {
+        if ((int)openos_mmap_ex(0, 4096, OPENOS_PROT_READ | OPENOS_PROT_EXEC,
+                                OPENOS_MAP_ANON | OPENOS_MAP_PRIVATE) != -1)
+            return CAP_FAIL;
+    }
+
+    mem = (unsigned char *)openos_mmap(0, 4096, 0);
+    if (mem == (unsigned char *)-1 || !mem)
+        return CAP_FAIL;
+    if (openos_mprotect(mem, 4096, OPENOS_PROT_READ | OPENOS_PROT_EXEC) == 0) {
+        openos_munmap(mem, 4096);
+        return CAP_FAIL;
+    }
+
+    return openos_munmap(mem, 4096) == 0 ? CAP_PASS : CAP_FAIL;
 }
 
 static int test_mprotect(void)

@@ -1563,6 +1563,8 @@ static uint32_t sys_mmap_anonymous(uint32_t addr, uint32_t len, uint32_t prot, u
         return (uint32_t)-1;
     if ((prot & ~(uint32_t)0x7u) != 0)
         return (uint32_t)-1;
+    if ((prot & PROCESS_MMAP_PROT_EXEC) != 0)
+        return (uint32_t)-1;
     if ((flags & ~(PROCESS_MMAP_FLAG_ANON | PROCESS_MMAP_FLAG_PRIVATE | PROCESS_MMAP_FLAG_FIXED)) != 0)
         return (uint32_t)-1;
     if ((flags & PROCESS_MMAP_FLAG_FIXED) && (addr & (PAGE_SIZE - 1u)) != 0)
@@ -1606,6 +1608,8 @@ static uint32_t sys_mmap_file(uint32_t fd_raw, uint32_t len_raw, uint32_t prot_r
     if (fd < 0 || length == 0 || length > SYS_MMAP_MAX_REQUEST)
         return (uint32_t)-1;
     if ((prot & ~(PROCESS_MMAP_PROT_READ | PROCESS_MMAP_PROT_WRITE)) != 0)
+        return (uint32_t)-1;
+    if ((prot & PROCESS_MMAP_PROT_EXEC) != 0)
         return (uint32_t)-1;
     if ((flags & ~(PROCESS_MMAP_FLAG_FILE | PROCESS_MMAP_FLAG_PRIVATE)) != 0)
         return (uint32_t)-1;
@@ -1766,6 +1770,8 @@ static uint32_t sys_mprotect_user(uint32_t addr, uint32_t len, uint32_t prot)
     }
 
     if ((prot & ~(uint32_t)0x7u) != 0)
+        return (uint32_t)-1;
+    if ((prot & PROCESS_MMAP_PROT_EXEC) != 0)
         return (uint32_t)-1;
 
     for (uint32_t va = addr; va < end; va += PAGE_SIZE) {
