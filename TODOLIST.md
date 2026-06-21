@@ -442,7 +442,7 @@
   - [√] 高精度单调时钟、定时器队列、睡眠唤醒精度改进
     - [√] 已新增 `SYS_CLOCK_GETTIME` / `OPENOS_CLOCK_MONOTONIC` 单调 timespec 接口，并接入 `/bin/chromiumcaptest` 验收
     - [√] 已新增 `SYS_NANOSLEEP` / `openos_nanosleep()`，基于单调毫秒 tick 向上取整到毫秒睡眠，并接入 `/bin/chromiumcaptest` 验收非法 timespec、0ns rem 清零和短睡眠单调不倒退
-- [ ] M4 进程、加载器与 IPC 能力增强
+- [√] M4 进程、加载器与 IPC 能力增强
   - [√] 稳定 fork/exec/spawn 与 fd/env/argv 继承语义
     - [√] 已在 `/bin/chromiumcaptest` 增加 spawn_env + argv/envp + waitpid 验收，以及 fork 后 pipe fd 继承读写验收，覆盖 Chromium 多进程启动的最小基础语义
     - [√] 已新增 `/bin/fdinherit` 子程序，并在 `/bin/chromiumcaptest` 通过 spawn/exec 后继承 pipe fd 读取数据，覆盖 Chromium 子进程启动时 fd 继承的最小语义
