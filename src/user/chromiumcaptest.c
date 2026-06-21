@@ -1663,6 +1663,8 @@ static int test_font_gui_smoke(void)
     int label;
     int button;
     openos_gui_event_t ev;
+    openos_gui_window_info_t info;
+    openos_gui_display_info_t display;
     unsigned int pixels[4] = {
         0xffff0000U, 0xff00ff00U,
         0xff0000ffU, 0xffffffffU
@@ -1678,9 +1680,32 @@ static int test_font_gui_smoke(void)
         q.codepoint_width == 0)
         return CAP_FAIL;
 
+    openos_memset(&display, 0, sizeof(display));
+    if (openos_gui_get_display_info(&display) != 0 || display.width <= 0 || display.height <= 0 ||
+        display.dpi_x == 0 || display.dpi_y == 0 || display.scale_milli == 0)
+        return CAP_FAIL;
+
     win = openos_gui_create_window("cap gui", 24, 24, 120, 80);
     if (win < 0)
         return CAP_FAIL;
+    openos_memset(&info, 0, sizeof(info));
+    if (openos_gui_get_window_info(win, &info) != 0 || info.window_id != (unsigned int)win ||
+        info.w != 120 || info.h != 80) {
+        openos_gui_destroy_window(win);
+        return CAP_FAIL;
+    }
+    if (openos_gui_resize_window(win, 144, 96) != 0 ||
+        openos_gui_get_window_info(win, &info) != 0 || info.w != 144 || info.h != 96) {
+        openos_gui_destroy_window(win);
+        return CAP_FAIL;
+    }
+    if (openos_gui_resize_window(win, 0, 96) == 0 ||
+        openos_gui_get_window_info(0xffffffff, &info) == 0 ||
+        openos_gui_get_window_info(win, 0) == 0 ||
+        openos_gui_get_display_info(0) == 0) {
+        openos_gui_destroy_window(win);
+        return CAP_FAIL;
+    }
     label = openos_gui_add_label(win, 4, 4, 100, 16, "label");
     button = openos_gui_add_button(win, 4, 24, 80, 20, "button");
     if (label < 0 || button < 0) {
@@ -2230,7 +2255,7 @@ int main(int argc, char **argv)
     failed += status == CAP_FAIL;
 
     status = test_font_gui_smoke();
-    print_result("font metrics and gui drawing", status);
+    print_result("font metrics and gui resize/dpi", status);
     failed += status == CAP_FAIL;
 
     status = test_dns_resolver_literal();

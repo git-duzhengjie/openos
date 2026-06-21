@@ -247,6 +247,62 @@ int gui_user_draw(const gui_user_draw_request_t *request) {
     return -1;
 }
 
+int gui_user_resize_window(uint32_t window_id, int w, int h) {
+    gui_window_t *win = gui_find_window(window_id);
+    if (!gui_user_window_owned_by_current(win)) {
+        return -1;
+    }
+    if (w < GUI_USER_MIN_W || h < GUI_USER_MIN_H || w > GUI_USER_MAX_W || h > GUI_USER_MAX_H) {
+        return -1;
+    }
+
+    int old_x = win->rect.x;
+    int old_y = win->rect.y;
+    int old_w = win->rect.w;
+    int old_h = win->rect.h;
+    win->rect.w = w;
+    win->rect.h = h;
+    gui_invalidate_rect(old_x, old_y, old_w, old_h);
+    gui_invalidate_rect(win->rect.x, win->rect.y, win->rect.w, win->rect.h);
+    return 0;
+}
+
+int gui_user_get_window_info(uint32_t window_id, gui_user_window_info_t *out_info) {
+    gui_window_t *win = gui_find_window(window_id);
+    if (!out_info || !gui_user_window_owned_by_current(win)) {
+        return -1;
+    }
+
+    out_info->window_id = win->id;
+    out_info->owner_pid = win->user_owner_pid;
+    out_info->x = win->rect.x;
+    out_info->y = win->rect.y;
+    out_info->w = win->rect.w;
+    out_info->h = win->rect.h;
+    out_info->flags = win->flags;
+    out_info->focused = win->active ? 1u : 0u;
+    return 0;
+}
+
+int gui_user_get_display_info(gui_user_display_info_t *out_info) {
+    const gui_system_t *gui;
+    if (!out_info || !gui_is_ready()) {
+        return -1;
+    }
+
+    gui = gui_get_system();
+    if (!gui || gui->width == 0 || gui->height == 0) {
+        return -1;
+    }
+
+    out_info->width = (int32_t)gui->width;
+    out_info->height = (int32_t)gui->height;
+    out_info->dpi_x = 96u;
+    out_info->dpi_y = 96u;
+    out_info->scale_milli = 1000u;
+    return 0;
+}
+
 void gui_user_cleanup_process(uint32_t pid) {
     if (pid == 0) {
         return;

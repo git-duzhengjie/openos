@@ -2800,6 +2800,33 @@ uint32_t syscall_dispatch(uint32_t num,
             return (uint32_t)rc;
         }
 
+    case SYS_GUI_RESIZE_WINDOW:
+        return (uint32_t)gui_user_resize_window((uint32_t)a, (int)b, (int)c);
+
+    case SYS_GUI_GET_WINDOW_INFO:
+        {
+            gui_user_window_info_t info;
+            if (!b || !user_ptr_valid((void *)b, sizeof(info), USERMEM_WRITE))
+                return (uint32_t)-1;
+            if (gui_user_get_window_info((uint32_t)a, &info) < 0)
+                return (uint32_t)-1;
+            if (copy_to_user((void *)b, &info, sizeof(info)) < 0)
+                return (uint32_t)-1;
+            return 0;
+        }
+
+    case SYS_GUI_GET_DISPLAY_INFO:
+        {
+            gui_user_display_info_t info;
+            if (!a || !user_ptr_valid((void *)a, sizeof(info), USERMEM_WRITE))
+                return (uint32_t)-1;
+            if (gui_user_get_display_info(&info) < 0)
+                return (uint32_t)-1;
+            if (copy_to_user((void *)a, &info, sizeof(info)) < 0)
+                return (uint32_t)-1;
+            return 0;
+        }
+
     default:
         return 0xFFFFFFFF;
     }

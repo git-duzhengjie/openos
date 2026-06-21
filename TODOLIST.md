@@ -482,6 +482,7 @@
     - [√] 已将用户态 GUI 事件队列空队列/非法参数 smoke 并入 `/bin/chromiumcaptest`
   - [ ] 剪贴板、光标、DPI/缩放和窗口 resize 事件
     - [√] 已新增 `SYS_CLIPBOARD_SET` / `SYS_CLIPBOARD_GET` 与用户态 `openos_clipboard_set/get`，并接入 `/bin/chromiumcaptest` 验收
+    - [√] 已新增 `SYS_GUI_RESIZE_WINDOW`、`SYS_GUI_GET_WINDOW_INFO`、`SYS_GUI_GET_DISPLAY_INFO` 最小 ABI，提供窗口 resize、窗口尺寸查询与 96 DPI/1000 scale 基础显示信息，并接入 `/bin/chromiumcaptest` 验收
 - [ ] M8 C/C++ runtime 与工具链
   - [ ] 用户态 C++ 编译、链接、构造/析构、异常策略、RTTI 策略
     - [√] 已新增 `build.sh cppsmoke` 工具链探测入口；当前环境缺少 `i686-elf-g++/clang++/g++` 时会明确失败并提示 `OPENOS_CXX`，避免静默伪装 C++ 能力完成

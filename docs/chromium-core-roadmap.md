@@ -188,7 +188,7 @@ Chromium 主体是 C++，OpenOS 需要：
 - IPC：shared memory 双映射一致性、message queue FIFO 多消息顺序、service channel request/reply 结构化元数据和错误边界。
 - 文件系统：`stat/fstat/lstat` 时间字段、`statfs/fstatfs`、`getdents` 目录枚举、路径规范化、资源 pak 读取、缓存目录、稀疏文件。
 - 网络：socketpair send/recv/poll/select、空队列不报 `POLLIN`、多 fd poll、负 fd 忽略、非法 fd `POLLERR`、select 读写位图、`POLLOUT`、空读失败、对端关闭 `POLLHUP`，以及离线 DNS resolver 基础验收。
-- 图形/字体/输入：GUI smoke、字体查询、GUI event queue、用户剪贴板 syscall smoke。
+- 图形/字体/输入：GUI smoke、字体查询、GUI event queue、用户剪贴板 syscall smoke、窗口 resize/window info/display DPI 基础 ABI。
 - C++ runtime：新增 `openos_cxxabi.h` 最小 ABI hooks 与 `/bin/cxxabitest`，覆盖 `new/delete`、guard variable、atomic fetch_add/load、init/fini array dispatch；`/bin/chromiumcaptest` 已通过 spawn/waitpid 汇总验收该子程序。
 - 工具链：`docs/chromium-build-chain.md` 已固定 Chromium GN/Ninja/Clang 交叉构建链设计，明确 `i386-openos-elf` 目标、OpenOS sysroot/CRT/runtime 边界、GN args 初始草案，以及 skia_demo -> v8_shell -> blink_smoke -> content_shell -> chromium 的分阶段验收顺序。
 

@@ -137,6 +137,9 @@
 #define SYS_FCNTL 341
 #define SYS_SETSOCKOPT 342
 #define SYS_GETSOCKOPT 343
+#define SYS_GUI_RESIZE_WINDOW 344
+#define SYS_GUI_GET_WINDOW_INFO 345
+#define SYS_GUI_GET_DISPLAY_INFO 346
 
 #define OPENOS_CHROMIUM_MEM_JITLESS_DEFAULT     (1u << 0)
 #define OPENOS_CHROMIUM_MEM_EXEC_PROT_RESERVED  (1u << 1)
@@ -576,6 +579,25 @@ typedef struct openos_gui_event {
     int button;
 } openos_gui_event_t;
 
+typedef struct openos_gui_window_info {
+    unsigned int window_id;
+    unsigned int owner_pid;
+    int x;
+    int y;
+    int w;
+    int h;
+    unsigned int flags;
+    unsigned int focused;
+} openos_gui_window_info_t;
+
+typedef struct openos_gui_display_info {
+    int width;
+    int height;
+    unsigned int dpi_x;
+    unsigned int dpi_y;
+    unsigned int scale_milli;
+} openos_gui_display_info_t;
+
 typedef struct openos_gui_widget_request {
     unsigned int window_id;
     unsigned int widget_id;
@@ -884,6 +906,21 @@ static inline int openos_gui_present(int window_id)
     req.src_y = 0;
     req.text[0] = 0;
     return openos_syscall_result(openos_syscall1(SYS_GUI_DRAW, (int)&req));
+}
+
+static inline int openos_gui_resize_window(int window_id, int w, int h)
+{
+    return openos_syscall_result(openos_syscall3(SYS_GUI_RESIZE_WINDOW, window_id, w, h));
+}
+
+static inline int openos_gui_get_window_info(int window_id, openos_gui_window_info_t *out_info)
+{
+    return openos_syscall_result(openos_syscall2(SYS_GUI_GET_WINDOW_INFO, window_id, (int)out_info));
+}
+
+static inline int openos_gui_get_display_info(openos_gui_display_info_t *out_info)
+{
+    return openos_syscall_result(openos_syscall1(SYS_GUI_GET_DISPLAY_INFO, (int)out_info));
 }
 
 static inline int openos_sendto(int fd, const void *buf, unsigned int len, int flags,
