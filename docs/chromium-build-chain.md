@@ -19,6 +19,39 @@
 - Python：跟随 depot_tools / Chromium 所需版本。
 - sysroot：使用 OpenOS 自有用户态 headers、crt objects、linker script、最小 libc/libc++ runtime，不复用 Linux sysroot。
 
+## OpenOS 用户态 SDK/sysroot
+
+真实 Chromium 内核路线要先从 OpenOS 用户态 ABI 出发，而不是继续扩展当前 `/bin/chromium` 原生演示壳。导出 SDK：
+
+```bash
+./build.sh sdk
+```
+
+该命令生成：
+
+```text
+target/openos-sdk/
+├── include/openos/        # OpenOS 用户态 ABI headers
+├── crt/crt0.o             # 用户程序入口对象
+├── ld/user.ld             # 用户程序 linker script
+├── lib/libopenos.a        # 稳定 OpenOS ABI archive 占位
+├── lib/libopenos_c.a      # 后续增长的 libc archive 占位
+├── lib/libopenos_cxx.a    # 后续增长的 C++ runtime archive 占位
+├── bin/openos-clang-i386.cfg
+└── manifest.txt
+```
+
+同时为了兼容本文件后续命令，也导出：
+
+```text
+target/openos-user-crt0.o
+target/libopenos.a
+target/libopenos_c.a
+target/libopenos_cxx.a
+```
+
+这个 sysroot **不是 Linux sysroot**。它只表达 OpenOS 当前 freestanding 用户态能力，后续 Skia/V8/Blink 的平台 glue 应基于它交叉编译，并把缺失的 POSIX、C/C++ runtime、线程、文件、网络、图形能力逐项补齐。
+
 ## 目标三元组与输出约定
 
 初始目标：

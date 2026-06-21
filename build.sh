@@ -28,9 +28,10 @@ if [ "$OPENOS_CJK_COVERAGE" != "ui" ] && [ "$OPENOS_CJK_EMBED" != "1" ] && [ "$O
 fi
 
 usage() {
-    echo "Usage: ARCH=i386|x86_64 ./build.sh [clean|test|cppsmoke]"
-    echo "       ./build.sh [i386|x86_64] [clean|test|cppsmoke]"
+    echo "Usage: ARCH=i386|x86_64 ./build.sh [clean|test|cppsmoke|sdk]"
+    echo "       ./build.sh [i386|x86_64] [clean|test|cppsmoke|sdk]"
     echo "       ./build.sh cppsmoke    # probe OpenOS userland C++ toolchain"
+    echo "       ./build.sh sdk         # export OpenOS userland SDK/sysroot for Chromium ports"
 }
 
 check_cpp_toolchain() {
@@ -66,6 +67,9 @@ case "${1:-}" in
         check_cpp_toolchain
         exit $?
         ;;
+    sdk|sysroot|export-sdk)
+        exec bash scripts/export-openos-sdk.sh
+        ;;
     i386|x86_64)
         BUILD_ARCH="$1"
         shift
@@ -89,6 +93,9 @@ fi
 if [ "${1:-}" = "cppsmoke" ] || [ "${1:-}" = "check-cpp" ] || [ "${1:-}" = "cpp" ]; then
     check_cpp_toolchain
     exit $?
+fi
+if [ "${1:-}" = "sdk" ] || [ "${1:-}" = "sysroot" ] || [ "${1:-}" = "export-sdk" ]; then
+    exec bash scripts/export-openos-sdk.sh
 fi
 
 case "$BUILD_ARCH" in
