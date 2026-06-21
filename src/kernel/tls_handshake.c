@@ -30,6 +30,16 @@ static int tls_hs_append_u16(uint8_t* buf, size_t cap, size_t* pos, uint16_t v)
            tls_hs_append_u8(buf, cap, pos, (uint8_t)(v & 0xffu));
 }
 
+static int tls_hs_append_u24(uint8_t* buf, size_t cap, size_t* pos, uint32_t v)
+{
+    if (v > 0xffffffu) {
+        return 0;
+    }
+    return tls_hs_append_u8(buf, cap, pos, (uint8_t)(v >> 16)) &&
+           tls_hs_append_u8(buf, cap, pos, (uint8_t)(v >> 8)) &&
+           tls_hs_append_u8(buf, cap, pos, (uint8_t)(v & 0xffu));
+}
+
 static int tls_hs_append_bytes(uint8_t* buf,
                                size_t cap,
                                size_t* pos,
@@ -126,6 +136,66 @@ static int tls_handshake_header_valid(const uint8_t* message,
     }
 
     *body_len = (size_t)declared_len;
+    return 1;
+}
+
+int tls12_make_rsa_pre_master_secret(
+    uint16_t client_version,
+    const uint8_t random_bytes[TLS12_RSA_PRE_MASTER_RANDOM_SIZE],
+    uint8_t pre_master_secret[TLS12_RSA_PRE_MASTER_SECRET_SIZE])
+{
+    if (!random_bytes || !pre_master_secret || client_version != TLS12_VERSION) {
+        return 0;
+    }
+
+    pre_master_secret[0] = (uint8_t)(client_version >> 8);
+    pre_master_secret[1] = (uint8_t)(client_version & 0xffu);
+    tls_copy(pre_master_secret + 2u, random_bytes, TLS12_RSA_PRE_MASTER_RANDOM_SIZE);
+    return 1;
+}
+
+int tls12_build_rsa_client_key_exchange_message(const uint8_t* encrypted_pre_master_secret,
+                                                size_t encrypted_pre_master_secret_len,
+                                                uint8_t* out_handshake_message,
+                                                size_t out_handshake_message_cap,
+                                                size_t* out_handshake_message_len)
+{
+    size_t p = 0u;
+    size_t body_len;
+
+    if (out_handshake_message_len) {
+        *out_handshake_message_len = 0u;
+    }
+
+    if (!encrypted_pre_master_secret || encrypted_pre_master_secret_len == 0u ||
+        encrypted_pre_master_secret_len > 0xffffu || !out_handshake_message ||
+        !out_handshake_message_len) {
+        return 0;
+    }
+
+    body_len = 2u + encrypted_pre_master_secret_len;
+    if (body_len > 0xffffffu || out_handshake_message_cap < TLS_HANDSHAKE_HEADER_SIZE + body_len) {
+        return 0;
+    }
+
+    if (!tls_hs_append_u8(out_handshake_message,
+                          out_handshake_message_cap,
+                          &p,
+                          TLS_HANDSHAKE_CLIENT_KEY_EXCHANGE) ||
+        !tls_hs_append_u24(out_handshake_message, out_handshake_message_cap, &p, (uint32_t)body_len) ||
+        !tls_hs_append_u16(out_handshake_message,
+                           out_handshake_message_cap,
+                           &p,
+                           (uint16_t)encrypted_pre_master_secret_len) ||
+        !tls_hs_append_bytes(out_handshake_message,
+                             out_handshake_message_cap,
+                             &p,
+                             encrypted_pre_master_secret,
+                             encrypted_pre_master_secret_len)) {
+        return 0;
+    }
+
+    *out_handshake_message_len = p;
     return 1;
 }
 
@@ -570,6 +640,45 @@ const char* tls12_handshake_state_name(tls12_handshake_state_t state)
     }
 }
 
+int tls12_handshake_set_rsa_pre_master_secret(
+    tls12_handshake_context_t* ctx,
+    const uint8_t pre_master_secret[TLS12_RSA_PRE_MASTER_SECRET_SIZE])
+{
+    uint16_t encoded_version;
+
+    if (!ctx || !pre_master_secret || ctx->state == TLS12_HANDSHAKE_STATE_ERROR ||
+        !ctx->has_client_random || !ctx->has_server_random) {
+        if (ctx) {
+            ctx->state = TLS12_HANDSHAKE_STATE_ERROR;
+        }
+        return 0;
+    }
+
+    encoded_version = tls_hs_read_u16(pre_master_secret);
+    if (encoded_version != TLS12_VERSION) {
+        ctx->state = TLS12_HANDSHAKE_STATE_ERROR;
+        return 0;
+    }
+
+    tls_copy(ctx->pre_master_secret, pre_master_secret, TLS12_RSA_PRE_MASTER_SECRET_SIZE);
+    ctx->has_pre_master_secret = 1;
+
+    if (tls12_derive_master_secret_sha256(ctx->pre_master_secret,
+                                          TLS12_RSA_PRE_MASTER_SECRET_SIZE,
+                                          ctx->client_random,
+                                          ctx->server_random,
+                                          ctx->master_secret) != 0) {
+        ctx->state = TLS12_HANDSHAKE_STATE_ERROR;
+        return 0;
+    }
+
+    ctx->has_master_secret = 1;
+    ctx->has_key_block = 0;
+    ctx->has_record_layer = 0;
+    tls12_aes128_gcm_record_layer_init(&ctx->record_layer);
+    return 1;
+}
+
 int tls12_handshake_set_master_secret(tls12_handshake_context_t* ctx,
                                       const uint8_t master_secret[TLS12_MASTER_SECRET_SIZE])
 {
@@ -769,6 +878,8 @@ int tls12_handshake_on_client_key_exchange_sent(tls12_handshake_context_t* ctx,
                                     handshake_message_len,
                                     TLS_HANDSHAKE_CLIENT_KEY_EXCHANGE,
                                     &body_len) ||
+        body_len < 2u ||
+        (size_t)tls_hs_read_u16(handshake_message + TLS_HANDSHAKE_HEADER_SIZE) != body_len - 2u ||
         !tls12_transcript_add(ctx, handshake_message, handshake_message_len)) {
         if (ctx) {
             ctx->state = TLS12_HANDSHAKE_STATE_ERROR;

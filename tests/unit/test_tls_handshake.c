@@ -58,8 +58,9 @@ static const uint8_t k_server_hello_done[] = {
 };
 
 static const uint8_t k_client_key_exchange[] = {
-    0x10, 0x00, 0x00, 0x02,
-    0x00, 0x00
+    0x10, 0x00, 0x00, 0x06,
+    0x00, 0x04,
+    0x31, 0x32, 0x33, 0x34
 };
 
 static const uint8_t k_change_cipher_spec[] = { 0x01 };
@@ -152,6 +153,54 @@ UNIT_TEST_CASE(build_client_hello_record)
 
     ASSERT_FALSE(tls12_build_client_hello_record("", random, record, sizeof(record), &record_len));
     ASSERT_FALSE(tls12_build_client_hello_record("example.com", random, record, 32u, &record_len));
+}
+
+UNIT_TEST_CASE(build_rsa_client_key_exchange_and_pre_master_secret)
+{
+    uint8_t random[TLS12_RSA_PRE_MASTER_RANDOM_SIZE];
+    uint8_t pre_master[TLS12_RSA_PRE_MASTER_SECRET_SIZE];
+    uint8_t encrypted[128];
+    uint8_t message[160];
+    size_t message_len = 0u;
+    size_t i;
+
+    for (i = 0; i < sizeof(random); ++i) {
+        random[i] = (uint8_t)(0xa0u + (uint8_t)i);
+    }
+    for (i = 0; i < sizeof(encrypted); ++i) {
+        encrypted[i] = (uint8_t)(0x20u + (uint8_t)i);
+    }
+
+    ASSERT_TRUE(tls12_make_rsa_pre_master_secret(TLS12_VERSION, random, pre_master));
+    ASSERT_EQ_INT(0x03, pre_master[0]);
+    ASSERT_EQ_INT(0x03, pre_master[1]);
+    ASSERT_EQ_INT(0, memcmp(random, pre_master + 2u, sizeof(random)));
+    ASSERT_FALSE(tls12_make_rsa_pre_master_secret(0x0301u, random, pre_master));
+
+    ASSERT_TRUE(tls12_build_rsa_client_key_exchange_message(encrypted,
+                                                            sizeof(encrypted),
+                                                            message,
+                                                            sizeof(message),
+                                                            &message_len));
+    ASSERT_EQ_SIZE(4u + 2u + sizeof(encrypted), message_len);
+    ASSERT_EQ_INT(TLS_HANDSHAKE_CLIENT_KEY_EXCHANGE, message[0]);
+    ASSERT_EQ_INT(0, message[1]);
+    ASSERT_EQ_INT(0, message[2]);
+    ASSERT_EQ_INT(2u + sizeof(encrypted), message[3]);
+    ASSERT_EQ_INT(0, message[4]);
+    ASSERT_EQ_INT(sizeof(encrypted), message[5]);
+    ASSERT_EQ_INT(0, memcmp(encrypted, message + 6u, sizeof(encrypted)));
+
+    ASSERT_FALSE(tls12_build_rsa_client_key_exchange_message(encrypted,
+                                                             0u,
+                                                             message,
+                                                             sizeof(message),
+                                                             &message_len));
+    ASSERT_FALSE(tls12_build_rsa_client_key_exchange_message(encrypted,
+                                                             sizeof(encrypted),
+                                                             message,
+                                                             8u,
+                                                             &message_len));
 }
 
 UNIT_TEST_CASE(expect_full_handshake_progression)
@@ -262,6 +311,70 @@ static void drive_until_client_ccs(tls12_handshake_context_t* ctx)
     ASSERT_TRUE(tls12_handshake_on_client_change_cipher_spec_sent(ctx,
                                                                   k_change_cipher_spec,
                                                                   sizeof(k_change_cipher_spec)));
+}
+
+UNIT_TEST_CASE(set_rsa_pre_master_secret_derives_master_secret)
+{
+    tls12_handshake_context_t ctx;
+    uint8_t random[TLS12_RSA_PRE_MASTER_RANDOM_SIZE];
+    uint8_t pre_master[TLS12_RSA_PRE_MASTER_SECRET_SIZE];
+    uint8_t expected_master[TLS12_MASTER_SECRET_SIZE];
+    size_t i;
+
+    for (i = 0; i < sizeof(random); ++i) {
+        random[i] = (uint8_t)(0x50u + (uint8_t)i);
+    }
+
+    tls12_handshake_context_init(&ctx);
+    ASSERT_TRUE(tls12_handshake_on_client_hello_sent(&ctx, k_client_hello, sizeof(k_client_hello)));
+    ASSERT_TRUE(tls12_handshake_on_server_handshake(&ctx, k_server_hello, sizeof(k_server_hello)));
+    ASSERT_TRUE(tls12_make_rsa_pre_master_secret(TLS12_VERSION, random, pre_master));
+    ASSERT_EQ_INT(0, tls12_derive_master_secret_sha256(pre_master,
+                                                       sizeof(pre_master),
+                                                       ctx.client_random,
+                                                       ctx.server_random,
+                                                       expected_master));
+
+    ASSERT_TRUE(tls12_handshake_set_rsa_pre_master_secret(&ctx, pre_master));
+    ASSERT_TRUE(ctx.has_pre_master_secret);
+    ASSERT_TRUE(ctx.has_master_secret);
+    ASSERT_EQ_INT(0, memcmp(pre_master, ctx.pre_master_secret, sizeof(pre_master)));
+    ASSERT_EQ_INT(0, memcmp(expected_master, ctx.master_secret, sizeof(expected_master)));
+    ASSERT_TRUE(tls12_handshake_derive_aes128_gcm_key_block(&ctx));
+
+    pre_master[1] = 0x01;
+    tls12_handshake_context_init(&ctx);
+    ASSERT_TRUE(tls12_handshake_on_client_hello_sent(&ctx, k_client_hello, sizeof(k_client_hello)));
+    ASSERT_TRUE(tls12_handshake_on_server_handshake(&ctx, k_server_hello, sizeof(k_server_hello)));
+    ASSERT_FALSE(tls12_handshake_set_rsa_pre_master_secret(&ctx, pre_master));
+    ASSERT_EQ_INT(TLS12_HANDSHAKE_STATE_ERROR, ctx.state);
+}
+
+UNIT_TEST_CASE(reject_malformed_client_key_exchange)
+{
+    tls12_handshake_context_t ctx;
+    static const uint8_t bad_short_body[] = {
+        TLS_HANDSHAKE_CLIENT_KEY_EXCHANGE, 0x00, 0x00, 0x01, 0x00
+    };
+    static const uint8_t bad_vector_len[] = {
+        TLS_HANDSHAKE_CLIENT_KEY_EXCHANGE, 0x00, 0x00, 0x03, 0x00, 0x02, 0xaa
+    };
+
+    tls12_handshake_context_init(&ctx);
+    ASSERT_TRUE(tls12_handshake_on_client_hello_sent(&ctx, k_client_hello, sizeof(k_client_hello)));
+    ASSERT_TRUE(tls12_handshake_on_server_handshake(&ctx, k_server_hello, sizeof(k_server_hello)));
+    ASSERT_TRUE(tls12_handshake_on_server_handshake(&ctx, k_certificate, sizeof(k_certificate)));
+    ASSERT_TRUE(tls12_handshake_on_server_handshake(&ctx, k_server_hello_done, sizeof(k_server_hello_done)));
+    ASSERT_FALSE(tls12_handshake_on_client_key_exchange_sent(&ctx, bad_short_body, sizeof(bad_short_body)));
+    ASSERT_EQ_INT(TLS12_HANDSHAKE_STATE_ERROR, ctx.state);
+
+    tls12_handshake_context_init(&ctx);
+    ASSERT_TRUE(tls12_handshake_on_client_hello_sent(&ctx, k_client_hello, sizeof(k_client_hello)));
+    ASSERT_TRUE(tls12_handshake_on_server_handshake(&ctx, k_server_hello, sizeof(k_server_hello)));
+    ASSERT_TRUE(tls12_handshake_on_server_handshake(&ctx, k_certificate, sizeof(k_certificate)));
+    ASSERT_TRUE(tls12_handshake_on_server_handshake(&ctx, k_server_hello_done, sizeof(k_server_hello_done)));
+    ASSERT_FALSE(tls12_handshake_on_client_key_exchange_sent(&ctx, bad_vector_len, sizeof(bad_vector_len)));
+    ASSERT_EQ_INT(TLS12_HANDSHAKE_STATE_ERROR, ctx.state);
 }
 
 UNIT_TEST_CASE(verify_finished_when_master_secret_is_available)
@@ -478,7 +591,10 @@ UNIT_TEST_CASE(reject_bad_change_cipher_spec)
 int main(void)
 {
     UNIT_TEST_RUN(build_client_hello_record);
+    UNIT_TEST_RUN(build_rsa_client_key_exchange_and_pre_master_secret);
     UNIT_TEST_RUN(expect_full_handshake_progression);
+    UNIT_TEST_RUN(set_rsa_pre_master_secret_derives_master_secret);
+    UNIT_TEST_RUN(reject_malformed_client_key_exchange);
     UNIT_TEST_RUN(verify_finished_when_master_secret_is_available);
     UNIT_TEST_RUN(derive_key_block_and_configure_record_layer);
     UNIT_TEST_RUN(reject_bad_finished_when_master_secret_is_available);

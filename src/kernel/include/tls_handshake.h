@@ -11,6 +11,8 @@
 #define TLS12_CIPHER_SUITE_RSA_WITH_AES_128_GCM_SHA256 0x009cu
 #define TLS12_HANDSHAKE_MAX_FINISHED_SIZE TLS12_VERIFY_DATA_SIZE
 #define TLS12_CLIENT_RANDOM_SIZE 32u
+#define TLS12_RSA_PRE_MASTER_SECRET_SIZE 48u
+#define TLS12_RSA_PRE_MASTER_RANDOM_SIZE 46u
 #define TLS12_AES128_GCM_KEY_BLOCK_SIZE \
     ((TLS12_AES_128_GCM_KEY_SIZE * 2u) + (TLS12_AEAD_GCM_FIXED_IV_SIZE * 2u))
 
@@ -43,12 +45,14 @@ typedef struct tls12_handshake_context {
     int server_has_supported_versions;
     uint8_t client_random[TLS12_RANDOM_SIZE];
     uint8_t server_random[TLS12_RANDOM_SIZE];
+    uint8_t pre_master_secret[TLS12_RSA_PRE_MASTER_SECRET_SIZE];
     uint8_t master_secret[TLS12_MASTER_SECRET_SIZE];
     uint8_t key_block[TLS12_AES128_GCM_KEY_BLOCK_SIZE];
     tls12_aes128_gcm_record_keys_t record_keys;
     tls12_aes128_gcm_record_layer_t record_layer;
     int has_client_random;
     int has_server_random;
+    int has_pre_master_secret;
     int has_master_secret;
     int has_key_block;
     int has_record_layer;
@@ -71,6 +75,21 @@ int tls12_build_client_hello_record(const char* server_name,
                                     uint8_t* out_record,
                                     size_t out_record_cap,
                                     size_t* out_record_len);
+
+int tls12_make_rsa_pre_master_secret(
+    uint16_t client_version,
+    const uint8_t random_bytes[TLS12_RSA_PRE_MASTER_RANDOM_SIZE],
+    uint8_t pre_master_secret[TLS12_RSA_PRE_MASTER_SECRET_SIZE]);
+
+int tls12_build_rsa_client_key_exchange_message(const uint8_t* encrypted_pre_master_secret,
+                                                size_t encrypted_pre_master_secret_len,
+                                                uint8_t* out_handshake_message,
+                                                size_t out_handshake_message_cap,
+                                                size_t* out_handshake_message_len);
+
+int tls12_handshake_set_rsa_pre_master_secret(
+    tls12_handshake_context_t* ctx,
+    const uint8_t pre_master_secret[TLS12_RSA_PRE_MASTER_SECRET_SIZE]);
 
 int tls12_handshake_set_master_secret(tls12_handshake_context_t* ctx,
                                       const uint8_t master_secret[TLS12_MASTER_SECRET_SIZE]);
