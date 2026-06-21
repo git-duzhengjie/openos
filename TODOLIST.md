@@ -411,7 +411,7 @@
 - [√] 新增 `/bin/chromiumcaptest` 底座验收程序
   - [√] 覆盖 uptime、匿名 mmap/munmap、sbrk、thread、shared memory、eventfd、socketpair、poll 等现有基础能力
   - [√] 接入 `build.sh`、内核嵌入头文件和 `/bin` 安装流程
-- [ ] M2 内存与地址空间能力增强
+- [√] M2 内存与地址空间能力增强
   - [√] `mmap` 支持完整 `prot` / `flags` 语义：read/write/exec、private/shared、anonymous/file-backed
     - [√] 已完成匿名私有 VMA 记录、基础 prot/flags 参数、按需分页按 VMA 写权限映射
     - [√] 已将非法 `prot` / `flags` 拒绝、只读映射读零、`mprotect` 升级读写等最小权限语义并入 `/bin/chromiumcaptest`
@@ -419,7 +419,7 @@
   - [√] 支持固定地址映射、地址空间保留、解除映射后的 VMA 合并与冲突检测
     - [√] 已完成 `MAP_FIXED` 基础固定地址预留与重叠 VMA 冲突拒绝
     - [√] 已补齐 `munmap` 对 VMA 头/尾裁剪、中间拆分、相邻匿名兼容 VMA 合并与未映射区间拒绝，并接入 `/bin/chromiumcaptest` 验收
-  - [ ] 文件 mmap 与 page cache 协同，支持只读资源映射和私有 COW 映射
+  - [√] 文件 mmap 与 page cache 协同，支持只读资源映射和私有 COW 映射
     - [√] 已完成基础 file-backed private snapshot mmap：`SYS_MMAP_FILE` 可将 fd 内容映射到用户地址空间，并接入 `/bin/chromiumcaptest` 验收
     - [√] 已增强 `/bin/chromiumcaptest` 对 file-backed `MAP_PRIVATE` 的不回写校验：映射内修改后重新映射应仍看到原始文件内容
     - [√] 已收紧 file-backed mmap flags 语义：当前仅接受 `MAP_PRIVATE|MAP_FILE`，显式拒绝 `MAP_SHARED`、`MAP_FIXED`、`MAP_ANON` 等未实现组合，并接入 `/bin/chromiumcaptest` 验收
