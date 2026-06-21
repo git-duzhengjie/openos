@@ -382,24 +382,19 @@
   - [√] 图形接口：framebuffer/窗口绘制、矩形裁剪、位图 blit、滚动、双缓冲；扩展 `SYS_GUI_DRAW` 支持 fill/text/blit/scroll/present，并由 `/bin/guiprobe` 验证
   - [√] 图片解码依赖评估：PNG/JPEG/GIF/WebP 可分阶段接入
   - [√] 文件与配置目录：缓存、cookie、证书、字体资源、下载目录；启动时创建 `/home/browser/{cache,cookies,certs,downloads}` 并在用户态暴露路径常量
-- [√] 优先评估并移植 NetSurf 作为 OpenOS 第一代开源浏览器内核；完成平台层 smoke、OpenOS 用户态平台适配和 `/bin/nsdemo` HTTP 文本化页面演示
-  - [√] 阅读 NetSurf framebuffer frontend、libdom、libcss、hubbub、utils 等依赖结构
-  - [√] 先在宿主机完成最小 framebuffer frontend 构建验证：新增 `ports/netsurf-openos` 平台层 smoke，覆盖 surface/clip/fill/blit/scroll/present/time/file/text/http 占位接口
-  - [√] 为 OpenOS 编写 NetSurf 平台层：framebuffer 绘制、输入事件、定时器、文件、socket、字体；新增 `src/user/openos_netsurf_platform.c`
-  - [√] 先支持 HTTP 页面显示，再接入 HTTPS、图片、表单、下载等能力；新增 `/bin/nsdemo` 使用 OpenOS 平台层拉取 HTTP 并渲染文本化页面
-  - [√] 记录 NetSurf 依赖裁剪清单，避免一次性引入过大依赖
-- [√] 备选轻量浏览器方案调研
-  - [√] Dillo：评估 FLTK 依赖替换成本、HTML/CSS 支持程度、HTTPS/中文支持工作量
-  - [√] Links2/Lynx：作为文本/半图形浏览器验证方案，不作为最终 GUI 浏览器目标
-  - [√] SerenityOS LibWeb / Ladybird：作为远期现代内核参考，待 C++ 运行时、线程、图形、JS 环境成熟后再评估
-  - [√] Chromium/WebKit/Gecko：暂不作为近期目标，仅作为长期参考，原因是依赖体量和平台适配成本过高
-- [√] JavaScript 后续路线
-  - [√] 短期不在内核内置 Browser 中实现 JS
-  - [√] 中期评估 QuickJS 作为轻量 JS 引擎
-  - [√] 长期随 NetSurf/LibWeb 等内核路线决定 JS/DOM/CSSOM 支持深度
+- [√] 明确废弃 NetSurf / 轻量浏览器内核路线：不再把 `/bin/nsdemo` 或任何自研 HTML demo 作为最终浏览器路线
+  - [√] 从活跃构建、内核 `/bin` 安装流程和源码树移除 NetSurf/OpenOS demo
+  - [√] 后续浏览器目标仅允许 Chromium Content + Blink + V8 + Skia 组合，不能用 NetSurf/Dillo/Links/QuickJS demo 替代
+- [ ] Chrome/Chromium 引擎近期落地任务
+  - [√] P0：清理 NetSurf/nsdemo 活跃路线，保证镜像不再安装 `/bin/nsdemo`
+  - [ ] P1：固定 Chromium 上游源码获取入口，记录版本/目录/磁盘需求和 depot_tools 前置检查
+  - [ ] P2：新增 OpenOS Chromium GN/toolchain 骨架，目标为 `target_os="openos"`、`target_cpu="x86"`
+  - [ ] P3：新增真实 Chromium 引擎门槛文档和构建检查，禁止把 `/bin/chromium` demo 宣称为 Chrome 引擎
+  - [ ] P4：接入官方 Skia 软件 raster 最小构建，替换当前自研 `/bin/skia_demo` 的“官方 Skia”缺口
+  - [ ] P5：接入官方 V8 `d8`/shell 的 jitless 最小构建
+  - [ ] P6：接入 Blink/content_shell 单进程软件渲染最小启动链路
 - [√] 文档化浏览器路线
-  - [√] 新增 `docs/browser-engine-roadmap.md`，记录当前轻量浏览器、用户态化、NetSurf 移植、HTTPS/JS 后续路线
-  - [√] 在 README 中说明当前 Browser 能力边界：支持基础 HTTP/HTML 文本化，不等同于 Chromium/WebKit 级完整浏览器
+  - [√] README 和路线文档必须说明：当前 Browser 能力边界是基础 HTTP/HTML 文本化，不等同于 Chromium/Blink/V8/Skia 级完整浏览器
 
 ### 17.3.1.2 Chromium 长期路线 / 原生核心能力补齐
 

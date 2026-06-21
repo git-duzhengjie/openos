@@ -399,13 +399,6 @@
 #define OPENOS_HAS_CHROMIUMCAPTEST 0
 #endif
 
-#if __has_include("embed_nsdemo.h")
-#include "embed_nsdemo.h"  /* NetSurf/OpenOS platform demo */
-#define OPENOS_HAS_NSDEMO 1
-#else
-#define OPENOS_HAS_NSDEMO 0
-#endif
-
 #if __has_include("embed_ping.h")
 #include "embed_ping.h"  /* ping user command */
 #define OPENOS_HAS_PING 1
@@ -1477,16 +1470,6 @@ void kernel_main(void) {
     }
 #endif
 
-#if OPENOS_HAS_NSDEMO
-    fd = vfs_open("/bin/nsdemo", O_CREAT | O_RDWR, 0755);
-    if (fd >= 0) {
-        vfs_write(fd, (const char *)nsdemo_elf, nsdemo_elf_size);
-        vfs_close(fd);
-        serial_write("[OK] Installed /bin/nsdemo user ELF\n");
-    } else {
-        serial_write("[WARN] Failed to install /bin/nsdemo\n");
-    }
-#endif
 
 #if OPENOS_HAS_PING
     fd = vfs_open("/bin/ping", O_CREAT | O_RDWR, 0755);

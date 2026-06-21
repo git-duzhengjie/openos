@@ -38,4 +38,4 @@ OpenOS 当前构建会生成并嵌入 CJK 字库资源，启动后以 `/fonts/cj
 - 支持完整 Unicode CJK 扩展区的外部字体包。
 - 支持矢量字体或离线栅格化字体缓存。
 - 用户态字体服务：字体枚举、fallback、文本 shaping 的平台统一入口。
-- 为 NetSurf / Dillo / LibWeb 等浏览器内核提供字体平台层。
+- 为 Chromium/Blink/Skia 提供字体平台层。

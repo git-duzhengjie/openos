@@ -486,19 +486,6 @@ if [ -f $USR/fdinherit.c ]; then
     echo "  Embedded: fdinherit.elf"
 fi
 
-if [ -f $USR/nsdemo.c ] && [ -f $USR/openos_netsurf_platform.c ]; then
-    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
-        -fno-stack-protector -fno-builtin \
-        -c $USR/openos_netsurf_platform.c -o $BUILD/openos_netsurf_platform.o
-    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
-        -fno-stack-protector -fno-builtin \
-        -c $USR/nsdemo.c -o $BUILD/nsdemo.o
-    ld -m elf_i386 -T $USR/user.ld -o $BUILD/nsdemo.elf $BUILD/crt0.o $BUILD/openos_netsurf_platform.o $BUILD/nsdemo.o
-    verify_user_start $BUILD/nsdemo.elf nsdemo.elf
-    python3 _embed_elf.py $BUILD/nsdemo.elf $SRC/include/embed_nsdemo.h nsdemo_elf
-    echo "  Embedded: nsdemo.elf"
-fi
-
 if [ -f $USR/fault.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \
