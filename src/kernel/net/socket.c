@@ -354,7 +354,8 @@ static int socket_poll(file_t *f, uint32_t events) {
     if (sock->flags & SOCKET_FLAG_PAIR) {
         if ((events & VFS_POLLIN) && !sock->info.read_shutdown && sock->recv_count > 0) ready |= VFS_POLLIN;
         if ((events & VFS_POLLOUT) && !sock->info.write_shutdown && sock->peer &&
-            sock->peer->magic == SOCKET_MAGIC && !sock->peer->info.read_shutdown) ready |= VFS_POLLOUT;
+            sock->peer->magic == SOCKET_MAGIC && !sock->peer->info.read_shutdown &&
+            sock->peer->recv_count < SOCKET_RECV_QUEUE_LEN) ready |= VFS_POLLOUT;
         if (!sock->peer || sock->peer->magic != SOCKET_MAGIC || sock->info.read_shutdown ||
             (sock->peer && sock->peer->magic == SOCKET_MAGIC && sock->peer->info.write_shutdown)) ready |= VFS_POLLHUP;
     } else if (socket_type_base(sock->info.type) == OPENOS_SOCK_STREAM) {

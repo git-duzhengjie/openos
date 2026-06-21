@@ -477,6 +477,7 @@
   - [ ] TCP 长连接、半关闭、RST、超时、窗口与重传压力测试
     - [√] 已新增 `SYS_SHUTDOWN` / `openos_shutdown` 基础半关闭 ABI，并在 `/bin/chromiumcaptest` 覆盖 socketpair 写端关闭、读端关闭、`SHUT_RDWR`、非法 how、send/recv 拒绝和 poll `POLLHUP` 语义
     - [√] 已新增 `/bin/chromiumcaptest` TCP listening socket 状态机边界验收，覆盖 bound->listening、重复 listen、非法 backlog，以及 listening socket 上 connect/send/recv 拒绝语义
+    - [√] 已补齐 socketpair 超时压力边界验收，`SO_RCVTIMEO/SO_SNDTIMEO` 覆盖空读失败、满队列写失败，并修正满队列时 `poll(POLLOUT)` 不再误报 ready
   - [ ] DNS resolver 完善：缓存、超时、失败回退、IPv4 优先策略
     - [√] 已新增 DNS IPv4 字面量快路径，用户态 `openos_dnslookup/openos_getaddrinfo/openos_gethostbyname` 可离线解析 IPv4 地址，并接入 `/bin/chromiumcaptest` 验收
     - [√] 已为 DNS resolver 增加成功缓存、失败负缓存、毫秒级超时回退，并在 `/bin/chromiumcaptest` 覆盖重复解析快路径

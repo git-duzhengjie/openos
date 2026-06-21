@@ -2424,6 +2424,61 @@ static int test_socket_options(void)
     return CAP_PASS;
 }
 
+static int test_socket_timeout_pressure(void)
+{
+    int sv[2];
+    openos_timeval_t tv;
+    char ch;
+    int i;
+    openos_pollfd_t pfd;
+
+    if (openos_socketpair(OPENOS_AF_UNSPEC, OPENOS_SOCK_STREAM, 0, sv) != 0) {
+        return CAP_FAIL;
+    }
+
+    tv.tv_sec = 0;
+    tv.tv_usec = 1000;
+    if (openos_setsockopt(sv[0], OPENOS_SOL_SOCKET, OPENOS_SO_RCVTIMEO, &tv, sizeof(tv)) != 0 ||
+        openos_setsockopt(sv[1], OPENOS_SOL_SOCKET, OPENOS_SO_SNDTIMEO, &tv, sizeof(tv)) != 0) {
+        openos_close(sv[0]);
+        openos_close(sv[1]);
+        return CAP_FAIL;
+    }
+
+    if (openos_recv(sv[0], &ch, 1, 0) >= 0) {
+        openos_close(sv[0]);
+        openos_close(sv[1]);
+        return CAP_FAIL;
+    }
+
+    for (i = 0; i < 8; ++i) {
+        if (openos_send(sv[1], "x", 1, 0) != 1) {
+            openos_close(sv[0]);
+            openos_close(sv[1]);
+            return CAP_FAIL;
+        }
+    }
+
+    pfd.fd = sv[1];
+    pfd.events = OPENOS_POLLOUT;
+    pfd.revents = 0;
+    if (openos_poll(&pfd, 1, 0) != 0 || (pfd.revents & OPENOS_POLLOUT)) {
+        openos_close(sv[0]);
+        openos_close(sv[1]);
+        return CAP_FAIL;
+    }
+
+    if (openos_send(sv[1], "y", 1, 0) >= 0) {
+        openos_close(sv[0]);
+        openos_close(sv[1]);
+        return CAP_FAIL;
+    }
+
+    openos_close(sv[0]);
+    openos_close(sv[1]);
+    return CAP_PASS;
+}
+
 static int test_kernel_pressure_smoke(void)
 {
     int i;
@@ -2436,6 +2491,8 @@ static int test_kernel_pressure_smoke(void)
         if (test_message_queue() != CAP_PASS)
             return CAP_FAIL;
         if (test_socketpair_poll() != CAP_PASS)
+            return CAP_FAIL;
+        if (test_socket_timeout_pressure() != CAP_PASS)
             return CAP_FAIL;
     }
 
@@ -2458,7 +2515,7 @@ int main(int argc, char **argv)
     (void)argv;
 
     openos_printf("Chromium core capability test\n");
-    openos_printf("target: mmap file-mmap fs-metadata path-normalization fs-mutations getdents browser-dirs resource-pak sparse-seek mprotect v8-memory-policy brk thread tls pthread-sync futex shm eventfd message-queue service-channel socketpair poll ipc-pressure fcntl shutdown sockopt tcp-listen-boundaries time nanosleep spawn waitpid cxxabi fork pipe fd argv env dns font gui clipboard pressure-smoke\n");
+    openos_printf("target: mmap file-mmap fs-metadata path-normalization fs-mutations getdents browser-dirs resource-pak sparse-seek mprotect v8-memory-policy brk thread tls pthread-sync futex shm eventfd message-queue service-channel socketpair poll ipc-pressure fcntl shutdown sockopt socket-timeout-pressure tcp-listen-boundaries time nanosleep spawn waitpid cxxabi fork pipe fd argv env dns font gui clipboard pressure-smoke\n");
 
     status = test_uptime();
     print_result("monotonic uptime", status);
@@ -2602,6 +2659,10 @@ int main(int argc, char **argv)
 
     status = test_socket_options();
     print_result("socket options setsockopt/getsockopt", status);
+    failed += status == CAP_FAIL;
+
+    status = test_socket_timeout_pressure();
+    print_result("socket timeout pressure boundaries", status);
     failed += status == CAP_FAIL;
 
     status = test_tcp_listen_boundaries();
