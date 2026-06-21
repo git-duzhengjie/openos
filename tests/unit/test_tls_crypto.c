@@ -127,6 +127,48 @@ static void test_tls12_finished_verify_data(void)
     assert_bytes_eq(expected_server, server_verify, sizeof(expected_server));
 }
 
+static void test_tls12_handshake_transcript(void)
+{
+    uint8_t master_secret[TLS12_MASTER_SECRET_SIZE];
+    static const uint8_t part1[] = {1, 0, 0, 4, 't', 'e', 's', 't'};
+    static const uint8_t part2[] = {2, 0, 0, 3, 'o', 's', '!'};
+    static const uint8_t whole[] = {
+        1, 0, 0, 4, 't', 'e', 's', 't',
+        2, 0, 0, 3, 'o', 's', '!',
+    };
+    uint8_t transcript_hash[TLS_SHA256_DIGEST_SIZE];
+    uint8_t direct_hash[TLS_SHA256_DIGEST_SIZE];
+    uint8_t from_transcript[TLS12_VERIFY_DATA_SIZE];
+    uint8_t direct[TLS12_VERIFY_DATA_SIZE];
+    tls12_handshake_transcript_t transcript = {0};
+
+    for (size_t i = 0; i < sizeof(master_secret); ++i) {
+        master_secret[i] = (uint8_t)i;
+    }
+
+    ASSERT_EQ_INT(-1, tls12_handshake_transcript_update(&transcript, part1, sizeof(part1)));
+    tls12_handshake_transcript_init(&transcript);
+    ASSERT_EQ_INT(0, tls12_handshake_transcript_update(&transcript, part1, sizeof(part1)));
+    ASSERT_EQ_INT(0, tls12_handshake_transcript_update(&transcript, NULL, 0u));
+    ASSERT_EQ_INT(0, tls12_handshake_transcript_update(&transcript, part2, sizeof(part2)));
+    ASSERT_EQ_INT(-1, tls12_handshake_transcript_update(&transcript, NULL, 1u));
+
+    ASSERT_EQ_INT(0, tls12_handshake_transcript_hash_sha256(&transcript, transcript_hash));
+    tls_sha256(whole, sizeof(whole), direct_hash);
+    assert_bytes_eq(direct_hash, transcript_hash, sizeof(direct_hash));
+
+    ASSERT_EQ_INT(0, tls12_compute_finished_verify_data_sha256_from_transcript(master_secret,
+                                                                               "client finished",
+                                                                               &transcript,
+                                                                               from_transcript));
+    ASSERT_EQ_INT(0, tls12_compute_finished_verify_data_sha256(master_secret,
+                                                               "client finished",
+                                                               whole,
+                                                               sizeof(whole),
+                                                               direct));
+    assert_bytes_eq(direct, from_transcript, sizeof(direct));
+}
+
 static void test_tls12_aead_record_helpers(void)
 {
     uint8_t key_block[40];
@@ -524,6 +566,7 @@ int main(void)
     UNIT_TEST_RUN(test_hmac_sha256_vector);
     UNIT_TEST_RUN(test_tls12_prf_sha256_vectors);
     UNIT_TEST_RUN(test_tls12_finished_verify_data);
+    UNIT_TEST_RUN(test_tls12_handshake_transcript);
     UNIT_TEST_RUN(test_tls12_aead_record_helpers);
     UNIT_TEST_RUN(test_aes128_and_gcm_vectors);
     UNIT_TEST_RUN(test_tls12_aes128_gcm_record_protection);

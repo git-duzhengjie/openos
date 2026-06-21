@@ -1208,6 +1208,11 @@ gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
     -I $SRC/include \
+    -c $SRC/tls_handshake.c -o $BUILD/tls_handshake.o
+
+gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
+    -I $SRC/include \
     -c $SRC/tls_trust.c -o $BUILD/tls_trust.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
@@ -1391,6 +1396,7 @@ ld -m elf_i386 -T $SRC/linker.ld \
     $BUILD/i18n.o \
     $BUILD/tls_crypto.o \
     $BUILD/tls_parser.o \
+    $BUILD/tls_handshake.o \
     $BUILD/tls_trust.o \
     $BUILD/tls_x509.o \
     $BUILD/gui.o \

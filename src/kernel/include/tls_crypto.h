@@ -65,6 +65,11 @@ typedef struct tls12_aes128_gcm_record_layer {
     tls12_aes128_gcm_record_keys_t keys;
 } tls12_aes128_gcm_record_layer_t;
 
+typedef struct tls12_handshake_transcript {
+    tls_sha256_ctx_t sha256;
+    int initialized;
+} tls12_handshake_transcript_t;
+
 void tls_sha256_init(tls_sha256_ctx_t* ctx);
 void tls_sha256_update(tls_sha256_ctx_t* ctx, const uint8_t* data, size_t len);
 void tls_sha256_final(tls_sha256_ctx_t* ctx, uint8_t out[TLS_SHA256_DIGEST_SIZE]);
@@ -115,6 +120,18 @@ int tls12_compute_finished_verify_data_sha256(const uint8_t master_secret[TLS12_
                                               const uint8_t* handshake_messages,
                                               size_t handshake_messages_len,
                                               uint8_t verify_data[TLS12_VERIFY_DATA_SIZE]);
+
+void tls12_handshake_transcript_init(tls12_handshake_transcript_t* transcript);
+int tls12_handshake_transcript_update(tls12_handshake_transcript_t* transcript,
+                                      const uint8_t* handshake_message,
+                                      size_t handshake_message_len);
+int tls12_handshake_transcript_hash_sha256(const tls12_handshake_transcript_t* transcript,
+                                           uint8_t handshake_hash[TLS_SHA256_DIGEST_SIZE]);
+int tls12_compute_finished_verify_data_sha256_from_transcript(
+    const uint8_t master_secret[TLS12_MASTER_SECRET_SIZE],
+    const char* label,
+    const tls12_handshake_transcript_t* transcript,
+    uint8_t verify_data[TLS12_VERIFY_DATA_SIZE]);
 
 size_t tls12_key_block_required_len(const tls12_key_block_layout_t* layout);
 

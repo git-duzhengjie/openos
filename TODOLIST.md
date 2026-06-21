@@ -484,6 +484,9 @@
     - [√] 已新增 `tls_x509` 最小 DER X.509 证书结构解析底座，支持安全 TLV 长度解析、证书顶层三段解析、TBS 内版本/序列号/issuer/validity/subject/SPKI 原始切片提取、UTC/GeneralizedTime 有效期解析校验、issuer/subject 原始 DER 链接匹配，并已在 `tls_trust` 层串起证书链结构校验、有效期校验与信任根锚定，接入单测与内核构建脚本
     - [√] 已补齐 X.509 OID/AlgorithmIdentifier/SPKI/签名 BIT STRING/RSA 公钥/DigestInfo 解析，新增 SHA256-RSA PKCS#1 v1.5 签名验签底座，并提供证书链签名校验与 TLS Certificate record 签名校验桥接入口
     - [√] 已新增 TLS 1.2 SHA-256 PRF、master secret/key block/Finished verify data 派生、AEAD key block 切片、record AAD/nonce 构造、AES-128 单块、AES-128-GCM 加解密认证、TLS record header view/write 工具、TLS 1.2 AES_128_GCM payload/wire record protect/unprotect 封装，以及自动选择 client/server 写密钥、固定 IV、读写序列号递增的 record layer 上下文，并接入 NIST 向量、往返、篡改失败和 sequence 不回退单测
+    - [√] 已新增 TLS 1.2 handshake transcript SHA-256 累积上下文，支持握手消息分片增量哈希、快照导出 handshake hash，以及直接从 transcript 派生 Finished verify_data，为后续握手状态机串联 ClientHello/ServerHello/Certificate/Finished 打底
+    - [√] 已新增 `tls_handshake` TLS 1.2 客户端握手状态机骨架，覆盖 ClientHello sent、ServerHello/Certificate/ServerHelloDone received、ClientKeyExchange/ChangeCipherSpec/Finished sent、Server ChangeCipherSpec/Finished received、transcript 累积、证书链 view 捕获、协商版本/cipher suite 记录、master secret 注入后的 client/server Finished verify_data 计算与常量时间校验，以及乱序/非法 CCS/错误 Finished 失败路径，并已接入单测与内核构建脚本
+    - [√] 已将 handshake 中的 master secret 串联到 TLS 1.2 AES_128_GCM_SHA256 key block 派生与 `tls12_aes128_gcm_record_layer_t` 初始化，保存 record keys/key block，支持按 client/server role 配置 record 层，并通过 client 加密、server 解密联通单测验证
   - [ ] 为 Chromium net stack 所需 socket 行为补齐错误码、非阻塞、poll 边界语义
     - [√] 已增强 `/bin/chromiumcaptest` 的 `socketpair` poll/select 边界验收，覆盖空队列不报 `POLLIN`、多 fd poll、负 fd 忽略、非法 fd `POLLERR`、select 读写位图、可写端 `POLLOUT`、空读失败和对端关闭 `POLLHUP`
     - [√] 已新增 `SYS_FCNTL` / `openos_fcntl` 最小 flags ABI，覆盖 `F_GETFL/F_SETFL/O_NONBLOCK` 开关、非法 fd 和非法 cmd，为后续 socket 非阻塞 I/O 语义打底

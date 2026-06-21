@@ -406,6 +406,55 @@ int tls12_compute_finished_verify_data_sha256(const uint8_t master_secret[TLS12_
                             TLS12_VERIFY_DATA_SIZE);
 }
 
+void tls12_handshake_transcript_init(tls12_handshake_transcript_t* transcript)
+{
+    if (!transcript) return;
+    tls_sha256_init(&transcript->sha256);
+    transcript->initialized = 1;
+}
+
+int tls12_handshake_transcript_update(tls12_handshake_transcript_t* transcript,
+                                      const uint8_t* handshake_message,
+                                      size_t handshake_message_len)
+{
+    if (!transcript || !transcript->initialized ||
+        (!handshake_message && handshake_message_len > 0u)) {
+        return -1;
+    }
+    tls_sha256_update(&transcript->sha256, handshake_message, handshake_message_len);
+    return 0;
+}
+
+int tls12_handshake_transcript_hash_sha256(const tls12_handshake_transcript_t* transcript,
+                                           uint8_t handshake_hash[TLS_SHA256_DIGEST_SIZE])
+{
+    tls_sha256_ctx_t copy;
+
+    if (!transcript || !transcript->initialized || !handshake_hash) return -1;
+    copy = transcript->sha256;
+    tls_sha256_final(&copy, handshake_hash);
+    return 0;
+}
+
+int tls12_compute_finished_verify_data_sha256_from_transcript(
+    const uint8_t master_secret[TLS12_MASTER_SECRET_SIZE],
+    const char* label,
+    const tls12_handshake_transcript_t* transcript,
+    uint8_t verify_data[TLS12_VERIFY_DATA_SIZE])
+{
+    uint8_t handshake_hash[TLS_SHA256_DIGEST_SIZE];
+
+    if (!master_secret || !label || !transcript || !verify_data) return -1;
+    if (tls12_handshake_transcript_hash_sha256(transcript, handshake_hash) != 0) return -1;
+    return tls12_prf_sha256(master_secret,
+                            TLS12_MASTER_SECRET_SIZE,
+                            label,
+                            handshake_hash,
+                            sizeof(handshake_hash),
+                            verify_data,
+                            TLS12_VERIFY_DATA_SIZE);
+}
+
 static int tls_size_add_overflow(size_t a, size_t b, size_t* out)
 {
     size_t sum = a + b;
