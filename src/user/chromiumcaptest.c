@@ -403,6 +403,16 @@ static int test_file_mmap(void)
         openos_close(fd);
         return CAP_FAIL;
     }
+    if (openos_seek(fd, 0, SEEK_SET) != 0) {
+        openos_close(fd);
+        return CAP_FAIL;
+    }
+    char verify_private[2];
+    if (openos_read(fd, verify_private, 2) != 2 ||
+        verify_private[0] != payload[0] || verify_private[1] != payload[1]) {
+        openos_close(fd);
+        return CAP_FAIL;
+    }
 
     if (openos_seek(fd, 0, SEEK_SET) != 0) {
         openos_close(fd);

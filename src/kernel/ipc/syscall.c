@@ -1671,6 +1671,31 @@ static int sys_munmap_sync_shared_file_range(process_t *proc, uint32_t addr, uin
     return 0;
 }
 
+static uint32_t sys_mmap_file_page_flags(uint32_t prot, uint32_t flags)
+{
+    uint32_t page_flags = PTE_PRESENT | PTE_USER;
+
+    if ((prot & PROCESS_MMAP_PROT_WRITE) != 0) {
+        if ((flags & PROCESS_MMAP_FLAG_PRIVATE) != 0)
+            page_flags |= PTE_COW;
+        else
+            page_flags |= PTE_RW;
+    }
+
+    return page_flags;
+}
+
+static void sys_mmap_apply_file_page_flags(uint32_t base,
+                                           uint32_t pages,
+                                           uint32_t prot,
+                                           uint32_t flags)
+{
+    uint32_t page_flags = sys_mmap_file_page_flags(prot, flags);
+
+    for (uint32_t page = 0; page < pages; ++page)
+        vmm_update_page_flags(base + page * PAGE_SIZE, page_flags);
+}
+
 static uint32_t sys_mmap_anonymous(uint32_t addr, uint32_t len, uint32_t prot, uint32_t flags)
 {
     process_t *proc;
@@ -1800,7 +1825,7 @@ static uint32_t sys_mmap_file(uint32_t fd_raw, uint32_t len_raw, uint32_t prot_r
         if (n < 0) {
             vfs_seek(fd, saved_pos, 0);
             sys_mmap_remove_vma(proc, base, mapped_len);
-        sys_munmap_range(base, mapped_len);
+            sys_munmap_range(base, mapped_len);
             return (uint32_t)-1;
         }
         if (n == 0)
@@ -1808,12 +1833,13 @@ static uint32_t sys_mmap_file(uint32_t fd_raw, uint32_t len_raw, uint32_t prot_r
         if (copy_to_user((void *)(uintptr_t)(base + copied), chunk, (uint32_t)n) < 0) {
             vfs_seek(fd, saved_pos, 0);
             sys_mmap_remove_vma(proc, base, mapped_len);
-        sys_munmap_range(base, mapped_len);
+            sys_munmap_range(base, mapped_len);
             return (uint32_t)-1;
         }
         copied += (uint32_t)n;
     }
     vfs_seek(fd, saved_pos, 0);
+    sys_mmap_apply_file_page_flags(base, pages, prot, flags);
 
     if (base + mapped_len > proc->mmap_end)
         proc->mmap_end = base + mapped_len;
