@@ -2238,6 +2238,45 @@ static int test_socketpair_shutdown(void)
     return CAP_PASS;
 }
 
+static int test_tcp_listen_boundaries(void)
+{
+    int fd;
+    char ch = 'x';
+    openos_sockaddr_in_t addr;
+
+    fd = openos_socket(OPENOS_AF_INET, OPENOS_SOCK_STREAM, OPENOS_IPPROTO_TCP);
+    if (fd < 0) {
+        return CAP_FAIL;
+    }
+
+    openos_memset(&addr, 0, sizeof(addr));
+    addr.sin_family = OPENOS_AF_INET;
+    addr.sin_port = 18080;
+    addr.sin_addr = OPENOS_INADDR_ANY;
+
+    if (openos_bind(fd, (const openos_sockaddr_t *)&addr, sizeof(addr)) != 0) {
+        openos_close(fd);
+        return CAP_FAIL;
+    }
+
+    if (openos_listen(fd, 4) != 0) {
+        openos_close(fd);
+        return CAP_FAIL;
+    }
+
+    if (openos_listen(fd, 4) == 0 ||
+        openos_listen(fd, -1) == 0 ||
+        openos_connect(fd, (const openos_sockaddr_t *)&addr, sizeof(addr)) == 0 ||
+        openos_send(fd, &ch, 1, 0) >= 0 ||
+        openos_recv(fd, &ch, 1, 0) >= 0) {
+        openos_close(fd);
+        return CAP_FAIL;
+    }
+
+    openos_close(fd);
+    return CAP_PASS;
+}
+
 static int test_socket_options(void)
 {
     int sv[2];
@@ -2358,7 +2397,7 @@ int main(int argc, char **argv)
     (void)argv;
 
     openos_printf("Chromium core capability test\n");
-    openos_printf("target: mmap file-mmap fs-metadata path-normalization fs-mutations getdents browser-dirs resource-pak sparse-seek mprotect v8-memory-policy brk thread tls pthread-sync futex shm eventfd message-queue service-channel socketpair poll ipc-pressure fcntl shutdown sockopt time nanosleep spawn waitpid cxxabi fork pipe fd argv env dns font gui clipboard pressure-smoke\n");
+    openos_printf("target: mmap file-mmap fs-metadata path-normalization fs-mutations getdents browser-dirs resource-pak sparse-seek mprotect v8-memory-policy brk thread tls pthread-sync futex shm eventfd message-queue service-channel socketpair poll ipc-pressure fcntl shutdown sockopt tcp-listen-boundaries time nanosleep spawn waitpid cxxabi fork pipe fd argv env dns font gui clipboard pressure-smoke\n");
 
     status = test_uptime();
     print_result("monotonic uptime", status);
@@ -2502,6 +2541,10 @@ int main(int argc, char **argv)
 
     status = test_socket_options();
     print_result("socket options setsockopt/getsockopt", status);
+    failed += status == CAP_FAIL;
+
+    status = test_tcp_listen_boundaries();
+    print_result("tcp listen socket boundaries", status);
     failed += status == CAP_FAIL;
 
     status = test_spawn_argv_env_wait();
