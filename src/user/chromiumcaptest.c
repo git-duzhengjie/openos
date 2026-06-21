@@ -1009,6 +1009,66 @@ static int test_getdents(void)
     return CAP_PASS;
 }
 
+static int test_chromium_shell_installation(void)
+{
+    openos_stat_t st;
+    int fd;
+    unsigned char ident[4];
+    const char *download_path = "/downloads/chromiumcaptest.tmp";
+    const char payload[] = "chromium download smoke";
+    char buf[sizeof(payload)];
+
+    openos_memset(&st, 0, sizeof(st));
+    if (openos_stat("/bin/chromium", &st) != 0)
+        return CAP_FAIL;
+    if ((st.mode & FS_FILE) != FS_FILE || st.size < 1024)
+        return CAP_FAIL;
+
+    fd = openos_open("/bin/chromium", O_RDONLY, 0);
+    if (fd < 0)
+        return CAP_FAIL;
+    if (openos_read(fd, ident, sizeof(ident)) != (int)sizeof(ident)) {
+        openos_close(fd);
+        return CAP_FAIL;
+    }
+    openos_close(fd);
+    if (ident[0] != 0x7f || ident[1] != 'E' || ident[2] != 'L' || ident[3] != 'F')
+        return CAP_FAIL;
+
+    openos_mkdir("/downloads", 0755);
+    openos_unlink(download_path);
+    fd = openos_open(download_path, O_CREAT | O_TRUNC | O_RDWR, 0644);
+    if (fd < 0)
+        return CAP_FAIL;
+    if (openos_write(fd, payload, sizeof(payload)) != (int)sizeof(payload)) {
+        openos_close(fd);
+        openos_unlink(download_path);
+        return CAP_FAIL;
+    }
+    if (openos_seek(fd, 0, SEEK_SET) != 0) {
+        openos_close(fd);
+        openos_unlink(download_path);
+        return CAP_FAIL;
+    }
+    openos_memset(buf, 0, sizeof(buf));
+    if (openos_read(fd, buf, sizeof(buf)) != (int)sizeof(buf)) {
+        openos_close(fd);
+        openos_unlink(download_path);
+        return CAP_FAIL;
+    }
+    openos_close(fd);
+    if (openos_memcmp(buf, payload, sizeof(payload)) != 0) {
+        openos_unlink(download_path);
+        return CAP_FAIL;
+    }
+    if (openos_stat(download_path, &st) != 0 || st.size != sizeof(payload)) {
+        openos_unlink(download_path);
+        return CAP_FAIL;
+    }
+    openos_unlink(download_path);
+    return CAP_PASS;
+}
+
 static int test_sbrk(void)
 {
     unsigned char *old_break;
@@ -2515,7 +2575,7 @@ int main(int argc, char **argv)
     (void)argv;
 
     openos_printf("Chromium core capability test\n");
-    openos_printf("target: mmap file-mmap fs-metadata path-normalization fs-mutations getdents browser-dirs resource-pak sparse-seek mprotect v8-memory-policy brk thread tls pthread-sync futex shm eventfd message-queue service-channel socketpair poll ipc-pressure fcntl shutdown sockopt socket-timeout-pressure tcp-listen-boundaries time nanosleep spawn waitpid cxxabi fork pipe fd argv env dns font gui clipboard pressure-smoke\n");
+    openos_printf("target: mmap file-mmap fs-metadata path-normalization fs-mutations getdents browser-dirs resource-pak chromium-shell sparse-seek mprotect v8-memory-policy brk thread tls pthread-sync futex shm eventfd message-queue service-channel socketpair poll ipc-pressure fcntl shutdown sockopt socket-timeout-pressure tcp-listen-boundaries time nanosleep spawn waitpid cxxabi fork pipe fd argv env dns font gui clipboard pressure-smoke\n");
 
     status = test_uptime();
     print_result("monotonic uptime", status);
@@ -2575,6 +2635,10 @@ int main(int argc, char **argv)
 
     status = test_browser_resource_paths();
     print_result("browser resource pak paths", status);
+    failed += status == CAP_FAIL;
+
+    status = test_chromium_shell_installation();
+    print_result("chromium shell install/download smoke", status);
     failed += status == CAP_FAIL;
 
     status = test_sparse_seek_file();
