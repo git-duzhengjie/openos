@@ -149,13 +149,18 @@ fetch_skia() {
     if [ -d "$SKIA_ROOT/.git" ]; then
         if git -C "$SKIA_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
             git -C "$SKIA_ROOT" fetch --depth 1 --tags origin || true
+            if git -C "$SKIA_ROOT" config --bool core.sparseCheckout | grep -qi '^true$'; then
+                echo "Disabling sparse checkout for official Skia source tree..."
+                git -C "$SKIA_ROOT" sparse-checkout disable
+                git -C "$SKIA_ROOT" checkout --force HEAD
+            fi
         else
             echo "Broken Skia .git directory detected; cleaning it before refetch..." >&2
             rm -rf "$SKIA_ROOT"
         fi
     fi
     if [ ! -d "$SKIA_ROOT/.git" ] && [ ! -s "$SKIA_ROOT/.openos-source-commit" ]; then
-        if ! git clone --depth 1 --filter=blob:none --sparse https://github.com/google/skia.git "$SKIA_ROOT"; then
+        if ! git clone --depth 1 --filter=blob:none https://github.com/google/skia.git "$SKIA_ROOT"; then
             echo "GitHub Skia clone failed; falling back to official GitHub source snapshot..." >&2
             rm -rf "$SKIA_ROOT"
             fetch_skia_snapshot
@@ -207,7 +212,7 @@ gn_gen() {
         exit 1
     fi
     cd "$SKIA_ROOT"
-    gn gen "$SKIA_OUT" --args='is_official_build=false is_debug=false skia_enable_gpu=false skia_use_gl=false skia_use_vulkan=false skia_use_system_libjpeg_turbo=false skia_use_system_libpng=false skia_use_system_zlib=false skia_use_system_freetype2=false skia_use_system_harfbuzz=false skia_use_system_expat=false skia_use_icu=false skia_enable_fontmgr_empty=true extra_cflags=["-DSK_DISABLE_LEGACY_SHADERCONTEXT"]'
+    gn gen "$SKIA_OUT" --args='is_official_build=false is_debug=false skia_enable_ganesh=false skia_enable_graphite=false skia_use_gl=false skia_use_vulkan=false skia_use_metal=false skia_use_dawn=false skia_use_direct3d=false skia_use_fontconfig=false skia_use_freetype=false skia_use_harfbuzz=false skia_use_icu=false skia_enable_fontmgr_empty=true skia_enable_fontmgr_fontconfig=false skia_enable_fontmgr_FontConfigInterface=false skia_use_libjpeg_turbo_decode=false skia_use_libjpeg_turbo_encode=false skia_use_libpng_decode=false skia_use_libpng_encode=false skia_use_libwebp_decode=false skia_use_libwebp_encode=false skia_use_zlib=false skia_use_system_libjpeg_turbo=false skia_use_system_libpng=false skia_use_system_zlib=false skia_use_system_freetype2=false skia_use_system_harfbuzz=false skia_use_system_expat=false extra_cflags=["-DSK_DISABLE_LEGACY_SHADERCONTEXT"]'
 }
 build_skia() {
     with_depot_path
@@ -216,7 +221,7 @@ build_skia() {
         exit 1
     fi
     gn_gen
-    ninja -C "$SKIA_OUT" libskia modules
+    ninja -C "$SKIA_OUT" libskia.a
     write_pin
 }
 
