@@ -391,6 +391,10 @@
   - [√] P2：新增 OpenOS Chromium GN/toolchain 骨架，目标为 `target_os="openos"`、`target_cpu="x86"`
   - [√] P3：新增真实 Chromium 引擎门槛文档和构建检查，禁止把 `/bin/chromium` demo 宣称为 Chrome 引擎
   - [ ] P4：接入官方 Skia 软件 raster 最小构建，替换当前自研 `/bin/skia_demo` 的“官方 Skia”缺口
+    - [√] P4.0：新增官方 Skia 获取/检查/构建入口和 `skia.official.pin` 生成规则
+    - [ ] P4.1：安装或提供 gn/ninja/clang++ 等宿主构建工具
+    - [ ] P4.2：拉取官方 Skia checkout 并写入 `ports/chromium-openos/skia.official.pin`
+    - [ ] P4.3：完成官方 Skia 软件 raster 最小库构建
   - [ ] P5：接入官方 V8 `d8`/shell 的 jitless 最小构建
   - [ ] P6：接入 Blink/content_shell 单进程软件渲染最小启动链路
 - [√] 文档化浏览器路线

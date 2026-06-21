@@ -77,6 +77,30 @@ target/libopenos_cxx.a
 
 这个 sysroot **不是 Linux sysroot**。它只表达 OpenOS 当前 freestanding 用户态能力，后续 Skia/V8/Blink 的平台 glue 应基于它交叉编译，并把缺失的 POSIX、C/C++ runtime、线程、文件、网络、图形能力逐项补齐。
 
+## 官方 Skia 接入入口
+
+真实 Chromium 路线要求官方 Skia，当前 OpenOS 自研 `/bin/skia_demo` 只能作为 GUI smoke。
+
+检查官方 Skia 前置条件：
+
+```bash
+./build.sh skia-official-check
+```
+
+获取/构建官方 Skia：
+
+```bash
+scripts/skia-official.sh --fetch
+scripts/skia-official.sh --gn-gen
+scripts/skia-official.sh --build
+```
+
+成功后必须生成：
+
+```text
+ports/chromium-openos/skia.official.pin
+```
+
 ## Chromium 引擎真实性门禁
 
 当前 `/bin/chromium` 仍是 OpenOS Chromium Demo，不是真实 Chrome/Chromium 引擎。门槛和检查脚本见：

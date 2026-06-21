@@ -28,7 +28,7 @@ if [ "$OPENOS_CJK_COVERAGE" != "ui" ] && [ "$OPENOS_CJK_EMBED" != "1" ] && [ "$O
 fi
 
 usage() {
-    echo "Usage: ARCH=i386|x86_64 ./build.sh [clean|test|cppsmoke|sdk|sdk-smoke|chromium-source-check|chromium-gn-check|chromium-engine-gate]"
+    echo "Usage: ARCH=i386|x86_64 ./build.sh [clean|test|cppsmoke|sdk|sdk-smoke|chromium-source-check|chromium-gn-check|chromium-engine-gate|skia-official-check]"
     echo "       ./build.sh [i386|x86_64] [clean|test|cppsmoke|sdk|sdk-smoke]"
     echo "       ./build.sh cppsmoke    # probe OpenOS userland C++ toolchain"
     echo "       ./build.sh sdk         # export OpenOS userland SDK/sysroot for Chromium ports"
@@ -36,6 +36,7 @@ usage() {
     echo "       ./build.sh chromium-source-check # check Chromium upstream checkout prerequisites"
     echo "       ./build.sh chromium-gn-check # check Chromium OpenOS GN/toolchain overlay"
     echo "       ./build.sh chromium-engine-gate # verify Chromium demo is not mislabeled as real Chrome"
+    echo "       ./build.sh skia-official-check # check official Skia intake prerequisites"
 }
 
 check_cpp_toolchain() {
@@ -85,6 +86,9 @@ case "${1:-}" in
         ;;
     chromium-engine-gate|chrome-engine-gate|real-chrome-gate)
         exec bash scripts/chromium-engine-gate.sh --check
+        ;;
+    skia-official-check|skia-check|official-skia-check)
+        exec bash scripts/skia-official.sh --check
         ;;
     i386|x86_64)
         BUILD_ARCH="$1"

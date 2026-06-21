@@ -86,3 +86,38 @@ Skia 最小 raster 仍可能触发：
 3. smoke 在 OpenOS 中绘制 raster 内容并 present 到 GUI 窗口。
 4. smoke 控制台输出明确 PASS/FAIL。
 5. 文档不再把当前 `/bin/skia_demo` 描述为真实 Skia，只称为 Skia 接入前的 OpenOS 图形能力 smoke。
+
+## 官方 Skia 接入口
+
+当前 `src/user/skia_demo.c` 只是 OpenOS GUI/raster smoke，不是官方 Skia。
+
+官方 Skia 源码、pin 和最小构建入口固定为：
+
+```bash
+./build.sh skia-official-check
+scripts/skia-official.sh --fetch
+scripts/skia-official.sh --gn-gen
+scripts/skia-official.sh --build
+```
+
+默认外部目录：
+
+```text
+.openos-deps/skia
+.openos-deps/depot_tools
+```
+
+成功接入官方 Skia 后必须生成：
+
+```text
+ports/chromium-openos/skia.official.pin
+```
+
+在该 pin 出现前，P4 不能标记为完全完成，`/bin/skia_demo` 也不能宣称为官方 Skia。
+
+当前已知宿主要求：
+
+- git / python3 / curl / tar / xz
+- depot_tools 提供或宿主提供 gn/ninja
+- clang++ 或 g++
+- 至少 12GB 可用空间用于独立 Skia checkout/build
