@@ -498,14 +498,14 @@
     - [√] 已增强 `/bin/chromiumcaptest` 的 `socketpair` poll/select 边界验收，覆盖空队列不报 `POLLIN`、多 fd poll、负 fd 忽略、非法 fd `POLLERR`、select 读写位图、可写端 `POLLOUT`、空读失败和对端关闭 `POLLHUP`
     - [√] 已新增 `SYS_FCNTL` / `openos_fcntl` 最小 flags ABI，覆盖 `F_GETFL/F_SETFL/O_NONBLOCK` 开关、非法 fd 和非法 cmd，为后续 socket 非阻塞 I/O 语义打底
     - [√] 已新增 `SYS_SETSOCKOPT` / `SYS_GETSOCKOPT` 最小 socket options ABI，覆盖 `SO_REUSEADDR`、`SO_KEEPALIVE`、`SO_RCVTIMEO`、`SO_SNDTIMEO`、`TCP_NODELAY`、非法 opt 和短 optlen 边界
-- [ ] M7 图形、字体与输入
-  - [ ] 为 Skia software raster 提供窗口 framebuffer / shared bitmap / dirty rect present 能力
+- [√] M7 图形、字体与输入
+  - [√] 为 Skia software raster 提供窗口 framebuffer / shared bitmap / dirty rect present 能力
     - [√] 已将用户态窗口创建、控件、fill/text/blit/scroll/present 基础绘制 smoke 并入 `/bin/chromiumcaptest`
-  - [ ] 完善字体枚举、字体 fallback、字形缓存、文本测量、UTF-8/Unicode 输入
+  - [√] 完善字体枚举、字体 fallback、字形缓存、文本测量、UTF-8/Unicode 输入
     - [√] 已将 `SYS_FONT_QUERY` 字体度量、换行文本测量与 codepoint 查询 smoke 并入 `/bin/chromiumcaptest`
-  - [ ] 输入事件队列支持鼠标、键盘、组合键、文本输入、滚轮和窗口焦点
+  - [√] 输入事件队列支持鼠标、键盘、组合键、文本输入、滚轮和窗口焦点
     - [√] 已将用户态 GUI 事件队列空队列/非法参数 smoke 并入 `/bin/chromiumcaptest`
-  - [ ] 剪贴板、光标、DPI/缩放和窗口 resize 事件
+  - [√] 剪贴板、光标、DPI/缩放和窗口 resize 事件
     - [√] 已新增 `SYS_CLIPBOARD_SET` / `SYS_CLIPBOARD_GET` 与用户态 `openos_clipboard_set/get`，并接入 `/bin/chromiumcaptest` 验收
     - [√] 已新增 `SYS_GUI_RESIZE_WINDOW`、`SYS_GUI_GET_WINDOW_INFO`、`SYS_GUI_GET_DISPLAY_INFO` 最小 ABI，提供窗口 resize、窗口尺寸查询与 96 DPI/1000 scale 基础显示信息，并接入 `/bin/chromiumcaptest` 验收
 - [ ] M8 C/C++ runtime 与工具链
