@@ -1607,7 +1607,10 @@ static uint32_t sys_mmap_file(uint32_t fd_raw, uint32_t len_raw, uint32_t prot_r
         return (uint32_t)-1;
     if ((prot & ~(PROCESS_MMAP_PROT_READ | PROCESS_MMAP_PROT_WRITE)) != 0)
         return (uint32_t)-1;
-    if ((flags & PROCESS_MMAP_FLAG_FIXED) != 0)
+    if ((flags & ~(PROCESS_MMAP_FLAG_FILE | PROCESS_MMAP_FLAG_PRIVATE)) != 0)
+        return (uint32_t)-1;
+    if ((flags & (PROCESS_MMAP_FLAG_FILE | PROCESS_MMAP_FLAG_PRIVATE)) !=
+        (PROCESS_MMAP_FLAG_FILE | PROCESS_MMAP_FLAG_PRIVATE))
         return (uint32_t)-1;
 
     process_t *proc = proc_find(proc_current_pid());

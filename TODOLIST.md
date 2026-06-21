@@ -422,6 +422,7 @@
   - [ ] 文件 mmap 与 page cache 协同，支持只读资源映射和私有 COW 映射
     - [√] 已完成基础 file-backed private snapshot mmap：`SYS_MMAP_FILE` 可将 fd 内容映射到用户地址空间，并接入 `/bin/chromiumcaptest` 验收
     - [√] 已增强 `/bin/chromiumcaptest` 对 file-backed `MAP_PRIVATE` 的不回写校验：映射内修改后重新映射应仍看到原始文件内容
+    - [√] 已收紧 file-backed mmap flags 语义：当前仅接受 `MAP_PRIVATE|MAP_FILE`，显式拒绝 `MAP_SHARED`、`MAP_FIXED`、`MAP_ANON` 等未实现组合，并接入 `/bin/chromiumcaptest` 验收
   - [ ] 为 V8 预留 executable memory / jitless 两条路线的内核策略
     - [√] 已完成原生 `SYS_CHROMIUM_MEMORY_POLICY` 策略查询：当前 i386 阶段声明默认 jitless，`PROT_EXEC` 语义已保留，待 NX/W^X 后启用 executable mmap
 - [ ] M3 线程、同步与调度增强

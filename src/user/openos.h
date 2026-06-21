@@ -153,6 +153,7 @@
 
 #define OPENOS_MAP_ANON    0x01
 #define OPENOS_MAP_PRIVATE 0x02
+#define OPENOS_MAP_SHARED  0x04
 #define OPENOS_MAP_FIXED   0x10
 #define OPENOS_MAP_FILE    0x20
 

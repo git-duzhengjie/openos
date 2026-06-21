@@ -359,6 +359,22 @@ static int test_file_mmap(void)
         return CAP_FAIL;
     }
 
+    if ((int)openos_mmap_file(fd, 4096, OPENOS_PROT_READ,
+                              OPENOS_MAP_SHARED | OPENOS_MAP_FILE) != -1) {
+        openos_close(fd);
+        return CAP_FAIL;
+    }
+    if ((int)openos_mmap_file(fd, 4096, OPENOS_PROT_READ,
+                              OPENOS_MAP_PRIVATE | OPENOS_MAP_FILE | OPENOS_MAP_FIXED) != -1) {
+        openos_close(fd);
+        return CAP_FAIL;
+    }
+    if ((int)openos_mmap_file(fd, 4096, OPENOS_PROT_READ,
+                              OPENOS_MAP_PRIVATE | OPENOS_MAP_FILE | OPENOS_MAP_ANON) != -1) {
+        openos_close(fd);
+        return CAP_FAIL;
+    }
+
     openos_close(fd);
     return CAP_PASS;
 }
