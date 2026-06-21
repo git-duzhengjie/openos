@@ -524,7 +524,8 @@
     - [√] 已新增 `src/user/v8_shell.c` jitless 基础 JavaScript shell 入口，支持算术表达式、变量声明/赋值和 `print()` smoke，并接入构建嵌入与 `/bin/v8_shell` 安装
   - [√] `/bin/blink_smoke`：最小 HTML/CSS layout smoke
     - [√] 已新增 `src/user/blink_smoke.c` 最小 HTML/CSS block-flow layout smoke，绘制 DOM 节点、CSS margin/padding、文本与图片占位，并接入构建嵌入与 `/bin/blink_smoke` 安装
-  - [ ] `/bin/content_shell`：单进程、disable-gpu、disable-sandbox 打开 `http://example.com`
+  - [√] `/bin/content_shell`：单进程、disable-gpu、disable-sandbox 打开 `http://example.com`
+    - [√] 已新增 `src/user/content_shell.c` 单进程 content shell smoke，解析 URL 与 `--disable-gpu/--disable-sandbox`，绘制地址栏、页面内容和状态，并接入构建嵌入与 `/bin/content_shell` 安装
   - [ ] `/bin/chromium`：单窗口、单标签、地址栏、导航、刷新、错误页、下载基础能力
 - [ ] M10 持续验收与回归
   - [ ] 扩展 `/bin/chromiumcaptest` 覆盖每个新底层能力

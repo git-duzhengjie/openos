@@ -410,6 +410,16 @@ if [ -f $USR/blink_smoke.c ]; then
     echo "  Embedded: blink_smoke.elf"
 fi
 
+if [ -f $USR/content_shell.c ]; then
+    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+        -fno-stack-protector -fno-builtin \
+        -c $USR/content_shell.c -o $BUILD/content_shell.o
+    ld -m elf_i386 -T $USR/user.ld -o $BUILD/content_shell.elf $BUILD/crt0.o $BUILD/content_shell.o
+    verify_user_start $BUILD/content_shell.elf content_shell.elf
+    python3 _embed_elf.py $BUILD/content_shell.elf $SRC/include/embed_content_shell.h content_shell_elf
+    echo "  Embedded: content_shell.elf"
+fi
+
 if [ -f $USR/browser.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \

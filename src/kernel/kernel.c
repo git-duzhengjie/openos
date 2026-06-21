@@ -364,6 +364,13 @@
 #define OPENOS_HAS_BLINK_SMOKE 0
 #endif
 
+#if __has_include("embed_content_shell.h")
+#include "embed_content_shell.h"  /* single-process content shell smoke */
+#define OPENOS_HAS_CONTENT_SHELL 1
+#else
+#define OPENOS_HAS_CONTENT_SHELL 0
+#endif
+
 #if __has_include("embed_browser.h")
 #include "embed_browser.h"  /* browser user command */
 #define OPENOS_HAS_USER_BROWSER 1
@@ -1405,6 +1412,17 @@ void kernel_main(void) {
         serial_write("[OK] Installed /bin/blink_smoke user ELF\n");
     } else {
         serial_write("[WARN] Failed to install /bin/blink_smoke\n");
+    }
+#endif
+
+#if OPENOS_HAS_CONTENT_SHELL
+    fd = vfs_open("/bin/content_shell", O_CREAT | O_RDWR, 0755);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)content_shell_elf, content_shell_elf_size);
+        vfs_close(fd);
+        serial_write("[OK] Installed /bin/content_shell user ELF\n");
+    } else {
+        serial_write("[WARN] Failed to install /bin/content_shell\n");
     }
 #endif
 
