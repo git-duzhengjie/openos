@@ -134,6 +134,39 @@ static int syscall_clock_gettime(uint32_t clock_id, openos_timespec_t *user_ts)
     return copy_to_user(user_ts, &ts, sizeof(ts));
 }
 
+static int syscall_nanosleep(const openos_timespec_t *user_req, openos_timespec_t *user_rem)
+{
+    openos_timespec_t req;
+    openos_timespec_t rem;
+    uint64_t sec_ms;
+    uint64_t nsec_ms;
+    uint64_t total_ms;
+
+    if (!user_req)
+        return -1;
+    if (copy_from_user(&req, user_req, sizeof(req)) < 0)
+        return -1;
+    if (req.tv_sec < 0 || req.tv_nsec < 0 || req.tv_nsec >= 1000000000ll)
+        return -1;
+
+    sec_ms = (uint64_t)req.tv_sec * 1000ull;
+    nsec_ms = ((uint64_t)req.tv_nsec + 999999ull) / 1000000ull;
+    total_ms = sec_ms + nsec_ms;
+    if (sec_ms / 1000ull != (uint64_t)req.tv_sec || total_ms < sec_ms || total_ms > 0xffffffffull)
+        return -1;
+
+    if (total_ms > 0ull)
+        thread_sleep((uint32_t)total_ms);
+
+    if (user_rem) {
+        rem.tv_sec = 0;
+        rem.tv_nsec = 0;
+        if (copy_to_user(user_rem, &rem, sizeof(rem)) < 0)
+            return -1;
+    }
+    return 0;
+}
+
 static int syscall_clipboard_set(const char *text)
 {
     uint32_t len = 0;
@@ -1939,6 +1972,9 @@ uint32_t syscall_dispatch(uint32_t num,
 
     case SYS_CLOCK_GETTIME:
         return (uint32_t)syscall_clock_gettime(a, (openos_timespec_t *)b);
+
+    case SYS_NANOSLEEP:
+        return (uint32_t)syscall_nanosleep((const openos_timespec_t *)a, (openos_timespec_t *)b);
 
     case SYS_FONT_QUERY:
         {

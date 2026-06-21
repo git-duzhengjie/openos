@@ -141,6 +141,7 @@
 #define SYS_GUI_GET_WINDOW_INFO 345
 #define SYS_GUI_GET_DISPLAY_INFO 346
 #define SYS_THREAD_CREATE_TLS 347
+#define SYS_NANOSLEEP 348
 
 #define OPENOS_CHROMIUM_MEM_JITLESS_DEFAULT     (1u << 0)
 #define OPENOS_CHROMIUM_MEM_EXEC_PROT_RESERVED  (1u << 1)
@@ -1400,6 +1401,15 @@ static inline unsigned int openos_uptime_ms(void)
 static inline int openos_clock_gettime(int clock_id, openos_timespec_t *ts)
 {
     return openos_syscall2(SYS_CLOCK_GETTIME, clock_id, (int)ts);
+}
+
+static inline int openos_nanosleep(const openos_timespec_t *req, openos_timespec_t *rem)
+{
+    if (!req || req->tv_sec < 0 || req->tv_nsec < 0 || req->tv_nsec >= 1000000000ll) {
+        openos_set_errno(OPENOS_EINVAL);
+        return -1;
+    }
+    return openos_syscall2(SYS_NANOSLEEP, (int)req, (int)rem);
 }
 
 static inline openos_time_t openos_time(openos_time_t *out)

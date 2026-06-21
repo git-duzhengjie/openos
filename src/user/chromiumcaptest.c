@@ -85,6 +85,54 @@ static int test_clock_gettime_monotonic(void)
     return after_ns >= before_ns ? CAP_PASS : CAP_FAIL;
 }
 
+static int test_nanosleep_monotonic(void)
+{
+    openos_timespec_t invalid;
+    openos_timespec_t zero;
+    openos_timespec_t rem;
+    openos_timespec_t req;
+    openos_timespec_t before;
+    openos_timespec_t after;
+    long long before_ns;
+    long long after_ns;
+
+    invalid.tv_sec = 0;
+    invalid.tv_nsec = 1000000000ll;
+    if (openos_nanosleep(&invalid, 0) == 0) {
+        return CAP_FAIL;
+    }
+
+    zero.tv_sec = 0;
+    zero.tv_nsec = 0;
+    rem.tv_sec = -1;
+    rem.tv_nsec = -1;
+    if (openos_nanosleep(&zero, &rem) != 0) {
+        return CAP_FAIL;
+    }
+    if (rem.tv_sec != 0 || rem.tv_nsec != 0) {
+        return CAP_FAIL;
+    }
+
+    if (openos_clock_gettime(OPENOS_CLOCK_MONOTONIC, &before) != 0) {
+        return CAP_FAIL;
+    }
+    req.tv_sec = 0;
+    req.tv_nsec = 1000000ll;
+    if (openos_nanosleep(&req, &rem) != 0) {
+        return CAP_FAIL;
+    }
+    if (openos_clock_gettime(OPENOS_CLOCK_MONOTONIC, &after) != 0) {
+        return CAP_FAIL;
+    }
+    if (rem.tv_sec != 0 || rem.tv_nsec != 0) {
+        return CAP_FAIL;
+    }
+
+    before_ns = before.tv_sec * 1000000000ll + before.tv_nsec;
+    after_ns = after.tv_sec * 1000000000ll + after.tv_nsec;
+    return after_ns >= before_ns ? CAP_PASS : CAP_FAIL;
+}
+
 static int test_mmap(void)
 {
     unsigned char *mem;
@@ -2241,7 +2289,7 @@ int main(int argc, char **argv)
     (void)argv;
 
     openos_printf("Chromium core capability test\n");
-    openos_printf("target: mmap file-mmap fs-metadata path-normalization fs-mutations getdents browser-dirs resource-pak sparse-seek mprotect v8-memory-policy brk thread tls pthread-sync futex shm eventfd message-queue service-channel socketpair poll fcntl shutdown sockopt time spawn cxxabi fork pipe fd argv env dns font gui clipboard pressure-smoke\n");
+    openos_printf("target: mmap file-mmap fs-metadata path-normalization fs-mutations getdents browser-dirs resource-pak sparse-seek mprotect v8-memory-policy brk thread tls pthread-sync futex shm eventfd message-queue service-channel socketpair poll fcntl shutdown sockopt time nanosleep spawn cxxabi fork pipe fd argv env dns font gui clipboard pressure-smoke\n");
 
     status = test_uptime();
     print_result("monotonic uptime", status);
@@ -2249,6 +2297,10 @@ int main(int argc, char **argv)
 
     status = test_clock_gettime_monotonic();
     print_result("clock_gettime monotonic timespec", status);
+    failed += status == CAP_FAIL;
+
+    status = test_nanosleep_monotonic();
+    print_result("nanosleep monotonic delay", status);
     failed += status == CAP_FAIL;
 
     status = test_mmap();
