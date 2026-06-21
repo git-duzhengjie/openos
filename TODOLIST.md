@@ -428,7 +428,7 @@
   - [√] 为 V8 预留 executable memory / jitless 两条路线的内核策略
     - [√] 已完成原生 `SYS_CHROMIUM_MEMORY_POLICY` 策略查询：当前 i386 阶段声明默认 jitless，`PROT_EXEC` 语义已保留，待 NX/W^X 后启用 executable mmap
     - [√] 已将当前 jitless 策略落到 syscall 行为：`mmap/mmap_file/mprotect(PROT_EXEC)` 显式失败，并接入 `/bin/chromiumcaptest` 验收
-- [ ] M3 线程、同步与调度增强
+- [√] M3 线程、同步与调度增强
   - [√] 用户态线程 TLS / thread-local storage 基础 ABI
     - [√] 已完成轻量 TLS base syscall：`SYS_TLS_SET/SYS_TLS_GET`，线程结构保存 `tls_base`，并接入 `/bin/chromiumcaptest` 验收
     - [√] 已新增 `SYS_THREAD_CREATE_TLS` / `openos_thread_create_tls()`，支持线程创建时指定初始 TLS base，并接入 `/bin/chromiumcaptest` 验收
