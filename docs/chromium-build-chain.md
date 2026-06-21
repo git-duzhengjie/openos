@@ -19,6 +19,31 @@
 - Python：跟随 depot_tools / Chromium 所需版本。
 - sysroot：使用 OpenOS 自有用户态 headers、crt objects、linker script、最小 libc/libc++ runtime，不复用 Linux sysroot。
 
+## Chromium 上游源码入口
+
+OpenOS 仓库不直接保存 Chromium 巨大源码。真实 Chrome 引擎路线的上游获取入口固定在：
+
+```bash
+./build.sh chromium-source-check
+scripts/chromium-source.sh --fetch-depot-tools
+scripts/chromium-source.sh --fetch
+```
+
+默认外部缓存目录：
+
+```text
+.openos-deps/depot_tools
+.openos-deps/chromium/src
+```
+
+详细 pin 与磁盘/工具要求见：
+
+```text
+docs/chromium-upstream-pin.md
+```
+
+普通 `./build.sh` 不会自动下载 Chromium。只有显式执行 `scripts/chromium-source.sh --fetch` 才会拉取上游源码。
+
 ## OpenOS 用户态 SDK/sysroot
 
 真实 Chromium 内核路线要先从 OpenOS 用户态 ABI 出发，而不是继续扩展当前 `/bin/chromium` 原生演示壳。导出 SDK：

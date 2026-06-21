@@ -31,3 +31,6 @@ src/kernel/include/embed_orphan.h
 src/kernel/include/embed_argtest.h
 src/kernel/include/version.h
 .git-commit-msg.tmp
+
+# 外部依赖缓存，包含 Chromium checkout 等大体积源码
+.openos-deps/

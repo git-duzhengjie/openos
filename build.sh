@@ -28,11 +28,12 @@ if [ "$OPENOS_CJK_COVERAGE" != "ui" ] && [ "$OPENOS_CJK_EMBED" != "1" ] && [ "$O
 fi
 
 usage() {
-    echo "Usage: ARCH=i386|x86_64 ./build.sh [clean|test|cppsmoke|sdk|sdk-smoke]"
+    echo "Usage: ARCH=i386|x86_64 ./build.sh [clean|test|cppsmoke|sdk|sdk-smoke|chromium-source-check]"
     echo "       ./build.sh [i386|x86_64] [clean|test|cppsmoke|sdk|sdk-smoke]"
     echo "       ./build.sh cppsmoke    # probe OpenOS userland C++ toolchain"
     echo "       ./build.sh sdk         # export OpenOS userland SDK/sysroot for Chromium ports"
     echo "       ./build.sh sdk-smoke   # verify SDK can build a minimal OpenOS user ELF"
+    echo "       ./build.sh chromium-source-check # check Chromium upstream checkout prerequisites"
 }
 
 check_cpp_toolchain() {
@@ -73,6 +74,9 @@ case "${1:-}" in
         ;;
     sdk-smoke|smoke-sdk)
         exec bash scripts/sdk-smoke.sh
+        ;;
+    chromium-source-check|chromium-check|chrome-source-check)
+        exec bash scripts/chromium-source.sh --check
         ;;
     i386|x86_64)
         BUILD_ARCH="$1"
