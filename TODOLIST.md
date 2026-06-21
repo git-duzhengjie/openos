@@ -458,7 +458,7 @@
     - [√] 已新增 `/bin/chromiumcaptest` 的 IPC channel pressure loop，连续覆盖 message queue、socketpair/poll、service channel 往返，作为 Chromium 多进程 IPC 最小压力回归
   - [√] 设计 `/bin/chromium` 第一版单进程模式与后续多进程模型边界：已新增 `docs/chromium-process-model.md`，明确 single-process/content_shell 起步、多进程恢复顺序和 `/bin/chromiumcaptest` 最低验收线
 - [ ] M5 文件系统与资源管理
-  - [ ] 完善 `stat/fstat/lstat`、权限、mtime/ctime/atime、目录遍历和路径规范化
+  - [√] 完善 `stat/fstat/lstat`、权限、mtime/ctime/atime、目录遍历和路径规范化
     - [√] 已将 `stat/fstat/lstat/readdir/opendir` 基础元数据与目录遍历语义并入 `/bin/chromiumcaptest`，覆盖 Chromium 资源发现和 pak 文件探测所需最小文件系统查询能力
     - [√] 已将 `.` / `..` / 重复斜杠 / 相对路径 / cwd 语义并入 `/bin/chromiumcaptest`，覆盖 Chromium 资源路径规范化的最小验收
     - [√] 已补充尾斜杠目录、越过根目录 `..` 截断、归一化前后 inode/size 一致性验收，强化 Chromium 资源路径解析边界
