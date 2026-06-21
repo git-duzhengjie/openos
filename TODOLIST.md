@@ -416,7 +416,7 @@
     - [√] 已完成匿名私有 VMA 记录、基础 prot/flags 参数、按需分页按 VMA 写权限映射
     - [√] 已将非法 `prot` / `flags` 拒绝、只读映射读零、`mprotect` 升级读写等最小权限语义并入 `/bin/chromiumcaptest`
   - [√] 实现 `mprotect` 页级权限切换基础能力，已接入 `/bin/chromiumcaptest` 验收
-  - [ ] 支持固定地址映射、地址空间保留、解除映射后的 VMA 合并与冲突检测
+  - [√] 支持固定地址映射、地址空间保留、解除映射后的 VMA 合并与冲突检测
     - [√] 已完成 `MAP_FIXED` 基础固定地址预留与重叠 VMA 冲突拒绝
     - [√] 已补齐 `munmap` 对 VMA 头/尾裁剪、中间拆分、相邻匿名兼容 VMA 合并与未映射区间拒绝，并接入 `/bin/chromiumcaptest` 验收
   - [ ] 文件 mmap 与 page cache 协同，支持只读资源映射和私有 COW 映射
