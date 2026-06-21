@@ -58,6 +58,84 @@ static const uint8_t k_server_finished[] = {
     0xd6, 0xd7, 0xd8, 0xd9, 0xda, 0xdb
 };
 
+static int contains_bytes(const uint8_t* haystack,
+                          size_t haystack_len,
+                          const uint8_t* needle,
+                          size_t needle_len)
+{
+    size_t i;
+
+    if (!haystack || !needle || needle_len == 0u || needle_len > haystack_len) {
+        return 0;
+    }
+
+    for (i = 0; i <= haystack_len - needle_len; ++i) {
+        if (memcmp(haystack + i, needle, needle_len) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+UNIT_TEST_CASE(build_client_hello_record)
+{
+    static const uint8_t expected_sni[] = {
+        0x00, 0x00,
+        0x00, 0x10,
+        0x00, 0x0e,
+        0x00,
+        0x00, 0x0b,
+        'e', 'x', 'a', 'm', 'p', 'l', 'e', '.', 'c', 'o', 'm'
+    };
+    static const uint8_t expected_alpn[] = {
+        0x00, 0x10,
+        0x00, 0x0b,
+        0x00, 0x09,
+        0x08, 'h', 't', 't', 'p', '/', '1', '.', '1'
+    };
+    uint8_t random[TLS12_CLIENT_RANDOM_SIZE];
+    uint8_t record[256];
+    size_t record_len = 0u;
+    size_t i;
+    size_t handshake_len;
+    size_t record_payload_len;
+    size_t ext_len_offset;
+    size_t ext_len;
+
+    for (i = 0; i < TLS12_CLIENT_RANDOM_SIZE; ++i) {
+        random[i] = (uint8_t)i;
+    }
+
+    ASSERT_TRUE(tls12_build_client_hello_record("example.com",
+                                                random,
+                                                record,
+                                                sizeof(record),
+                                                &record_len));
+    ASSERT_TRUE(record_len > TLS_RECORD_HEADER_SIZE + 4u);
+    ASSERT_EQ_INT(TLS_CONTENT_TYPE_HANDSHAKE, record[0]);
+    ASSERT_EQ_INT(0x03, record[1]);
+    ASSERT_EQ_INT(0x01, record[2]);
+
+    record_payload_len = ((size_t)record[3] << 8) | record[4];
+    ASSERT_EQ_SIZE(record_len - TLS_RECORD_HEADER_SIZE, record_payload_len);
+    ASSERT_EQ_INT(TLS_HANDSHAKE_CLIENT_HELLO, record[5]);
+
+    handshake_len = ((size_t)record[6] << 16) | ((size_t)record[7] << 8) | record[8];
+    ASSERT_EQ_SIZE(record_len - TLS_RECORD_HEADER_SIZE - 4u, handshake_len);
+    ASSERT_EQ_INT(0x03, record[9]);
+    ASSERT_EQ_INT(0x03, record[10]);
+    ASSERT_EQ_INT(0, memcmp(random, record + 11, TLS12_CLIENT_RANDOM_SIZE));
+    ASSERT_TRUE(contains_bytes(record, record_len, expected_sni, sizeof(expected_sni)));
+    ASSERT_TRUE(contains_bytes(record, record_len, expected_alpn, sizeof(expected_alpn)));
+
+    ext_len_offset = 5u + 4u + 2u + TLS12_CLIENT_RANDOM_SIZE + 1u + 2u + 16u + 1u + 1u;
+    ext_len = ((size_t)record[ext_len_offset] << 8) | record[ext_len_offset + 1u];
+    ASSERT_EQ_SIZE(record_len - ext_len_offset - 2u, ext_len);
+
+    ASSERT_FALSE(tls12_build_client_hello_record("", random, record, sizeof(record), &record_len));
+    ASSERT_FALSE(tls12_build_client_hello_record("example.com", random, record, 32u, &record_len));
+}
+
 UNIT_TEST_CASE(expect_full_handshake_progression)
 {
     tls12_handshake_context_t ctx;
@@ -313,6 +391,7 @@ UNIT_TEST_CASE(reject_bad_change_cipher_spec)
 
 int main(void)
 {
+    UNIT_TEST_RUN(build_client_hello_record);
     UNIT_TEST_RUN(expect_full_handshake_progression);
     UNIT_TEST_RUN(verify_finished_when_master_secret_is_available);
     UNIT_TEST_RUN(derive_key_block_and_configure_record_layer);

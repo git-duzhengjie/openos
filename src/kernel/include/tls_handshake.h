@@ -10,6 +10,7 @@
 #define TLS12_VERSION 0x0303u
 #define TLS12_CIPHER_SUITE_RSA_WITH_AES_128_GCM_SHA256 0x009cu
 #define TLS12_HANDSHAKE_MAX_FINISHED_SIZE TLS12_VERIFY_DATA_SIZE
+#define TLS12_CLIENT_RANDOM_SIZE 32u
 #define TLS12_AES128_GCM_KEY_BLOCK_SIZE \
     ((TLS12_AES_128_GCM_KEY_SIZE * 2u) + (TLS12_AEAD_GCM_FIXED_IV_SIZE * 2u))
 
@@ -57,6 +58,12 @@ typedef struct tls12_handshake_context {
 
 void tls12_handshake_context_init(tls12_handshake_context_t* ctx);
 const char* tls12_handshake_state_name(tls12_handshake_state_t state);
+
+int tls12_build_client_hello_record(const char* server_name,
+                                    const uint8_t client_random[TLS12_CLIENT_RANDOM_SIZE],
+                                    uint8_t* out_record,
+                                    size_t out_record_cap,
+                                    size_t* out_record_len);
 
 int tls12_handshake_set_master_secret(tls12_handshake_context_t* ctx,
                                       const uint8_t master_secret[TLS12_MASTER_SECRET_SIZE]);

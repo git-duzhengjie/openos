@@ -15,6 +15,62 @@ static uint16_t tls_hs_read_u16(const uint8_t* data)
     return (uint16_t)(((uint16_t)data[0] << 8) | (uint16_t)data[1]);
 }
 
+static int tls_hs_append_u8(uint8_t* buf, size_t cap, size_t* pos, uint8_t v)
+{
+    if (!buf || !pos || *pos >= cap) {
+        return 0;
+    }
+    buf[(*pos)++] = v;
+    return 1;
+}
+
+static int tls_hs_append_u16(uint8_t* buf, size_t cap, size_t* pos, uint16_t v)
+{
+    return tls_hs_append_u8(buf, cap, pos, (uint8_t)(v >> 8)) &&
+           tls_hs_append_u8(buf, cap, pos, (uint8_t)(v & 0xffu));
+}
+
+static int tls_hs_append_bytes(uint8_t* buf,
+                               size_t cap,
+                               size_t* pos,
+                               const uint8_t* src,
+                               size_t len)
+{
+    size_t i;
+
+    if (!buf || !pos || (!src && len > 0u) || *pos > cap || len > cap - *pos) {
+        return 0;
+    }
+
+    for (i = 0; i < len; ++i) {
+        buf[(*pos)++] = src[i];
+    }
+    return 1;
+}
+
+static int tls12_hostname_len(const char* server_name, size_t* out_len)
+{
+    size_t len = 0u;
+
+    if (!server_name || !out_len) {
+        return 0;
+    }
+
+    while (server_name[len] != '\0') {
+        ++len;
+        if (len > 255u) {
+            return 0;
+        }
+    }
+
+    if (len == 0u) {
+        return 0;
+    }
+
+    *out_len = len;
+    return 1;
+}
+
 static void tls_zero(void* ptr, size_t len)
 {
     uint8_t* bytes = (uint8_t*)ptr;
@@ -70,6 +126,164 @@ static int tls_handshake_header_valid(const uint8_t* message,
     }
 
     *body_len = (size_t)declared_len;
+    return 1;
+}
+
+int tls12_build_client_hello_record(const char* server_name,
+                                    const uint8_t client_random[TLS12_CLIENT_RANDOM_SIZE],
+                                    uint8_t* out_record,
+                                    size_t out_record_cap,
+                                    size_t* out_record_len)
+{
+    static const uint8_t ciphers[] = {
+        0xc0, 0x2f,
+        0xc0, 0x30,
+        0xc0, 0x13,
+        0xc0, 0x14,
+        0x00, 0x9c,
+        0x00, 0x9d,
+        0x00, 0x2f,
+        0x00, 0xff
+    };
+    static const uint8_t groups[] = { 0x00, 0x17, 0x00, 0x18, 0x00, 0x19 };
+    static const uint8_t ec_points[] = { 0x00 };
+    static const uint8_t sigalgs[] = {
+        0x04, 0x01,
+        0x05, 0x01,
+        0x02, 0x01,
+        0x04, 0x03,
+        0x05, 0x03
+    };
+    static const uint8_t alpn_http11[] = {
+        0x00, 0x09,
+        0x08, 'h', 't', 't', 'p', '/', '1', '.', '1'
+    };
+    size_t p = 0u;
+    size_t record_len_pos;
+    size_t handshake_len_pos;
+    size_t handshake_start;
+    size_t ext_len_pos;
+    size_t ext_start;
+    size_t sni_len;
+    size_t handshake_len;
+    size_t record_len;
+
+    if (!out_record_len) {
+        return 0;
+    }
+    *out_record_len = 0u;
+
+    if (!client_random || !out_record ||
+        !tls12_hostname_len(server_name, &sni_len) || out_record_cap < 128u) {
+        return 0;
+    }
+
+    if (!tls_hs_append_u8(out_record, out_record_cap, &p, TLS_CONTENT_TYPE_HANDSHAKE)) {
+        return 0;
+    }
+    if (!tls_hs_append_u16(out_record, out_record_cap, &p, 0x0301u)) {
+        return 0;
+    }
+    record_len_pos = p;
+    if (!tls_hs_append_u16(out_record, out_record_cap, &p, 0u)) {
+        return 0;
+    }
+
+    if (!tls_hs_append_u8(out_record, out_record_cap, &p, TLS_HANDSHAKE_CLIENT_HELLO)) {
+        return 0;
+    }
+    handshake_len_pos = p;
+    if (!tls_hs_append_u8(out_record, out_record_cap, &p, 0u) ||
+        !tls_hs_append_u8(out_record, out_record_cap, &p, 0u) ||
+        !tls_hs_append_u8(out_record, out_record_cap, &p, 0u)) {
+        return 0;
+    }
+    handshake_start = p;
+
+    if (!tls_hs_append_u16(out_record, out_record_cap, &p, TLS12_VERSION) ||
+        !tls_hs_append_bytes(out_record, out_record_cap, &p, client_random, TLS12_CLIENT_RANDOM_SIZE) ||
+        !tls_hs_append_u8(out_record, out_record_cap, &p, 0u) ||
+        !tls_hs_append_u16(out_record, out_record_cap, &p, (uint16_t)sizeof(ciphers)) ||
+        !tls_hs_append_bytes(out_record, out_record_cap, &p, ciphers, sizeof(ciphers)) ||
+        !tls_hs_append_u8(out_record, out_record_cap, &p, 1u) ||
+        !tls_hs_append_u8(out_record, out_record_cap, &p, 0u)) {
+        return 0;
+    }
+
+    ext_len_pos = p;
+    if (!tls_hs_append_u16(out_record, out_record_cap, &p, 0u)) {
+        return 0;
+    }
+    ext_start = p;
+
+    if (!tls_hs_append_u16(out_record, out_record_cap, &p, 0x0000u) ||
+        !tls_hs_append_u16(out_record, out_record_cap, &p, (uint16_t)(5u + sni_len)) ||
+        !tls_hs_append_u16(out_record, out_record_cap, &p, (uint16_t)(3u + sni_len)) ||
+        !tls_hs_append_u8(out_record, out_record_cap, &p, 0u) ||
+        !tls_hs_append_u16(out_record, out_record_cap, &p, (uint16_t)sni_len) ||
+        !tls_hs_append_bytes(out_record,
+                             out_record_cap,
+                             &p,
+                             (const uint8_t*)server_name,
+                             sni_len)) {
+        return 0;
+    }
+
+    if (!tls_hs_append_u16(out_record, out_record_cap, &p, 0x000au) ||
+        !tls_hs_append_u16(out_record, out_record_cap, &p, (uint16_t)(2u + sizeof(groups))) ||
+        !tls_hs_append_u16(out_record, out_record_cap, &p, (uint16_t)sizeof(groups)) ||
+        !tls_hs_append_bytes(out_record, out_record_cap, &p, groups, sizeof(groups))) {
+        return 0;
+    }
+
+    if (!tls_hs_append_u16(out_record, out_record_cap, &p, 0x000bu) ||
+        !tls_hs_append_u16(out_record, out_record_cap, &p, (uint16_t)(1u + sizeof(ec_points))) ||
+        !tls_hs_append_u8(out_record, out_record_cap, &p, (uint8_t)sizeof(ec_points)) ||
+        !tls_hs_append_bytes(out_record, out_record_cap, &p, ec_points, sizeof(ec_points))) {
+        return 0;
+    }
+
+    if (!tls_hs_append_u16(out_record, out_record_cap, &p, 0x000du) ||
+        !tls_hs_append_u16(out_record, out_record_cap, &p, (uint16_t)(2u + sizeof(sigalgs))) ||
+        !tls_hs_append_u16(out_record, out_record_cap, &p, (uint16_t)sizeof(sigalgs)) ||
+        !tls_hs_append_bytes(out_record, out_record_cap, &p, sigalgs, sizeof(sigalgs))) {
+        return 0;
+    }
+
+    if (!tls_hs_append_u16(out_record, out_record_cap, &p, 0x0010u) ||
+        !tls_hs_append_u16(out_record, out_record_cap, &p, (uint16_t)sizeof(alpn_http11)) ||
+        !tls_hs_append_bytes(out_record, out_record_cap, &p, alpn_http11, sizeof(alpn_http11))) {
+        return 0;
+    }
+
+    if (!tls_hs_append_u16(out_record, out_record_cap, &p, 0x0016u) ||
+        !tls_hs_append_u16(out_record, out_record_cap, &p, 0u) ||
+        !tls_hs_append_u16(out_record, out_record_cap, &p, 0x0017u) ||
+        !tls_hs_append_u16(out_record, out_record_cap, &p, 0u) ||
+        !tls_hs_append_u16(out_record, out_record_cap, &p, 0xff01u) ||
+        !tls_hs_append_u16(out_record, out_record_cap, &p, 1u) ||
+        !tls_hs_append_u8(out_record, out_record_cap, &p, 0u) ||
+        !tls_hs_append_u16(out_record, out_record_cap, &p, 0x002bu) ||
+        !tls_hs_append_u16(out_record, out_record_cap, &p, 3u) ||
+        !tls_hs_append_u8(out_record, out_record_cap, &p, 2u) ||
+        !tls_hs_append_u16(out_record, out_record_cap, &p, TLS12_VERSION)) {
+        return 0;
+    }
+
+    handshake_len = p - handshake_start;
+    record_len = p - TLS_RECORD_HEADER_SIZE;
+    if (handshake_len > 0xffffffu || record_len > 0xffffu || p > 0xffffu) {
+        return 0;
+    }
+
+    out_record[ext_len_pos] = (uint8_t)((p - ext_start) >> 8);
+    out_record[ext_len_pos + 1u] = (uint8_t)((p - ext_start) & 0xffu);
+    out_record[handshake_len_pos] = (uint8_t)(handshake_len >> 16);
+    out_record[handshake_len_pos + 1u] = (uint8_t)(handshake_len >> 8);
+    out_record[handshake_len_pos + 2u] = (uint8_t)(handshake_len & 0xffu);
+    out_record[record_len_pos] = (uint8_t)(record_len >> 8);
+    out_record[record_len_pos + 1u] = (uint8_t)(record_len & 0xffu);
+    *out_record_len = p;
     return 1;
 }
 
