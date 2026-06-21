@@ -124,7 +124,9 @@ symbol_level=1
 
 ### 1. `skia_demo`
 
-- 仅启用软件 raster。
+> 注意：当前仓库里的 `/bin/skia_demo` 是 OpenOS 自研 GUI/raster smoke，用来验证 OpenOS surface、RGBA blit、文本和字体查询路径；它尚未链接官方 Skia。真实 Skia 接入前置缺口见 `docs/skia-openos-port-checklist.md`。
+
+- 真实 Skia 阶段仅启用软件 raster。
 - 输出单个 OpenOS 用户态 ELF。
 - 使用 OpenOS GUI/window surface ABI 做 present。
 - 验收矩形、文本、位图 blit、dirty rect。
@@ -188,5 +190,9 @@ src/user/user.ld
 ## 当前状态
 
 - 已有 `build.sh cppsmoke` 作为 C++ 工具链探测入口。
+- 已有 `build.sh sdk` 导出 `target/openos-sdk/`。
+- 已有 `build.sh sdk-smoke` 验证 SDK 可链接最小 OpenOS 用户态 ELF。
 - 已有 `docs/chromium-cpp-runtime-roadmap.md` 记录 M8 runtime 顺序。
+- 已有 `docs/skia-openos-port-checklist.md` 明确真实 Skia 接入前置缺口。
+- 当前 `/bin/skia_demo` 仍是 OpenOS 自研 GUI/raster smoke，不是官方 Skia 产物。
 - 本文完成 GN/Ninja/Clang 构建链设计闭环；真正的 Skia/V8/Blink/Chromium 构建与运行仍属于 M9 长期任务。
