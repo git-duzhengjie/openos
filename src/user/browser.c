@@ -10,6 +10,20 @@
 #define BROWSER_RESPONSE_TIMEOUT_MS 6000
 #define BROWSER_POLL_SLICE_MS 100
 #define BROWSER_RECV_CHUNK_MAX 1400
+#define BROWSER_HOST_MAX 128
+#define BROWSER_PATH_MAX 256
+#define BROWSER_BODY_MAX 512
+
+typedef struct browser_load_context {
+    volatile int active;
+    volatile int done;
+    volatile int result;
+    char host[BROWSER_HOST_MAX];
+    char path[BROWSER_PATH_MAX];
+    char response[BROWSER_RECV_MAX + 1];
+    char body[BROWSER_BODY_MAX];
+    char status[64];
+} browser_load_context_t;
 
 static void browser_format_ip(unsigned int ip, char *out, int out_size)
 {
@@ -262,31 +276,29 @@ static int browser_fetch_http(const char *host, const char *path, char *out, int
     return 0;
 }
 
-static int browser_load_to_window(int win, int status_label, int body_label,
-                                  const char *host, const char *path)
+static void browser_load_worker(void *arg)
 {
-    char response[BROWSER_RECV_MAX + 1];
-    char summary[512];
+    browser_load_context_t *ctx = (browser_load_context_t *)arg;
     int rc;
 
-    snprintf(summary, sizeof(summary), "Loading http://%s%s ...", host, path);
-    openos_gui_set_text(win, status_label, summary);
-    openos_gui_set_text(win, body_label, "Waiting for HTTP response...");
+    if (!ctx)
+        return;
 
-    rc = browser_fetch_http(host, path, response, sizeof(response));
+    rc = browser_fetch_http(ctx->host, ctx->path, ctx->response, sizeof(ctx->response));
+    ctx->result = rc;
     if (rc < 0) {
-        openos_gui_set_text(win, status_label, "Failed");
-        openos_gui_set_text(win, body_label, response);
-        printf("browser: %s\n", response);
-        return -1;
+        snprintf(ctx->status, sizeof(ctx->status), "Failed");
+        snprintf(ctx->body, sizeof(ctx->body), "%s", ctx->response);
+        printf("browser: %s\n", ctx->response);
+    } else {
+        collapse_html_text(ctx->body, sizeof(ctx->body), find_body(ctx->response));
+        if (!ctx->body[0])
+            snprintf(ctx->body, sizeof(ctx->body), "Empty response");
+        snprintf(ctx->status, sizeof(ctx->status), "Done");
+        printf("browser: loaded http://%s%s\n", ctx->host, ctx->path);
+        printf("%s\n", ctx->body);
     }
-
-    collapse_html_text(summary, sizeof(summary), find_body(response));
-    openos_gui_set_text(win, status_label, "Done");
-    openos_gui_set_text(win, body_label, summary[0] ? summary : "Empty response");
-    printf("browser: loaded http://%s%s\n", host, path);
-    printf("%s\n", summary);
-    return 0;
+    ctx->done = 1;
 }
 
 int main(int argc, char **argv)
@@ -300,6 +312,9 @@ int main(int argc, char **argv)
     int load_button;
     int close_button;
     int rc = 0;
+    browser_load_context_t load;
+
+    memset(&load, 0, sizeof(load));
 
     if (argc > 1 && argv && argv[1] && argv[1][0]) host = argv[1];
     if (argc > 2 && argv && argv[2] && argv[2][0]) path = argv[2];
@@ -325,8 +340,39 @@ int main(int argc, char **argv)
         if (ev == 0 && event.type != OPENOS_GUI_EVENT_NONE && event.window_id == (unsigned int)win) {
             if (event.widget_id == (unsigned int)close_button)
                 break;
-            if (event.widget_id == (unsigned int)load_button)
-                rc = browser_load_to_window(win, status_label, body_label, host, path);
+            if (event.widget_id == (unsigned int)load_button) {
+                if (load.active && !load.done) {
+                    openos_gui_set_text(win, status_label, "Loading");
+                    openos_gui_set_text(win, body_label, "Load already in progress...");
+                } else {
+                    openos_thread_t tid;
+                    char loading[128];
+
+                    memset(&load, 0, sizeof(load));
+                    snprintf(load.host, sizeof(load.host), "%s", host);
+                    snprintf(load.path, sizeof(load.path), "%s", path);
+                    snprintf(loading, sizeof(loading), "Loading http://%s%s ...", load.host, load.path);
+                    load.active = 1;
+                    load.done = 0;
+                    load.result = -1;
+                    openos_gui_set_text(win, status_label, loading);
+                    openos_gui_set_text(win, body_label, "Waiting for HTTP response...");
+                    if (openos_thread_create(&tid, browser_load_worker, &load) != 0) {
+                        load.active = 0;
+                        load.done = 1;
+                        load.result = -1;
+                        rc = -1;
+                        openos_gui_set_text(win, status_label, "Failed");
+                        openos_gui_set_text(win, body_label, "failed to create browser loader thread");
+                    }
+                }
+            }
+        }
+        if (load.active && load.done) {
+            rc = load.result;
+            openos_gui_set_text(win, status_label, load.status[0] ? load.status : (rc < 0 ? "Failed" : "Done"));
+            openos_gui_set_text(win, body_label, load.body[0] ? load.body : (rc < 0 ? "Load failed" : "Empty response"));
+            load.active = 0;
         }
         openos_sleep(10);
     }
