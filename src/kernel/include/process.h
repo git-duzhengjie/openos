@@ -63,6 +63,8 @@ typedef struct process_mmap_vma {
     uint32_t end;
     uint32_t prot;
     uint32_t flags;
+    int file_fd;
+    uint32_t file_length;
 } process_mmap_vma_t;
 
 /* ============================================================

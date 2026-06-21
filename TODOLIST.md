@@ -423,6 +423,7 @@
     - [√] 已完成基础 file-backed private snapshot mmap：`SYS_MMAP_FILE` 可将 fd 内容映射到用户地址空间，并接入 `/bin/chromiumcaptest` 验收
     - [√] 已增强 `/bin/chromiumcaptest` 对 file-backed `MAP_PRIVATE` 的不回写校验：映射内修改后重新映射应仍看到原始文件内容
     - [√] 已收紧 file-backed mmap flags 语义：当前仅接受 `MAP_PRIVATE|MAP_FILE`，显式拒绝 `MAP_SHARED`、`MAP_FIXED`、`MAP_ANON` 等未实现组合，并接入 `/bin/chromiumcaptest` 验收
+    - [√] 已新增 file-backed `MAP_SHARED|MAP_FILE|PROT_READ|PROT_WRITE` 基础写回语义，VMA 记录 fd/文件长度，`munmap` 前按映射文件范围写回并恢复 fd offset；继续拒绝只读 MAP_SHARED 和 MAP_FIXED/MAP_ANON 组合，并接入 `/bin/chromiumcaptest` 验收
   - [ ] 为 V8 预留 executable memory / jitless 两条路线的内核策略
     - [√] 已完成原生 `SYS_CHROMIUM_MEMORY_POLICY` 策略查询：当前 i386 阶段声明默认 jitless，`PROT_EXEC` 语义已保留，待 NX/W^X 后启用 executable mmap
     - [√] 已将当前 jitless 策略落到 syscall 行为：`mmap/mmap_file/mprotect(PROT_EXEC)` 显式失败，并接入 `/bin/chromiumcaptest` 验收

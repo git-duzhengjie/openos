@@ -429,6 +429,37 @@ static int test_file_mmap(void)
         openos_close(fd);
         return CAP_FAIL;
     }
+
+    if (openos_seek(fd, 0, SEEK_SET) != 0) {
+        openos_close(fd);
+        return CAP_FAIL;
+    }
+    mapped = (char *)openos_mmap_file(fd, 4096, OPENOS_PROT_READ | OPENOS_PROT_WRITE,
+                                      OPENOS_MAP_SHARED | OPENOS_MAP_FILE);
+    if ((int)mapped == -1 || !mapped) {
+        openos_close(fd);
+        return CAP_FAIL;
+    }
+    mapped[0] = 'B';
+    mapped[1] = 'Y';
+    if (openos_munmap(mapped, 4096) != 0) {
+        openos_close(fd);
+        return CAP_FAIL;
+    }
+    if (openos_seek(fd, 0, SEEK_SET) != 0) {
+        openos_close(fd);
+        return CAP_FAIL;
+    }
+    char verify_shared[4];
+    if (openos_read(fd, verify_shared, 4) != 4 || memcmp(verify_shared, "BYen", 4) != 0) {
+        openos_close(fd);
+        return CAP_FAIL;
+    }
+    if (openos_seek(fd, 0, SEEK_SET) != 0 || openos_write(fd, payload, len) != len) {
+        openos_close(fd);
+        return CAP_FAIL;
+    }
+
     if ((int)openos_mmap_file(fd, 4096, OPENOS_PROT_READ,
                               OPENOS_MAP_PRIVATE | OPENOS_MAP_FILE | OPENOS_MAP_FIXED) != -1) {
         openos_close(fd);

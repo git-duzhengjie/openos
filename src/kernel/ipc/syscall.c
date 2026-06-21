@@ -1428,6 +1428,8 @@ static void sys_mmap_clear_vma(process_mmap_vma_t *vma)
     vma->end = 0;
     vma->prot = 0;
     vma->flags = 0;
+    vma->file_fd = -1;
+    vma->file_length = 0;
 }
 
 static int sys_mmap_vma_can_merge(const process_mmap_vma_t *left, const process_mmap_vma_t *right)
@@ -1517,6 +1519,8 @@ static int sys_mmap_add_vma(process_t *proc, uint32_t start, uint32_t len, uint3
         vma->end = end;
         vma->prot = prot;
         vma->flags = flags;
+        vma->file_fd = -1;
+        vma->file_length = 0;
         sys_mmap_merge_adjacent_vmas(proc);
         return 0;
     }
@@ -1568,6 +1572,8 @@ static int sys_mmap_remove_vma(process_t *proc, uint32_t addr, uint32_t len)
         proc->mmap_vmas[free_slot].end = old_end;
         proc->mmap_vmas[free_slot].prot = vma->prot;
         proc->mmap_vmas[free_slot].flags = vma->flags;
+        proc->mmap_vmas[free_slot].file_fd = vma->file_fd;
+        proc->mmap_vmas[free_slot].file_length = vma->file_length;
     }
 
     sys_mmap_merge_adjacent_vmas(proc);
@@ -1585,6 +1591,84 @@ static void sys_munmap_range(uint32_t addr, uint32_t len)
             pmm_free_page((void *)pa);
         }
     }
+}
+
+static int sys_munmap_sync_shared_file_vma(process_mmap_vma_t *vma,
+                                             uint32_t addr,
+                                             uint32_t len)
+{
+    uint32_t sync_start;
+    uint32_t sync_end;
+    uint32_t sync_len;
+    uint32_t vma_offset;
+    uint32_t written = 0;
+    int saved_pos;
+
+    if (!vma || (vma->flags & PROCESS_MMAP_FLAG_FILE) == 0 ||
+        (vma->flags & PROCESS_MMAP_FLAG_SHARED) == 0 ||
+        (vma->prot & PROCESS_MMAP_PROT_WRITE) == 0 ||
+        vma->file_fd < 0 || vma->file_length == 0)
+        return 0;
+
+    sync_start = addr > vma->start ? addr : vma->start;
+    sync_end = (addr + len) < vma->end ? (addr + len) : vma->end;
+    if (sync_start >= sync_end || sync_start < vma->start)
+        return 0;
+    vma_offset = sync_start - vma->start;
+    if (vma_offset >= vma->file_length)
+        return 0;
+
+    sync_len = sync_end - sync_start;
+    if (sync_len > vma->file_length - vma_offset)
+        sync_len = vma->file_length - vma_offset;
+    if (sync_len == 0)
+        return 0;
+
+    saved_pos = vfs_seek(vma->file_fd, 0, 1);
+    if (saved_pos < 0)
+        return -1;
+    if (vfs_seek(vma->file_fd, (int)vma_offset, 0) < 0) {
+        vfs_seek(vma->file_fd, saved_pos, 0);
+        return -1;
+    }
+
+    while (written < sync_len) {
+        uint8_t chunk[512];
+        uint32_t want = sync_len - written;
+        int n;
+        if (want > sizeof(chunk))
+            want = sizeof(chunk);
+        if (copy_from_user(chunk, (const void *)(uintptr_t)(sync_start + written), want) < 0) {
+            vfs_seek(vma->file_fd, saved_pos, 0);
+            return -1;
+        }
+        n = vfs_write(vma->file_fd, chunk, want);
+        if (n <= 0) {
+            vfs_seek(vma->file_fd, saved_pos, 0);
+            return -1;
+        }
+        written += (uint32_t)n;
+    }
+
+    vfs_seek(vma->file_fd, saved_pos, 0);
+    return 0;
+}
+
+static int sys_munmap_sync_shared_file_range(process_t *proc, uint32_t addr, uint32_t len)
+{
+    uint32_t end = addr + len;
+
+    if (!proc || end <= addr)
+        return -1;
+
+    for (int i = 0; i < PROCESS_MMAP_VMA_MAX; i++) {
+        process_mmap_vma_t *vma = &proc->mmap_vmas[i];
+        if (!vma->start || addr >= vma->end || end <= vma->start)
+            continue;
+        if (sys_munmap_sync_shared_file_vma(vma, addr, len) < 0)
+            return -1;
+    }
+    return 0;
 }
 
 static uint32_t sys_mmap_anonymous(uint32_t addr, uint32_t len, uint32_t prot, uint32_t flags)
@@ -1644,10 +1728,13 @@ static uint32_t sys_mmap_file(uint32_t fd_raw, uint32_t len_raw, uint32_t prot_r
         return (uint32_t)-1;
     if ((prot & PROCESS_MMAP_PROT_EXEC) != 0)
         return (uint32_t)-1;
-    if ((flags & ~(PROCESS_MMAP_FLAG_FILE | PROCESS_MMAP_FLAG_PRIVATE)) != 0)
+    if ((flags & ~(PROCESS_MMAP_FLAG_FILE | PROCESS_MMAP_FLAG_PRIVATE | PROCESS_MMAP_FLAG_SHARED)) != 0)
         return (uint32_t)-1;
-    if ((flags & (PROCESS_MMAP_FLAG_FILE | PROCESS_MMAP_FLAG_PRIVATE)) !=
-        (PROCESS_MMAP_FLAG_FILE | PROCESS_MMAP_FLAG_PRIVATE))
+    if ((flags & PROCESS_MMAP_FLAG_FILE) == 0)
+        return (uint32_t)-1;
+    if (((flags & PROCESS_MMAP_FLAG_PRIVATE) != 0) == ((flags & PROCESS_MMAP_FLAG_SHARED) != 0))
+        return (uint32_t)-1;
+    if ((flags & PROCESS_MMAP_FLAG_SHARED) && ((prot & PROCESS_MMAP_PROT_WRITE) == 0))
         return (uint32_t)-1;
 
     process_t *proc = proc_find(proc_current_pid());
@@ -1664,8 +1751,20 @@ static uint32_t sys_mmap_file(uint32_t fd_raw, uint32_t len_raw, uint32_t prot_r
     uint32_t base = page_align_up_u32(proc->mmap_end);
     if (base < SYS_MMAP_BASE || base > SYS_MMAP_LIMIT || mapped_len > (SYS_MMAP_LIMIT - base))
         return (uint32_t)-1;
-    if (sys_mmap_add_vma(proc, base, mapped_len, prot, PROCESS_MMAP_FLAG_FILE | (flags & PROCESS_MMAP_FLAG_PRIVATE)) < 0)
+    if (sys_mmap_add_vma(proc,
+                         base,
+                         mapped_len,
+                         prot,
+                         PROCESS_MMAP_FLAG_FILE |
+                             (flags & (PROCESS_MMAP_FLAG_PRIVATE | PROCESS_MMAP_FLAG_SHARED))) < 0)
         return (uint32_t)-1;
+    process_mmap_vma_t *file_vma = sys_mmap_find_vma(proc, base, mapped_len);
+    if (!file_vma) {
+        sys_mmap_remove_vma(proc, base, mapped_len);
+        return (uint32_t)-1;
+    }
+    file_vma->file_fd = fd;
+    file_vma->file_length = length;
 
     for (uint32_t page = 0; page < pages; ++page) {
         void *phys = pmm_alloc_page();
@@ -1736,6 +1835,9 @@ static uint32_t sys_munmap_user(uint32_t addr, uint32_t len)
 
     proc = proc_find(proc_current_pid());
     if (!sys_mmap_range_is_mapped(proc, addr, len))
+        return (uint32_t)-1;
+
+    if (sys_munmap_sync_shared_file_range(proc, addr, len) < 0)
         return (uint32_t)-1;
 
     if (sys_mmap_remove_vma(proc, addr, len) < 0)
