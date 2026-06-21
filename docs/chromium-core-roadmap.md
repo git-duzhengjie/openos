@@ -32,7 +32,7 @@ OpenOS process/thread/mm/ipc/fs/net/gui/font core
 
 Chromium/V8/Skia 需要强内存能力：
 
-- `mmap/munmap`：已具备匿名映射、基础 `MAP_FIXED` 和文件私有快照映射雏形，后续需扩展 shared/file page cache/COW 语义。
+- `mmap/munmap`：已具备匿名映射、基础 `prot` / `flags` 校验、`MAP_FIXED`、文件私有快照映射和文件 shared 写回雏形，后续需扩展 page cache/COW 语义。
 - `mprotect`：已具备页级权限切换基础能力，V8 JIT、只读页、W^X 仍需策略化增强。
 - `brk/sbrk`：已具备堆增长雏形，需要大分配压力测试。
 - 共享内存：已有 `shm_create/shm_map/shm_destroy` 雏形，需要跨进程引用计数、大小参数、权限和生命周期。
@@ -147,7 +147,7 @@ Chromium 主体是 C++，OpenOS 需要：
 
 - `mprotect`。
 - 固定地址 mmap。
-- 文件 mmap：已完成 fd 内容到用户地址空间的基础私有快照映射，后续接入 page cache、shared/COW 和只读资源映射。
+- 文件 mmap：已完成 fd 内容到用户地址空间的基础私有快照映射和 `MAP_SHARED|MAP_FILE|PROT_READ|PROT_WRITE` 写回雏形，后续接入 page cache、COW 和只读资源映射。
 - shm 大小参数和跨进程映射。
 - COW fork。
 
@@ -181,7 +181,7 @@ Chromium 主体是 C++，OpenOS 需要：
 
 `/bin/chromiumcaptest` 已从最早的 capability smoke 扩展为覆盖 Chromium 底座的持续验收入口。近期已并入的关键验收包括：
 
-- 内存：匿名 `mmap/munmap`、`mprotect` 权限切换、非法 `prot/flags` 拒绝、固定地址映射、文件私有快照 mmap、稀疏文件 seek。
+- 内存：匿名 `mmap/munmap`、`mprotect` 权限切换、非法 `prot/flags` 拒绝、固定地址映射、文件私有快照 mmap、文件 shared 写回 mmap、稀疏文件 seek。
 - 时间：`clock_gettime(OPENOS_CLOCK_MONOTONIC)` timespec ABI；当前底层精度仍是毫秒级，后续替换高精度硬件时间源。
 - 线程/同步：线程创建、共享地址空间、TLS base ABI、pthread-like mutex/cond、双等待者 cond broadcast、futex 边界、semaphore 生产/消费同步、eventfd。
 - 进程/加载器：`spawn/waitpid`、argv/envp、fd 继承最小验收，`/bin/fdinherit` 作为继承 fd 子进程回归程序。
