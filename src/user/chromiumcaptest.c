@@ -1185,7 +1185,18 @@ static int test_shm(void)
     volatile unsigned int *a;
     volatile unsigned int *b;
     openos_shm_info_t info;
+    openos_shm_t invalid;
     int i;
+
+    invalid = 0;
+    if (openos_shm_info(&invalid, &info) == 0 || openos_shm_destroy(&invalid) == 0) {
+        return CAP_FAIL;
+    }
+    invalid = 0x7fffffff;
+    if (openos_shm_info(&invalid, &info) == 0 || openos_shm_destroy(&invalid) == 0 ||
+        openos_shm_map(&invalid) != (void *)-1) {
+        return CAP_FAIL;
+    }
 
     if (openos_shm_create(&shm) != 0) {
         return CAP_FAIL;

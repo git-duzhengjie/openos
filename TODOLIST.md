@@ -447,6 +447,7 @@
     - [√] 已将 `/bin/waittest` 纳入 `/bin/chromiumcaptest` 统一验收，覆盖 spawn 后 waitpid/WNOHANG/重复 wait/reparent 边界回归
   - [ ] 共享内存引用计数、权限、名称/handle 传递和生命周期管理
     - [√] 已为匿名共享内存段增加内核 refcount/flags 元数据、`SYS_SHM_INFO` 查询接口、引用中拒绝 destroy 的生命周期保护，并在 `/bin/chromiumcaptest` 增加双映射 refcount 与 destroy 防误释放验收
+    - [√] 已在 `/bin/chromiumcaptest` 增加共享内存无效/越界 handle 的 info/map/destroy 失败验收，防止 Chromium IPC handle 误用静默成功
   - [ ] socketpair / message queue / service channel 压测，支撑 Chromium 多进程 IPC
     - [√] 已将 message queue 基础 create/send/recv/truncate/destroy 语义并入 `/bin/chromiumcaptest`，与 socketpair/poll 共同覆盖 Chromium 多进程 IPC 的最小通道能力
     - [√] 已增强 message queue FIFO 多消息顺序验收，覆盖连续 send 后按 one/two/three 顺序 recv
