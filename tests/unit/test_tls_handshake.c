@@ -474,6 +474,136 @@ UNIT_TEST_CASE(derive_key_block_and_configure_record_layer)
     ASSERT_EQ_SIZE(1u, server_ctx.record_layer.next_read_sequence);
 }
 
+UNIT_TEST_CASE(build_and_process_finished_records_over_record_layer)
+{
+    tls12_handshake_context_t client_ctx;
+    tls12_handshake_context_t server_ctx;
+    uint8_t master_secret[TLS12_MASTER_SECRET_SIZE];
+    uint8_t client_ccs_record[8] = { 0 };
+    uint8_t client_finished_record[128] = { 0 };
+    uint8_t server_ccs_record[8] = { 0 };
+    uint8_t server_finished_message[16] = { 0 };
+    uint8_t server_finished_record[128] = { 0 };
+    uint8_t decrypted_client_finished[32] = { 0 };
+    uint8_t decrypted_server_finished[32] = { 0 };
+    uint8_t verify_data[TLS12_VERIFY_DATA_SIZE] = { 0 };
+    uint8_t content_type = 0u;
+    size_t client_ccs_record_len = 0u;
+    size_t client_finished_record_len = 0u;
+    size_t server_ccs_record_len = 0u;
+    size_t server_finished_record_len = 0u;
+    size_t decrypted_client_finished_len = 0u;
+    size_t decrypted_server_finished_len = 0u;
+
+    tls12_handshake_context_init(&client_ctx);
+    tls12_handshake_context_init(&server_ctx);
+    fill_test_master_secret(master_secret);
+
+    ASSERT_TRUE(tls12_handshake_on_client_hello_sent(&client_ctx,
+                                                     k_client_hello,
+                                                     sizeof(k_client_hello)));
+    ASSERT_TRUE(tls12_handshake_on_server_handshake(&client_ctx,
+                                                    k_server_hello,
+                                                    sizeof(k_server_hello)));
+    ASSERT_TRUE(tls12_handshake_on_server_handshake(&client_ctx,
+                                                    k_certificate,
+                                                    sizeof(k_certificate)));
+    ASSERT_TRUE(tls12_handshake_on_server_handshake(&client_ctx,
+                                                    k_server_hello_done,
+                                                    sizeof(k_server_hello_done)));
+    ASSERT_TRUE(tls12_handshake_on_client_key_exchange_sent(&client_ctx,
+                                                            k_client_key_exchange,
+                                                            sizeof(k_client_key_exchange)));
+    ASSERT_TRUE(tls12_handshake_set_master_secret(&client_ctx, master_secret));
+    ASSERT_TRUE(tls12_handshake_configure_aes128_gcm_record_layer(&client_ctx,
+                                                                  TLS12_ENDPOINT_CLIENT));
+
+    ASSERT_TRUE(tls12_handshake_on_client_hello_sent(&server_ctx,
+                                                     k_client_hello,
+                                                     sizeof(k_client_hello)));
+    ASSERT_TRUE(tls12_handshake_on_server_handshake(&server_ctx,
+                                                    k_server_hello,
+                                                    sizeof(k_server_hello)));
+    ASSERT_TRUE(tls12_handshake_on_server_handshake(&server_ctx,
+                                                    k_certificate,
+                                                    sizeof(k_certificate)));
+    ASSERT_TRUE(tls12_handshake_on_server_handshake(&server_ctx,
+                                                    k_server_hello_done,
+                                                    sizeof(k_server_hello_done)));
+    ASSERT_TRUE(tls12_handshake_on_client_key_exchange_sent(&server_ctx,
+                                                            k_client_key_exchange,
+                                                            sizeof(k_client_key_exchange)));
+    ASSERT_TRUE(tls12_handshake_set_master_secret(&server_ctx, master_secret));
+    ASSERT_TRUE(tls12_handshake_configure_aes128_gcm_record_layer(&server_ctx,
+                                                                  TLS12_ENDPOINT_SERVER));
+
+    ASSERT_TRUE(tls12_handshake_build_client_change_cipher_spec_record(&client_ctx,
+                                                                       client_ccs_record,
+                                                                       sizeof(client_ccs_record),
+                                                                       &client_ccs_record_len));
+    ASSERT_EQ_SIZE(6u, client_ccs_record_len);
+    ASSERT_EQ_INT(TLS_CONTENT_TYPE_CHANGE_CIPHER_SPEC, client_ccs_record[0]);
+    ASSERT_EQ_INT(TLS_CHANGE_CIPHER_SPEC_TYPE, client_ccs_record[5]);
+    ASSERT_TRUE(tls12_handshake_on_client_change_cipher_spec_sent(&server_ctx,
+                                                                  client_ccs_record + TLS_RECORD_HEADER_SIZE,
+                                                                  client_ccs_record_len - TLS_RECORD_HEADER_SIZE));
+
+    ASSERT_TRUE(tls12_handshake_build_client_finished_record(&client_ctx,
+                                                             client_finished_record,
+                                                             sizeof(client_finished_record),
+                                                             &client_finished_record_len));
+    ASSERT_EQ_INT(TLS12_HANDSHAKE_STATE_CLIENT_FINISHED_SENT, client_ctx.state);
+    ASSERT_EQ_SIZE(1u, client_ctx.record_layer.next_write_sequence);
+
+    ASSERT_EQ_INT(0, tls12_aes128_gcm_record_layer_unprotect(&server_ctx.record_layer,
+                                                             client_finished_record,
+                                                             client_finished_record_len,
+                                                             decrypted_client_finished,
+                                                             sizeof(decrypted_client_finished),
+                                                             &decrypted_client_finished_len,
+                                                             &content_type));
+    ASSERT_EQ_INT(TLS_CONTENT_TYPE_HANDSHAKE, content_type);
+    ASSERT_EQ_SIZE(16u, decrypted_client_finished_len);
+    ASSERT_TRUE(tls12_handshake_on_client_finished_sent(&server_ctx,
+                                                        decrypted_client_finished,
+                                                        decrypted_client_finished_len));
+    ASSERT_EQ_INT(TLS12_HANDSHAKE_STATE_CLIENT_FINISHED_SENT, server_ctx.state);
+    ASSERT_EQ_SIZE(1u, server_ctx.record_layer.next_read_sequence);
+
+    ASSERT_TRUE(tls12_build_change_cipher_spec_record(server_ccs_record,
+                                                      sizeof(server_ccs_record),
+                                                      &server_ccs_record_len));
+    ASSERT_TRUE(tls12_handshake_on_server_change_cipher_spec_record(&client_ctx,
+                                                                    server_ccs_record,
+                                                                    server_ccs_record_len));
+    ASSERT_EQ_INT(TLS12_HANDSHAKE_STATE_SERVER_CHANGE_CIPHER_SPEC_RECEIVED, client_ctx.state);
+
+    ASSERT_TRUE(tls12_handshake_on_server_change_cipher_spec(&server_ctx,
+                                                             server_ccs_record + TLS_RECORD_HEADER_SIZE,
+                                                             server_ccs_record_len - TLS_RECORD_HEADER_SIZE));
+    ASSERT_TRUE(tls12_handshake_compute_expected_server_finished(&server_ctx, verify_data));
+    make_finished_message(server_finished_message, verify_data);
+    ASSERT_EQ_INT(0, tls12_aes128_gcm_record_layer_protect(&server_ctx.record_layer,
+                                                           TLS_CONTENT_TYPE_HANDSHAKE,
+                                                           server_finished_message,
+                                                           sizeof(server_finished_message),
+                                                           server_finished_record,
+                                                           sizeof(server_finished_record),
+                                                           &server_finished_record_len));
+    ASSERT_TRUE(tls12_handshake_on_server_finished_record(&client_ctx,
+                                                          server_finished_record,
+                                                          server_finished_record_len,
+                                                          decrypted_server_finished,
+                                                          sizeof(decrypted_server_finished),
+                                                          &decrypted_server_finished_len));
+    ASSERT_EQ_SIZE(16u, decrypted_server_finished_len);
+    ASSERT_EQ_INT(0, memcmp(server_finished_message,
+                            decrypted_server_finished,
+                            sizeof(server_finished_message)));
+    ASSERT_EQ_INT(TLS12_HANDSHAKE_STATE_ESTABLISHED, client_ctx.state);
+    ASSERT_EQ_SIZE(1u, client_ctx.record_layer.next_read_sequence);
+}
+
 UNIT_TEST_CASE(reject_bad_finished_when_master_secret_is_available)
 {
     tls12_handshake_context_t ctx;
@@ -597,6 +727,7 @@ int main(void)
     UNIT_TEST_RUN(reject_malformed_client_key_exchange);
     UNIT_TEST_RUN(verify_finished_when_master_secret_is_available);
     UNIT_TEST_RUN(derive_key_block_and_configure_record_layer);
+    UNIT_TEST_RUN(build_and_process_finished_records_over_record_layer);
     UNIT_TEST_RUN(reject_bad_finished_when_master_secret_is_available);
     UNIT_TEST_RUN(parse_server_hello_extensions);
     UNIT_TEST_RUN(reject_invalid_server_hello_negotiation);

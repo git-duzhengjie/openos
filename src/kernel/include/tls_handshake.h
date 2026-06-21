@@ -103,6 +103,31 @@ int tls12_handshake_derive_aes128_gcm_key_block(tls12_handshake_context_t* ctx);
 int tls12_handshake_configure_aes128_gcm_record_layer(tls12_handshake_context_t* ctx,
                                                       tls12_endpoint_role_t role);
 
+int tls12_build_change_cipher_spec_record(uint8_t* out_record,
+                                          size_t out_record_cap,
+                                          size_t* out_record_len);
+
+int tls12_handshake_build_client_change_cipher_spec_record(tls12_handshake_context_t* ctx,
+                                                           uint8_t* out_record,
+                                                           size_t out_record_cap,
+                                                           size_t* out_record_len);
+
+int tls12_handshake_build_client_finished_record(tls12_handshake_context_t* ctx,
+                                                 uint8_t* out_record,
+                                                 size_t out_record_cap,
+                                                 size_t* out_record_len);
+
+int tls12_handshake_on_server_change_cipher_spec_record(tls12_handshake_context_t* ctx,
+                                                        const uint8_t* record,
+                                                        size_t record_len);
+
+int tls12_handshake_on_server_finished_record(tls12_handshake_context_t* ctx,
+                                              const uint8_t* record,
+                                              size_t record_len,
+                                              uint8_t* out_handshake_message,
+                                              size_t out_handshake_message_cap,
+                                              size_t* out_handshake_message_len);
+
 int tls12_handshake_compute_expected_server_finished(
     const tls12_handshake_context_t* ctx,
     uint8_t verify_data[TLS12_VERIFY_DATA_SIZE]);

@@ -769,6 +769,210 @@ int tls12_handshake_configure_aes128_gcm_record_layer(tls12_handshake_context_t*
     return 1;
 }
 
+static int tls12_parse_plain_record(const uint8_t* record,
+                                      size_t record_len,
+                                      uint8_t expected_type,
+                                      const uint8_t** out_fragment,
+                                      size_t* out_fragment_len)
+{
+    uint16_t fragment_len;
+
+    if (!record || record_len < TLS_RECORD_HEADER_SIZE || !out_fragment || !out_fragment_len) {
+        return 0;
+    }
+    if (record[0] != expected_type || tls_hs_read_u16(record + 1u) != TLS12_VERSION) {
+        return 0;
+    }
+    fragment_len = tls_hs_read_u16(record + 3u);
+    if ((size_t)fragment_len != record_len - TLS_RECORD_HEADER_SIZE) {
+        return 0;
+    }
+
+    *out_fragment = record + TLS_RECORD_HEADER_SIZE;
+    *out_fragment_len = fragment_len;
+    return 1;
+}
+
+static int tls12_build_finished_handshake_message(const uint8_t verify_data[TLS12_VERIFY_DATA_SIZE],
+                                                  uint8_t* out_message,
+                                                  size_t out_message_cap,
+                                                  size_t* out_message_len)
+{
+    size_t p = 0u;
+
+    if (out_message_len) {
+        *out_message_len = 0u;
+    }
+    if (!verify_data || !out_message || !out_message_len ||
+        out_message_cap < TLS_HANDSHAKE_HEADER_SIZE + TLS12_VERIFY_DATA_SIZE) {
+        return 0;
+    }
+
+    if (!tls_hs_append_u8(out_message, out_message_cap, &p, TLS_HANDSHAKE_FINISHED) ||
+        !tls_hs_append_u24(out_message, out_message_cap, &p, TLS12_VERIFY_DATA_SIZE) ||
+        !tls_hs_append_bytes(out_message, out_message_cap, &p, verify_data, TLS12_VERIFY_DATA_SIZE)) {
+        return 0;
+    }
+
+    *out_message_len = p;
+    return 1;
+}
+
+static int tls12_build_record_header(uint8_t content_type,
+                                     size_t fragment_len,
+                                     uint8_t* out_record,
+                                     size_t out_record_cap,
+                                     size_t* pos)
+{
+    if (fragment_len > 0xffffu) {
+        return 0;
+    }
+    return tls_hs_append_u8(out_record, out_record_cap, pos, content_type) &&
+           tls_hs_append_u16(out_record, out_record_cap, pos, TLS12_VERSION) &&
+           tls_hs_append_u16(out_record, out_record_cap, pos, (uint16_t)fragment_len);
+}
+
+int tls12_build_change_cipher_spec_record(uint8_t* out_record,
+                                          size_t out_record_cap,
+                                          size_t* out_record_len)
+{
+    size_t p = 0u;
+
+    if (out_record_len) {
+        *out_record_len = 0u;
+    }
+    if (!out_record || !out_record_len) {
+        return 0;
+    }
+    if (!tls12_build_record_header(TLS_CONTENT_TYPE_CHANGE_CIPHER_SPEC, 1u, out_record, out_record_cap, &p) ||
+        !tls_hs_append_u8(out_record, out_record_cap, &p, TLS_CHANGE_CIPHER_SPEC_TYPE)) {
+        return 0;
+    }
+
+    *out_record_len = p;
+    return 1;
+}
+
+int tls12_handshake_build_client_change_cipher_spec_record(tls12_handshake_context_t* ctx,
+                                                           uint8_t* out_record,
+                                                           size_t out_record_cap,
+                                                           size_t* out_record_len)
+{
+    uint8_t ccs = TLS_CHANGE_CIPHER_SPEC_TYPE;
+
+    if (!ctx || ctx->state != TLS12_HANDSHAKE_STATE_CLIENT_KEY_EXCHANGE_SENT ||
+        !tls12_build_change_cipher_spec_record(out_record, out_record_cap, out_record_len)) {
+        if (ctx) {
+            ctx->state = TLS12_HANDSHAKE_STATE_ERROR;
+        }
+        return 0;
+    }
+
+    return tls12_handshake_on_client_change_cipher_spec_sent(ctx, &ccs, 1u);
+}
+
+int tls12_handshake_build_client_finished_record(tls12_handshake_context_t* ctx,
+                                                 uint8_t* out_record,
+                                                 size_t out_record_cap,
+                                                 size_t* out_record_len)
+{
+    uint8_t verify_data[TLS12_VERIFY_DATA_SIZE];
+    uint8_t finished_message[TLS_HANDSHAKE_HEADER_SIZE + TLS12_VERIFY_DATA_SIZE];
+    uint8_t encrypted[128u];
+    size_t finished_message_len = 0u;
+    size_t encrypted_len = 0u;
+    size_t p = 0u;
+
+    if (out_record_len) {
+        *out_record_len = 0u;
+    }
+    if (!ctx || !out_record || !out_record_len ||
+        ctx->state != TLS12_HANDSHAKE_STATE_CLIENT_CHANGE_CIPHER_SPEC_SENT ||
+        !ctx->has_record_layer || !ctx->has_master_secret ||
+        !tls12_handshake_compute_expected_client_finished(ctx, verify_data) ||
+        !tls12_build_finished_handshake_message(verify_data,
+                                                finished_message,
+                                                sizeof(finished_message),
+                                                &finished_message_len)) {
+        if (ctx) {
+            ctx->state = TLS12_HANDSHAKE_STATE_ERROR;
+        }
+        return 0;
+    }
+
+    if (tls12_aes128_gcm_record_layer_protect(&ctx->record_layer,
+                                              TLS_CONTENT_TYPE_HANDSHAKE,
+                                              finished_message,
+                                              finished_message_len,
+                                              encrypted,
+                                              sizeof(encrypted),
+                                              &encrypted_len) != 0 ||
+        encrypted_len > out_record_cap ||
+        !tls_hs_append_bytes(out_record, out_record_cap, &p, encrypted, encrypted_len) ||
+        !tls12_handshake_on_client_finished_sent(ctx, finished_message, finished_message_len)) {
+        ctx->state = TLS12_HANDSHAKE_STATE_ERROR;
+        return 0;
+    }
+
+    *out_record_len = p;
+    return 1;
+}
+
+int tls12_handshake_on_server_change_cipher_spec_record(tls12_handshake_context_t* ctx,
+                                                        const uint8_t* record,
+                                                        size_t record_len)
+{
+    const uint8_t* fragment;
+    size_t fragment_len;
+
+    if (!ctx || !tls12_parse_plain_record(record,
+                                          record_len,
+                                          TLS_CONTENT_TYPE_CHANGE_CIPHER_SPEC,
+                                          &fragment,
+                                          &fragment_len)) {
+        if (ctx) {
+            ctx->state = TLS12_HANDSHAKE_STATE_ERROR;
+        }
+        return 0;
+    }
+
+    return tls12_handshake_on_server_change_cipher_spec(ctx, fragment, fragment_len);
+}
+
+int tls12_handshake_on_server_finished_record(tls12_handshake_context_t* ctx,
+                                              const uint8_t* record,
+                                              size_t record_len,
+                                              uint8_t* out_handshake_message,
+                                              size_t out_handshake_message_cap,
+                                              size_t* out_handshake_message_len)
+{
+    size_t plain_len = 0u;
+    uint8_t content_type = 0u;
+
+    if (out_handshake_message_len) {
+        *out_handshake_message_len = 0u;
+    }
+    if (!ctx || !out_handshake_message || !out_handshake_message_len ||
+        !ctx->has_record_layer ||
+        tls12_aes128_gcm_record_layer_unprotect(&ctx->record_layer,
+                                                record,
+                                                record_len,
+                                                out_handshake_message,
+                                                out_handshake_message_cap,
+                                                &plain_len,
+                                                &content_type) != 0 ||
+        content_type != TLS_CONTENT_TYPE_HANDSHAKE ||
+        !tls12_handshake_on_server_finished(ctx, out_handshake_message, plain_len)) {
+        if (ctx) {
+            ctx->state = TLS12_HANDSHAKE_STATE_ERROR;
+        }
+        return 0;
+    }
+
+    *out_handshake_message_len = plain_len;
+    return 1;
+}
+
 int tls12_handshake_on_client_hello_sent(tls12_handshake_context_t* ctx,
                                          const uint8_t* handshake_message,
                                          size_t handshake_message_len)
