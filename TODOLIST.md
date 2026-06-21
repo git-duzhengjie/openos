@@ -453,6 +453,7 @@
     - [√] 已增强 message queue FIFO 多消息顺序验收，覆盖连续 send 后按 one/two/three 顺序 recv
     - [√] 已将基于 socketpair 的 service channel 结构化 request/reply 消息语义并入 `/bin/chromiumcaptest`，覆盖 service/opcode/seq/status/payload 元数据往返校验
     - [√] 已增强 service channel 正常回复、错误 status 和错误 seq 的结构化边界验收
+    - [√] 已新增 `/bin/chromiumcaptest` 的 IPC channel pressure loop，连续覆盖 message queue、socketpair/poll、service channel 往返，作为 Chromium 多进程 IPC 最小压力回归
   - [√] 设计 `/bin/chromium` 第一版单进程模式与后续多进程模型边界：已新增 `docs/chromium-process-model.md`，明确 single-process/content_shell 起步、多进程恢复顺序和 `/bin/chromiumcaptest` 最低验收线
 - [ ] M5 文件系统与资源管理
   - [ ] 完善 `stat/fstat/lstat`、权限、mtime/ctime/atime、目录遍历和路径规范化

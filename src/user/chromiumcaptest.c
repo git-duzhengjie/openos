@@ -26,6 +26,8 @@ static volatile int g_sem_produced = 0;
 static volatile int g_sem_consumed = 0;
 static volatile int g_sem_failed = 0;
 
+static int test_socketpair_poll(void);
+
 static void print_result(const char *name, int status)
 {
     if (status == CAP_PASS) {
@@ -1577,6 +1579,24 @@ static int test_service_channel(void)
                : CAP_FAIL;
 }
 
+static int test_ipc_channel_pressure(void)
+{
+    int i;
+
+    for (i = 0; i < 5; ++i) {
+        if (test_message_queue() != CAP_PASS) {
+            return CAP_FAIL;
+        }
+        if (test_socketpair_poll() != CAP_PASS) {
+            return CAP_FAIL;
+        }
+        if (test_service_channel() != CAP_PASS) {
+            return CAP_FAIL;
+        }
+    }
+    return CAP_PASS;
+}
+
 static int test_cxx_abi_runtime_hooks(void)
 {
     char *argv[] = { (char *)"/bin/cxxabitest", 0 };
@@ -2321,7 +2341,7 @@ int main(int argc, char **argv)
     (void)argv;
 
     openos_printf("Chromium core capability test\n");
-    openos_printf("target: mmap file-mmap fs-metadata path-normalization fs-mutations getdents browser-dirs resource-pak sparse-seek mprotect v8-memory-policy brk thread tls pthread-sync futex shm eventfd message-queue service-channel socketpair poll fcntl shutdown sockopt time nanosleep spawn waitpid cxxabi fork pipe fd argv env dns font gui clipboard pressure-smoke\n");
+    openos_printf("target: mmap file-mmap fs-metadata path-normalization fs-mutations getdents browser-dirs resource-pak sparse-seek mprotect v8-memory-policy brk thread tls pthread-sync futex shm eventfd message-queue service-channel socketpair poll ipc-pressure fcntl shutdown sockopt time nanosleep spawn waitpid cxxabi fork pipe fd argv env dns font gui clipboard pressure-smoke\n");
 
     status = test_uptime();
     print_result("monotonic uptime", status);
@@ -2433,6 +2453,10 @@ int main(int argc, char **argv)
 
     status = test_service_channel();
     print_result("service channel request/reply", status);
+    failed += status == CAP_FAIL;
+
+    status = test_ipc_channel_pressure();
+    print_result("ipc channel pressure loop", status);
     failed += status == CAP_FAIL;
 
     status = test_clipboard_smoke();
