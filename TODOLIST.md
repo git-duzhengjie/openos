@@ -54,9 +54,9 @@
 - [x] P1.2：DOM 文本渲染入口替换纯字符串折叠输出
   - [x] 基于 DOM 遍历输出文本
   - [x] 按默认 display 类型输出块级换行
-- [ ] P1.3：扩展默认 CSS display 分类
-  - [ ] 覆盖 `article` / `section` / `nav` / `header` / `footer` / `main`
-  - [ ] 增加默认样式 smoke 覆盖
+- [x] P1.3：扩展默认 CSS display 分类
+  - [x] 覆盖 `article` / `section` / `nav` / `header` / `footer` / `main`
+  - [x] 增加默认样式 smoke 覆盖
 - [ ] P1.4：HTML tokenizer 属性跳过与自闭合标签回归
   - [ ] 确认带属性标签名解析稳定
   - [ ] 增加 `<br>` / `<img>` / `<meta>` 等自闭合/void 标签测试

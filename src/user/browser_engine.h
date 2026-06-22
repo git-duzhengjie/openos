@@ -120,7 +120,8 @@ static int ob_default_display_for_tag(ob_style_resolver_i_t *self, const char *t
         ob_token_eq_ci(tag, "li") || ob_token_eq_ci(tag, "ul") ||
         ob_token_eq_ci(tag, "ol") || ob_token_eq_ci(tag, "tr") ||
         ob_token_eq_ci(tag, "table") || ob_token_eq_ci(tag, "section") ||
-        ob_token_eq_ci(tag, "article") || ob_token_eq_ci(tag, "header") ||
+        ob_token_eq_ci(tag, "article") || ob_token_eq_ci(tag, "nav") ||
+        ob_token_eq_ci(tag, "main") || ob_token_eq_ci(tag, "header") ||
         ob_token_eq_ci(tag, "footer") || ob_token_eq_ci(tag, "title"))
         return OB_DISPLAY_BLOCK;
     return OB_DISPLAY_INLINE;

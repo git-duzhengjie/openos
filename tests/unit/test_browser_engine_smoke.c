@@ -45,6 +45,16 @@ int main(void)
     }
 
     {
+        const char *semantic = "<header>Top</header><nav>Nav</nav><main><article><section>Body</section></article></main><footer>Bottom</footer>";
+        if (parser.iface.parse(&parser.iface, semantic, &doc) <= 1 ||
+            renderer.iface.render(&renderer.iface, &doc, rendered, sizeof(rendered)) <= 0 ||
+            !strstr(rendered, "Top\nNav\nBody\nBottom")) {
+            fprintf(stderr, "browser default display smoke failed: %s\n", rendered);
+            return 1;
+        }
+    }
+
+    {
         const char *nested = "<main><section><p>One</section><p>Two</p></main>";
         int section_id;
         int first_p_id;
