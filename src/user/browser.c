@@ -1050,21 +1050,17 @@ static void browser_load_worker(void *arg)
             browser_extract_title(ctx->title, sizeof(ctx->title), body);
             {
                 ob_html_parser_base_t parser;
-                ob_dom_text_renderer_base_t renderer;
-                ob_dom_document_t doc;
                 ob_html_parser_base_init(&parser);
-                ob_dom_text_renderer_base_init(&renderer);
-                if (parser.iface.parse(&parser.iface, body, &doc) > 0) {
+                if (parser.iface.parse(&parser.iface, body, &ctx->dom) > 0) {
                     int i;
                     ctx->link_count = 0;
                     ctx->selected_link = 0;
-                    for (i = 0; i < doc.count && ctx->link_count < BROWSER_LINK_MAX; ++i) {
-                        if (doc.nodes[i].type == OB_DOM_NODE_ELEMENT && ob_token_eq_ci(doc.nodes[i].name, "a") && doc.nodes[i].href[0]) {
-                            snprintf(ctx->links[ctx->link_count], sizeof(ctx->links[ctx->link_count]), "%s", doc.nodes[i].href);
+                    for (i = 0; i < ctx->dom.count && ctx->link_count < BROWSER_LINK_MAX; ++i) {
+                        if (ctx->dom.nodes[i].type == OB_DOM_NODE_ELEMENT && ob_token_eq_ci(ctx->dom.nodes[i].name, "a") && ctx->dom.nodes[i].href[0]) {
+                            snprintf(ctx->links[ctx->link_count], sizeof(ctx->links[ctx->link_count]), "%s", ctx->dom.nodes[i].href);
                             ++ctx->link_count;
                         }
                     }
-                    ob_dom_document_copy(&ctx->dom, &doc);
                     ob_dom_normalize_resource_urls(&ctx->dom, ctx->path);
                     ob_form_state_collect_from_dom(&ctx->form_state, &ctx->dom);
                     ob_dom_text_render_with_form_state(&ctx->dom, &ctx->form_state, ctx->body, sizeof(ctx->body));
