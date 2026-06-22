@@ -1,0 +1,10 @@
+official_component=v8
+repository=https://github.com/v8/v8.git
+commit=ea2fec07f9cf14fa17771d51732052634105ced0
+commit_short=ea2fec07f9cf
+source_kind=github-tarball
+source_path=/mnt/e/openos/.openos-deps/v8
+gn_out=/mnt/e/openos/.openos-deps/v8/out/openos-host-jitless
+generated_at_utc=2026-06-22T01:31:04Z
+jitless_smoke=d8 --jitless -e "print(1+2)"
+note=Official V8 d8/shell jitless minimum build pin for OpenOS Chromium route.

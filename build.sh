@@ -28,7 +28,7 @@ if [ "$OPENOS_CJK_COVERAGE" != "ui" ] && [ "$OPENOS_CJK_EMBED" != "1" ] && [ "$O
 fi
 
 usage() {
-    echo "Usage: ARCH=i386|x86_64 ./build.sh [clean|test|cppsmoke|sdk|sdk-smoke|chromium-source-check|chromium-gn-check|chromium-engine-gate|skia-official-check|host-tools-check]"
+    echo "Usage: ARCH=i386|x86_64 ./build.sh [clean|test|cppsmoke|sdk|sdk-smoke|chromium-source-check|chromium-gn-check|chromium-engine-gate|skia-official-check|v8-official-check|host-tools-check]"
     echo "       ./build.sh [i386|x86_64] [clean|test|cppsmoke|sdk|sdk-smoke]"
     echo "       ./build.sh cppsmoke    # probe OpenOS userland C++ toolchain"
     echo "       ./build.sh sdk         # export OpenOS userland SDK/sysroot for Chromium ports"
@@ -37,6 +37,11 @@ usage() {
     echo "       ./build.sh chromium-gn-check # check Chromium OpenOS GN/toolchain overlay"
     echo "       ./build.sh chromium-engine-gate # verify Chromium demo is not mislabeled as real Chrome"
     echo "       ./build.sh skia-official-check # check official Skia intake prerequisites"
+    echo "       ./build.sh v8-official-check # check official V8 d8 jitless intake prerequisites"
+    echo "       ./build.sh v8-official-fetch # fetch official V8 checkout and write v8.official.pin"
+    echo "       ./build.sh v8-official-sync-deps # sync official V8 minimal DEPS for d8 build"
+    echo "       ./build.sh v8-official-build # build official V8 d8 for host jitless smoke"
+    echo "       ./build.sh v8-official-smoke # run official V8 d8 --jitless smoke"
     echo "       ./build.sh host-tools-check # check no-sudo host tool bootstrap"
 }
 
@@ -90,6 +95,21 @@ case "${1:-}" in
         ;;
     skia-official-check|skia-check|official-skia-check)
         exec bash scripts/skia-official.sh --check
+        ;;
+    v8-official-check|v8-check|official-v8-check)
+        exec bash scripts/v8-official.sh --check
+        ;;
+    v8-official-fetch|v8-fetch|official-v8-fetch)
+        exec bash scripts/v8-official.sh --fetch
+        ;;
+    v8-official-sync-deps|v8-sync-deps|official-v8-sync-deps)
+        exec bash scripts/v8-official.sh --sync-deps
+        ;;
+    v8-official-build|v8-build|official-v8-build)
+        exec bash scripts/v8-official.sh --build
+        ;;
+    v8-official-smoke|v8-smoke|official-v8-smoke)
+        exec bash scripts/v8-official.sh --smoke
         ;;
     host-tools-check|bootstrap-host-tools-check)
         exec bash scripts/bootstrap-host-tools.sh --check
