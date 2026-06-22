@@ -65,6 +65,37 @@ int main(void)
     }
 
     {
+        const char *links = "<main><p><a href=\"/one\">One</a> <a href='/two'>Two</a> <a href=three>Three</a></p></main>";
+        int first_link = -1;
+        int second_link = -1;
+        int third_link = -1;
+        int i;
+        if (parser.iface.parse(&parser.iface, links, &doc) <= 1 ||
+            renderer.iface.render(&renderer.iface, &doc, rendered, sizeof(rendered)) <= 0 ||
+            !strstr(rendered, "One [1] Two [2] Three [3]")) {
+            fprintf(stderr, "browser link render smoke failed: %s\n", rendered);
+            return 1;
+        }
+        for (i = 0; i < doc.count; ++i) {
+            if (strcmp(doc.nodes[i].name, "a") == 0) {
+                if (first_link < 0) first_link = i;
+                else if (second_link < 0) second_link = i;
+                else if (third_link < 0) third_link = i;
+            }
+        }
+        if (first_link < 0 || second_link < 0 || third_link < 0 ||
+            strcmp(doc.nodes[first_link].href, "/one") != 0 ||
+            strcmp(doc.nodes[second_link].href, "/two") != 0 ||
+            strcmp(doc.nodes[third_link].href, "three") != 0) {
+            fprintf(stderr, "browser href extraction smoke failed: %s | %s | %s\n",
+                    first_link >= 0 ? doc.nodes[first_link].href : "",
+                    second_link >= 0 ? doc.nodes[second_link].href : "",
+                    third_link >= 0 ? doc.nodes[third_link].href : "");
+            return 1;
+        }
+    }
+
+    {
         const char *nested = "<main><section><p>One</section><p>Two</p></main>";
         int section_id;
         int first_p_id;

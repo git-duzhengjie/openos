@@ -17,6 +17,7 @@
 #define BROWSER_TITLE_MAX 96
 #define BROWSER_STATUS_MAX 96
 #define BROWSER_HISTORY_MAX 8
+#define BROWSER_LINK_MAX 8
 #define BROWSER_VIEW_LINES 6
 #define BROWSER_LINE_MAX 72
 
@@ -35,6 +36,9 @@ typedef struct browser_load_context {
     char title[BROWSER_TITLE_MAX];
     char http_status[BROWSER_STATUS_MAX];
     char status[64];
+    char links[BROWSER_LINK_MAX][OB_MAX_ATTR_VALUE];
+    int link_count;
+    int selected_link;
 } browser_load_context_t;
 
 typedef struct browser_history_entry {
@@ -295,6 +299,99 @@ static int browser_history_go(browser_history_t *history, int delta)
     return 0;
 }
 
+static void browser_history_push(browser_history_t *history, const char *host, const char *path, int is_file)
+{
+    int i;
+    if (!history || !path || !path[0]) return;
+    if (!is_file && (!host || !host[0])) return;
+    if (history->current < history->count - 1) history->count = history->current + 1;
+    if (history->count >= BROWSER_HISTORY_MAX) {
+        for (i = 1; i < history->count; ++i) history->entries[i - 1] = history->entries[i];
+        history->count = BROWSER_HISTORY_MAX - 1;
+        history->current = history->count - 1;
+    }
+    ++history->current;
+    if (history->current < 0) history->current = 0;
+    if (history->current >= BROWSER_HISTORY_MAX) history->current = BROWSER_HISTORY_MAX - 1;
+    snprintf(history->entries[history->current].host, sizeof(history->entries[history->current].host), "%s", is_file ? "" : host);
+    snprintf(history->entries[history->current].path, sizeof(history->entries[history->current].path), "%s", path);
+    history->entries[history->current].is_file = is_file;
+    history->count = history->current + 1;
+}
+
+static const char *browser_basename_dir_end(const char *path)
+{
+    const char *last = 0;
+    const char *p = path;
+    if (!path) return 0;
+    while (*p) {
+        if (*p == '/') last = p;
+        ++p;
+    }
+    return last;
+}
+
+static void browser_join_relative_path(char *out, int out_size, const char *base_path, const char *href)
+{
+    const char *base = base_path && base_path[0] ? base_path : "/";
+    const char *slash;
+    int base_len;
+    if (!out || out_size <= 0) return;
+    out[0] = 0;
+    if (!href || !href[0]) { snprintf(out, out_size, "%s", base); return; }
+    if (href[0] == '/') { snprintf(out, out_size, "%s", href); return; }
+    slash = browser_basename_dir_end(base);
+    base_len = slash ? (int)(slash - base + 1) : 1;
+    if (base_len > 1) snprintf(out, out_size, "%.*s%s", base_len, base, href);
+    else snprintf(out, out_size, "/%s", href);
+}
+
+static int browser_resolve_link(const browser_history_entry_t *base, const char *href, char *host, int host_size, char *path, int path_size, int *is_file, char *error, int error_size)
+{
+    if (!base || !href || !href[0] || !host || !path || !is_file) return -1;
+    host[0] = 0;
+    path[0] = 0;
+    *is_file = base->is_file;
+    if (browser_match_token_ci(href, "https://")) {
+        if (error && error_size > 0) snprintf(error, error_size, "HTTPS links are not supported yet");
+        return -1;
+    }
+    if (browser_match_token_ci(href, "http://")) {
+        *is_file = 0;
+        return browser_parse_url_arg(href, host, host_size, path, path_size);
+    }
+    if (browser_match_token_ci(href, "file://")) {
+        *is_file = 1;
+        host[0] = 0;
+        return browser_parse_file_arg(href, path, path_size);
+    }
+    if (strstr(href, "://")) {
+        if (error && error_size > 0) snprintf(error, error_size, "Unsupported link scheme");
+        return -1;
+    }
+    if (base->is_file) {
+        host[0] = 0;
+        browser_join_relative_path(path, path_size, base->path, href);
+        *is_file = 1;
+    } else {
+        snprintf(host, host_size, "%s", base->host);
+        browser_join_relative_path(path, path_size, base->path, href);
+        *is_file = 0;
+    }
+    return path[0] ? 0 : -1;
+}
+
+static void browser_update_link_status(int win, int status_label, const browser_load_context_t *load)
+{
+    char status[128];
+    if (!load || load->link_count <= 0) {
+        openos_gui_set_text(win, status_label, "No links");
+        return;
+    }
+    snprintf(status, sizeof(status), "Link %d/%d: %s", load->selected_link + 1, load->link_count, load->links[load->selected_link]);
+    openos_gui_set_text(win, status_label, status);
+}
+
 static void browser_make_view(char *out, int out_size, const browser_load_context_t *load, int scroll_line)
 {
     int line = 0;
@@ -521,9 +618,18 @@ static void browser_load_worker(void *arg)
             ob_dom_document_t doc;
             ob_html_parser_base_init(&parser);
             ob_dom_text_renderer_base_init(&renderer);
-            if (parser.iface.parse(&parser.iface, body, &doc) > 0)
+            if (parser.iface.parse(&parser.iface, body, &doc) > 0) {
+                int i;
+                ctx->link_count = 0;
+                ctx->selected_link = 0;
+                for (i = 0; i < doc.count && ctx->link_count < BROWSER_LINK_MAX; ++i) {
+                    if (doc.nodes[i].type == OB_DOM_NODE_ELEMENT && ob_token_eq_ci(doc.nodes[i].name, "a") && doc.nodes[i].href[0]) {
+                        snprintf(ctx->links[ctx->link_count], sizeof(ctx->links[ctx->link_count]), "%s", doc.nodes[i].href);
+                        ++ctx->link_count;
+                    }
+                }
                 renderer.iface.render(&renderer.iface, &doc, ctx->body, sizeof(ctx->body));
-            else
+            } else
                 ctx->body[0] = 0;
         }
         if (!ctx->body[0])
@@ -561,6 +667,8 @@ int main(int argc, char **argv)
     int forward_button;
     int up_button;
     int down_button;
+    int next_link_button;
+    int open_link_button;
     int close_button;
     int rc = 0;
     int scroll_line = 0;
@@ -593,21 +701,23 @@ int main(int argc, char **argv)
 
     browser_history_init(&history, host, path, is_file);
 
-    win = openos_gui_create_window("用户态浏览器", 80, 80, 600, 300);
+    win = openos_gui_create_window("用户态浏览器", 80, 80, 700, 300);
     if (win < 0) {
         printf("browser: failed to create GUI window\n");
         return 1;
     }
 
-    status_label = openos_gui_add_label(win, 16, 24, 500, 20, "Ready");
+    status_label = openos_gui_add_label(win, 16, 24, 640, 20, "Ready");
     snprintf(summary, sizeof(summary), "Ready: %s%s%s", is_file ? "file://" : "http://", is_file ? "" : host, path);
-    body_label = openos_gui_add_label(win, 16, 56, 560, 170, summary);
+    body_label = openos_gui_add_label(win, 16, 56, 650, 170, summary);
     load_button = openos_gui_add_button(win, 16, 248, 80, 24, "Refresh");
     back_button = openos_gui_add_button(win, 104, 248, 64, 24, "Back");
     forward_button = openos_gui_add_button(win, 176, 248, 72, 24, "Forward");
     up_button = openos_gui_add_button(win, 256, 248, 56, 24, "Up");
     down_button = openos_gui_add_button(win, 320, 248, 56, 24, "Down");
-    close_button = openos_gui_add_button(win, 488, 248, 80, 24, "Close");
+    next_link_button = openos_gui_add_button(win, 384, 248, 72, 24, "NextLink");
+    open_link_button = openos_gui_add_button(win, 464, 248, 72, 24, "OpenLink");
+    close_button = openos_gui_add_button(win, 584, 248, 80, 24, "Close");
     printf("browser: ready http://%s%s\n", host, path);
 
     for (;;) {
@@ -638,6 +748,32 @@ int main(int argc, char **argv)
                 } else {
                     openos_gui_set_text(win, status_label, "Forward: no history");
                 }
+            } else if (event.widget_id == (unsigned int)next_link_button) {
+                if (load.link_count <= 0) {
+                    openos_gui_set_text(win, status_label, "No links");
+                } else {
+                    load.selected_link = (load.selected_link + 1) % load.link_count;
+                    browser_update_link_status(win, status_label, &load);
+                }
+            } else if (event.widget_id == (unsigned int)open_link_button) {
+                const browser_history_entry_t *cur = browser_history_current(&history);
+                char selected_href[OB_MAX_ATTR_VALUE];
+                char next_host[BROWSER_HOST_MAX];
+                char next_path[BROWSER_PATH_MAX];
+                char error[96];
+                int next_is_file = 0;
+                selected_href[0] = 0;
+                error[0] = 0;
+                if (load.link_count > 0) snprintf(selected_href, sizeof(selected_href), "%s", load.links[load.selected_link]);
+                if (!cur || !selected_href[0]) {
+                    openos_gui_set_text(win, status_label, "OpenLink: no link");
+                } else if (browser_resolve_link(cur, selected_href, next_host, sizeof(next_host), next_path, sizeof(next_path), &next_is_file, error, sizeof(error)) == 0) {
+                    scroll_line = 0;
+                    browser_history_push(&history, next_host, next_path, next_is_file);
+                    browser_start_load(&load, win, status_label, body_label, next_host, next_path, next_is_file);
+                } else {
+                    openos_gui_set_text(win, status_label, error[0] ? error : "OpenLink: unsupported link");
+                }
             } else if (event.widget_id == (unsigned int)up_button) {
                 char view[BROWSER_BODY_MAX + BROWSER_TITLE_MAX + 32];
                 if (scroll_line > 0) --scroll_line;
@@ -658,6 +794,7 @@ int main(int argc, char **argv)
                 scroll_line = 0;
                 browser_make_view(view, sizeof(view), &load, scroll_line);
                 openos_gui_set_text(win, body_label, view);
+                if (load.link_count > 0) browser_update_link_status(win, status_label, &load);
             }
             load.active = 0;
         }

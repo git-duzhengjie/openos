@@ -9,8 +9,6 @@
  * The structs below emulate interface/base/implementation layering in C.
  */
 
-#include <string.h>
-
 #define OB_HTML_TOKEN_TEXT 1
 #define OB_HTML_TOKEN_TAG 2
 #define OB_HTML_TOKEN_EOF 3
@@ -26,6 +24,7 @@
 #define OB_MAX_TAG_NAME 16
 #define OB_MAX_DOM_NODES 32
 #define OB_MAX_NODE_TEXT 96
+#define OB_MAX_ATTR_VALUE 96
 
 typedef struct ob_html_token {
     int type;
@@ -34,6 +33,8 @@ typedef struct ob_html_token {
     int text_len;
     int closing;
     int self_closing;
+    const char *attrs;
+    int attrs_len;
 } ob_html_token_t;
 
 typedef struct ob_html_tokenizer_i ob_html_tokenizer_i_t;
@@ -55,6 +56,7 @@ typedef struct ob_dom_node {
     int style_display;
     char name[OB_MAX_TAG_NAME];
     char text[OB_MAX_NODE_TEXT];
+    char href[OB_MAX_ATTR_VALUE];
 } ob_dom_node_t;
 
 typedef struct ob_dom_document {
@@ -223,6 +225,8 @@ static int ob_tokenizer_next_impl(ob_html_tokenizer_i_t *iface, ob_html_token_t 
     out->text_len = 0;
     out->closing = 0;
     out->self_closing = 0;
+    out->attrs = 0;
+    out->attrs_len = 0;
     if (!s[self->pos]) return 0;
     if (s[self->pos] != '<') {
         start = self->pos;
@@ -240,6 +244,7 @@ static int ob_tokenizer_next_impl(ob_html_tokenizer_i_t *iface, ob_html_token_t 
            s[self->pos] != ' ' && s[self->pos] != '\t' && s[self->pos] != '\r' && s[self->pos] != '\n')
         ++self->pos;
     name_len = self->pos - name_start;
+    out->attrs = s + self->pos;
     while (s[self->pos]) {
         char c = s[self->pos];
         if (quote) {
@@ -256,6 +261,7 @@ static int ob_tokenizer_next_impl(ob_html_tokenizer_i_t *iface, ob_html_token_t 
         if (c == '>') break;
         ++self->pos;
     }
+    out->attrs_len = (int)((s + self->pos) - out->attrs);
     if (s[self->pos] == '>') ++self->pos;
     out->type = OB_HTML_TOKEN_TAG;
     ob_copy_tag_name(out->name, sizeof(out->name), s + name_start, name_len);
@@ -268,6 +274,70 @@ static void ob_html_tokenizer_base_init(ob_html_tokenizer_base_t *tokenizer, con
     tokenizer->iface.next = ob_tokenizer_next_impl;
     tokenizer->input = html ? html : "";
     tokenizer->pos = 0;
+}
+
+static void ob_copy_attr_value(char *dst, int dst_size, const char *src, int len)
+{
+    int i = 0;
+    if (!dst || dst_size <= 0) return;
+    if (!src || len <= 0) { dst[0] = 0; return; }
+    while (i < dst_size - 1 && i < len && src[i]) {
+        dst[i] = src[i];
+        ++i;
+    }
+    dst[i] = 0;
+}
+
+static int ob_attr_name_eq_ci(const char *p, int len, const char *name)
+{
+    int i = 0;
+    if (!p || !name || len <= 0) return 0;
+    while (i < len && name[i]) {
+        if (!ob_ascii_equal_ci(p[i], name[i])) return 0;
+        ++i;
+    }
+    return i == len && name[i] == 0;
+}
+
+static void ob_extract_attr_value(const char *attrs, int attrs_len, const char *name, char *out, int out_size)
+{
+    int pos = 0;
+    if (!out || out_size <= 0) return;
+    out[0] = 0;
+    if (!attrs || attrs_len <= 0 || !name) return;
+    while (pos < attrs_len) {
+        int key_start;
+        int key_len;
+        while (pos < attrs_len && (attrs[pos] == ' ' || attrs[pos] == '\t' || attrs[pos] == '\r' || attrs[pos] == '\n' || attrs[pos] == '/')) ++pos;
+        key_start = pos;
+        while (pos < attrs_len && attrs[pos] != '=' && attrs[pos] != ' ' && attrs[pos] != '\t' && attrs[pos] != '\r' && attrs[pos] != '\n' && attrs[pos] != '/') ++pos;
+        key_len = pos - key_start;
+        while (pos < attrs_len && (attrs[pos] == ' ' || attrs[pos] == '\t' || attrs[pos] == '\r' || attrs[pos] == '\n')) ++pos;
+        if (pos >= attrs_len || attrs[pos] != '=') {
+            while (pos < attrs_len && attrs[pos] != ' ' && attrs[pos] != '\t' && attrs[pos] != '\r' && attrs[pos] != '\n') ++pos;
+            continue;
+        }
+        ++pos;
+        while (pos < attrs_len && (attrs[pos] == ' ' || attrs[pos] == '\t' || attrs[pos] == '\r' || attrs[pos] == '\n')) ++pos;
+        if (pos >= attrs_len) return;
+        if (attrs[pos] == '"' || attrs[pos] == '\'') {
+            char quote = attrs[pos++];
+            int value_start = pos;
+            while (pos < attrs_len && attrs[pos] != quote) ++pos;
+            if (ob_attr_name_eq_ci(attrs + key_start, key_len, name)) {
+                ob_copy_attr_value(out, out_size, attrs + value_start, pos - value_start);
+                return;
+            }
+            if (pos < attrs_len) ++pos;
+        } else {
+            int value_start = pos;
+            while (pos < attrs_len && attrs[pos] != ' ' && attrs[pos] != '\t' && attrs[pos] != '\r' && attrs[pos] != '\n' && attrs[pos] != '/') ++pos;
+            if (ob_attr_name_eq_ci(attrs + key_start, key_len, name)) {
+                ob_copy_attr_value(out, out_size, attrs + value_start, pos - value_start);
+                return;
+            }
+        }
+    }
 }
 
 static int ob_dom_add_node(ob_dom_document_t *doc, int type, const char *name, const char *text, int text_len, int parent, int display)
@@ -283,6 +353,7 @@ static int ob_dom_add_node(ob_dom_document_t *doc, int type, const char *name, c
     doc->nodes[id].style_display = display;
     doc->nodes[id].name[0] = 0;
     doc->nodes[id].text[0] = 0;
+    doc->nodes[id].href[0] = 0;
     if (name) ob_copy_tag_name(doc->nodes[id].name, sizeof(doc->nodes[id].name), name, ob_cstr_len(name));
     if (text && text_len > 0) {
         for (i = 0; i < text_len && i < OB_MAX_NODE_TEXT - 1; ++i) doc->nodes[id].text[i] = text[i];
@@ -340,6 +411,8 @@ static int ob_html_parse_impl(ob_html_parser_i_t *iface, const char *html, ob_do
             } else {
                 int display = styles.iface.display_for_tag(&styles.iface, tok.name);
                 int id = ob_dom_add_node(doc, OB_DOM_NODE_ELEMENT, tok.name, 0, 0, current, display);
+                if (id >= 0 && ob_token_eq_ci(tok.name, "a"))
+                    ob_extract_attr_value(tok.attrs, tok.attrs_len, "href", doc->nodes[id].href, sizeof(doc->nodes[id].href));
                 if (id >= 0 && !tok.self_closing && !ob_is_void_tag(tok.name) && depth < OB_MAX_DOM_NODES) stack[depth++] = id;
             }
         }
@@ -353,7 +426,33 @@ static void ob_html_parser_base_init(ob_html_parser_base_t *parser)
     parser->iface.parse = ob_html_parse_impl;
 }
 
-static void ob_dom_render_node_text(const ob_dom_document_t *doc, int node_id, char *out, int out_size, int *pos)
+static void ob_dom_render_append_int(char *out, int out_size, int *pos, int value)
+{
+    char digits[12];
+    int count = 0;
+    if (!out || !pos || *pos >= out_size - 1) return;
+    if (value <= 0) {
+        if (*pos < out_size - 1) out[(*pos)++] = '0';
+        return;
+    }
+    while (value > 0 && count < (int)sizeof(digits)) {
+        digits[count++] = (char)('0' + (value % 10));
+        value /= 10;
+    }
+    while (count > 0 && *pos < out_size - 1) out[(*pos)++] = digits[--count];
+}
+
+static void ob_dom_render_append_link_marker(char *out, int out_size, int *pos, int link_number)
+{
+    if (!out || !pos || link_number <= 0 || *pos >= out_size - 1) return;
+    if (*pos > 0 && out[*pos - 1] != ' ' && out[*pos - 1] != '\n') out[(*pos)++] = ' ';
+    if (*pos < out_size - 1) out[(*pos)++] = '[';
+    ob_dom_render_append_int(out, out_size, pos, link_number);
+    if (*pos < out_size - 1) out[(*pos)++] = ']';
+    if (*pos < out_size - 1) out[(*pos)++] = ' ';
+}
+
+static void ob_dom_render_node_text_ex(const ob_dom_document_t *doc, int node_id, char *out, int out_size, int *pos, int *link_count)
 {
     int child;
     int is_block;
@@ -364,10 +463,20 @@ static void ob_dom_render_node_text(const ob_dom_document_t *doc, int node_id, c
     if (doc->nodes[node_id].type == OB_DOM_NODE_TEXT) ob_dom_render_append_text(out, out_size, pos, doc->nodes[node_id].text);
     child = doc->nodes[node_id].first_child;
     while (child >= 0 && *pos < out_size - 1) {
-        ob_dom_render_node_text(doc, child, out, out_size, pos);
+        ob_dom_render_node_text_ex(doc, child, out, out_size, pos, link_count);
         child = doc->nodes[child].next_sibling;
     }
+    if (doc->nodes[node_id].type == OB_DOM_NODE_ELEMENT && ob_token_eq_ci(doc->nodes[node_id].name, "a") && doc->nodes[node_id].href[0] && link_count) {
+        ++(*link_count);
+        ob_dom_render_append_link_marker(out, out_size, pos, *link_count);
+    }
     if (is_block && *pos > 0) ob_dom_render_append_newline(out, out_size, pos);
+}
+
+static void ob_dom_render_node_text(const ob_dom_document_t *doc, int node_id, char *out, int out_size, int *pos)
+{
+    int link_count = 0;
+    ob_dom_render_node_text_ex(doc, node_id, out, out_size, pos, &link_count);
 }
 
 static int ob_dom_text_render_impl(ob_dom_text_renderer_i_t *iface, const ob_dom_document_t *doc, char *out, int out_size)
