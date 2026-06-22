@@ -33,7 +33,9 @@ usage() {
     echo "       ./build.sh cppsmoke    # probe OpenOS userland C++ toolchain"
     echo "       ./build.sh sdk         # export OpenOS userland SDK/sysroot for Chromium ports"
     echo "       ./build.sh sdk-smoke   # verify SDK can build a minimal OpenOS user ELF"
-    echo "       ./build.sh chromium-source-check # check Chromium upstream checkout prerequisites"
+    echo "       ./build.sh chromium-source-check # check Chromium minimal source/dependency closure prerequisites"
+    echo "       ./build.sh chromium-source-fetch # fetch minimal Chromium src entrypoint only"
+    echo "       ./build.sh chromium-source-fetch-full # explicit full Chromium fetch/gclient sync; not the default OpenOS route"
     echo "       ./build.sh chromium-gn-check # check Chromium OpenOS GN/toolchain overlay"
     echo "       ./build.sh chromium-engine-gate # verify Chromium demo is not mislabeled as real Chrome"
     echo "       ./build.sh chromium-real-switch-gate # final gate for replacing demo /bin/chromium with real Chromium"
@@ -91,6 +93,12 @@ case "${1:-}" in
         ;;
     chromium-source-check|chromium-check|chrome-source-check)
         exec bash scripts/chromium-source.sh --check
+        ;;
+    chromium-source-fetch|chromium-fetch|chrome-source-fetch)
+        exec bash scripts/chromium-source.sh --fetch
+        ;;
+    chromium-source-fetch-full|chromium-fetch-full|chrome-source-fetch-full)
+        exec bash scripts/chromium-source.sh --fetch-full
         ;;
     chromium-gn-check|chrome-gn-check|chromium-toolchain-check)
         exec bash scripts/chromium-openos-gn.sh --check

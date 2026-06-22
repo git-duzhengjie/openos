@@ -19,10 +19,12 @@
   - [x] 检查官方 Skia/V8/Blink/content_shell pins 均为真实 commit，不能是 pending
   - [x] 检查官方 content_shell/Chromium 构建产物存在并记录 hash/size
   - [x] 检查 demo 程序只能以 `/bin/chromium_demo` 或 fallback 名称存在，不能占用 `/bin/chromium`
-- [ ] P0.2：准备并验证完整官方 Chromium checkout（当前阻塞：可用磁盘空间不足 180GB，且 WSL 到 `chromium.googlesource.com` 连接超时；详见 `docs/chromium-upstream-pin.md`）
+- [ ] P0.2：准备并验证官方 Chromium 最小源码/依赖闭包（不要同步海量无关 `third_party`；当前主要阻塞：WSL 到 `chromium.googlesource.com` 连接超时，详见 `docs/chromium-upstream-pin.md`）
   - [ ] 获取/校验 depot_tools（脚本已支持 Gitiles git clone + archive fallback；待网络恢复后验收）
-  - [ ] 拉取 Chromium `src` 到 `.openos-deps/chromium/src`
-  - [ ] 记录 `docs/chromium-upstream-pin.md` 的真实 commit、分支、磁盘占用和同步时间
+  - [ ] 拉取 Chromium `src` 最小历史到 `.openos-deps/chromium/src`
+  - [ ] 生成 `content_shell` 所需的最小 DEPS 闭包清单，优先跳过测试/移动端/媒体大包/无关平台依赖
+  - [ ] 只同步 GN 生成和 `//content/shell:content_shell` 所需依赖，禁止把“完整 third_party 全量同步”作为默认路线
+  - [ ] 记录 `docs/chromium-upstream-pin.md` 的真实 commit、分支、最小依赖闭包、磁盘占用和同步时间
   - [ ] 执行 `./build.sh chromium-source-check` 通过
 - [ ] P0.3：生成并通过 OpenOS content_shell GN 配置
   - [ ] 执行 `./build.sh chromium-content-shell-gn-gen`

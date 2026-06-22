@@ -10,7 +10,7 @@ CONTENT_OUT="${OPENOS_CONTENT_SHELL_OUT:-$CHROMIUM_SRC/out/OpenOSContentShell-i3
 ARGS_FILE="$ROOT/ports/chromium-openos/args.content-shell-openos-i386.gn"
 BLINK_PIN_FILE="$ROOT/ports/chromium-openos/blink.official.pin"
 CONTENT_PIN_FILE="$ROOT/ports/chromium-openos/content_shell.official.pin"
-MIN_FREE_GB="${OPENOS_CONTENT_SHELL_MIN_FREE_GB:-180}"
+MIN_FREE_GB="${OPENOS_CONTENT_SHELL_MIN_FREE_GB:-40}"
 
 usage() {
     cat <<USAGE
@@ -20,7 +20,8 @@ Default action: --check
 
 This is the official Blink/content_shell single-process software-rendering
 bootstrap entrypoint for the OpenOS Chromium route. It requires a real Chromium
-checkout and never treats src/user/chromium.c as a Chromium engine.
+source tree plus the minimal dependency closure needed by content_shell; it never
+treats src/user/chromium.c as a Chromium engine.
 
 Environment:
   OPENOS_CHROMIUM_DEPS_DIR       External dependency cache, default: $ROOT/.openos-deps
@@ -28,7 +29,7 @@ Environment:
   OPENOS_CHROMIUM_ROOT           Chromium checkout root, default: \$OPENOS_CHROMIUM_DEPS_DIR/chromium
   OPENOS_CHROMIUM_SRC            Chromium src path, default: \$OPENOS_CHROMIUM_ROOT/src
   OPENOS_CONTENT_SHELL_OUT       GN output dir, default: \$OPENOS_CHROMIUM_SRC/out/OpenOSContentShell-i386
-  OPENOS_CONTENT_SHELL_MIN_FREE_GB Required free space, default: 180
+  OPENOS_CONTENT_SHELL_MIN_FREE_GB Required free space for minimal closure, default: 40
 USAGE
 }
 
@@ -85,7 +86,7 @@ check_common() {
     free="$(free_gb)"
     echo "  INFO free_space: ${free}GB at $DEPS_DIR"
     if [ "$free" -lt "$MIN_FREE_GB" ]; then
-        echo "  MISS free space: need at least ${MIN_FREE_GB}GB for Chromium/content_shell" >&2
+        echo "  MISS free space: need at least ${MIN_FREE_GB}GB for Chromium/content_shell minimal closure" >&2
         fail=1
     fi
     if [ -d "$DEPOT_TOOLS_DIR/.git" ]; then

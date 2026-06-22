@@ -7,11 +7,11 @@ DEPOT_TOOLS_DIR="${OPENOS_DEPOT_TOOLS_DIR:-$DEPS_DIR/depot_tools}"
 CHROMIUM_ROOT="${OPENOS_CHROMIUM_ROOT:-$DEPS_DIR/chromium}"
 CHROMIUM_SRC="$CHROMIUM_ROOT/src"
 PIN_FILE="$ROOT/docs/chromium-upstream-pin.md"
-MIN_FREE_GB="${OPENOS_CHROMIUM_MIN_FREE_GB:-180}"
+MIN_FREE_GB="${OPENOS_CHROMIUM_MIN_FREE_GB:-40}"
 
 usage() {
     cat <<USAGE
-Usage: scripts/chromium-source.sh [--check|--print-env|--fetch-depot-tools|--fetch]
+Usage: scripts/chromium-source.sh [--check|--print-env|--fetch-depot-tools|--fetch|--fetch-full]
 
 Default action: --check
 
@@ -19,20 +19,23 @@ Environment:
   OPENOS_CHROMIUM_DEPS_DIR   External dependency cache, default: $ROOT/.openos-deps
   OPENOS_DEPOT_TOOLS_DIR     depot_tools path, default: \$OPENOS_CHROMIUM_DEPS_DIR/depot_tools
   OPENOS_CHROMIUM_ROOT       Chromium checkout root, default: \$OPENOS_CHROMIUM_DEPS_DIR/chromium
-  OPENOS_CHROMIUM_MIN_FREE_GB Required free space for --check/--fetch, default: 180
+  OPENOS_CHROMIUM_MIN_FREE_GB Required free space for minimal source/dependency closure, default: 40
 
 Notes:
   --check never downloads Chromium.
   --fetch-depot-tools downloads depot_tools only, using official Chromium Gitiles git clone first and Gitiles archive fallback.
-  --fetch downloads Chromium source and can consume 100GB+ disk and many hours.
+  --fetch downloads only the minimal Chromium src entrypoint first; hooks and full DEPS are intentionally not synced.
+  --fetch-full explicitly runs the official fetch/gclient flow and may consume very large disk space. Do not use it as the default OpenOS route.
 USAGE
 }
 
 have() { command -v "$1" >/dev/null 2>&1; }
+
 free_gb() {
     mkdir -p "$DEPS_DIR"
     df -BG "$DEPS_DIR" | awk 'NR==2 {gsub("G", "", $4); print $4}'
 }
+
 print_env() {
     cat <<ENV
 OpenOS Chromium upstream source configuration
@@ -44,6 +47,7 @@ OpenOS Chromium upstream source configuration
   min_free_gb:         $MIN_FREE_GB
 ENV
 }
+
 check_common() {
     local missing=0
     print_env
@@ -64,7 +68,7 @@ check_common() {
     free="$(free_gb)"
     echo "  INFO free_space: ${free}GB at $DEPS_DIR"
     if [ "$free" -lt "$MIN_FREE_GB" ]; then
-        echo "  MISS free space: need at least ${MIN_FREE_GB}GB for Chromium checkout" >&2
+        echo "  MISS free space: need at least ${MIN_FREE_GB}GB for Chromium minimal source/dependency closure" >&2
         missing=1
     fi
     if [ -x "$DEPOT_TOOLS_DIR/fetch" ] && [ -x "$DEPOT_TOOLS_DIR/gclient" ]; then
@@ -84,6 +88,7 @@ check_common() {
     fi
     return "$missing"
 }
+
 fetch_depot_tools() {
     mkdir -p "$DEPS_DIR"
     if [ -x "$DEPOT_TOOLS_DIR/fetch" ] && [ -x "$DEPOT_TOOLS_DIR/gclient" ]; then
@@ -133,15 +138,36 @@ PY
     chmod +x "$DEPOT_TOOLS_DIR/fetch" "$DEPOT_TOOLS_DIR/gclient" || true
     echo "depot_tools ready from Gitiles archive: $DEPOT_TOOLS_DIR"
 }
-fetch_chromium() {
+
+fetch_chromium_minimal() {
     check_common || true
+    fetch_depot_tools
+    mkdir -p "$CHROMIUM_ROOT"
+    if [ -d "$CHROMIUM_SRC/.git" ]; then
+        echo "Chromium src already exists: $CHROMIUM_SRC"
+        echo "Updating minimal shallow origin ref only; hooks and full DEPS are intentionally skipped."
+        git -C "$CHROMIUM_SRC" fetch --depth=1 origin main || git -C "$CHROMIUM_SRC" fetch --depth=1 origin master
+        return 0
+    fi
+
+    echo "Cloning minimal Chromium src entrypoint only."
+    echo "Full third_party/gclient sync is intentionally skipped; build scripts must add only the content_shell dependency closure."
+    git clone --depth=1 https://chromium.googlesource.com/chromium/src.git "$CHROMIUM_SRC"
+}
+
+fetch_chromium_full() {
+    local full_min_free_gb="${OPENOS_CHROMIUM_FULL_MIN_FREE_GB:-180}"
+    OPENOS_CHROMIUM_MIN_FREE_GB="$full_min_free_gb" MIN_FREE_GB="$full_min_free_gb" check_common || true
     fetch_depot_tools
     export PATH="$DEPOT_TOOLS_DIR:$PATH"
     mkdir -p "$CHROMIUM_ROOT"
     if [ -d "$CHROMIUM_SRC/.git" ]; then
         echo "Chromium already exists: $CHROMIUM_SRC"
-        echo "Run manually if needed: cd '$CHROMIUM_SRC' && gclient sync --no-history --with_branch_heads --with_tags"
+        echo "Running explicit full gclient sync because --fetch-full was requested."
+        cd "$CHROMIUM_SRC"
+        gclient sync --no-history --with_branch_heads --with_tags
     else
+        echo "Running explicit full Chromium fetch because --fetch-full was requested. This can take a long time."
         cd "$CHROMIUM_ROOT"
         fetch --nohooks --no-history chromium
         cd "$CHROMIUM_SRC"
@@ -160,7 +186,10 @@ case "${1:---check}" in
         fetch_depot_tools
         ;;
     --fetch|fetch)
-        fetch_chromium
+        fetch_chromium_minimal
+        ;;
+    --fetch-full|fetch-full)
+        fetch_chromium_full
         ;;
     -h|--help|help)
         usage
