@@ -377,8 +377,15 @@ static void browser_format_address(char *out, int out_size, const char *host, co
 static void browser_update_address_label(browser_load_context_t *ctx)
 {
     const char *text;
+    char visible[BROWSER_ADDRESS_MAX];
+    int len;
     if (!ctx || ctx->window_id <= 0 || ctx->address_label_id <= 0) return;
     text = ctx->address_text[0] ? ctx->address_text : "Search OpenOS or type a URL";
+    len = (int)strlen(text);
+    if (ctx->address_text[0] && len > 60) {
+        snprintf(visible, sizeof(visible), "...%s", text + len - 60);
+        text = visible;
+    }
     openos_gui_set_text(ctx->window_id, ctx->address_label_id, text);
 }
 
@@ -400,7 +407,8 @@ static int browser_address_handle_key(browser_load_context_t *ctx, unsigned int 
         browser_update_address_label(ctx);
         return 0;
     }
-    if (key == OPENOS_GUI_KEY_BACKSPACE || key == 127u) {
+    if (key == OPENOS_GUI_KEY_BACKSPACE || key == 127u || key == '\b') {
+        ctx->address_editing = 2;
         len = (int)strlen(ctx->address_text);
         if (len > 0) ctx->address_text[len - 1] = 0;
         browser_update_address_label(ctx);
