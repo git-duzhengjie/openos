@@ -116,6 +116,17 @@ int main(void)
         }
     }
 
+    {
+        const char *outline = "<main><h1>Title</h1><h2>Part</h2><h3>Detail</h3>"
+                              "<ul><li>First</li><li>Second <a href='/next'>Next</a></li></ul></main>";
+        if (parser.iface.parse(&parser.iface, outline, &doc) <= 1 ||
+            renderer.iface.render(&renderer.iface, &doc, rendered, sizeof(rendered)) <= 0 ||
+            !strstr(rendered, "# Title\n## Part\n### Detail\n- First\n- Second Next [1]")) {
+            fprintf(stderr, "browser heading/list render smoke failed: %s\n", rendered);
+            return 1;
+        }
+    }
+
     printf("browser engine smoke ok: nodes=%d\n", doc.count);
     return 0;
 }

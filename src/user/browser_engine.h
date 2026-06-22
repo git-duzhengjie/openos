@@ -176,13 +176,16 @@ static void ob_dom_render_append_text(char *out, int out_size, int *pos, const c
             ++p;
             continue;
         }
-        if (pending_space && *pos > 0 && out[*pos - 1] != '\n') {
+        if (pending_space && *pos > 0 && out[*pos - 1] != '\n' && out[*pos - 1] != ' ') {
             out[(*pos)++] = ' ';
             if (*pos >= out_size - 1) break;
         }
         pending_space = 0;
         out[(*pos)++] = c;
         ++p;
+    }
+    if (pending_space && *pos > 0 && *pos < out_size - 1 && out[*pos - 1] != '\n' && out[*pos - 1] != ' ') {
+        out[(*pos)++] = ' ';
     }
 }
 
@@ -452,14 +455,45 @@ static void ob_dom_render_append_link_marker(char *out, int out_size, int *pos, 
     if (*pos < out_size - 1) out[(*pos)++] = ' ';
 }
 
+static void ob_dom_render_append_literal(char *out, int out_size, int *pos, const char *text)
+{
+    int i = 0;
+    if (!out || !pos || !text) return;
+    while (text[i] && *pos < out_size - 1) out[(*pos)++] = text[i++];
+}
+
+static int ob_dom_heading_level(const ob_dom_node_t *node)
+{
+    if (!node || node->type != OB_DOM_NODE_ELEMENT) return 0;
+    if (ob_token_eq_ci(node->name, "h1")) return 1;
+    if (ob_token_eq_ci(node->name, "h2")) return 2;
+    if (ob_token_eq_ci(node->name, "h3")) return 3;
+    return 0;
+}
+
+static void ob_dom_render_append_heading_prefix(char *out, int out_size, int *pos, int level)
+{
+    int i;
+    if (!out || !pos || level <= 0) return;
+    if (*pos > 0 && out[*pos - 1] != '\n') ob_dom_render_append_newline(out, out_size, pos);
+    for (i = 0; i < level && *pos < out_size - 1; ++i) out[(*pos)++] = '#';
+    if (*pos < out_size - 1) out[(*pos)++] = ' ';
+}
+
 static void ob_dom_render_node_text_ex(const ob_dom_document_t *doc, int node_id, char *out, int out_size, int *pos, int *link_count)
 {
     int child;
     int is_block;
+    int heading_level;
+    int is_list_item;
     if (!doc || node_id < 0 || node_id >= doc->count || !out || !pos || *pos >= out_size - 1) return;
     if (doc->nodes[node_id].style_display == OB_DISPLAY_NONE) return;
     is_block = doc->nodes[node_id].type == OB_DOM_NODE_ELEMENT && doc->nodes[node_id].style_display == OB_DISPLAY_BLOCK;
+    heading_level = ob_dom_heading_level(&doc->nodes[node_id]);
+    is_list_item = doc->nodes[node_id].type == OB_DOM_NODE_ELEMENT && ob_token_eq_ci(doc->nodes[node_id].name, "li");
     if (is_block && *pos > 0) ob_dom_render_append_newline(out, out_size, pos);
+    if (heading_level > 0) ob_dom_render_append_heading_prefix(out, out_size, pos, heading_level);
+    if (is_list_item) ob_dom_render_append_literal(out, out_size, pos, "- ");
     if (doc->nodes[node_id].type == OB_DOM_NODE_TEXT) ob_dom_render_append_text(out, out_size, pos, doc->nodes[node_id].text);
     child = doc->nodes[node_id].first_child;
     while (child >= 0 && *pos < out_size - 1) {
