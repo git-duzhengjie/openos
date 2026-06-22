@@ -91,6 +91,10 @@ bash scripts/version.sh --full
 
 构建时会自动生成 `src/kernel/include/version.h`，发布打包默认使用同一版本来源。详见 `docs/versioning.md`。
 
+## 浏览器能力边界
+
+当前 `/bin/browser` 走自研轻量内核路线，支持文件/HTTP 加载、HTML 文本化 DOM 渲染、基础 CSS、链接历史、表单提交雏形、图片占位、HTTP header 诊断、重定向和最近页面缓存。暂不支持 JavaScript、复杂 CSS、媒体、HTTPS 渲染和 Chromium/Blink 兼容；Chromium 路线仅保留为历史备选。
+
 ## 设计理念
 
 - **开源** — 完全开放，社区驱动

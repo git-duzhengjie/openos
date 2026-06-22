@@ -58,7 +58,7 @@ int main(void)
         const char *attrs = "<main data-x=\"1>2\"><p class='lead'>A<br>B<img src=\"x>y.png\">C<meta charset=\"utf-8\"><p>D</p></main>";
         if (parser.iface.parse(&parser.iface, attrs, &doc) <= 1 ||
             renderer.iface.render(&renderer.iface, &doc, rendered, sizeof(rendered)) <= 0 ||
-            !strstr(rendered, "A\nBC\nD")) {
+            !strstr(rendered, "A\nB [Image src=\"x>y.png\"]C\nD")) {
             fprintf(stderr, "browser tokenizer attrs/void smoke failed: %s\n", rendered);
             return 1;
         }
@@ -292,6 +292,60 @@ int main(void)
         if (ob_url_parse_address("https://example.com/", 0, &parts, error, sizeof(error)) == 0 ||
             !strstr(error, "HTTPS")) {
             fprintf(stderr, "browser address parse https rejection smoke failed: error=%s\n", error);
+            return 1;
+        }
+    }
+
+    {
+        const char *images = "<main><img src='img/logo.png' alt='Logo' width='32' height='16'></main>";
+        int img_id = -1;
+        int i;
+        if (parser.iface.parse(&parser.iface, images, &doc) <= 1) {
+            fprintf(stderr, "browser image parse smoke failed\n");
+            return 1;
+        }
+        ob_dom_normalize_resource_urls(&doc, "/docs/index.html");
+        if (renderer.iface.render(&renderer.iface, &doc, rendered, sizeof(rendered)) <= 0 ||
+            !strstr(rendered, "[Image: Logo src=\"/docs/img/logo.png\" size=\"32x16\"]")) {
+            fprintf(stderr, "browser image placeholder smoke failed: %s\n", rendered);
+            return 1;
+        }
+        for (i = 0; i < doc.count; ++i) {
+            if (strcmp(doc.nodes[i].name, "img") == 0) img_id = i;
+        }
+        if (img_id < 0 || strcmp(doc.nodes[img_id].img_src, "/docs/img/logo.png") != 0 ||
+            strcmp(doc.nodes[img_id].img_alt, "Logo") != 0 || strcmp(doc.nodes[img_id].img_width, "32") != 0 ||
+            strcmp(doc.nodes[img_id].img_height, "16") != 0) {
+            fprintf(stderr, "browser image attrs smoke failed\n");
+            return 1;
+        }
+    }
+
+    {
+        const char *response = "HTTP/1.1 302 Found\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: 42\r\nLocation: /next\r\n\r\n<html></html>";
+        ob_http_headers_t headers;
+        if (ob_http_parse_headers(response, &headers) != 0 || strcmp(headers.status_line, "HTTP/1.1 302 Found") != 0 ||
+            strcmp(headers.content_type, "text/html; charset=utf-8") != 0 || strcmp(headers.content_length, "42") != 0 ||
+            strcmp(headers.location, "/next") != 0 || !ob_http_content_is_renderable_html(headers.content_type) ||
+            ob_http_content_is_renderable_html("image/png")) {
+            fprintf(stderr, "browser HTTP header smoke failed: status=%s type=%s len=%s loc=%s\n",
+                    headers.status_line, headers.content_type, headers.content_length, headers.location);
+            return 1;
+        }
+    }
+
+    {
+        char many_nodes[OB_HTML_LIMIT_BYTES];
+        int pos = 0;
+        int i;
+        pos += snprintf(many_nodes + pos, sizeof(many_nodes) - (size_t)pos, "<main>");
+        for (i = 0; i < OB_MAX_DOM_NODES * 2 && pos < (int)sizeof(many_nodes) - 16; ++i) {
+            pos += snprintf(many_nodes + pos, sizeof(many_nodes) - (size_t)pos, "<span>x</span>");
+        }
+        snprintf(many_nodes + pos, sizeof(many_nodes) - (size_t)pos, "</main>");
+        if (parser.iface.parse(&parser.iface, many_nodes, &doc) <= 1 || doc.count != OB_MAX_DOM_NODES ||
+            renderer.iface.render(&renderer.iface, &doc, rendered, sizeof(rendered)) <= 0) {
+            fprintf(stderr, "browser DOM node limit smoke failed: count=%d output=%s\n", doc.count, rendered);
             return 1;
         }
     }

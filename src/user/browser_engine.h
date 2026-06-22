@@ -26,6 +26,9 @@
 #define OB_MAX_NODE_TEXT 96
 #define OB_MAX_ATTR_VALUE 96
 #define OB_FORM_STATE_MAX_CONTROLS 8
+#define OB_MAX_HEADER_VALUE 128
+#define OB_HTML_LIMIT_BYTES 4096
+
 
 typedef struct ob_html_token {
     int type;
@@ -59,6 +62,10 @@ typedef struct ob_dom_node {
     char name[OB_MAX_TAG_NAME];
     char text[OB_MAX_NODE_TEXT];
     char href[OB_MAX_ATTR_VALUE];
+    char img_src[OB_MAX_ATTR_VALUE];
+    char img_alt[OB_MAX_ATTR_VALUE];
+    char img_width[OB_MAX_ATTR_VALUE];
+    char img_height[OB_MAX_ATTR_VALUE];
     char form_type[OB_MAX_ATTR_VALUE];
     char form_value[OB_MAX_ATTR_VALUE];
     char form_placeholder[OB_MAX_ATTR_VALUE];
@@ -95,6 +102,10 @@ static void ob_dom_node_copy(ob_dom_node_t *dst, const ob_dom_node_t *src)
     ob_dom_copy_text(dst->name, sizeof(dst->name), src->name);
     ob_dom_copy_text(dst->text, sizeof(dst->text), src->text);
     ob_dom_copy_text(dst->href, sizeof(dst->href), src->href);
+    ob_dom_copy_text(dst->img_src, sizeof(dst->img_src), src->img_src);
+    ob_dom_copy_text(dst->img_alt, sizeof(dst->img_alt), src->img_alt);
+    ob_dom_copy_text(dst->img_width, sizeof(dst->img_width), src->img_width);
+    ob_dom_copy_text(dst->img_height, sizeof(dst->img_height), src->img_height);
     ob_dom_copy_text(dst->form_type, sizeof(dst->form_type), src->form_type);
     ob_dom_copy_text(dst->form_value, sizeof(dst->form_value), src->form_value);
     ob_dom_copy_text(dst->form_placeholder, sizeof(dst->form_placeholder), src->form_placeholder);
@@ -123,10 +134,17 @@ static void ob_dom_document_copy(ob_dom_document_t *dst, const ob_dom_document_t
         dst->nodes[i].name[0] = 0;
         dst->nodes[i].text[0] = 0;
         dst->nodes[i].href[0] = 0;
+        dst->nodes[i].img_src[0] = 0;
+        dst->nodes[i].img_alt[0] = 0;
+        dst->nodes[i].img_width[0] = 0;
+        dst->nodes[i].img_height[0] = 0;
         dst->nodes[i].form_type[0] = 0;
         dst->nodes[i].form_value[0] = 0;
         dst->nodes[i].form_placeholder[0] = 0;
         dst->nodes[i].form_name[0] = 0;
+        dst->nodes[i].form_action[0] = 0;
+        dst->nodes[i].form_method[0] = 0;
+        dst->nodes[i].form_owner = -1;
     }
 }
 
@@ -169,6 +187,13 @@ typedef struct ob_form_state {
     int count;
     int focused;
 } ob_form_state_t;
+
+typedef struct ob_http_headers {
+    char status_line[OB_MAX_HEADER_VALUE];
+    char content_type[OB_MAX_HEADER_VALUE];
+    char content_length[OB_MAX_HEADER_VALUE];
+    char location[OB_MAX_HEADER_VALUE];
+} ob_http_headers_t;
 
 static int ob_ascii_equal_ci(char a, char b)
 {
@@ -487,6 +512,17 @@ static void ob_css_apply_inline_style(ob_dom_node_t *node, const ob_html_token_t
     }
 }
 
+static void ob_dom_extract_resource_attrs(ob_dom_node_t *node, const ob_html_token_t *tok)
+{
+    if (!node || !tok) return;
+    if (ob_token_eq_ci(node->name, "img")) {
+        ob_extract_attr_value(tok->attrs, tok->attrs_len, "src", node->img_src, sizeof(node->img_src));
+        ob_extract_attr_value(tok->attrs, tok->attrs_len, "alt", node->img_alt, sizeof(node->img_alt));
+        ob_extract_attr_value(tok->attrs, tok->attrs_len, "width", node->img_width, sizeof(node->img_width));
+        ob_extract_attr_value(tok->attrs, tok->attrs_len, "height", node->img_height, sizeof(node->img_height));
+    }
+}
+
 static void ob_dom_extract_form_attrs(ob_dom_node_t *node, const ob_html_token_t *tok)
 {
     if (!node || !tok) return;
@@ -601,7 +637,10 @@ static int ob_html_parse_impl(ob_html_parser_i_t *iface, const char *html, ob_do
                     }
                 }
                 if (id >= 0) ob_css_apply_inline_style(&doc->nodes[id], &tok);
-                if (id >= 0) ob_dom_extract_form_attrs(&doc->nodes[id], &tok);
+                if (id >= 0) {
+                    ob_dom_extract_form_attrs(&doc->nodes[id], &tok);
+                    ob_dom_extract_resource_attrs(&doc->nodes[id], &tok);
+                }
                 if (id >= 0 && ob_token_eq_ci(tok.name, "form")) doc->nodes[id].form_owner = id;
                 if (id >= 0 && !tok.self_closing && !ob_is_void_tag(tok.name) && depth < OB_MAX_DOM_NODES) stack[depth++] = id;
             }
@@ -833,6 +872,20 @@ static void ob_dom_render_node_text_ex(const ob_dom_document_t *doc, int node_id
     if (is_list_item) ob_dom_render_append_literal(out, out_size, pos, "- ");
     if (doc->nodes[node_id].font_weight_bold) ob_dom_render_append_literal(out, out_size, pos, "**");
     if (ob_dom_is_form_control(&doc->nodes[node_id])) ob_dom_render_append_form_start_ex(out, out_size, pos, &doc->nodes[node_id], node_id, form_state);
+    if (doc->nodes[node_id].type == OB_DOM_NODE_ELEMENT && ob_token_eq_ci(doc->nodes[node_id].name, "img")) {
+        if (*pos > 0 && out[*pos - 1] != ' ' && out[*pos - 1] != '\n') ob_dom_render_append_literal(out, out_size, pos, " ");
+        ob_dom_render_append_literal(out, out_size, pos, "[Image");
+        if (doc->nodes[node_id].img_alt[0]) { ob_dom_render_append_literal(out, out_size, pos, ": "); ob_dom_render_append_literal(out, out_size, pos, doc->nodes[node_id].img_alt); }
+        if (doc->nodes[node_id].img_src[0]) { ob_dom_render_append_literal(out, out_size, pos, " src=\""); ob_dom_render_append_literal(out, out_size, pos, doc->nodes[node_id].img_src); ob_dom_render_append_literal(out, out_size, pos, "\""); }
+        if (doc->nodes[node_id].img_width[0] || doc->nodes[node_id].img_height[0]) {
+            ob_dom_render_append_literal(out, out_size, pos, " size=\"");
+            ob_dom_render_append_literal(out, out_size, pos, doc->nodes[node_id].img_width[0] ? doc->nodes[node_id].img_width : "?");
+            ob_dom_render_append_literal(out, out_size, pos, "x");
+            ob_dom_render_append_literal(out, out_size, pos, doc->nodes[node_id].img_height[0] ? doc->nodes[node_id].img_height : "?");
+            ob_dom_render_append_literal(out, out_size, pos, "\"");
+        }
+        ob_dom_render_append_literal(out, out_size, pos, "]");
+    }
     if (doc->nodes[node_id].type == OB_DOM_NODE_TEXT) ob_dom_render_append_text(out, out_size, pos, doc->nodes[node_id].text);
     child = doc->nodes[node_id].first_child;
     while (child >= 0 && *pos < out_size - 1) {
@@ -1135,5 +1188,96 @@ static int ob_url_parse_address(const char *text, const char *default_host, ob_u
     else snprintf(out->path, sizeof(out->path), "/");
     return 0;
 }
+
+static void ob_dom_normalize_resource_urls(ob_dom_document_t *doc, const char *base_path)
+{
+    int i;
+    if (!doc) return;
+    for (i = 0; i < doc->count; ++i) {
+        if (doc->nodes[i].type == OB_DOM_NODE_ELEMENT && ob_token_eq_ci(doc->nodes[i].name, "img") && doc->nodes[i].img_src[0] &&
+            !ob_ascii_match_ci(doc->nodes[i].img_src, "http://") && !ob_ascii_match_ci(doc->nodes[i].img_src, "https://") &&
+            !ob_ascii_match_ci(doc->nodes[i].img_src, "file://")) {
+            char normalized[OB_MAX_ATTR_VALUE];
+            ob_url_join_relative_path(normalized, sizeof(normalized), base_path && base_path[0] ? base_path : "/", doc->nodes[i].img_src);
+            ob_dom_copy_text(doc->nodes[i].img_src, sizeof(doc->nodes[i].img_src), normalized);
+        }
+    }
+}
+
+static void ob_http_headers_init(ob_http_headers_t *headers)
+{
+    if (headers) memset(headers, 0, sizeof(*headers));
+}
+
+static int ob_http_header_name_eq_ci(const char *p, int len, const char *name)
+{
+    int i = 0;
+    if (!p || !name || len <= 0) return 0;
+    while (i < len && name[i]) {
+        if (!ob_ascii_equal_ci(p[i], name[i])) return 0;
+        ++i;
+    }
+    return i == len && name[i] == 0;
+}
+
+static void ob_http_copy_trimmed(char *dst, int dst_size, const char *src, int len)
+{
+    int start = 0;
+    int end = len;
+    int i;
+    if (!dst || dst_size <= 0) return;
+    dst[0] = 0;
+    if (!src || len <= 0) return;
+    while (start < end && (src[start] == ' ' || src[start] == '\t' || src[start] == '\r' || src[start] == '\n')) ++start;
+    while (end > start && (src[end - 1] == ' ' || src[end - 1] == '\t' || src[end - 1] == '\r' || src[end - 1] == '\n')) --end;
+    for (i = 0; i < dst_size - 1 && start + i < end; ++i) dst[i] = src[start + i];
+    dst[i] = 0;
+}
+
+static int ob_http_parse_headers(const char *response, ob_http_headers_t *headers)
+{
+    int pos = 0;
+    if (!response || !headers) return -1;
+    ob_http_headers_init(headers);
+    while (response[pos] && response[pos] != '\r' && response[pos] != '\n' && pos < OB_MAX_HEADER_VALUE - 1) {
+        headers->status_line[pos] = response[pos];
+        ++pos;
+    }
+    headers->status_line[pos] = 0;
+    while (response[pos] == '\r' || response[pos] == '\n') ++pos;
+    while (response[pos]) {
+        int line_start = pos;
+        int line_end;
+        int colon = -1;
+        int i;
+        while (response[pos] && response[pos] != '\r' && response[pos] != '\n') ++pos;
+        line_end = pos;
+        if (line_end == line_start) break;
+        for (i = line_start; i < line_end; ++i) {
+            if (response[i] == ':') { colon = i; break; }
+        }
+        if (colon > line_start) {
+            int name_len = colon - line_start;
+            const char *value = response + colon + 1;
+            int value_len = line_end - colon - 1;
+            if (ob_http_header_name_eq_ci(response + line_start, name_len, "Content-Type"))
+                ob_http_copy_trimmed(headers->content_type, sizeof(headers->content_type), value, value_len);
+            else if (ob_http_header_name_eq_ci(response + line_start, name_len, "Content-Length"))
+                ob_http_copy_trimmed(headers->content_length, sizeof(headers->content_length), value, value_len);
+            else if (ob_http_header_name_eq_ci(response + line_start, name_len, "Location"))
+                ob_http_copy_trimmed(headers->location, sizeof(headers->location), value, value_len);
+        }
+        while (response[pos] == '\r' || response[pos] == '\n') ++pos;
+    }
+    return headers->status_line[0] ? 0 : -1;
+}
+
+static int ob_http_content_is_renderable_html(const char *content_type)
+{
+    if (!content_type || !content_type[0]) return 1;
+    return ob_ascii_match_ci(content_type, "text/html") || ob_ascii_match_ci(content_type, "application/xhtml") ||
+           ob_ascii_match_ci(content_type, "text/plain");
+}
+
 
 #endif /* OPENOS_USER_BROWSER_ENGINE_H */

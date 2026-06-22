@@ -18,6 +18,8 @@
 #define BROWSER_STATUS_MAX 96
 #define BROWSER_HISTORY_MAX 8
 #define BROWSER_LINK_MAX 8
+#define BROWSER_CACHE_MAX 4
+#define BROWSER_REDIRECT_MAX 4
 #define BROWSER_VIEW_LINES 6
 #define BROWSER_LINE_MAX 72
 #define BROWSER_ADDRESS_MAX 256
@@ -38,7 +40,10 @@ typedef struct browser_load_context {
     char body[BROWSER_BODY_MAX];
     char title[BROWSER_TITLE_MAX];
     char http_status[BROWSER_STATUS_MAX];
-    char status[64];
+    char content_type[OB_MAX_HEADER_VALUE];
+    char content_length[OB_MAX_HEADER_VALUE];
+    char location[OB_MAX_HEADER_VALUE];
+    char status[BROWSER_STATUS_MAX];
     char links[BROWSER_LINK_MAX][OB_MAX_ATTR_VALUE];
     int link_count;
     int selected_link;
@@ -62,8 +67,24 @@ typedef struct browser_history {
     int current;
 } browser_history_t;
 
+typedef struct browser_page_cache_entry {
+    int valid;
+    int is_file;
+    int scroll_line;
+    char host[BROWSER_HOST_MAX];
+    char path[BROWSER_PATH_MAX];
+    char title[BROWSER_TITLE_MAX];
+    char body[BROWSER_BODY_MAX];
+    char status[BROWSER_STATUS_MAX];
+    char content_type[OB_MAX_HEADER_VALUE];
+    char content_length[OB_MAX_HEADER_VALUE];
+    char location[OB_MAX_HEADER_VALUE];
+} browser_page_cache_entry_t;
+
+static browser_page_cache_entry_t g_page_cache[BROWSER_CACHE_MAX];
 
 static void browser_load_worker(void *arg);
+static void browser_render_current_view(browser_load_context_t *load, int body_label, int scroll_line);
 
 static void browser_format_ip(unsigned int ip, char *out, int out_size)
 {
@@ -600,11 +621,25 @@ static int browser_fetch_file(const char *path, char *out, int out_size)
         total += n;
     }
     out[total] = 0;
+    if (total >= out_size - 1) {
+        char extra;
+        int n = openos_read(fd, &extra, 1);
+        if (n > 0) {
+            openos_close(fd);
+            snprintf(out, out_size, "resource limit exceeded: file too large path=%s limit=%d bytes", path, out_size - 1);
+            return -2;
+        }
+        if (n < 0) {
+            openos_close(fd);
+            snprintf(out, out_size, "file read failed path=%s reason=openos_read returned %d", path, n);
+            return -1;
+        }
+    }
     openos_close(fd);
     return 0;
 }
 
-static int browser_fetch_http(const char *host, const char *path, char *out, int out_size)
+static int browser_fetch_http_once(const char *host, const char *path, char *out, int out_size, ob_http_headers_t *headers)
 {
     int fd;
     int total = 0;
@@ -710,12 +745,126 @@ static int browser_fetch_http(const char *host, const char *path, char *out, int
 
     openos_close(fd);
     if (total <= 0) {
-        snprintf(out, out_size, "HTTP response timeout from %s", host);
+        snprintf(out, out_size, "receive stage timeout from %s", host);
         return -1;
     }
+    if (total >= out_size - 1 || total >= BROWSER_RECV_MAX) {
+        snprintf(out, out_size, "resource limit exceeded: response too large host=%s path=%s limit=%d bytes", host, path, out_size - 1);
+        return -2;
+    }
+    if (headers) ob_http_parse_headers(out, headers);
     return 0;
 }
 
+static int browser_is_redirect_status(int code)
+{
+    return code == 301 || code == 302 || code == 303 || code == 307 || code == 308;
+}
+
+static int browser_fetch_http(const char *host, const char *path, char *out, int out_size, ob_http_headers_t *headers)
+{
+    char cur_host[BROWSER_HOST_MAX];
+    char cur_path[BROWSER_PATH_MAX];
+    int redirects;
+    if (!host || !path || !out || out_size <= 0) return -1;
+    snprintf(cur_host, sizeof(cur_host), "%s", host);
+    snprintf(cur_path, sizeof(cur_path), "%s", path);
+    for (redirects = 0; redirects <= BROWSER_REDIRECT_MAX; ++redirects) {
+        ob_http_headers_t parsed;
+        int code;
+        int rc = browser_fetch_http_once(cur_host, cur_path, out, out_size, &parsed);
+        if (rc < 0) return rc;
+        code = browser_http_status_code(parsed.status_line);
+        if (!browser_is_redirect_status(code)) {
+            if (headers) *headers = parsed;
+            return 0;
+        }
+        if (!parsed.location[0]) {
+            snprintf(out, out_size, "redirect stage failed: HTTP %d without Location", code);
+            return -1;
+        }
+        if (redirects >= BROWSER_REDIRECT_MAX) {
+            snprintf(out, out_size, "redirect stage failed: too many redirects after Location=%s", parsed.location);
+            return -1;
+        }
+        if (browser_match_token_ci(parsed.location, "http://")) {
+            if (browser_parse_url_arg(parsed.location, cur_host, sizeof(cur_host), cur_path, sizeof(cur_path)) != 0) {
+                snprintf(out, out_size, "redirect stage failed: invalid Location=%s", parsed.location);
+                return -1;
+            }
+        } else if (browser_match_token_ci(parsed.location, "https://")) {
+            snprintf(out, out_size, "redirect stage failed: HTTPS Location is not supported: %s", parsed.location);
+            return -1;
+        } else {
+            char joined[BROWSER_PATH_MAX];
+            browser_join_relative_path(joined, sizeof(joined), cur_path, parsed.location);
+            snprintf(cur_path, sizeof(cur_path), "%s", joined);
+        }
+    }
+    snprintf(out, out_size, "redirect stage failed: loop detected");
+    return -1;
+}
+
+static int browser_cache_key_eq(const browser_page_cache_entry_t *entry, const char *host, const char *path, int is_file)
+{
+    if (!entry || !entry->valid || !path) return 0;
+    if (entry->is_file != is_file) return 0;
+    if (strcmp(entry->path, path) != 0) return 0;
+    return is_file || strcmp(entry->host, host ? host : "") == 0;
+}
+
+static void browser_cache_store(const browser_load_context_t *load, int scroll_line)
+{
+    int slot = 0;
+    int i;
+    if (!load || load->result < 0 || !load->path[0]) return;
+    for (i = 0; i < BROWSER_CACHE_MAX; ++i) {
+        if (browser_cache_key_eq(&g_page_cache[i], load->host, load->path, load->is_file)) { slot = i; break; }
+        if (!g_page_cache[i].valid) slot = i;
+    }
+    g_page_cache[slot].valid = 1;
+    g_page_cache[slot].is_file = load->is_file;
+    g_page_cache[slot].scroll_line = scroll_line;
+    snprintf(g_page_cache[slot].host, sizeof(g_page_cache[slot].host), "%s", load->host);
+    snprintf(g_page_cache[slot].path, sizeof(g_page_cache[slot].path), "%s", load->path);
+    snprintf(g_page_cache[slot].title, sizeof(g_page_cache[slot].title), "%s", load->title);
+    snprintf(g_page_cache[slot].body, sizeof(g_page_cache[slot].body), "%s", load->body);
+    snprintf(g_page_cache[slot].status, sizeof(g_page_cache[slot].status), "%s", load->status);
+    snprintf(g_page_cache[slot].content_type, sizeof(g_page_cache[slot].content_type), "%s", load->content_type);
+    snprintf(g_page_cache[slot].content_length, sizeof(g_page_cache[slot].content_length), "%s", load->content_length);
+    snprintf(g_page_cache[slot].location, sizeof(g_page_cache[slot].location), "%s", load->location);
+}
+
+static int browser_cache_restore(browser_load_context_t *load, int win, int status_label, int body_label,
+                                 const char *host, const char *path, int is_file, int *scroll_line)
+{
+    int i;
+    if (!load || !path) return -1;
+    for (i = 0; i < BROWSER_CACHE_MAX; ++i) {
+        if (browser_cache_key_eq(&g_page_cache[i], host, path, is_file)) {
+            memset(load, 0, sizeof(*load));
+            load->window_id = win;
+            load->status_label_id = status_label;
+            load->body_label_id = body_label;
+            load->is_file = is_file;
+            load->done = 1;
+            load->result = 0;
+            snprintf(load->host, sizeof(load->host), "%s", host ? host : "");
+            snprintf(load->path, sizeof(load->path), "%s", path);
+            snprintf(load->title, sizeof(load->title), "%s", g_page_cache[i].title);
+            snprintf(load->body, sizeof(load->body), "%s", g_page_cache[i].body);
+            snprintf(load->status, sizeof(load->status), "Cache: %s", g_page_cache[i].status[0] ? g_page_cache[i].status : "hit");
+            snprintf(load->content_type, sizeof(load->content_type), "%s", g_page_cache[i].content_type);
+            snprintf(load->content_length, sizeof(load->content_length), "%s", g_page_cache[i].content_length);
+            snprintf(load->location, sizeof(load->location), "%s", g_page_cache[i].location);
+            if (scroll_line) *scroll_line = g_page_cache[i].scroll_line;
+            openos_gui_set_text(win, status_label, load->status);
+            browser_render_current_view(load, body_label, scroll_line ? *scroll_line : 0);
+            return 0;
+        }
+    }
+    return -1;
+}
 
 static void browser_render_current_view(browser_load_context_t *load, int body_label, int scroll_line)
 {
@@ -853,8 +1002,17 @@ static void browser_load_worker(void *arg)
     if (!ctx)
         return;
 
-    rc = ctx->is_file ? browser_fetch_file(ctx->path, ctx->response, sizeof(ctx->response))
-                      : browser_fetch_http(ctx->host, ctx->path, ctx->response, sizeof(ctx->response));
+    {
+        ob_http_headers_t headers;
+        ob_http_headers_init(&headers);
+        rc = ctx->is_file ? browser_fetch_file(ctx->path, ctx->response, sizeof(ctx->response))
+                          : browser_fetch_http(ctx->host, ctx->path, ctx->response, sizeof(ctx->response), &headers);
+        if (!ctx->is_file && rc == 0) {
+            snprintf(ctx->content_type, sizeof(ctx->content_type), "%s", headers.content_type);
+            snprintf(ctx->content_length, sizeof(ctx->content_length), "%s", headers.content_length);
+            snprintf(ctx->location, sizeof(ctx->location), "%s", headers.location);
+        }
+    }
     ctx->result = rc;
     if (rc < 0) {
         browser_make_error_page(ctx, ctx->is_file ? "File load failed" : "Network load failed", ctx->response);
@@ -871,7 +1029,15 @@ static void browser_load_worker(void *arg)
             snprintf(ctx->http_status, sizeof(ctx->http_status), "%s", short_status);
             http_code = browser_http_status_code(ctx->http_status);
         }
-        if (!ctx->is_file && (http_code < 200 || http_code >= 300)) {
+        if (!ctx->is_file && !ob_http_content_is_renderable_html(ctx->content_type)) {
+            char detail[BROWSER_BODY_MAX / 2];
+            ctx->result = -3;
+            snprintf(detail, sizeof(detail), "content is not renderable: Content-Type=%s Content-Length=%s",
+                     ctx->content_type[0] ? ctx->content_type : "unknown",
+                     ctx->content_length[0] ? ctx->content_length : "unknown");
+            browser_make_error_page(ctx, "Unsupported content", detail);
+            printf("browser: unsupported content http://%s%s %s\n", ctx->host, ctx->path, ctx->content_type);
+        } else if (!ctx->is_file && (http_code < 200 || http_code >= 300)) {
             char detail[BROWSER_BODY_MAX / 2];
             ctx->result = -2;
             snprintf(detail, sizeof(detail),
@@ -899,6 +1065,7 @@ static void browser_load_worker(void *arg)
                         }
                     }
                     ob_dom_document_copy(&ctx->dom, &doc);
+                    ob_dom_normalize_resource_urls(&ctx->dom, ctx->path);
                     ob_form_state_collect_from_dom(&ctx->form_state, &ctx->dom);
                     ob_dom_text_render_with_form_state(&ctx->dom, &ctx->form_state, ctx->body, sizeof(ctx->body));
                 } else
@@ -906,7 +1073,14 @@ static void browser_load_worker(void *arg)
             }
             if (!ctx->body[0])
                 snprintf(ctx->body, sizeof(ctx->body), "Empty response");
-            snprintf(ctx->status, sizeof(ctx->status), "%s", ctx->http_status[0] ? ctx->http_status : "Done");
+            if (!ctx->is_file && (ctx->content_type[0] || ctx->content_length[0] || ctx->location[0]))
+                snprintf(ctx->status, sizeof(ctx->status), "%s CT=%s Len=%s%s%s",
+                         ctx->http_status[0] ? ctx->http_status : "Done",
+                         ctx->content_type[0] ? ctx->content_type : "?",
+                         ctx->content_length[0] ? ctx->content_length : "?",
+                         ctx->location[0] ? " Location=" : "", ctx->location[0] ? ctx->location : "");
+            else
+                snprintf(ctx->status, sizeof(ctx->status), "%s", ctx->http_status[0] ? ctx->http_status : "Done");
             printf("browser: loaded %s%s%s %s\n", ctx->is_file ? "file://" : "http://", ctx->is_file ? "" : ctx->host, ctx->path, ctx->status);
             if (ctx->title[0]) printf("title: %s\n", ctx->title);
             printf("%s\n", ctx->body);
@@ -1062,7 +1236,8 @@ int main(int argc, char **argv)
                     const browser_history_entry_t *cur = browser_history_current(&history);
                     scroll_line = 0;
                     browser_sync_address_from_target(&load, cur->host, cur->path, cur->is_file);
-                    browser_start_load(&load, win, status_label, body_label, cur->host, cur->path, cur->is_file);
+                    if (browser_cache_restore(&load, win, status_label, body_label, cur->host, cur->path, cur->is_file, &scroll_line) != 0)
+                        browser_start_load(&load, win, status_label, body_label, cur->host, cur->path, cur->is_file);
                 } else {
                     openos_gui_set_text(win, status_label, "Back: no history");
                 }
@@ -1071,7 +1246,8 @@ int main(int argc, char **argv)
                     const browser_history_entry_t *cur = browser_history_current(&history);
                     scroll_line = 0;
                     browser_sync_address_from_target(&load, cur->host, cur->path, cur->is_file);
-                    browser_start_load(&load, win, status_label, body_label, cur->host, cur->path, cur->is_file);
+                    if (browser_cache_restore(&load, win, status_label, body_label, cur->host, cur->path, cur->is_file, &scroll_line) != 0)
+                        browser_start_load(&load, win, status_label, body_label, cur->host, cur->path, cur->is_file);
                 } else {
                     openos_gui_set_text(win, status_label, "Forward: no history");
                 }
@@ -1116,6 +1292,7 @@ int main(int argc, char **argv)
                 scroll_line = 0;
                 browser_make_view(view, sizeof(view), &load, scroll_line);
                 openos_gui_set_text(win, body_label, view);
+                browser_cache_store(&load, scroll_line);
                 load.focus_mode = load.link_count > 0 ? BROWSER_FOCUS_LINK : (load.form_state.count > 0 ? BROWSER_FOCUS_FORM : 0);
                 if (load.link_count > 0) browser_update_link_status(win, status_label, &load);
                 else if (load.form_state.count > 0) browser_update_form_status(win, status_label, &load);

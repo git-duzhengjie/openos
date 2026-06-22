@@ -82,12 +82,26 @@ HTML
   - `Bottom`
 - `&amp;` 被解码为 `&`。
 - 属性值中的 `>` 不应截断标签解析。
-- `<br>` 产生换行；`<img>` 不吞掉后续正文。
+- `<br>` 产生换行；`<img>` 输出 `[Image: ...]` 占位且不吞掉后续正文。
 - 点击 `Down` 后正文窗口向后滚动，点击 `Up` 后回滚。
-- 点击 `Refresh` 后仍显示同一文件内容。
-- 点击 `Back`/`Forward` 在无历史时状态栏显示 `Back: no history` / `Forward: no history`。
+- 点击 `Refresh` 后强制重新加载当前页面。
+- 点击 `Back`/`Forward`：有历史时优先使用最近页面缓存恢复正文与滚动位置；无历史时状态栏显示 `Back: no history` / `Forward: no history`。
+- 点击链接后加载目标页面；网络错误、404/非 2xx、重定向失败、非 HTML 内容会显示可诊断错误页。
+- HTTP 状态栏会展示 `Content-Type`、`Content-Length` 和 `Location` 等关键 header。
 
-### 4. QEMU 启动级 smoke
+### 4. 本地兼容性样例
+
+样例页面位于：
+
+```text
+tests/resources/browser/index.html
+tests/resources/browser/form.html
+tests/resources/browser/error.html
+```
+
+`./build.sh test` 会自动编译并运行浏览器样例回归，覆盖基础排版、链接、表单、图片占位和错误页文本解析。
+
+### 5. QEMU 启动级 smoke
 
 ```bash
 scripts/qemu-smoke.sh --timeout 12
@@ -100,3 +114,4 @@ scripts/qemu-smoke.sh --timeout 12
 1. 扩展 CSS 默认样式和基础选择器。
 2. 后续在 GUI 框架支持输入框后，补真正的地址栏。
 3. 增加 GUI 自动化事件/截图断言后，把上述手动回归转为自动化测试。
+4. Chromium 路线保持冻结；只有在构建体积、依赖闭包、许可证与长期维护成本重新评估通过后才恢复。
