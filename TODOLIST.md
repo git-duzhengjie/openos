@@ -57,9 +57,9 @@
 - [x] P1.3：扩展默认 CSS display 分类
   - [x] 覆盖 `article` / `section` / `nav` / `header` / `footer` / `main`
   - [x] 增加默认样式 smoke 覆盖
-- [ ] P1.4：HTML tokenizer 属性跳过与自闭合标签回归
-  - [ ] 确认带属性标签名解析稳定
-  - [ ] 增加 `<br>` / `<img>` / `<meta>` 等自闭合/void 标签测试
+- [x] P1.4：HTML tokenizer 属性跳过与自闭合标签回归
+  - [x] 确认带属性标签名解析稳定
+  - [x] 增加 `<br>` / `<img>` / `<meta>` 等自闭合/void 标签测试
 - [ ] P1.5：浏览器 GUI 文档视图回归
   - [ ] 确认标题、状态、正文和滚动视图在本地 HTML 下稳定
   - [ ] 记录 OpenOS/QEMU 手动验证步骤

@@ -55,6 +55,16 @@ int main(void)
     }
 
     {
+        const char *attrs = "<main data-x=\"1>2\"><p class='lead'>A<br>B<img src=\"x>y.png\">C<meta charset=\"utf-8\"><p>D</p></main>";
+        if (parser.iface.parse(&parser.iface, attrs, &doc) <= 1 ||
+            renderer.iface.render(&renderer.iface, &doc, rendered, sizeof(rendered)) <= 0 ||
+            !strstr(rendered, "A\nBC\nD")) {
+            fprintf(stderr, "browser tokenizer attrs/void smoke failed: %s\n", rendered);
+            return 1;
+        }
+    }
+
+    {
         const char *nested = "<main><section><p>One</section><p>Two</p></main>";
         int section_id;
         int first_p_id;

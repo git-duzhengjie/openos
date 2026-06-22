@@ -196,6 +196,17 @@ static void ob_copy_tag_name(char *dst, int dst_size, const char *src, int len)
     dst[i] = 0;
 }
 
+static int ob_is_void_tag(const char *tag)
+{
+    return ob_token_eq_ci(tag, "area") || ob_token_eq_ci(tag, "base") ||
+           ob_token_eq_ci(tag, "br") || ob_token_eq_ci(tag, "col") ||
+           ob_token_eq_ci(tag, "embed") || ob_token_eq_ci(tag, "hr") ||
+           ob_token_eq_ci(tag, "img") || ob_token_eq_ci(tag, "input") ||
+           ob_token_eq_ci(tag, "link") || ob_token_eq_ci(tag, "meta") ||
+           ob_token_eq_ci(tag, "param") || ob_token_eq_ci(tag, "source") ||
+           ob_token_eq_ci(tag, "track") || ob_token_eq_ci(tag, "wbr");
+}
+
 static int ob_tokenizer_next_impl(ob_html_tokenizer_i_t *iface, ob_html_token_t *out)
 {
     ob_html_tokenizer_base_t *self = (ob_html_tokenizer_base_t *)iface;
@@ -203,6 +214,7 @@ static int ob_tokenizer_next_impl(ob_html_tokenizer_i_t *iface, ob_html_token_t 
     int start;
     int name_start;
     int name_len;
+    char quote = 0;
     if (!self || !out || !self->input) return -1;
     s = self->input;
     out->type = OB_HTML_TOKEN_EOF;
@@ -228,8 +240,20 @@ static int ob_tokenizer_next_impl(ob_html_tokenizer_i_t *iface, ob_html_token_t 
            s[self->pos] != ' ' && s[self->pos] != '\t' && s[self->pos] != '\r' && s[self->pos] != '\n')
         ++self->pos;
     name_len = self->pos - name_start;
-    while (s[self->pos] && s[self->pos] != '>') {
-        if (s[self->pos] == '/' && s[self->pos + 1] == '>') out->self_closing = 1;
+    while (s[self->pos]) {
+        char c = s[self->pos];
+        if (quote) {
+            if (c == quote) quote = 0;
+            ++self->pos;
+            continue;
+        }
+        if (c == '"' || c == '\'') {
+            quote = c;
+            ++self->pos;
+            continue;
+        }
+        if (c == '/' && s[self->pos + 1] == '>') out->self_closing = 1;
+        if (c == '>') break;
         ++self->pos;
     }
     if (s[self->pos] == '>') ++self->pos;
@@ -316,7 +340,7 @@ static int ob_html_parse_impl(ob_html_parser_i_t *iface, const char *html, ob_do
             } else {
                 int display = styles.iface.display_for_tag(&styles.iface, tok.name);
                 int id = ob_dom_add_node(doc, OB_DOM_NODE_ELEMENT, tok.name, 0, 0, current, display);
-                if (id >= 0 && !tok.self_closing && depth < OB_MAX_DOM_NODES) stack[depth++] = id;
+                if (id >= 0 && !tok.self_closing && !ob_is_void_tag(tok.name) && depth < OB_MAX_DOM_NODES) stack[depth++] = id;
             }
         }
     }
