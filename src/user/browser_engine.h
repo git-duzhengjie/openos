@@ -667,4 +667,104 @@ static void ob_dom_text_renderer_base_init(ob_dom_text_renderer_base_t *renderer
     renderer->iface.render = ob_dom_text_render_impl;
 }
 
+static void ob_url_split_path_suffix(const char *input, int *path_len, const char **suffix)
+{
+    const char *p = input ? input : "";
+    int len = 0;
+    while (p[len] && p[len] != '?' && p[len] != '#') ++len;
+    if (path_len) *path_len = len;
+    if (suffix) *suffix = p + len;
+}
+
+static int ob_url_append_segment(char *out, int out_size, int *written, const char *segment, int seg_len)
+{
+    if (!out || !written || out_size <= 0 || seg_len <= 0) return 0;
+    if (*written > 1 && out[*written - 1] != '/') {
+        if (*written >= out_size - 1) return -1;
+        out[(*written)++] = '/';
+    }
+    if (*written == 0) {
+        if (*written >= out_size - 1) return -1;
+        out[(*written)++] = '/';
+    }
+    if (*written + seg_len >= out_size) return -1;
+    memcpy(out + *written, segment, seg_len);
+    *written += seg_len;
+    out[*written] = 0;
+    return 0;
+}
+
+static void ob_url_normalize_path(char *out, int out_size, const char *raw_path, int raw_len, const char *suffix)
+{
+    int written = 0;
+    int i = 0;
+    if (!out || out_size <= 0) return;
+    out[0] = 0;
+    if (!raw_path || raw_len <= 0) {
+        raw_path = "/";
+        raw_len = 1;
+    }
+    if (raw_path[0] == '/') out[written++] = '/';
+    while (i < raw_len) {
+        int start;
+        int len;
+        while (i < raw_len && raw_path[i] == '/') ++i;
+        start = i;
+        while (i < raw_len && raw_path[i] != '/') ++i;
+        len = i - start;
+        if (len == 0 || (len == 1 && raw_path[start] == '.')) continue;
+        if (len == 2 && raw_path[start] == '.' && raw_path[start + 1] == '.') {
+            if (written > 1) {
+                if (out[written - 1] == '/') --written;
+                while (written > 1 && out[written - 1] != '/') --written;
+                out[written] = 0;
+            }
+            continue;
+        }
+        if (ob_url_append_segment(out, out_size, &written, raw_path + start, len) < 0) break;
+    }
+    if (written == 0) out[written++] = '/';
+    out[written] = 0;
+    if (suffix && suffix[0] && written < out_size - 1) snprintf(out + written, out_size - written, "%s", suffix);
+}
+
+static void ob_url_join_relative_path(char *out, int out_size, const char *base_path, const char *href)
+{
+    const char *base = base_path && base_path[0] ? base_path : "/";
+    const char *slash = 0;
+    const char *suffix = "";
+    char combined[512];
+    int base_path_len;
+    int href_path_len;
+    int base_len;
+    if (!out || out_size <= 0) return;
+    out[0] = 0;
+    ob_url_split_path_suffix(base, &base_path_len, 0);
+    if (!href || !href[0]) {
+        ob_url_normalize_path(out, out_size, base, base_path_len, base + base_path_len);
+        return;
+    }
+    ob_url_split_path_suffix(href, &href_path_len, &suffix);
+    if (href[0] == '?' || href[0] == '#') {
+        ob_url_normalize_path(out, out_size, base, base_path_len, href);
+        return;
+    }
+    if (href[0] == '/') {
+        ob_url_normalize_path(out, out_size, href, href_path_len, suffix);
+        return;
+    }
+    if (base_path_len > 0) {
+        const char *p = base;
+        const char *end = base + base_path_len;
+        while (p < end) {
+            if (*p == '/') slash = p;
+            ++p;
+        }
+    }
+    base_len = slash ? (int)(slash - base + 1) : 1;
+    if (base_len > 1) snprintf(combined, sizeof(combined), "%.*s%.*s", base_len, base, href_path_len, href);
+    else snprintf(combined, sizeof(combined), "/%.*s", href_path_len, href);
+    ob_url_normalize_path(out, out_size, combined, (int)strlen(combined), suffix);
+}
+
 #endif /* OPENOS_USER_BROWSER_ENGINE_H */

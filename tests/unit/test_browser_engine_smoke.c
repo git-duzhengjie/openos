@@ -180,6 +180,35 @@ int main(void)
         }
     }
 
+    {
+        char url[128];
+        ob_url_join_relative_path(url, sizeof(url), "/docs/guide/index.html", "./intro.html");
+        if (strcmp(url, "/docs/guide/intro.html") != 0) {
+            fprintf(stderr, "browser relative ./ URL smoke failed: %s\n", url);
+            return 1;
+        }
+        ob_url_join_relative_path(url, sizeof(url), "/docs/guide/index.html", "../api/ref.html?x=1#top");
+        if (strcmp(url, "/docs/api/ref.html?x=1#top") != 0) {
+            fprintf(stderr, "browser relative ../ URL smoke failed: %s\n", url);
+            return 1;
+        }
+        ob_url_join_relative_path(url, sizeof(url), "/docs/guide/index.html?old=1", "?q=2#part");
+        if (strcmp(url, "/docs/guide/index.html?q=2#part") != 0) {
+            fprintf(stderr, "browser relative query URL smoke failed: %s\n", url);
+            return 1;
+        }
+        ob_url_join_relative_path(url, sizeof(url), "/docs/guide/", "../index.html#home");
+        if (strcmp(url, "/docs/index.html#home") != 0) {
+            fprintf(stderr, "browser directory relative URL smoke failed: %s\n", url);
+            return 1;
+        }
+        ob_url_join_relative_path(url, sizeof(url), "/docs/guide/index.html", "/assets/../img/logo.png?v=1");
+        if (strcmp(url, "/img/logo.png?v=1") != 0) {
+            fprintf(stderr, "browser absolute normalized URL smoke failed: %s\n", url);
+            return 1;
+        }
+    }
+
     printf("browser engine smoke ok: nodes=%d\n", doc.count);
     return 0;
 }

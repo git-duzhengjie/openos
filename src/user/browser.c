@@ -404,17 +404,7 @@ static const char *browser_basename_dir_end(const char *path)
 
 static void browser_join_relative_path(char *out, int out_size, const char *base_path, const char *href)
 {
-    const char *base = base_path && base_path[0] ? base_path : "/";
-    const char *slash;
-    int base_len;
-    if (!out || out_size <= 0) return;
-    out[0] = 0;
-    if (!href || !href[0]) { snprintf(out, out_size, "%s", base); return; }
-    if (href[0] == '/') { snprintf(out, out_size, "%s", href); return; }
-    slash = browser_basename_dir_end(base);
-    base_len = slash ? (int)(slash - base + 1) : 1;
-    if (base_len > 1) snprintf(out, out_size, "%.*s%s", base_len, base, href);
-    else snprintf(out, out_size, "/%s", href);
+    ob_url_join_relative_path(out, out_size, base_path, href);
 }
 
 static int browser_resolve_link(const browser_history_entry_t *base, const char *href, char *host, int host_size, char *path, int path_size, int *is_file, char *error, int error_size)
