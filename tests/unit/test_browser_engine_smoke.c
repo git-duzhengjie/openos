@@ -165,6 +165,21 @@ int main(void)
         }
     }
 
+    {
+        const char *styled = "<main><span style='display:block'>Block</span>"
+                             "<p style=\"display:inline\">Inline</p>"
+                             "<div style='display:none'>Hidden</div>"
+                             "<span style='font-weight:bold'>Bold</span>"
+                             "<b style='font-weight:700'>Heavy</b></main>";
+        if (parser.iface.parse(&parser.iface, styled, &doc) <= 1 ||
+            renderer.iface.render(&renderer.iface, &doc, rendered, sizeof(rendered)) <= 0 ||
+            !strstr(rendered, "Block\nInline**Bold****Heavy**") ||
+            strstr(rendered, "Hidden")) {
+            fprintf(stderr, "browser inline style smoke failed: %s\n", rendered);
+            return 1;
+        }
+    }
+
     printf("browser engine smoke ok: nodes=%d\n", doc.count);
     return 0;
 }

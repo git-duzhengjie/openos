@@ -99,10 +99,10 @@
   - [√] tokenizer 跳过 `<!-- -->` 注释
   - [√] `<!doctype html>` 不进入可见 DOM
   - [√] 单元测试覆盖注释、doctype 与普通标签混排
-- [ ] P3.3：基础 CSS 样式解析雏形
-  - [ ] 解析内联 `style` 的 `display:none/block/inline`
-  - [ ] 支持 `font-weight:bold` 或等价文本提示
-  - [ ] 单元测试覆盖样式覆盖默认 display
+- [√] P3.3：基础 CSS 样式解析雏形
+  - [√] 解析内联 `style` 的 `display:none/block/inline`
+  - [√] 支持 `font-weight:bold` 或等价文本提示
+  - [√] 单元测试覆盖样式覆盖默认 display
 - [ ] P3.4：相对 URL 解析增强
   - [ ] 支持 `./`、`../` 路径折叠
   - [ ] 保留 query/hash

@@ -54,6 +54,7 @@ typedef struct ob_dom_node {
     int first_child;
     int next_sibling;
     int style_display;
+    int font_weight_bold;
     char name[OB_MAX_TAG_NAME];
     char text[OB_MAX_NODE_TEXT];
     char href[OB_MAX_ATTR_VALUE];
@@ -359,6 +360,60 @@ static void ob_extract_attr_value(const char *attrs, int attrs_len, const char *
     }
 }
 
+static int ob_css_ident_eq_ci(const char *p, int len, const char *name)
+{
+    int i = 0;
+    if (!p || !name || len <= 0) return 0;
+    while (i < len && name[i]) {
+        if (!ob_ascii_equal_ci(p[i], name[i])) return 0;
+        ++i;
+    }
+    return i == len && name[i] == 0;
+}
+
+static void ob_css_apply_inline_style(ob_dom_node_t *node, const ob_html_token_t *tok)
+{
+    char style[OB_MAX_ATTR_VALUE];
+    int pos = 0;
+    if (!node || !tok) return;
+    ob_extract_attr_value(tok->attrs, tok->attrs_len, "style", style, sizeof(style));
+    while (style[pos]) {
+        int key_start;
+        int key_len;
+        int value_start;
+        int value_len;
+        while (style[pos] == ' ' || style[pos] == '\t' || style[pos] == '\r' || style[pos] == '\n' || style[pos] == ';') ++pos;
+        key_start = pos;
+        while (style[pos] && style[pos] != ':' && style[pos] != ';') ++pos;
+        key_len = pos - key_start;
+        while (key_len > 0 && (style[key_start + key_len - 1] == ' ' || style[key_start + key_len - 1] == '\t' ||
+                               style[key_start + key_len - 1] == '\r' || style[key_start + key_len - 1] == '\n')) --key_len;
+        if (style[pos] != ':') {
+            while (style[pos] && style[pos] != ';') ++pos;
+            continue;
+        }
+        ++pos;
+        while (style[pos] == ' ' || style[pos] == '\t' || style[pos] == '\r' || style[pos] == '\n') ++pos;
+        value_start = pos;
+        while (style[pos] && style[pos] != ';') ++pos;
+        value_len = pos - value_start;
+        while (value_len > 0 && (style[value_start + value_len - 1] == ' ' || style[value_start + value_len - 1] == '\t' ||
+                                 style[value_start + value_len - 1] == '\r' || style[value_start + value_len - 1] == '\n')) --value_len;
+        if (ob_css_ident_eq_ci(style + key_start, key_len, "display")) {
+            if (ob_css_ident_eq_ci(style + value_start, value_len, "none")) node->style_display = OB_DISPLAY_NONE;
+            else if (ob_css_ident_eq_ci(style + value_start, value_len, "block")) node->style_display = OB_DISPLAY_BLOCK;
+            else if (ob_css_ident_eq_ci(style + value_start, value_len, "inline")) node->style_display = OB_DISPLAY_INLINE;
+        } else if (ob_css_ident_eq_ci(style + key_start, key_len, "font-weight")) {
+            if (ob_css_ident_eq_ci(style + value_start, value_len, "bold") ||
+                ob_css_ident_eq_ci(style + value_start, value_len, "700") ||
+                ob_css_ident_eq_ci(style + value_start, value_len, "800") ||
+                ob_css_ident_eq_ci(style + value_start, value_len, "900"))
+                node->font_weight_bold = 1;
+        }
+        if (style[pos] == ';') ++pos;
+    }
+}
+
 static void ob_dom_extract_form_attrs(ob_dom_node_t *node, const ob_html_token_t *tok)
 {
     if (!node || !tok) return;
@@ -387,6 +442,7 @@ static int ob_dom_add_node(ob_dom_document_t *doc, int type, const char *name, c
     doc->nodes[id].first_child = -1;
     doc->nodes[id].next_sibling = -1;
     doc->nodes[id].style_display = display;
+    doc->nodes[id].font_weight_bold = 0;
     doc->nodes[id].name[0] = 0;
     doc->nodes[id].text[0] = 0;
     doc->nodes[id].href[0] = 0;
@@ -453,6 +509,7 @@ static int ob_html_parse_impl(ob_html_parser_i_t *iface, const char *html, ob_do
                 int id = ob_dom_add_node(doc, OB_DOM_NODE_ELEMENT, tok.name, 0, 0, current, display);
                 if (id >= 0 && ob_token_eq_ci(tok.name, "a"))
                     ob_extract_attr_value(tok.attrs, tok.attrs_len, "href", doc->nodes[id].href, sizeof(doc->nodes[id].href));
+                if (id >= 0) ob_css_apply_inline_style(&doc->nodes[id], &tok);
                 if (id >= 0) ob_dom_extract_form_attrs(&doc->nodes[id], &tok);
                 if (id >= 0 && !tok.self_closing && !ob_is_void_tag(tok.name) && depth < OB_MAX_DOM_NODES) stack[depth++] = id;
             }
@@ -568,6 +625,7 @@ static void ob_dom_render_node_text_ex(const ob_dom_document_t *doc, int node_id
     if (is_block && *pos > 0) ob_dom_render_append_newline(out, out_size, pos);
     if (heading_level > 0) ob_dom_render_append_heading_prefix(out, out_size, pos, heading_level);
     if (is_list_item) ob_dom_render_append_literal(out, out_size, pos, "- ");
+    if (doc->nodes[node_id].font_weight_bold) ob_dom_render_append_literal(out, out_size, pos, "**");
     if (ob_dom_is_form_control(&doc->nodes[node_id])) ob_dom_render_append_form_start(out, out_size, pos, &doc->nodes[node_id]);
     if (doc->nodes[node_id].type == OB_DOM_NODE_TEXT) ob_dom_render_append_text(out, out_size, pos, doc->nodes[node_id].text);
     child = doc->nodes[node_id].first_child;
@@ -576,6 +634,7 @@ static void ob_dom_render_node_text_ex(const ob_dom_document_t *doc, int node_id
         child = doc->nodes[child].next_sibling;
     }
     if (ob_dom_is_form_control(&doc->nodes[node_id])) ob_dom_render_append_form_end(out, out_size, pos, &doc->nodes[node_id]);
+    if (doc->nodes[node_id].font_weight_bold) ob_dom_render_append_literal(out, out_size, pos, "**");
     if (doc->nodes[node_id].type == OB_DOM_NODE_ELEMENT && ob_token_eq_ci(doc->nodes[node_id].name, "a") && doc->nodes[node_id].href[0] && link_count) {
         ++(*link_count);
         ob_dom_render_append_link_marker(out, out_size, pos, *link_count);
