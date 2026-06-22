@@ -376,15 +376,10 @@ static void browser_format_address(char *out, int out_size, const char *host, co
 
 static void browser_update_address_label(browser_load_context_t *ctx)
 {
-    char label[BROWSER_ADDRESS_MAX + 32];
     const char *text;
     if (!ctx || ctx->window_id <= 0 || ctx->address_label_id <= 0) return;
     text = ctx->address_text[0] ? ctx->address_text : "Search OpenOS or type a URL";
-    if (ctx->address_editing)
-        snprintf(label, sizeof(label), "  %s|", text);
-    else
-        snprintf(label, sizeof(label), "  %s", text);
-    openos_gui_set_text(ctx->window_id, ctx->address_label_id, label);
+    openos_gui_set_text(ctx->window_id, ctx->address_label_id, text);
 }
 
 static void browser_sync_address_from_target(browser_load_context_t *ctx, const char *host, const char *path, int is_file)
@@ -1200,7 +1195,7 @@ int main(int argc, char **argv)
     back_button = openos_gui_add_button(win, 16, 18, 40, 24, "<");
     forward_button = openos_gui_add_button(win, 60, 18, 40, 24, ">");
     load_button = openos_gui_add_button(win, 104, 18, 72, 24, "Reload");
-    address_label = openos_gui_add_button(win, 188, 18, 620, 24, "  Search OpenOS or type a URL");
+    address_label = openos_gui_add_textbox(win, 188, 18, 620, 24, "");
     close_button = openos_gui_add_button(win, 824, 18, 56, 24, "Close");
 
     if (argc > 1 && argv && argv[1] && argv[1][0])
@@ -1235,6 +1230,10 @@ int main(int argc, char **argv)
         int ev = openos_gui_poll_event(&event);
         if (ev == 0 && event.type != OPENOS_GUI_EVENT_NONE && event.window_id == (unsigned int)win) {
             if (event.type == OPENOS_GUI_EVENT_KEY_DOWN || event.type == OPENOS_GUI_EVENT_TEXT_INPUT) {
+                int address_focused = (event.widget_id == (unsigned int)address_label);
+                if (address_focused) {
+                    load.address_editing = 1;
+                }
                 if (event.type == OPENOS_GUI_EVENT_KEY_DOWN && event.key == OPENOS_GUI_KEY_TAB) {
                     browser_focus_next(&load, win, status_label, body_label, scroll_line);
                     continue;

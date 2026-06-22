@@ -75,6 +75,7 @@ int gui_user_create_window(const char *title, int x, int y, int w, int h, uint32
 int gui_user_destroy_window(uint32_t window_id);
 int gui_user_add_label(uint32_t window_id, int x, int y, int w, int h, const char *text);
 int gui_user_add_button(uint32_t window_id, int x, int y, int w, int h, const char *text);
+int gui_user_add_textbox(uint32_t window_id, int x, int y, int w, int h, const char *text);
 int gui_user_poll_event(gui_user_event_t *out_event);
 void gui_user_post_key_event(gui_window_t *window, int key);
 int gui_user_set_text(uint32_t window_id, uint32_t widget_id, const char *text);

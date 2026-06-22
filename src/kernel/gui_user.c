@@ -78,7 +78,8 @@ void gui_user_post_key_event(gui_window_t *window, int key) {
     event.owner_pid = window->user_owner_pid;
     event.type = GUI_EVENT_KEY_DOWN;
     event.window_id = window->id;
-    event.widget_id = 0;
+    gui_widget_t *focused = gui_get_focused_widget();
+    event.widget_id = (focused && focused->owner == window) ? focused->id : 0;
     event.key = key;
     gui_user_push_event(&event);
 }
@@ -176,6 +177,24 @@ int gui_user_add_button(uint32_t window_id, int x, int y, int w, int h, const ch
     gui_user_copy_text(safe_text, sizeof(safe_text), text ? text : "Button");
 
     gui_widget_t *widget = gui_add_button(win, x, y, w, h, safe_text, gui_user_button_on_click, NULL);
+    if (!widget) {
+        return -1;
+    }
+
+    gui_invalidate_rect(win->rect.x, win->rect.y, win->rect.w, win->rect.h);
+    return (int)widget->id;
+}
+
+int gui_user_add_textbox(uint32_t window_id, int x, int y, int w, int h, const char *text) {
+    gui_window_t *win = gui_find_window(window_id);
+    if (!gui_user_window_owned_by_current(win) || w <= 0 || h <= 0) {
+        return -1;
+    }
+
+    char safe_text[GUI_USER_TEXT_MAX + 1];
+    gui_user_copy_text(safe_text, sizeof(safe_text), text ? text : "");
+
+    gui_widget_t *widget = gui_add_textbox(win, x, y, w, h, safe_text);
     if (!widget) {
         return -1;
     }

@@ -121,6 +121,7 @@
 #define SYS_GUI_POLL_EVENT 324
 #define SYS_GUI_SET_TEXT 325
 #define SYS_GUI_DRAW 326
+#define SYS_GUI_ADD_TEXTBOX 327
 #define SYS_MMAP_FILE    328
 #define SYS_CHROMIUM_MEMORY_POLICY 329
 #define SYS_TLS_SET     330
@@ -794,6 +795,19 @@ static inline int openos_gui_add_button(int window_id, int x, int y, int w, int 
     req.h = h;
     openos_gui_copy_text64(req.text, text);
     return openos_syscall_result(openos_syscall1(SYS_GUI_ADD_BUTTON, (int)&req));
+}
+
+static inline int openos_gui_add_textbox(int window_id, int x, int y, int w, int h, const char *text)
+{
+    openos_gui_widget_request_t req;
+    req.window_id = (unsigned int)window_id;
+    req.widget_id = 0;
+    req.x = x;
+    req.y = y;
+    req.w = w;
+    req.h = h;
+    openos_gui_copy_text64(req.text, text);
+    return openos_syscall_result(openos_syscall1(SYS_GUI_ADD_TEXTBOX, (int)&req));
 }
 
 static inline int openos_gui_poll_event(openos_gui_event_t *event)

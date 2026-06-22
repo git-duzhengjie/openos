@@ -3028,6 +3028,17 @@ uint32_t syscall_dispatch(uint32_t num,
             return (uint32_t)gui_user_add_button(req.window_id, req.x, req.y, req.w, req.h, req.text);
         }
 
+    case SYS_GUI_ADD_TEXTBOX:
+        {
+            gui_user_widget_request_t req;
+            if (!a || !user_ptr_valid((void *)a, sizeof(req), USERMEM_READ))
+                return (uint32_t)-1;
+            if (copy_from_user(&req, (const void *)a, sizeof(req)) < 0)
+                return (uint32_t)-1;
+            req.text[sizeof(req.text) - 1] = 0;
+            return (uint32_t)gui_user_add_textbox(req.window_id, req.x, req.y, req.w, req.h, req.text);
+        }
+
     case SYS_GUI_POLL_EVENT:
         {
             gui_user_event_t event;
