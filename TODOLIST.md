@@ -87,6 +87,27 @@
   - [√] 文件读取失败保留路径和错误原因
   - [√] 网络/DNS/连接失败文案保持可诊断
 
+## P3：自研浏览器表单与基础 CSS 增强
+
+> 目标：在保持轻量、自研、可测试的前提下，补齐网页阅读和简单交互所需的表单文本化、基础 CSS、注释/编码与 URL 解析能力。
+
+- [√] P3.1：表单控件文本化渲染
+  - [√] `input` 保存并渲染 `type/value/placeholder/name` 等关键属性
+  - [√] `button/textarea/select/option` 输出可读文本提示
+  - [√] 单元测试覆盖常见表单控件输出
+- [ ] P3.2：HTML 注释与 doctype 容错
+  - [ ] tokenizer 跳过 `<!-- -->` 注释
+  - [ ] `<!doctype html>` 不进入可见 DOM
+  - [ ] 单元测试覆盖注释、doctype 与普通标签混排
+- [ ] P3.3：基础 CSS 样式解析雏形
+  - [ ] 解析内联 `style` 的 `display:none/block/inline`
+  - [ ] 支持 `font-weight:bold` 或等价文本提示
+  - [ ] 单元测试覆盖样式覆盖默认 display
+- [ ] P3.4：相对 URL 解析增强
+  - [ ] 支持 `./`、`../` 路径折叠
+  - [ ] 保留 query/hash
+  - [ ] 单元测试覆盖文件与 HTTP 基准路径
+
 ---
 
 ## 已完成基线

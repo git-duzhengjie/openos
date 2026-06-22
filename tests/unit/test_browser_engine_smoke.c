@@ -127,6 +127,26 @@ int main(void)
         }
     }
 
+    {
+        const char *forms = "<main><form>"
+                            "<input name='q' placeholder='Search'>"
+                            "<input type=password name=p value=secret>"
+                            "<button value='go'>Go</button>"
+                            "<textarea name='msg' placeholder='Message'>Hi</textarea>"
+                            "<select name='choice'><option value='a'>A</option></select>"
+                            "</form></main>";
+        if (parser.iface.parse(&parser.iface, forms, &doc) <= 1 ||
+            renderer.iface.render(&renderer.iface, &doc, rendered, sizeof(rendered)) <= 0 ||
+            !strstr(rendered, "[input type=\"text\" name=\"q\" placeholder=\"Search\"]") ||
+            !strstr(rendered, "[input type=\"password\" name=\"p\" value=\"secret\"]") ||
+            !strstr(rendered, "[button value=\"go\"Go]") ||
+            !strstr(rendered, "[textarea name=\"msg\" placeholder=\"Message\"Hi]") ||
+            !strstr(rendered, "[select name=\"choice\" [option value=\"a\"A]]")) {
+            fprintf(stderr, "browser form render smoke failed: %s\n", rendered);
+            return 1;
+        }
+    }
+
     printf("browser engine smoke ok: nodes=%d\n", doc.count);
     return 0;
 }

@@ -57,6 +57,10 @@ typedef struct ob_dom_node {
     char name[OB_MAX_TAG_NAME];
     char text[OB_MAX_NODE_TEXT];
     char href[OB_MAX_ATTR_VALUE];
+    char form_type[OB_MAX_ATTR_VALUE];
+    char form_value[OB_MAX_ATTR_VALUE];
+    char form_placeholder[OB_MAX_ATTR_VALUE];
+    char form_name[OB_MAX_ATTR_VALUE];
 } ob_dom_node_t;
 
 typedef struct ob_dom_document {
@@ -343,6 +347,23 @@ static void ob_extract_attr_value(const char *attrs, int attrs_len, const char *
     }
 }
 
+static void ob_dom_extract_form_attrs(ob_dom_node_t *node, const ob_html_token_t *tok)
+{
+    if (!node || !tok) return;
+    if (ob_token_eq_ci(node->name, "input")) {
+        ob_extract_attr_value(tok->attrs, tok->attrs_len, "type", node->form_type, sizeof(node->form_type));
+        ob_extract_attr_value(tok->attrs, tok->attrs_len, "value", node->form_value, sizeof(node->form_value));
+        ob_extract_attr_value(tok->attrs, tok->attrs_len, "placeholder", node->form_placeholder, sizeof(node->form_placeholder));
+        ob_extract_attr_value(tok->attrs, tok->attrs_len, "name", node->form_name, sizeof(node->form_name));
+        if (!node->form_type[0]) ob_copy_attr_value(node->form_type, sizeof(node->form_type), "text", 4);
+    } else if (ob_token_eq_ci(node->name, "button") || ob_token_eq_ci(node->name, "textarea") ||
+               ob_token_eq_ci(node->name, "select") || ob_token_eq_ci(node->name, "option")) {
+        ob_extract_attr_value(tok->attrs, tok->attrs_len, "value", node->form_value, sizeof(node->form_value));
+        ob_extract_attr_value(tok->attrs, tok->attrs_len, "name", node->form_name, sizeof(node->form_name));
+        ob_extract_attr_value(tok->attrs, tok->attrs_len, "placeholder", node->form_placeholder, sizeof(node->form_placeholder));
+    }
+}
+
 static int ob_dom_add_node(ob_dom_document_t *doc, int type, const char *name, const char *text, int text_len, int parent, int display)
 {
     int id;
@@ -357,6 +378,10 @@ static int ob_dom_add_node(ob_dom_document_t *doc, int type, const char *name, c
     doc->nodes[id].name[0] = 0;
     doc->nodes[id].text[0] = 0;
     doc->nodes[id].href[0] = 0;
+    doc->nodes[id].form_type[0] = 0;
+    doc->nodes[id].form_value[0] = 0;
+    doc->nodes[id].form_placeholder[0] = 0;
+    doc->nodes[id].form_name[0] = 0;
     if (name) ob_copy_tag_name(doc->nodes[id].name, sizeof(doc->nodes[id].name), name, ob_cstr_len(name));
     if (text && text_len > 0) {
         for (i = 0; i < text_len && i < OB_MAX_NODE_TEXT - 1; ++i) doc->nodes[id].text[i] = text[i];
@@ -416,6 +441,7 @@ static int ob_html_parse_impl(ob_html_parser_i_t *iface, const char *html, ob_do
                 int id = ob_dom_add_node(doc, OB_DOM_NODE_ELEMENT, tok.name, 0, 0, current, display);
                 if (id >= 0 && ob_token_eq_ci(tok.name, "a"))
                     ob_extract_attr_value(tok.attrs, tok.attrs_len, "href", doc->nodes[id].href, sizeof(doc->nodes[id].href));
+                if (id >= 0) ob_dom_extract_form_attrs(&doc->nodes[id], &tok);
                 if (id >= 0 && !tok.self_closing && !ob_is_void_tag(tok.name) && depth < OB_MAX_DOM_NODES) stack[depth++] = id;
             }
         }
@@ -462,6 +488,42 @@ static void ob_dom_render_append_literal(char *out, int out_size, int *pos, cons
     while (text[i] && *pos < out_size - 1) out[(*pos)++] = text[i++];
 }
 
+static int ob_dom_is_form_control(const ob_dom_node_t *node)
+{
+    if (!node || node->type != OB_DOM_NODE_ELEMENT) return 0;
+    return ob_token_eq_ci(node->name, "input") || ob_token_eq_ci(node->name, "button") ||
+           ob_token_eq_ci(node->name, "textarea") || ob_token_eq_ci(node->name, "select") ||
+           ob_token_eq_ci(node->name, "option");
+}
+
+static void ob_dom_render_append_attr_label(char *out, int out_size, int *pos, const char *label, const char *value)
+{
+    if (!value || !value[0]) return;
+    ob_dom_render_append_literal(out, out_size, pos, " ");
+    ob_dom_render_append_literal(out, out_size, pos, label);
+    ob_dom_render_append_literal(out, out_size, pos, "=\"");
+    ob_dom_render_append_literal(out, out_size, pos, value);
+    ob_dom_render_append_literal(out, out_size, pos, "\"");
+}
+
+static void ob_dom_render_append_form_start(char *out, int out_size, int *pos, const ob_dom_node_t *node)
+{
+    if (!ob_dom_is_form_control(node)) return;
+    if (*pos > 0 && out[*pos - 1] != ' ' && out[*pos - 1] != '\n') ob_dom_render_append_literal(out, out_size, pos, " ");
+    ob_dom_render_append_literal(out, out_size, pos, "[");
+    ob_dom_render_append_literal(out, out_size, pos, node->name);
+    if (ob_token_eq_ci(node->name, "input")) ob_dom_render_append_attr_label(out, out_size, pos, "type", node->form_type[0] ? node->form_type : "text");
+    ob_dom_render_append_attr_label(out, out_size, pos, "name", node->form_name);
+    ob_dom_render_append_attr_label(out, out_size, pos, "value", node->form_value);
+    ob_dom_render_append_attr_label(out, out_size, pos, "placeholder", node->form_placeholder);
+}
+
+static void ob_dom_render_append_form_end(char *out, int out_size, int *pos, const ob_dom_node_t *node)
+{
+    if (!ob_dom_is_form_control(node)) return;
+    ob_dom_render_append_literal(out, out_size, pos, "]");
+}
+
 static int ob_dom_heading_level(const ob_dom_node_t *node)
 {
     if (!node || node->type != OB_DOM_NODE_ELEMENT) return 0;
@@ -494,12 +556,14 @@ static void ob_dom_render_node_text_ex(const ob_dom_document_t *doc, int node_id
     if (is_block && *pos > 0) ob_dom_render_append_newline(out, out_size, pos);
     if (heading_level > 0) ob_dom_render_append_heading_prefix(out, out_size, pos, heading_level);
     if (is_list_item) ob_dom_render_append_literal(out, out_size, pos, "- ");
+    if (ob_dom_is_form_control(&doc->nodes[node_id])) ob_dom_render_append_form_start(out, out_size, pos, &doc->nodes[node_id]);
     if (doc->nodes[node_id].type == OB_DOM_NODE_TEXT) ob_dom_render_append_text(out, out_size, pos, doc->nodes[node_id].text);
     child = doc->nodes[node_id].first_child;
     while (child >= 0 && *pos < out_size - 1) {
         ob_dom_render_node_text_ex(doc, child, out, out_size, pos, link_count);
         child = doc->nodes[child].next_sibling;
     }
+    if (ob_dom_is_form_control(&doc->nodes[node_id])) ob_dom_render_append_form_end(out, out_size, pos, &doc->nodes[node_id]);
     if (doc->nodes[node_id].type == OB_DOM_NODE_ELEMENT && ob_token_eq_ci(doc->nodes[node_id].name, "a") && doc->nodes[node_id].href[0] && link_count) {
         ++(*link_count);
         ob_dom_render_append_link_marker(out, out_size, pos, *link_count);
