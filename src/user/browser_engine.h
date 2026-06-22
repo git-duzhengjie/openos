@@ -220,6 +220,21 @@ static int ob_dom_add_node(ob_dom_document_t *doc, int type, const char *name, c
     return id;
 }
 
+static void ob_dom_close_tag(ob_dom_document_t *doc, int *stack, int *depth, const char *tag)
+{
+    int i;
+    if (!doc || !stack || !depth || !tag || !tag[0]) return;
+    for (i = *depth - 1; i > 0; --i) {
+        int node_id = stack[i];
+        if (node_id >= 0 && node_id < doc->count &&
+            doc->nodes[node_id].type == OB_DOM_NODE_ELEMENT &&
+            ob_token_eq_ci(doc->nodes[node_id].name, tag)) {
+            *depth = i;
+            return;
+        }
+    }
+}
+
 static int ob_html_parse_impl(ob_html_parser_i_t *iface, const char *html, ob_dom_document_t *doc)
 {
     ob_html_tokenizer_base_t tokenizer;
@@ -242,7 +257,7 @@ static int ob_html_parse_impl(ob_html_parser_i_t *iface, const char *html, ob_do
             ob_dom_add_node(doc, OB_DOM_NODE_TEXT, "#text", tok.text, tok.text_len, current, OB_DISPLAY_INLINE);
         } else if (tok.type == OB_HTML_TOKEN_TAG && tok.name[0]) {
             if (tok.closing) {
-                if (depth > 1) --depth;
+                ob_dom_close_tag(doc, stack, &depth, tok.name);
             } else {
                 int display = styles.iface.display_for_tag(&styles.iface, tok.name);
                 int id = ob_dom_add_node(doc, OB_DOM_NODE_ELEMENT, tok.name, 0, 0, current, display);

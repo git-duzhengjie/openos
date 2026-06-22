@@ -34,6 +34,27 @@ int main(void)
         return 1;
     }
 
+    {
+        const char *nested = "<main><section><p>One</section><p>Two</p></main>";
+        int section_id;
+        int first_p_id;
+        int second_p_id;
+        if (parser.iface.parse(&parser.iface, nested, &doc) <= 1) {
+            fprintf(stderr, "browser parser nested smoke failed\n");
+            return 1;
+        }
+        section_id = doc.nodes[1].first_child;
+        first_p_id = section_id >= 0 ? doc.nodes[section_id].first_child : -1;
+        second_p_id = section_id >= 0 ? doc.nodes[section_id].next_sibling : -1;
+        if (section_id < 0 || first_p_id < 0 || second_p_id < 0 ||
+            strcmp(doc.nodes[section_id].name, "section") != 0 ||
+            strcmp(doc.nodes[first_p_id].name, "p") != 0 ||
+            strcmp(doc.nodes[second_p_id].name, "p") != 0) {
+            fprintf(stderr, "browser parser close-tag stack smoke failed\n");
+            return 1;
+        }
+    }
+
     printf("browser engine smoke ok: nodes=%d\n", doc.count);
     return 0;
 }
