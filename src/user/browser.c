@@ -210,6 +210,77 @@ static void browser_extract_http_status(const char *response, char *out, int out
     out[i] = 0;
 }
 
+static int browser_http_status_code(const char *status_line)
+{
+    const char *p = status_line;
+    int code = 0;
+    int digits = 0;
+    if (!p) return 0;
+    if (browser_match_token_ci(p, "HTTP/")) {
+        while (*p && *p != ' ' && *p != '\t') ++p;
+        while (*p == ' ' || *p == '\t') ++p;
+    } else if (browser_match_token_ci(p, "HTTP ")) {
+        p += 5;
+    }
+    while (*p >= '0' && *p <= '9' && digits < 3) {
+        code = code * 10 + (*p - '0');
+        ++p;
+        ++digits;
+    }
+    return digits == 3 ? code : 0;
+}
+
+static void browser_format_short_http_status(const char *status_line, char *out, int out_size)
+{
+    int code;
+    const char *reason;
+    if (!out || out_size <= 0) return;
+    out[0] = 0;
+    code = browser_http_status_code(status_line);
+    if (code <= 0) {
+        snprintf(out, out_size, "%s", status_line && status_line[0] ? status_line : "HTTP status unknown");
+        return;
+    }
+    reason = status_line ? status_line : "";
+    if (browser_match_token_ci(reason, "HTTP/")) {
+        while (*reason && *reason != ' ' && *reason != '\t') ++reason;
+        while (*reason == ' ' || *reason == '\t') ++reason;
+        while (*reason >= '0' && *reason <= '9') ++reason;
+        while (*reason == ' ' || *reason == '\t') ++reason;
+    } else if (browser_match_token_ci(reason, "HTTP ")) {
+        reason += 5;
+        while (*reason >= '0' && *reason <= '9') ++reason;
+        while (*reason == ' ' || *reason == '\t') ++reason;
+    }
+    snprintf(out, out_size, "HTTP %d%s%s", code, reason[0] ? " " : "", reason);
+}
+
+static void browser_target_url(const browser_load_context_t *ctx, char *out, int out_size)
+{
+    if (!out || out_size <= 0) return;
+    if (!ctx) {
+        snprintf(out, out_size, "?");
+        return;
+    }
+    if (ctx->is_file)
+        snprintf(out, out_size, "file://%s", ctx->path);
+    else
+        snprintf(out, out_size, "http://%s%s", ctx->host, ctx->path);
+}
+
+static void browser_make_error_page(browser_load_context_t *ctx, const char *summary, const char *detail)
+{
+    char target[BROWSER_HOST_MAX + BROWSER_PATH_MAX + 16];
+    if (!ctx) return;
+    browser_target_url(ctx, target, sizeof(target));
+    snprintf(ctx->title, sizeof(ctx->title), "OpenOS Browser Error");
+    snprintf(ctx->status, sizeof(ctx->status), "%s", summary && summary[0] ? summary : "Load failed");
+    snprintf(ctx->body, sizeof(ctx->body),
+             "OpenOS Browser Error\nURL: %s\nReason: %s",
+             target,
+             detail && detail[0] ? detail : (summary && summary[0] ? summary : "unknown error"));
+}
+
 static void browser_extract_title(char *dst, int dst_size, const char *html)
 {
     const char *p = html;
@@ -460,14 +531,14 @@ static int browser_fetch_file(const char *path, char *out, int out_size)
     out[0] = 0;
     fd = openos_open(path, 0, 0);
     if (fd < 0) {
-        snprintf(out, out_size, "Could not open local file: %s", path);
+        snprintf(out, out_size, "file open failed path=%s reason=openos_open returned %d", path, fd);
         return -1;
     }
     while (total < out_size - 1) {
         int n = openos_read(fd, out + total, out_size - 1 - total);
         if (n < 0) {
             openos_close(fd);
-            snprintf(out, out_size, "Could not read local file: %s", path);
+            snprintf(out, out_size, "file read failed path=%s reason=openos_read returned %d", path, n);
             return -1;
         }
         if (n == 0) break;
@@ -602,42 +673,58 @@ static void browser_load_worker(void *arg)
                       : browser_fetch_http(ctx->host, ctx->path, ctx->response, sizeof(ctx->response));
     ctx->result = rc;
     if (rc < 0) {
-        snprintf(ctx->status, sizeof(ctx->status), "Failed");
-        snprintf(ctx->body, sizeof(ctx->body), "%s", ctx->response);
+        browser_make_error_page(ctx, ctx->is_file ? "File load failed" : "Network load failed", ctx->response);
         printf("browser: %s\n", ctx->response);
     } else {
         const char *body = ctx->is_file ? ctx->response : find_body(ctx->response);
-        if (ctx->is_file)
+        int http_code = 0;
+        if (ctx->is_file) {
             snprintf(ctx->http_status, sizeof(ctx->http_status), "FILE loaded");
-        else
+        } else {
+            char short_status[BROWSER_STATUS_MAX];
             browser_extract_http_status(ctx->response, ctx->http_status, sizeof(ctx->http_status));
-        browser_extract_title(ctx->title, sizeof(ctx->title), body);
-        {
-            ob_html_parser_base_t parser;
-            ob_dom_text_renderer_base_t renderer;
-            ob_dom_document_t doc;
-            ob_html_parser_base_init(&parser);
-            ob_dom_text_renderer_base_init(&renderer);
-            if (parser.iface.parse(&parser.iface, body, &doc) > 0) {
-                int i;
-                ctx->link_count = 0;
-                ctx->selected_link = 0;
-                for (i = 0; i < doc.count && ctx->link_count < BROWSER_LINK_MAX; ++i) {
-                    if (doc.nodes[i].type == OB_DOM_NODE_ELEMENT && ob_token_eq_ci(doc.nodes[i].name, "a") && doc.nodes[i].href[0]) {
-                        snprintf(ctx->links[ctx->link_count], sizeof(ctx->links[ctx->link_count]), "%s", doc.nodes[i].href);
-                        ++ctx->link_count;
-                    }
-                }
-                renderer.iface.render(&renderer.iface, &doc, ctx->body, sizeof(ctx->body));
-            } else
-                ctx->body[0] = 0;
+            browser_format_short_http_status(ctx->http_status, short_status, sizeof(short_status));
+            snprintf(ctx->http_status, sizeof(ctx->http_status), "%s", short_status);
+            http_code = browser_http_status_code(ctx->http_status);
         }
-        if (!ctx->body[0])
-            snprintf(ctx->body, sizeof(ctx->body), "Empty response");
-        snprintf(ctx->status, sizeof(ctx->status), "%s", ctx->http_status[0] ? ctx->http_status : "Done");
-        printf("browser: loaded http://%s%s %s\n", ctx->host, ctx->path, ctx->status);
-        if (ctx->title[0]) printf("title: %s\n", ctx->title);
-        printf("%s\n", ctx->body);
+        if (!ctx->is_file && (http_code < 200 || http_code >= 300)) {
+            char detail[BROWSER_BODY_MAX / 2];
+            ctx->result = -2;
+            snprintf(detail, sizeof(detail),
+                     "server returned non-success status %s. Response preview: %.220s",
+                     ctx->http_status[0] ? ctx->http_status : "HTTP status unknown",
+                     body && body[0] ? body : "<empty response body>");
+            browser_make_error_page(ctx, ctx->http_status[0] ? ctx->http_status : "HTTP error", detail);
+            printf("browser: HTTP error http://%s%s %s\n", ctx->host, ctx->path, ctx->status);
+        } else {
+            browser_extract_title(ctx->title, sizeof(ctx->title), body);
+            {
+                ob_html_parser_base_t parser;
+                ob_dom_text_renderer_base_t renderer;
+                ob_dom_document_t doc;
+                ob_html_parser_base_init(&parser);
+                ob_dom_text_renderer_base_init(&renderer);
+                if (parser.iface.parse(&parser.iface, body, &doc) > 0) {
+                    int i;
+                    ctx->link_count = 0;
+                    ctx->selected_link = 0;
+                    for (i = 0; i < doc.count && ctx->link_count < BROWSER_LINK_MAX; ++i) {
+                        if (doc.nodes[i].type == OB_DOM_NODE_ELEMENT && ob_token_eq_ci(doc.nodes[i].name, "a") && doc.nodes[i].href[0]) {
+                            snprintf(ctx->links[ctx->link_count], sizeof(ctx->links[ctx->link_count]), "%s", doc.nodes[i].href);
+                            ++ctx->link_count;
+                        }
+                    }
+                    renderer.iface.render(&renderer.iface, &doc, ctx->body, sizeof(ctx->body));
+                } else
+                    ctx->body[0] = 0;
+            }
+            if (!ctx->body[0])
+                snprintf(ctx->body, sizeof(ctx->body), "Empty response");
+            snprintf(ctx->status, sizeof(ctx->status), "%s", ctx->http_status[0] ? ctx->http_status : "Done");
+            printf("browser: loaded %s%s%s %s\n", ctx->is_file ? "file://" : "http://", ctx->is_file ? "" : ctx->host, ctx->path, ctx->status);
+            if (ctx->title[0]) printf("title: %s\n", ctx->title);
+            printf("%s\n", ctx->body);
+        }
     }
 
     if (ctx->window_id >= 0 && ctx->status_label_id >= 0 && ctx->body_label_id >= 0) {
