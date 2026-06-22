@@ -21,6 +21,8 @@
 #define BROWSER_VIEW_LINES 6
 #define BROWSER_LINE_MAX 72
 #define BROWSER_ADDRESS_MAX 256
+#define BROWSER_FOCUS_LINK 1
+#define BROWSER_FOCUS_FORM 2
 
 typedef struct browser_load_context {
     volatile int active;
@@ -40,6 +42,7 @@ typedef struct browser_load_context {
     char links[BROWSER_LINK_MAX][OB_MAX_ATTR_VALUE];
     int link_count;
     int selected_link;
+    int focus_mode;
     int address_label_id;
     int address_editing;
     char address_text[BROWSER_ADDRESS_MAX];
@@ -734,13 +737,112 @@ static void browser_refresh_form_body(browser_load_context_t *load, int body_lab
 static void browser_update_form_status(int win, int status_label, const browser_load_context_t *load)
 {
     char status[128];
+    const char *name;
+    const char *kind;
     if (!load || load->form_state.count <= 0 || load->form_state.focused < 0) {
-        openos_gui_set_text(win, status_label, "No editable form fields");
+        openos_gui_set_text(win, status_label, "No form controls");
         return;
     }
-    snprintf(status, sizeof(status), "Field %d/%d: %s", load->form_state.focused + 1, load->form_state.count,
-             load->form_state.controls[load->form_state.focused].name[0] ? load->form_state.controls[load->form_state.focused].name : "input");
+    name = load->form_state.controls[load->form_state.focused].name[0] ? load->form_state.controls[load->form_state.focused].name : "control";
+    kind = load->form_state.controls[load->form_state.focused].editable ? "Field" : "Submit";
+    snprintf(status, sizeof(status), "%s %d/%d: %s (Tab next, Enter activate)", kind,
+             load->form_state.focused + 1, load->form_state.count, name);
     openos_gui_set_text(win, status_label, status);
+}
+
+static int browser_focus_next(browser_load_context_t *load, int win, int status_label, int body_label, int scroll_line)
+{
+    if (!load) return -1;
+    load->address_editing = 0;
+    if (load->focus_mode == BROWSER_FOCUS_LINK && load->form_state.count > 0) {
+        load->focus_mode = BROWSER_FOCUS_FORM;
+        if (load->form_state.focused < 0) ob_form_state_focus_next(&load->form_state);
+        browser_refresh_form_body(load, body_label, scroll_line);
+        browser_update_form_status(win, status_label, load);
+        return 0;
+    }
+    if (load->focus_mode == BROWSER_FOCUS_FORM && load->link_count > 0) {
+        load->focus_mode = BROWSER_FOCUS_LINK;
+        load->selected_link = (load->selected_link + 1) % load->link_count;
+        browser_update_link_status(win, status_label, load);
+        return 0;
+    }
+    if (load->link_count > 0) {
+        load->focus_mode = BROWSER_FOCUS_LINK;
+        load->selected_link = (load->selected_link + 1) % load->link_count;
+        browser_update_link_status(win, status_label, load);
+        return 0;
+    }
+    if (ob_form_state_focus_next(&load->form_state) >= 0) {
+        load->focus_mode = BROWSER_FOCUS_FORM;
+        browser_refresh_form_body(load, body_label, scroll_line);
+        browser_update_form_status(win, status_label, load);
+        return 0;
+    }
+    openos_gui_set_text(win, status_label, "No links or form controls");
+    return -1;
+}
+
+static int browser_open_selected_link(browser_load_context_t *load, browser_history_t *history,
+                                      int win, int status_label, int body_label, int *scroll_line)
+{
+    const browser_history_entry_t *cur;
+    char selected_href[OB_MAX_ATTR_VALUE];
+    char next_host[BROWSER_HOST_MAX];
+    char next_path[BROWSER_PATH_MAX];
+    char error[96];
+    int next_is_file = 0;
+    if (!load || !history || !scroll_line) return -1;
+    cur = browser_history_current(history);
+    selected_href[0] = 0;
+    error[0] = 0;
+    if (load->link_count > 0) snprintf(selected_href, sizeof(selected_href), "%s", load->links[load->selected_link]);
+    if (!cur || !selected_href[0]) {
+        openos_gui_set_text(win, status_label, "OpenLink: no link");
+        return -1;
+    }
+    if (browser_resolve_link(cur, selected_href, next_host, sizeof(next_host), next_path, sizeof(next_path), &next_is_file, error, sizeof(error)) != 0) {
+        openos_gui_set_text(win, status_label, error[0] ? error : "OpenLink: unsupported link");
+        return -1;
+    }
+    *scroll_line = 0;
+    browser_history_push(history, next_host, next_path, next_is_file);
+    browser_sync_address_from_target(load, next_host, next_path, next_is_file);
+    browser_start_load(load, win, status_label, body_label, next_host, next_path, next_is_file);
+    return 0;
+}
+
+static int browser_submit_current_form(browser_load_context_t *load, browser_history_t *history,
+                                       int win, int status_label, int body_label, int *scroll_line)
+{
+    const browser_history_entry_t *cur;
+    char action_url[BROWSER_ADDRESS_MAX];
+    char next_host[BROWSER_HOST_MAX];
+    char next_path[BROWSER_PATH_MAX];
+    char error[96];
+    int next_is_file = 0;
+    int submit_id = -1;
+    int build_rc;
+    if (!load || !history || !scroll_line) return -1;
+    cur = browser_history_current(history);
+    error[0] = 0;
+    if (load->form_state.count > 0 && load->form_state.focused >= 0 && load->form_state.focused < load->form_state.count)
+        submit_id = load->form_state.controls[load->form_state.focused].node_id;
+    build_rc = ob_form_build_get_url(&load->dom, &load->form_state, submit_id,
+                                      cur ? cur->path : load->path, action_url, sizeof(action_url));
+    if (!cur || build_rc < 0) {
+        openos_gui_set_text(win, status_label, build_rc == -2 ? "Submit: only GET forms supported" : "Submit: no GET form target");
+        return -1;
+    }
+    if (browser_resolve_link(cur, action_url, next_host, sizeof(next_host), next_path, sizeof(next_path), &next_is_file, error, sizeof(error)) != 0) {
+        openos_gui_set_text(win, status_label, error[0] ? error : "Submit: unsupported target");
+        return -1;
+    }
+    *scroll_line = 0;
+    browser_history_push(history, next_host, next_path, next_is_file);
+    browser_sync_address_from_target(load, next_host, next_path, next_is_file);
+    browser_start_load(load, win, status_label, body_label, next_host, next_path, next_is_file);
+    return 0;
 }
 
 static void browser_load_worker(void *arg)
@@ -907,6 +1009,17 @@ int main(int argc, char **argv)
         int ev = openos_gui_poll_event(&event);
         if (ev == 0 && event.type != OPENOS_GUI_EVENT_NONE && event.window_id == (unsigned int)win) {
             if (event.type == OPENOS_GUI_EVENT_KEY_DOWN || event.type == OPENOS_GUI_EVENT_TEXT_INPUT) {
+                if (event.type == OPENOS_GUI_EVENT_KEY_DOWN && event.key == OPENOS_GUI_KEY_TAB) {
+                    browser_focus_next(&load, win, status_label, body_label, scroll_line);
+                    continue;
+                }
+                if (event.type == OPENOS_GUI_EVENT_KEY_DOWN && event.key == OPENOS_GUI_KEY_ENTER && !load.address_editing) {
+                    if (load.focus_mode == BROWSER_FOCUS_FORM)
+                        browser_submit_current_form(&load, &history, win, status_label, body_label, &scroll_line);
+                    else
+                        browser_open_selected_link(&load, &history, win, status_label, body_label, &scroll_line);
+                    continue;
+                }
                 char next_host[BROWSER_HOST_MAX];
                 char next_path[BROWSER_PATH_MAX];
                 char error[96];
@@ -929,6 +1042,7 @@ int main(int argc, char **argv)
                         browser_start_load(&load, win, status_label, body_label, next_host, next_path, next_is_file);
                     }
                 } else if (ob_form_state_handle_key(&load.form_state, event.key)) {
+                    load.focus_mode = BROWSER_FOCUS_FORM;
                     browser_refresh_form_body(&load, body_label, scroll_line);
                     browser_update_form_status(win, status_label, &load);
                 }
@@ -965,61 +1079,23 @@ int main(int argc, char **argv)
                 if (load.link_count <= 0) {
                     openos_gui_set_text(win, status_label, "No links");
                 } else {
+                    load.focus_mode = BROWSER_FOCUS_LINK;
                     load.selected_link = (load.selected_link + 1) % load.link_count;
                     browser_update_link_status(win, status_label, &load);
                 }
             } else if (event.widget_id == (unsigned int)next_field_button) {
                 load.address_editing = 0;
                 if (ob_form_state_focus_next(&load.form_state) >= 0) {
+                    load.focus_mode = BROWSER_FOCUS_FORM;
                     browser_refresh_form_body(&load, body_label, scroll_line);
                     browser_update_form_status(win, status_label, &load);
                 } else {
-                    openos_gui_set_text(win, status_label, "No editable form fields");
+                    openos_gui_set_text(win, status_label, "No form controls");
                 }
             } else if (event.widget_id == (unsigned int)submit_button) {
-                const browser_history_entry_t *cur = browser_history_current(&history);
-                char action_url[BROWSER_ADDRESS_MAX];
-                char next_host[BROWSER_HOST_MAX];
-                char next_path[BROWSER_PATH_MAX];
-                char error[96];
-                int next_is_file = 0;
-                int submit_id = -1;
-                int build_rc;
-                error[0] = 0;
-                if (load.form_state.count > 0 && load.form_state.focused >= 0 && load.form_state.focused < load.form_state.count)
-                    submit_id = load.form_state.controls[load.form_state.focused].node_id;
-                build_rc = ob_form_build_get_url(&load.dom, &load.form_state, submit_id,
-                                                  cur ? cur->path : path, action_url, sizeof(action_url));
-                if (!cur || build_rc < 0) {
-                    openos_gui_set_text(win, status_label, build_rc == -2 ? "Submit: only GET forms supported" : "Submit: no GET form target");
-                } else if (browser_resolve_link(cur, action_url, next_host, sizeof(next_host), next_path, sizeof(next_path), &next_is_file, error, sizeof(error)) == 0) {
-                    scroll_line = 0;
-                    browser_history_push(&history, next_host, next_path, next_is_file);
-                    browser_sync_address_from_target(&load, next_host, next_path, next_is_file);
-                    browser_start_load(&load, win, status_label, body_label, next_host, next_path, next_is_file);
-                } else {
-                    openos_gui_set_text(win, status_label, error[0] ? error : "Submit: unsupported target");
-                }
+                browser_submit_current_form(&load, &history, win, status_label, body_label, &scroll_line);
             } else if (event.widget_id == (unsigned int)open_link_button) {
-                const browser_history_entry_t *cur = browser_history_current(&history);
-                char selected_href[OB_MAX_ATTR_VALUE];
-                char next_host[BROWSER_HOST_MAX];
-                char next_path[BROWSER_PATH_MAX];
-                char error[96];
-                int next_is_file = 0;
-                selected_href[0] = 0;
-                error[0] = 0;
-                if (load.link_count > 0) snprintf(selected_href, sizeof(selected_href), "%s", load.links[load.selected_link]);
-                if (!cur || !selected_href[0]) {
-                    openos_gui_set_text(win, status_label, "OpenLink: no link");
-                } else if (browser_resolve_link(cur, selected_href, next_host, sizeof(next_host), next_path, sizeof(next_path), &next_is_file, error, sizeof(error)) == 0) {
-                    scroll_line = 0;
-                    browser_history_push(&history, next_host, next_path, next_is_file);
-                    browser_sync_address_from_target(&load, next_host, next_path, next_is_file);
-                    browser_start_load(&load, win, status_label, body_label, next_host, next_path, next_is_file);
-                } else {
-                    openos_gui_set_text(win, status_label, error[0] ? error : "OpenLink: unsupported link");
-                }
+                browser_open_selected_link(&load, &history, win, status_label, body_label, &scroll_line);
             } else if (event.widget_id == (unsigned int)up_button) {
                 char view[BROWSER_BODY_MAX + BROWSER_TITLE_MAX + 32];
                 if (scroll_line > 0) --scroll_line;
@@ -1040,7 +1116,9 @@ int main(int argc, char **argv)
                 scroll_line = 0;
                 browser_make_view(view, sizeof(view), &load, scroll_line);
                 openos_gui_set_text(win, body_label, view);
+                load.focus_mode = load.link_count > 0 ? BROWSER_FOCUS_LINK : (load.form_state.count > 0 ? BROWSER_FOCUS_FORM : 0);
                 if (load.link_count > 0) browser_update_link_status(win, status_label, &load);
+                else if (load.form_state.count > 0) browser_update_form_status(win, status_label, &load);
             }
             load.active = 0;
         }

@@ -230,10 +230,12 @@ int main(void)
             if (strcmp(doc.nodes[i].name, "button") == 0) post_button = i;
         }
         if (first_input < 0 || submit_input < 0 || post_button < 0 ||
+            form.count != 5 || form.controls[0].editable != 1 || form.controls[2].editable != 0 ||
+            ob_form_state_focus_next(&form) < 0 || ob_form_state_handle_key(&form, 'Z') != 1 ||
             ob_form_build_get_url(&doc, &form, first_input, "/base", url, sizeof(url)) <= 0 ||
-            strcmp(url, "/search?q=hello+world&msg=a%26b") != 0 ||
+            strcmp(url, "/search?q=hello+world&msg=a%26bZ") != 0 ||
             ob_form_build_get_url(&doc, &form, submit_input, "/base", url, sizeof(url)) <= 0 ||
-            strcmp(url, "/search?q=hello+world&msg=a%26b") != 0 ||
+            strcmp(url, "/search?q=hello+world&msg=a%26bZ") != 0 ||
             ob_form_build_get_url(&doc, &form, post_button, "/base", url, sizeof(url)) != -2) {
             fprintf(stderr, "browser form GET submit smoke failed: %s\n", url);
             return 1;

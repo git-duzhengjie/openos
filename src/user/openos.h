@@ -616,6 +616,7 @@ typedef struct openos_gui_widget_request {
 #define OPENOS_GUI_EVENT_KEY_DOWN 2u
 #define OPENOS_GUI_EVENT_TEXT_INPUT 3u
 #define OPENOS_GUI_KEY_BACKSPACE 8u
+#define OPENOS_GUI_KEY_TAB 9u
 #define OPENOS_GUI_KEY_ENTER 13u
 #define OPENOS_GUI_KEY_ESCAPE 27u
 
