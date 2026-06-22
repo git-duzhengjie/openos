@@ -180,6 +180,35 @@ int main(void)
         }
     }
 
+
+    {
+        const char *editable_forms = "<form><input name='q' value='hi'><textarea name='msg'></textarea></form>";
+        ob_dom_document_t copied_doc;
+        ob_form_state_t form;
+        if (parser.iface.parse(&parser.iface, editable_forms, &doc) <= 1 ||
+            ob_form_state_collect_from_dom(&form, &doc) != 2 || form.focused != 0 ||
+            !ob_form_state_handle_key(&form, '!') || !strstr(form.controls[0].value, "hi!") ||
+            ob_form_state_focus_next(&form) != 1 ||
+            !ob_form_state_handle_key(&form, 'o') || !ob_form_state_handle_key(&form, 'k') ||
+            !strstr(form.controls[1].value, "ok") ||
+            ob_dom_text_render_with_form_state(&doc, &form, rendered, sizeof(rendered)) <= 0 ||
+            !strstr(rendered, "value=\"hi!\"") || !strstr(rendered, "[*textarea") ||
+            !strstr(rendered, "value=\"ok\"")) {
+            fprintf(stderr, "browser form state editing smoke failed: %s\n", rendered);
+            return 1;
+        }
+        ob_dom_document_copy(&copied_doc, &doc);
+        if (copied_doc.count != doc.count || copied_doc.root != doc.root || strcmp(copied_doc.nodes[form.controls[0].node_id].form_name, "q") != 0) {
+            fprintf(stderr, "browser DOM copy smoke failed\n");
+            return 1;
+        }
+        if (!ob_form_state_handle_key(&form, 8) || !strstr(form.controls[1].value, "o") ||
+            !ob_form_state_handle_key(&form, 27) || form.controls[1].value[0] != 0) {
+            fprintf(stderr, "browser form state edit key smoke failed: %s\n", form.controls[1].value);
+            return 1;
+        }
+    }
+
     {
         char url[128];
         ob_url_join_relative_path(url, sizeof(url), "/docs/guide/index.html", "./intro.html");

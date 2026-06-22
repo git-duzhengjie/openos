@@ -25,6 +25,7 @@
 #define OB_MAX_DOM_NODES 32
 #define OB_MAX_NODE_TEXT 96
 #define OB_MAX_ATTR_VALUE 96
+#define OB_FORM_STATE_MAX_CONTROLS 8
 
 typedef struct ob_html_token {
     int type;
@@ -70,6 +71,59 @@ typedef struct ob_dom_document {
     int root;
 } ob_dom_document_t;
 
+static void ob_dom_copy_text(char *dst, int dst_size, const char *src)
+{
+    int i;
+    if (!dst || dst_size <= 0) return;
+    if (!src) src = "";
+    for (i = 0; i < dst_size - 1 && src[i]; ++i) dst[i] = src[i];
+    dst[i] = 0;
+}
+
+static void ob_dom_node_copy(ob_dom_node_t *dst, const ob_dom_node_t *src)
+{
+    if (!dst || !src) return;
+    dst->type = src->type;
+    dst->parent = src->parent;
+    dst->first_child = src->first_child;
+    dst->next_sibling = src->next_sibling;
+    dst->style_display = src->style_display;
+    dst->font_weight_bold = src->font_weight_bold;
+    ob_dom_copy_text(dst->name, sizeof(dst->name), src->name);
+    ob_dom_copy_text(dst->text, sizeof(dst->text), src->text);
+    ob_dom_copy_text(dst->href, sizeof(dst->href), src->href);
+    ob_dom_copy_text(dst->form_type, sizeof(dst->form_type), src->form_type);
+    ob_dom_copy_text(dst->form_value, sizeof(dst->form_value), src->form_value);
+    ob_dom_copy_text(dst->form_placeholder, sizeof(dst->form_placeholder), src->form_placeholder);
+    ob_dom_copy_text(dst->form_name, sizeof(dst->form_name), src->form_name);
+}
+
+static void ob_dom_document_copy(ob_dom_document_t *dst, const ob_dom_document_t *src)
+{
+    int i;
+    if (!dst || !src) return;
+    dst->count = src->count;
+    dst->root = src->root;
+    if (dst->count < 0) dst->count = 0;
+    if (dst->count > OB_MAX_DOM_NODES) dst->count = OB_MAX_DOM_NODES;
+    for (i = 0; i < dst->count; ++i) ob_dom_node_copy(&dst->nodes[i], &src->nodes[i]);
+    for (; i < OB_MAX_DOM_NODES; ++i) {
+        dst->nodes[i].type = 0;
+        dst->nodes[i].parent = -1;
+        dst->nodes[i].first_child = -1;
+        dst->nodes[i].next_sibling = -1;
+        dst->nodes[i].style_display = 0;
+        dst->nodes[i].font_weight_bold = 0;
+        dst->nodes[i].name[0] = 0;
+        dst->nodes[i].text[0] = 0;
+        dst->nodes[i].href[0] = 0;
+        dst->nodes[i].form_type[0] = 0;
+        dst->nodes[i].form_value[0] = 0;
+        dst->nodes[i].form_placeholder[0] = 0;
+        dst->nodes[i].form_name[0] = 0;
+    }
+}
+
 typedef struct ob_html_parser_i ob_html_parser_i_t;
 struct ob_html_parser_i {
     int (*parse)(ob_html_parser_i_t *self, const char *html, ob_dom_document_t *doc);
@@ -96,6 +150,18 @@ struct ob_dom_text_renderer_i {
 typedef struct ob_dom_text_renderer_base {
     ob_dom_text_renderer_i_t iface;
 } ob_dom_text_renderer_base_t;
+
+typedef struct ob_form_control_state {
+    int node_id;
+    char name[OB_MAX_ATTR_VALUE];
+    char value[OB_MAX_ATTR_VALUE];
+} ob_form_control_state_t;
+
+typedef struct ob_form_state {
+    ob_form_control_state_t controls[OB_FORM_STATE_MAX_CONTROLS];
+    int count;
+    int focused;
+} ob_form_state_t;
 
 static int ob_ascii_equal_ci(char a, char b)
 {
@@ -557,12 +623,98 @@ static void ob_dom_render_append_literal(char *out, int out_size, int *pos, cons
     while (text[i] && *pos < out_size - 1) out[(*pos)++] = text[i++];
 }
 
+static int ob_dom_is_editable_form_control(const ob_dom_node_t *node)
+{
+    if (!node || node->type != OB_DOM_NODE_ELEMENT) return 0;
+    if (ob_token_eq_ci(node->name, "textarea")) return 1;
+    if (ob_token_eq_ci(node->name, "input")) {
+        if (!node->form_type[0]) return 1;
+        return ob_token_eq_ci(node->form_type, "text") || ob_token_eq_ci(node->form_type, "search") ||
+               ob_token_eq_ci(node->form_type, "password") || ob_token_eq_ci(node->form_type, "email") ||
+               ob_token_eq_ci(node->form_type, "url") || ob_token_eq_ci(node->form_type, "number");
+    }
+    return 0;
+}
+
 static int ob_dom_is_form_control(const ob_dom_node_t *node)
 {
     if (!node || node->type != OB_DOM_NODE_ELEMENT) return 0;
     return ob_token_eq_ci(node->name, "input") || ob_token_eq_ci(node->name, "button") ||
            ob_token_eq_ci(node->name, "textarea") || ob_token_eq_ci(node->name, "select") ||
            ob_token_eq_ci(node->name, "option");
+}
+
+static void ob_form_state_init(ob_form_state_t *state)
+{
+    if (!state) return;
+    memset(state, 0, sizeof(*state));
+    state->focused = -1;
+}
+
+static const char *ob_form_state_value_for_node(const ob_form_state_t *state, int node_id)
+{
+    int i;
+    if (!state) return 0;
+    for (i = 0; i < state->count; ++i) {
+        if (state->controls[i].node_id == node_id) return state->controls[i].value;
+    }
+    return 0;
+}
+
+static int ob_form_state_is_focused(const ob_form_state_t *state, int node_id)
+{
+    if (!state || state->focused < 0 || state->focused >= state->count) return 0;
+    return state->controls[state->focused].node_id == node_id;
+}
+
+static int ob_form_state_collect_from_dom(ob_form_state_t *state, const ob_dom_document_t *doc)
+{
+    int i;
+    if (!state || !doc) return -1;
+    ob_form_state_init(state);
+    for (i = 0; i < doc->count && state->count < OB_FORM_STATE_MAX_CONTROLS; ++i) {
+        const ob_dom_node_t *node = &doc->nodes[i];
+        if (!ob_dom_is_editable_form_control(node)) continue;
+        state->controls[state->count].node_id = i;
+        ob_copy_attr_value(state->controls[state->count].name, sizeof(state->controls[state->count].name),
+                           node->form_name[0] ? node->form_name : node->name,
+                           ob_cstr_len(node->form_name[0] ? node->form_name : node->name));
+        ob_copy_attr_value(state->controls[state->count].value, sizeof(state->controls[state->count].value),
+                           node->form_value, ob_cstr_len(node->form_value));
+        ++state->count;
+    }
+    if (state->count > 0) state->focused = 0;
+    return state->count;
+}
+
+static int ob_form_state_focus_next(ob_form_state_t *state)
+{
+    if (!state || state->count <= 0) return -1;
+    state->focused = (state->focused + 1) % state->count;
+    return state->focused;
+}
+
+static int ob_form_state_handle_key(ob_form_state_t *state, unsigned int key)
+{
+    char *value;
+    int len;
+    if (!state || state->focused < 0 || state->focused >= state->count) return 0;
+    value = state->controls[state->focused].value;
+    len = ob_cstr_len(value);
+    if (key == 8u || key == 127u) {
+        if (len > 0) value[len - 1] = 0;
+        return 1;
+    }
+    if (key == 27u) {
+        value[0] = 0;
+        return 1;
+    }
+    if (key >= 32u && key <= 126u && len < OB_MAX_ATTR_VALUE - 1) {
+        value[len] = (char)key;
+        value[len + 1] = 0;
+        return 1;
+    }
+    return 0;
 }
 
 static void ob_dom_render_append_attr_label(char *out, int out_size, int *pos, const char *label, const char *value)
@@ -575,15 +727,17 @@ static void ob_dom_render_append_attr_label(char *out, int out_size, int *pos, c
     ob_dom_render_append_literal(out, out_size, pos, "\"");
 }
 
-static void ob_dom_render_append_form_start(char *out, int out_size, int *pos, const ob_dom_node_t *node)
+static void ob_dom_render_append_form_start_ex(char *out, int out_size, int *pos, const ob_dom_node_t *node, int node_id, const ob_form_state_t *form_state)
 {
+    const char *value;
     if (!ob_dom_is_form_control(node)) return;
     if (*pos > 0 && out[*pos - 1] != ' ' && out[*pos - 1] != '\n') ob_dom_render_append_literal(out, out_size, pos, " ");
-    ob_dom_render_append_literal(out, out_size, pos, "[");
+    ob_dom_render_append_literal(out, out_size, pos, ob_form_state_is_focused(form_state, node_id) ? "[*" : "[");
     ob_dom_render_append_literal(out, out_size, pos, node->name);
     if (ob_token_eq_ci(node->name, "input")) ob_dom_render_append_attr_label(out, out_size, pos, "type", node->form_type[0] ? node->form_type : "text");
     ob_dom_render_append_attr_label(out, out_size, pos, "name", node->form_name);
-    ob_dom_render_append_attr_label(out, out_size, pos, "value", node->form_value);
+    value = ob_form_state_value_for_node(form_state, node_id);
+    ob_dom_render_append_attr_label(out, out_size, pos, "value", value ? value : node->form_value);
     ob_dom_render_append_attr_label(out, out_size, pos, "placeholder", node->form_placeholder);
 }
 
@@ -611,7 +765,7 @@ static void ob_dom_render_append_heading_prefix(char *out, int out_size, int *po
     if (*pos < out_size - 1) out[(*pos)++] = ' ';
 }
 
-static void ob_dom_render_node_text_ex(const ob_dom_document_t *doc, int node_id, char *out, int out_size, int *pos, int *link_count)
+static void ob_dom_render_node_text_ex(const ob_dom_document_t *doc, int node_id, char *out, int out_size, int *pos, int *link_count, const ob_form_state_t *form_state)
 {
     int child;
     int is_block;
@@ -626,11 +780,11 @@ static void ob_dom_render_node_text_ex(const ob_dom_document_t *doc, int node_id
     if (heading_level > 0) ob_dom_render_append_heading_prefix(out, out_size, pos, heading_level);
     if (is_list_item) ob_dom_render_append_literal(out, out_size, pos, "- ");
     if (doc->nodes[node_id].font_weight_bold) ob_dom_render_append_literal(out, out_size, pos, "**");
-    if (ob_dom_is_form_control(&doc->nodes[node_id])) ob_dom_render_append_form_start(out, out_size, pos, &doc->nodes[node_id]);
+    if (ob_dom_is_form_control(&doc->nodes[node_id])) ob_dom_render_append_form_start_ex(out, out_size, pos, &doc->nodes[node_id], node_id, form_state);
     if (doc->nodes[node_id].type == OB_DOM_NODE_TEXT) ob_dom_render_append_text(out, out_size, pos, doc->nodes[node_id].text);
     child = doc->nodes[node_id].first_child;
     while (child >= 0 && *pos < out_size - 1) {
-        ob_dom_render_node_text_ex(doc, child, out, out_size, pos, link_count);
+        ob_dom_render_node_text_ex(doc, child, out, out_size, pos, link_count, form_state);
         child = doc->nodes[child].next_sibling;
     }
     if (ob_dom_is_form_control(&doc->nodes[node_id])) ob_dom_render_append_form_end(out, out_size, pos, &doc->nodes[node_id]);
@@ -642,23 +796,28 @@ static void ob_dom_render_node_text_ex(const ob_dom_document_t *doc, int node_id
     if (is_block && *pos > 0) ob_dom_render_append_newline(out, out_size, pos);
 }
 
-static void ob_dom_render_node_text(const ob_dom_document_t *doc, int node_id, char *out, int out_size, int *pos)
+static void ob_dom_render_node_text_with_form_state(const ob_dom_document_t *doc, int node_id, char *out, int out_size, int *pos, const ob_form_state_t *form_state)
 {
     int link_count = 0;
-    ob_dom_render_node_text_ex(doc, node_id, out, out_size, pos, &link_count);
+    ob_dom_render_node_text_ex(doc, node_id, out, out_size, pos, &link_count, form_state);
+}
+
+static int ob_dom_text_render_with_form_state(const ob_dom_document_t *doc, const ob_form_state_t *form_state, char *out, int out_size)
+{
+    int pos = 0;
+    if (!out || out_size <= 0) return -1;
+    out[0] = 0;
+    if (!doc || doc->root < 0 || doc->root >= doc->count) return -1;
+    ob_dom_render_node_text_with_form_state(doc, doc->root, out, out_size, &pos, form_state);
+    while (pos > 0 && (out[pos - 1] == ' ' || out[pos - 1] == '\n')) --pos;
+    out[pos] = 0;
+    return pos;
 }
 
 static int ob_dom_text_render_impl(ob_dom_text_renderer_i_t *iface, const ob_dom_document_t *doc, char *out, int out_size)
 {
-    int pos = 0;
     (void)iface;
-    if (!out || out_size <= 0) return -1;
-    out[0] = 0;
-    if (!doc || doc->root < 0 || doc->root >= doc->count) return -1;
-    ob_dom_render_node_text(doc, doc->root, out, out_size, &pos);
-    while (pos > 0 && (out[pos - 1] == ' ' || out[pos - 1] == '\n')) --pos;
-    out[pos] = 0;
-    return pos;
+    return ob_dom_text_render_with_form_state(doc, 0, out, out_size);
 }
 
 static void ob_dom_text_renderer_base_init(ob_dom_text_renderer_base_t *renderer)

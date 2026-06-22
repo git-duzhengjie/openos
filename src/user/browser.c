@@ -43,6 +43,8 @@ typedef struct browser_load_context {
     int address_label_id;
     int address_editing;
     char address_text[BROWSER_ADDRESS_MAX];
+    ob_dom_document_t dom;
+    ob_form_state_t form_state;
 } browser_load_context_t;
 
 typedef struct browser_history_entry {
@@ -56,6 +58,7 @@ typedef struct browser_history {
     int count;
     int current;
 } browser_history_t;
+
 
 static void browser_load_worker(void *arg);
 
@@ -710,6 +713,36 @@ static int browser_fetch_http(const char *host, const char *path, char *out, int
     return 0;
 }
 
+
+static void browser_render_current_view(browser_load_context_t *load, int body_label, int scroll_line)
+{
+    char view[BROWSER_BODY_MAX + BROWSER_TITLE_MAX + 32];
+    if (!load) return;
+    browser_make_view(view, sizeof(view), load, scroll_line);
+    openos_gui_set_text(load->window_id, body_label, view[0] ? view : "Empty response");
+}
+
+static void browser_refresh_form_body(browser_load_context_t *load, int body_label, int scroll_line)
+{
+    if (!load) return;
+    if (load->dom.count > 0) {
+        ob_dom_text_render_with_form_state(&load->dom, &load->form_state, load->body, sizeof(load->body));
+    }
+    browser_render_current_view(load, body_label, scroll_line);
+}
+
+static void browser_update_form_status(int win, int status_label, const browser_load_context_t *load)
+{
+    char status[128];
+    if (!load || load->form_state.count <= 0 || load->form_state.focused < 0) {
+        openos_gui_set_text(win, status_label, "No editable form fields");
+        return;
+    }
+    snprintf(status, sizeof(status), "Field %d/%d: %s", load->form_state.focused + 1, load->form_state.count,
+             load->form_state.controls[load->form_state.focused].name[0] ? load->form_state.controls[load->form_state.focused].name : "input");
+    openos_gui_set_text(win, status_label, status);
+}
+
 static void browser_load_worker(void *arg)
 {
     browser_load_context_t *ctx = (browser_load_context_t *)arg;
@@ -763,7 +796,9 @@ static void browser_load_worker(void *arg)
                             ++ctx->link_count;
                         }
                     }
-                    renderer.iface.render(&renderer.iface, &doc, ctx->body, sizeof(ctx->body));
+                    ob_dom_document_copy(&ctx->dom, &doc);
+                    ob_form_state_collect_from_dom(&ctx->form_state, &ctx->dom);
+                    ob_dom_text_render_with_form_state(&ctx->dom, &ctx->form_state, ctx->body, sizeof(ctx->body));
                 } else
                     ctx->body[0] = 0;
             }
@@ -806,6 +841,7 @@ int main(int argc, char **argv)
     int down_button;
     int next_link_button;
     int open_link_button;
+    int next_field_button;
     int close_button;
     int rc = 0;
     int scroll_line = 0;
@@ -855,7 +891,8 @@ int main(int argc, char **argv)
     down_button = openos_gui_add_button(win, 320, 248, 56, 24, "Down");
     next_link_button = openos_gui_add_button(win, 384, 248, 72, 24, "NextLink");
     open_link_button = openos_gui_add_button(win, 464, 248, 72, 24, "OpenLink");
-    close_button = openos_gui_add_button(win, 584, 248, 80, 24, "Close");
+    next_field_button = openos_gui_add_button(win, 544, 248, 80, 24, "NextField");
+    close_button = openos_gui_add_button(win, 632, 248, 56, 24, "Close");
     load.window_id = win;
     load.status_label_id = status_label;
     load.body_label_id = body_label;
@@ -876,17 +913,22 @@ int main(int argc, char **argv)
                 snprintf(next_host, sizeof(next_host), "%s", host ? host : "");
                 snprintf(next_path, sizeof(next_path), "%s", path ? path : "/");
                 error[0] = 0;
-                key_rc = browser_address_handle_key(&load, event.key, next_host, sizeof(next_host), next_path, sizeof(next_path), &next_is_file, error, sizeof(error));
-                if (key_rc < 0) {
-                    openos_gui_set_text(win, status_label, error[0] ? error : "Invalid address");
-                } else if (key_rc > 0) {
-                    host = next_is_file ? "" : load.host;
-                    path = load.path;
-                    snprintf(load.host, sizeof(load.host), "%s", next_host);
-                    snprintf(load.path, sizeof(load.path), "%s", next_path);
-                    browser_history_push(&history, next_host, next_path, next_is_file);
-                    scroll_line = 0;
-                    browser_start_load(&load, win, status_label, body_label, next_host, next_path, next_is_file);
+                if (load.address_editing || load.form_state.count <= 0) {
+                    key_rc = browser_address_handle_key(&load, event.key, next_host, sizeof(next_host), next_path, sizeof(next_path), &next_is_file, error, sizeof(error));
+                    if (key_rc < 0) {
+                        openos_gui_set_text(win, status_label, error[0] ? error : "Invalid address");
+                    } else if (key_rc > 0) {
+                        host = next_is_file ? "" : load.host;
+                        path = load.path;
+                        snprintf(load.host, sizeof(load.host), "%s", next_host);
+                        snprintf(load.path, sizeof(load.path), "%s", next_path);
+                        browser_history_push(&history, next_host, next_path, next_is_file);
+                        scroll_line = 0;
+                        browser_start_load(&load, win, status_label, body_label, next_host, next_path, next_is_file);
+                    }
+                } else if (ob_form_state_handle_key(&load.form_state, event.key)) {
+                    browser_refresh_form_body(&load, body_label, scroll_line);
+                    browser_update_form_status(win, status_label, &load);
                 }
                 continue;
             }
@@ -923,6 +965,14 @@ int main(int argc, char **argv)
                 } else {
                     load.selected_link = (load.selected_link + 1) % load.link_count;
                     browser_update_link_status(win, status_label, &load);
+                }
+            } else if (event.widget_id == (unsigned int)next_field_button) {
+                load.address_editing = 0;
+                if (ob_form_state_focus_next(&load.form_state) >= 0) {
+                    browser_refresh_form_body(&load, body_label, scroll_line);
+                    browser_update_form_status(win, status_label, &load);
+                } else {
+                    openos_gui_set_text(win, status_label, "No editable form fields");
                 }
             } else if (event.widget_id == (unsigned int)open_link_button) {
                 const browser_history_entry_t *cur = browser_history_current(&history);
