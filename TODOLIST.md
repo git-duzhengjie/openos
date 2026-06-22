@@ -6,13 +6,13 @@
 >
 > 最近完成：已补齐 shell 后台任务、`Ctrl+C` / `Ctrl+D`、`jobs` / `fg`、Tab 命令补全、脚本执行；本轮完成用户态运行库 libc 子集，并新增 `/bin/libctest` 回归程序；已补充 `/bin/touch`、`/bin/cp`、`/bin/mv`、`/bin/tee`、`/bin/head`、`/bin/tail`、`/bin/sort`、`/bin/env` 常用文件工具；已完善 `grep -n/-v/-c` 与 `wc -l/-w/-c` 选项；已支持 shell 环境变量 `$VAR` / `${VAR}` 参数展开；已新增最小 `kill` syscall 与 `/bin/kill`；已补充最小 signal pending/default terminate 机制；已新增 alarm/timer signal 与 `/bin/alarmtest`。
 >
-> 当前推荐下一步：进入 OpenOS 自研轻量浏览器路线，以 `/bin/browser` 为主入口，优先补齐 HTML tokenizer/parser、最小 DOM/CSS、GUI 交互、本地文件加载与 smoke 验证；Chromium 官方内核路线保留为长期备选，不再作为当前 P0 阻塞项。
+> 当前推荐下一步：进入 OpenOS 自研轻量浏览器路线，以 `/bin/browser` 为主入口，优先补齐 HTML tokenizer/parser、最小 DOM/CSS、GUI 交互、本地文件加载与 smoke 验证；Chromium 官方内核迁移路线冻结为历史备选，不再作为当前 P0/P1 阻塞项。
 
 ---
 
 ## P0：OpenOS 自研轻量浏览器收口
 
-> 目标：停止把 Chromium 作为当前优先路线，改为落地 OpenOS 自研轻量浏览器；第一阶段先实现可维护的网络加载、HTML 文本渲染、基础页面信息提取和 GUI 展示。Chromium 官方内核路线保留为长期备选，不再阻塞当前浏览器可用性。
+> 目标：停止把 Chromium 作为当前优先路线，改为落地 OpenOS 自研轻量浏览器；第一阶段先实现可维护的网络加载、HTML 文本渲染、基础页面信息提取和 GUI 展示。Chromium 官方内核迁移路线冻结为历史备选，不再阻塞当前浏览器可用性。
 
 - [x] P0.1：确认现有浏览器入口
   - [x] 统一任务清单为 `TODOLIST.md`
@@ -416,10 +416,12 @@
   - [√] 图形接口：framebuffer/窗口绘制、矩形裁剪、位图 blit、滚动、双缓冲；扩展 `SYS_GUI_DRAW` 支持 fill/text/blit/scroll/present，并由 `/bin/guiprobe` 验证
   - [√] 图片解码依赖评估：PNG/JPEG/GIF/WebP 可分阶段接入
   - [√] 文件与配置目录：缓存、cookie、证书、字体资源、下载目录；启动时创建 `/home/browser/{cache,cookies,certs,downloads}` 并在用户态暴露路径常量
-- [√] 明确废弃 NetSurf / 轻量浏览器内核路线：不再把 `/bin/nsdemo` 或任何自研 HTML demo 作为最终浏览器路线
-  - [√] 从活跃构建、内核 `/bin` 安装流程和源码树移除 NetSurf/OpenOS demo
-  - [√] 后续浏览器目标仅允许 Chromium Content + Blink + V8 + Skia 组合，不能用 NetSurf/Dillo/Links/QuickJS demo 替代
-- [√] Chrome/Chromium 引擎近期落地任务（P0-P6 入口、文档、门禁与阶段性验证已完成；真实 V8/content_shell 完整构建仍受外部依赖网络、Chromium checkout 与构建空间条件约束）
+- [√] 冻结 Chromium/Chrome 官方内核迁移路线，当前改用 OpenOS 自研轻量浏览器内核
+  - [√] 保留 `/bin/browser` 作为当前浏览器主入口，源码入口为 `src/user/browser.c`
+  - [√] 保留 `src/user/browser_engine.h` 的 tokenizer/parser/DOM/style 分层作为自研内核基础
+  - [√] `/bin/chromium` 仅作为历史兼容/demo，不再作为当前浏览器主线或迁移目标
+  - [√] 不再默认拉取 Chromium `src`、`third_party` 或构建官方 `content_shell`
+- [√] Chrome/Chromium 引擎近期落地任务已冻结归档（历史 P0-P6 入口、文档、门禁与阶段性验证保留为资料；真实 V8/content_shell 构建不再作为当前任务）
   - [√] P0：清理 NetSurf/nsdemo 活跃路线，保证镜像不再安装 `/bin/nsdemo`
   - [√] P1：固定 Chromium 上游源码获取入口，记录版本/目录/磁盘需求和 depot_tools 前置检查
   - [√] P2：新增 OpenOS Chromium GN/toolchain 骨架，目标为 `target_os="openos"`、`target_cpu="x86"`
@@ -434,9 +436,9 @@
 - [√] 文档化浏览器路线
   - [√] README 和路线文档必须说明：当前 Browser 能力边界是基础 HTTP/HTML 文本化，不等同于 Chromium/Blink/V8/Skia 级完整浏览器
 
-### 17.3.1.2 Chromium 长期路线 / 原生核心能力补齐
+### 17.3.1.2 Chromium 长期路线冻结归档 / 原生核心能力保留
 
-> 目标：不把 Chromium 当作简单兼容移植对象，也不继续扩展玩具 HTML 渲染器；OpenOS 需要补齐 Chromium 所需的原生底层能力，最终承载 Chromium content / Blink / V8 / Skia，并提供真正浏览器实现。
+> 状态：冻结归档。OpenOS 当前浏览器主线改为自研轻量浏览器内核；以下 Chromium 能力补齐记录仅作为历史资料和通用系统能力参考，不再作为当前浏览器 P0/P1 阻塞项。
 
 - [√] 建立 Chromium 核心能力路线文档：`docs/chromium-core-roadmap.md`
   - [√] 明确第一目标为 OpenOS 原生核心能力补齐，而不是 POSIX/Linux 兼容层堆叠
@@ -445,9 +447,9 @@
   - [√] 覆盖 uptime、匿名 mmap/munmap、sbrk、thread、shared memory、eventfd、socketpair、poll 等现有基础能力
   - [√] 接入 `build.sh`、内核嵌入头文件和 `/bin` 安装流程
 
-#### 17.3.1.3 方案 B：真实 Chromium 构建链近期任务
+#### 17.3.1.3 方案 B：真实 Chromium 构建链冻结归档
 
-> 原则：不继续扩大自研玩具浏览器；先建立真实 Skia / V8 / Blink / Chromium Content 可逐步接入的 OpenOS SDK、构建入口和 smoke 回归链。每项任务完成后必须独立验证并提交。
+> 状态：冻结归档。当前不再推进真实 Skia / V8 / Blink / Chromium Content 迁移链；保留既有 SDK、系统能力和 smoke 回归成果，浏览器功能继续沿 `/bin/browser` 自研轻量内核演进。
 
 - [√] P0：收尾并提交浏览器 HTTP 加载响应性修复，确保现有 `/bin/browser`、`/bin/chromium` 在方案 B 推进期间保持可用
 - [√] P1：导出 OpenOS 用户态 SDK/sysroot，提供 headers、crt0、linker script、runtime archive 占位和 manifest

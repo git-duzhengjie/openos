@@ -1,32 +1,38 @@
-# OpenOS 浏览器引擎路线：Chromium Only
+# OpenOS 浏览器引擎路线：自研轻量内核主线
 
-OpenOS 浏览器目标只接受真实 Chromium/Chrome 引擎路线：
+OpenOS 浏览器当前不再迁移 Chrome/Chromium 内核，近期唯一主线改为自研轻量浏览器内核：
 
 ```text
-Chromium Content + Blink + V8 + Skia
+OpenOS Browser Engine = 网络加载 + HTML tokenizer/parser + 最小 DOM + 默认 CSS + GUI 文本/块布局渲染
 ```
 
-## 明确废弃
+## 当前决策
 
-以下路线不再作为 OpenOS 最终浏览器方向：
+- `/bin/browser` 是当前浏览器主入口。
+- 源码入口为 `src/user/browser.c`，自研内核接口为 `src/user/browser_engine.h`。
+- `/bin/chromium` 只保留为历史兼容/demo 名称，不能再作为当前迁移目标。
+- Chromium/Chrome 官方内核迁移任务冻结为历史备选，不再作为 P0/P1 阻塞项。
 
-- NetSurf
-- Dillo
-- Links/Lynx
-- QuickJS + 自研 DOM demo
-- 任何只显示 HTTP/HTML 文本的自研 `/bin/chromium` demo
+## 明确不做
 
-这些组件可以作为历史实验参考，但不能宣称为真实 Chrome/Chromium 引擎。
+当前阶段不追求：
+
+- Chrome/Chromium/Blink 兼容性。
+- 官方 `content_shell` 构建和替换 `/bin/chromium`。
+- 全量或最小 Chromium `third_party` 依赖闭包同步。
+- JavaScript/V8、GPU 合成、复杂 CSS、媒体播放、现代 Web App 兼容。
 
 ## 当前事实
 
-当前 `/bin/browser` 和 `/bin/chromium` 仍是 OpenOS 用户态 demo，用于验证 GUI、HTTP、线程、SDK 和系统调用能力；它们不是 Chrome 引擎。
+当前 `/bin/browser` 是 OpenOS 自研轻量浏览器，用于验证 GUI、HTTP/文件加载、HTML 文本化解析、最小 DOM/CSS 分层、历史导航和滚动阅读能力。
 
-## 近期唯一主线
+它不是 Chrome 引擎，也不需要伪装成 Chrome 引擎。
 
-1. 固定 Chromium 上游源码获取入口和版本。
-2. 建立 OpenOS Chromium GN/toolchain 骨架。
-3. 先接官方 Skia 软件 raster。
-4. 再接官方 V8 jitless shell。
-5. 再接 Blink/content_shell 单进程软件渲染链路。
-6. 最终用真实 Chromium Content shell 替换当前 `/bin/chromium` demo。
+## 近期主线
+
+1. 继续完善 `src/user/browser_engine.h` 的 tokenizer/parser/DOM/style 分层。
+2. 将 `src/user/browser.c` 的文本输出逐步切换为 DOM 遍历渲染。
+3. 扩展默认 CSS display、基础选择器和简单块布局。
+4. 完善 `file://`、HTTP 错误页、本地 smoke 测试与 GUI 回归。
+5. 在 OpenOS GUI 支持输入控件后补真正地址栏。
+6. Chromium 相关文档和脚本仅保留为历史资料/长期备选，不参与当前默认构建路线。

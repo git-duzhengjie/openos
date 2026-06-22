@@ -1,165 +1,74 @@
-# Chromium 上游源码固定入口
+# Chromium 上游源码固定入口（冻结归档）
 
-OpenOS 真实浏览器路线只接受 Chromium/Chrome 引擎栈：
+> 状态：已冻结。OpenOS 当前放弃迁移 Chrome/Chromium 内核，改用自研轻量浏览器内核方案。
+
+本文件仅保留历史研究记录，避免后续误把 Chromium 迁移任务重新当作当前 P0/P1 主线。
+
+## 当前浏览器主线
+
+当前主线是 OpenOS 自研轻量浏览器：
+
+```text
+/bin/browser
+src/user/browser.c
+src/user/browser_engine.h
+```
+
+目标能力：
+
+```text
+网络加载 + HTML tokenizer/parser + 最小 DOM + 默认 CSS + GUI 文本/块布局渲染
+```
+
+## 冻结的 Chromium 迁移路线
+
+以下工作不再作为当前默认任务执行：
+
+- 获取官方 Chromium `src`。
+- 同步 Chromium `third_party`，无论全量还是最小闭包。
+- 配置 OpenOS Chromium GN/toolchain。
+- 构建官方 `content_shell`。
+- 用官方 `content_shell` 替换 `/bin/chromium`。
+- 将 `/bin/chromium` 作为当前浏览器主入口。
+
+## 历史结论
+
+Chromium/Chrome 官方引擎栈曾被评估为：
 
 ```text
 Chromium Content + Blink + V8 + Skia
 ```
 
-当前仓库不直接 vendoring Chromium 源码，也不要求默认同步海量无关 `third_party`。P0 路线采用“官方 Chromium 源码入口 + `content_shell` 所需最小依赖闭包”：先获取 Chromium `src` 最小历史，再只补齐 GN 生成和 `//content/shell:content_shell` 构建实际需要的依赖。
+但这条路线依赖大量 OpenOS 尚需长期补齐的系统能力、工具链适配和外部源码同步条件。当前阶段继续推进会阻塞浏览器可用性，因此迁移路线冻结归档。
 
-## 固定目录
-
-默认目录：
-
-```text
-.openos-deps/
-├── depot_tools/
-└── chromium/
-    └── src/
-```
-
-可通过环境变量覆盖：
-
-```bash
-OPENOS_CHROMIUM_DEPS_DIR=/data/openos-deps
-OPENOS_DEPOT_TOOLS_DIR=/data/openos-deps/depot_tools
-OPENOS_CHROMIUM_ROOT=/data/openos-deps/chromium
-```
-
-`.openos-deps/` 已加入 `.gitignore`，不能提交 Chromium 上游源码到 OpenOS 仓库。
-
-## 前置检查
-
-默认只检查环境，不下载源码：
-
-```bash
-./build.sh chromium-source-check
-```
-
-等价于：
-
-```bash
-scripts/chromium-source.sh --check
-```
-
-检查内容：
-
-- git / python3 / curl / tar / unzip / xz
-- depot_tools 是否存在
-- Chromium `src` 是否存在
-- 可用磁盘空间，默认至少 40GB，用于最小源码/依赖闭包起步
-
-磁盘阈值可覆盖：
-
-```bash
-OPENOS_CHROMIUM_MIN_FREE_GB=80 ./build.sh chromium-source-check
-```
-
-## 获取 depot_tools
-
-```bash
-scripts/chromium-source.sh --fetch-depot-tools
-```
-
-## 获取 Chromium 最小源码入口
-
-必须显式执行：
-
-```bash
-scripts/chromium-source.sh --fetch
-```
-
-该命令只做最小起步：
-
-```bash
-git clone --depth=1 https://github.com/chromium/chromium.git .openos-deps/chromium/src
-```
-
-`OPENOS_CHROMIUM_SRC_URL` 可覆盖源码入口；GitHub 镜像失败时脚本才回退到 Chromium Gitiles：
-
-```bash
-OPENOS_CHROMIUM_SRC_URL=https://chromium.googlesource.com/chromium/src.git scripts/chromium-source.sh --fetch
-```
-
-它不会默认执行完整：
-
-```bash
-gclient sync --no-history --with_branch_heads --with_tags
-```
-
-原因：完整 `gclient sync` 会同步大量与 OpenOS `content_shell` 最小路线无关的 `third_party`、测试资源、移动端/平台专用依赖和工具链缓存。P0.2 的正确目标是形成可记录、可复现的最小依赖闭包，而不是把“完整 Chromium checkout”当成默认前提。
-
-如后续确实需要完整官方工作树，可显式使用 `scripts/chromium-source.sh --fetch-full` 或手动执行官方 gclient 流程，并在本文件记录原因、磁盘占用和 commit。
-
-## 最小依赖闭包原则
-
-P0.2/P0.3 同步依赖时遵循：
-
-1. 必须保留 `content_shell` 构建必需依赖，例如 V8、Skia、Blink 相关生成工具、build/buildtools、ICU、基础压缩/图片库等。
-2. 默认跳过测试数据、大型 fuzz/corpus、Android/iOS/ChromeOS 专用包、未启用媒体/GPU/远程服务依赖。
-3. 优先使用 `--no-history`、浅克隆、可复用缓存和已存在目录，避免重复下载。
-4. 每个新增依赖必须能解释其被 GN/Ninja 引用的原因，不能为了省事全量拉取 `third_party`。
-
-## 版本固定策略
-
-P1/P0.2 阶段先固定源码获取入口，不在 OpenOS 仓库中保存巨大源码。
-
-后续需要在本文件补充实际 pin：
-
-```text
-chromium_commit: <待真实最小源码入口获取后填写>
-depot_tools_commit: <待真实获取后填写>
-minimal_deps: <待 GN/content_shell 闭包确认后填写>
-gclient_args: <仅在显式完整同步时填写>
-```
-
-提交 pin 前必须能运行：
-
-```bash
-git -C "$OPENOS_CHROMIUM_ROOT/src" rev-parse HEAD
-git -C "$OPENOS_DEPOT_TOOLS_DIR" rev-parse HEAD
-```
-
-## 当前 P0.2 尝试记录
+## 历史阻塞记录
 
 记录时间：2026-06-22
 
-当前机器不应再以“180GB 完整 checkout”作为默认阻塞项。当前真实阻塞是 depot_tools 官方源网络和 host tool：
+当时尝试最小 Chromium 源码入口时遇到：
 
 ```text
 Chromium src 最小入口：优先 https://github.com/chromium/chromium.git
-2026-06-22 GitHub 最小 src 浅克隆结果：fetch-pack unexpected disconnect while reading sideband packet
-WSL 访问 chromium.googlesource.com: 连接超时，影响 depot_tools 获取和 Gitiles fallback
+GitHub 最小 src 浅克隆结果：fetch-pack unexpected disconnect while reading sideband packet
+Gitiles clone fallback：WSL 访问 chromium.googlesource.com 连接超时
 host tool: unzip 缺失
-默认阈值：OPENOS_CHROMIUM_MIN_FREE_GB=40
 ```
 
-该失败发生在 Chromium `src` 仓库自身的浅克隆阶段，尚未进入 DEPS/`third_party` 同步，因此不能再归因为“需要完整海量 third_party”。
-
-`depot_tools` 官方源为：
-
-```text
-https://chromium.googlesource.com/chromium/tools/depot_tools.git
-```
-
-本轮通过 WSL 访问官方 Gitiles 时出现连接超时：
-
-```text
-Failed to connect to chromium.googlesource.com port 443
-```
-
-因此 P0.2 的最小验收需要先满足以下任一条件：
-
-1. 修复当前网络到 `chromium.googlesource.com` 的访问，或提供已同步的 `depot_tools`/Chromium `src` 缓存；
-2. 安装缺失的 host tool，例如 `unzip`；
-3. 提供足够最小闭包起步的依赖目录，默认 40GB，可按实际闭包增长调整。
-
-在这些条件满足前，`./build.sh chromium-source-check` 必须继续失败，不能伪造 Chromium checkout/pin。
+这些记录只用于历史追踪，不再要求当前任务继续解决。
 
 ## 禁止事项
 
-- 禁止把 NetSurf/Dillo/Links/QuickJS demo 作为真实浏览器路线。
-- 禁止把当前 OpenOS 自研 `/bin/chromium` 文本/GUI demo 宣称为 Chrome 引擎。
-- 禁止把 Chromium 上游源码直接提交到 OpenOS 仓库。
-- 禁止把完整 `third_party` 全量同步作为默认路线；只能按 `content_shell` 最小闭包逐项引入。
+- 禁止把当前 OpenOS 自研 `/bin/browser` 宣称为 Chrome/Chromium 内核。
+- 禁止把 `/bin/chromium` demo 作为当前浏览器主线。
+- 禁止在默认构建中重新引入 Chromium 源码或 `third_party` 同步。
+- 禁止把 Chromium checkout、`content_shell` 构建或真实 Chrome 迁移作为当前 P0 阻塞项。
+
+## 如未来恢复本路线
+
+必须先由任务清单显式恢复，并重新确认：
+
+1. 目标、资源预算和磁盘空间。
+2. 源码获取方式和可复现 pin。
+3. 最小依赖闭包或完整 checkout 的边界。
+4. OpenOS GN/toolchain/sysroot 适配计划。
+5. 不影响 `/bin/browser` 自研主线的回归策略。

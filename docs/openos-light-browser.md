@@ -22,9 +22,9 @@
 
 ## 非目标
 
-- 当前不追求 Chromium/Chrome 兼容性。
+- 当前不追求 Chromium/Chrome 兼容性；Chromium 官方内核迁移路线已冻结为历史备选。
 - 当前不实现 JavaScript、复杂 CSS、媒体播放、GPU 合成和现代 Web App 兼容。
-- 官方 Chromium 内核切换路线保留为长期备选，不再作为当前 P0 阻塞项。
+- Chromium 官方内核迁移路线已冻结为历史备选，不再作为当前 P0/P1 阻塞项。
 
 ## 后续路线
 
