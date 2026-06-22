@@ -46,7 +46,21 @@ target_cpu = "x86"
 scripts/chromium-engine-gate.sh --strict
 ```
 
-当前阶段只要求普通检查通过；严格检查会在 P4/P5/P6 逐步补齐官方 Skia/V8/Blink/content_shell 后通过。P6 已建立 `scripts/chromium-content-shell.sh` 和 `args.content-shell-openos-i386.gn`，但在真实 Chromium checkout、足够磁盘空间和成功 `content_shell` 构建前，Blink/content_shell pin 仍必须被视为 pending。
+最终真实切换检查：
+
+```bash
+./build.sh chromium-real-switch-gate
+```
+
+`chromium-real-switch-gate` 必须在以下条件全部满足后才通过：
+
+- Skia/V8/Blink/content_shell pin 均记录真实 40 位 commit，不能是 `status=pending_*` 或 `<pending>`。
+- 官方 `content_shell`/Chromium 产物存在、非空，并可记录 size/sha256。
+- `build.sh` 不再把 `src/user/chromium.c` 编译/嵌入为 `chromium_elf`/`chromium.elf`。
+- `src/kernel/kernel.c` 不再把 demo `chromium_elf` 安装到 `/bin/chromium`。
+- OpenOS content_shell GN 参数仍保持 `target_os = "openos"`、`target_cpu = "x86"` 和单进程软件渲染路线。
+
+当前阶段只要求普通检查通过；严格检查和最终真实切换检查会在 P0.2-P0.7 逐步补齐官方 Chromium checkout、GN、`content_shell` 构建、安装切换和 smoke 验证后通过。P6 已建立 `scripts/chromium-content-shell.sh` 和 `args.content-shell-openos-i386.gn`，但在真实 Chromium checkout、足够磁盘空间和成功 `content_shell` 构建前，Blink/content_shell pin 仍必须被视为 pending。
 
 ## 禁止说法
 

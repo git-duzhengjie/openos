@@ -28,7 +28,7 @@ if [ "$OPENOS_CJK_COVERAGE" != "ui" ] && [ "$OPENOS_CJK_EMBED" != "1" ] && [ "$O
 fi
 
 usage() {
-    echo "Usage: ARCH=i386|x86_64 ./build.sh [clean|test|cppsmoke|sdk|sdk-smoke|chromium-source-check|chromium-gn-check|chromium-engine-gate|skia-official-check|v8-official-check|host-tools-check]"
+    echo "Usage: ARCH=i386|x86_64 ./build.sh [clean|test|cppsmoke|sdk|sdk-smoke|chromium-source-check|chromium-gn-check|chromium-engine-gate|chromium-real-switch-gate|skia-official-check|v8-official-check|host-tools-check]"
     echo "       ./build.sh [i386|x86_64] [clean|test|cppsmoke|sdk|sdk-smoke]"
     echo "       ./build.sh cppsmoke    # probe OpenOS userland C++ toolchain"
     echo "       ./build.sh sdk         # export OpenOS userland SDK/sysroot for Chromium ports"
@@ -36,6 +36,7 @@ usage() {
     echo "       ./build.sh chromium-source-check # check Chromium upstream checkout prerequisites"
     echo "       ./build.sh chromium-gn-check # check Chromium OpenOS GN/toolchain overlay"
     echo "       ./build.sh chromium-engine-gate # verify Chromium demo is not mislabeled as real Chrome"
+    echo "       ./build.sh chromium-real-switch-gate # final gate for replacing demo /bin/chromium with real Chromium"
     echo "       ./build.sh skia-official-check # check official Skia intake prerequisites"
     echo "       ./build.sh v8-official-check # check official V8 d8 jitless intake prerequisites"
     echo "       ./build.sh v8-official-fetch # fetch official V8 checkout and write v8.official.pin"
@@ -96,6 +97,9 @@ case "${1:-}" in
         ;;
     chromium-engine-gate|chrome-engine-gate|real-chrome-gate)
         exec bash scripts/chromium-engine-gate.sh --check
+        ;;
+    chromium-real-switch-gate|chrome-real-switch-gate|real-chromium-switch-gate)
+        exec bash scripts/chromium-real-switch-gate.sh --check
         ;;
     skia-official-check|skia-check|official-skia-check)
         exec bash scripts/skia-official.sh --check

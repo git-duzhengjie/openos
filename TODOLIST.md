@@ -10,6 +10,44 @@
 
 ---
 
+## P0：真实 Chromium 内核切换收口
+
+> 目标：把当前 OpenOS demo `/bin/chromium` 真正替换为官方 Chromium Content/Blink/V8/Skia 运行链路；完成前禁止宣称已经切换到 Chrome/Chromium 内核。
+
+- [x] P0.1：新增真实内核切换最终门禁，检查 `/bin/chromium` 不再由 `src/user/chromium.c` demo 产物安装，且存在官方 content_shell/Chromium 产物证明
+  - [x] 新增构建入口，例如 `./build.sh chromium-real-switch-gate`
+  - [x] 检查官方 Skia/V8/Blink/content_shell pins 均为真实 commit，不能是 pending
+  - [x] 检查官方 content_shell/Chromium 构建产物存在并记录 hash/size
+  - [x] 检查 demo 程序只能以 `/bin/chromium_demo` 或 fallback 名称存在，不能占用 `/bin/chromium`
+- [ ] P0.2：准备并验证完整官方 Chromium checkout
+  - [ ] 获取/校验 depot_tools
+  - [ ] 拉取 Chromium `src` 到 `.openos-deps/chromium/src`
+  - [ ] 记录 `docs/chromium-upstream-pin.md` 的真实 commit、分支、磁盘占用和同步时间
+  - [ ] 执行 `./build.sh chromium-source-check` 通过
+- [ ] P0.3：生成并通过 OpenOS content_shell GN 配置
+  - [ ] 执行 `./build.sh chromium-content-shell-gn-gen`
+  - [ ] 确认 `target_os="openos"`、`target_cpu="x86"`、单进程、禁用 GPU/沙箱的软件渲染参数生效
+  - [ ] 保存 GN args 和生成日志摘要
+- [ ] P0.4：构建官方 Chromium `//content/shell:content_shell`
+  - [ ] 执行 `./build.sh chromium-content-shell-build`
+  - [ ] 生成 `ports/chromium-openos/blink.official.pin` 和 `content_shell.official.pin` 的真实 commit
+  - [ ] 记录官方产物路径、大小、sha256 和构建日志
+- [ ] P0.5：将 OpenOS `/bin/chromium` 切换到官方 Chromium Content/Blink/V8/Skia 产物
+  - [ ] 停止把 `src/user/chromium.c` demo 编译/嵌入为 `/bin/chromium`
+  - [ ] 如需保留 demo，将其改名为 `/bin/chromium_demo`
+  - [ ] 新增官方产物安装/封装流程，确保 `/bin/chromium` 指向真实 Chromium 内核路径
+- [ ] P0.6：完成真实 Chromium 内核 smoke 验证
+  - [ ] 运行官方 `content_shell` 单进程软件渲染 smoke
+  - [ ] 在 OpenOS/QEMU 中启动 `/bin/chromium` 并打开本地 data/http 页面
+  - [ ] 验证页面渲染链路来自 Blink/V8/Skia，而不是 HTML 文本化 demo
+- [ ] P0.7：严格门禁和文档收口
+  - [ ] `./build.sh chromium-engine-gate` 普通门禁通过
+  - [ ] `./build.sh chromium-real-switch-gate` 最终门禁通过
+  - [ ] 更新 README、`docs/chromium-engine-reality-gate.md`、`docs/blink-content-shell-openos.md`
+  - [ ] 更新本 TODOLIST 并提交真实切换完成 commit
+
+---
+
 ## 已完成基线
 
 - [√] BIOS / x86 32 位启动
