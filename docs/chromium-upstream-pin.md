@@ -98,6 +98,40 @@ git -C "$OPENOS_CHROMIUM_ROOT/src" rev-parse HEAD
 git -C "$OPENOS_DEPOT_TOOLS_DIR" rev-parse HEAD
 ```
 
+## 当前 P0.2 尝试记录
+
+记录时间：2026-06-22
+
+当前机器尚未完成完整 Chromium checkout，原因是外部条件未满足：
+
+```text
+C: 可用约 9GB
+D: 可用约 29GB
+E: 可用约 80GB
+F: 可用约 75GB
+默认阈值：OPENOS_CHROMIUM_MIN_FREE_GB=180
+```
+
+`depot_tools` 官方源为：
+
+```text
+https://chromium.googlesource.com/chromium/tools/depot_tools.git
+```
+
+本轮通过 WSL 访问官方 Gitiles 时出现连接超时：
+
+```text
+Failed to connect to chromium.googlesource.com port 443
+```
+
+因此 P0.2 的完整验收需要先满足以下任一条件：
+
+1. 提供可用空间不少于 180GB 的 `OPENOS_CHROMIUM_DEPS_DIR`；
+2. 修复当前网络到 `chromium.googlesource.com` 的访问，或提供已同步的 `depot_tools`/Chromium 源码缓存；
+3. 安装缺失的 host tool，例如 `unzip`。
+
+在这些条件满足前，`./build.sh chromium-source-check` 必须继续失败，不能伪造 Chromium checkout/pin。
+
 ## 禁止事项
 
 - 禁止把 NetSurf/Dillo/Links/QuickJS demo 作为真实浏览器路线。

@@ -19,8 +19,8 @@
   - [x] 检查官方 Skia/V8/Blink/content_shell pins 均为真实 commit，不能是 pending
   - [x] 检查官方 content_shell/Chromium 构建产物存在并记录 hash/size
   - [x] 检查 demo 程序只能以 `/bin/chromium_demo` 或 fallback 名称存在，不能占用 `/bin/chromium`
-- [ ] P0.2：准备并验证完整官方 Chromium checkout
-  - [ ] 获取/校验 depot_tools
+- [ ] P0.2：准备并验证完整官方 Chromium checkout（当前阻塞：可用磁盘空间不足 180GB，且 WSL 到 `chromium.googlesource.com` 连接超时；详见 `docs/chromium-upstream-pin.md`）
+  - [ ] 获取/校验 depot_tools（脚本已支持 Gitiles git clone + archive fallback；待网络恢复后验收）
   - [ ] 拉取 Chromium `src` 到 `.openos-deps/chromium/src`
   - [ ] 记录 `docs/chromium-upstream-pin.md` 的真实 commit、分支、磁盘占用和同步时间
   - [ ] 执行 `./build.sh chromium-source-check` 通过

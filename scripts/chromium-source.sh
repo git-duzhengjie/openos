@@ -23,7 +23,7 @@ Environment:
 
 Notes:
   --check never downloads Chromium.
-  --fetch-depot-tools clones depot_tools only.
+  --fetch-depot-tools downloads depot_tools only, using official Chromium Gitiles git clone first and Gitiles archive fallback.
   --fetch downloads Chromium source and can consume 100GB+ disk and many hours.
 USAGE
 }
@@ -67,7 +67,7 @@ check_common() {
         echo "  MISS free space: need at least ${MIN_FREE_GB}GB for Chromium checkout" >&2
         missing=1
     fi
-    if [ -d "$DEPOT_TOOLS_DIR/.git" ]; then
+    if [ -x "$DEPOT_TOOLS_DIR/fetch" ] && [ -x "$DEPOT_TOOLS_DIR/gclient" ]; then
         echo "  OK   depot_tools: $DEPOT_TOOLS_DIR"
     else
         echo "  MISS depot_tools: $DEPOT_TOOLS_DIR"
@@ -86,16 +86,52 @@ check_common() {
 }
 fetch_depot_tools() {
     mkdir -p "$DEPS_DIR"
-    if [ -d "$DEPOT_TOOLS_DIR/.git" ]; then
-        if git -C "$DEPOT_TOOLS_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    if [ -x "$DEPOT_TOOLS_DIR/fetch" ] && [ -x "$DEPOT_TOOLS_DIR/gclient" ]; then
+        if [ -d "$DEPOT_TOOLS_DIR/.git" ]; then
             git -C "$DEPOT_TOOLS_DIR" pull --ff-only || true
-            echo "depot_tools ready: $DEPOT_TOOLS_DIR"
-            return 0
         fi
-        rm -rf "$DEPOT_TOOLS_DIR"
+        echo "depot_tools ready: $DEPOT_TOOLS_DIR"
+        return 0
     fi
-    git clone --depth 1 https://github.com/chromium/depot_tools.git "$DEPOT_TOOLS_DIR"
-    echo "depot_tools ready: $DEPOT_TOOLS_DIR"
+
+    if [ -e "$DEPOT_TOOLS_DIR" ]; then
+        echo "Removing stale depot_tools path: $DEPOT_TOOLS_DIR" >&2
+        rm -rf "$DEPOT_TOOLS_DIR" || true
+    fi
+
+    local tmp_dir tarball extracted
+    tmp_dir="$DEPS_DIR/depot_tools.tmp.$$"
+    tarball="$DEPS_DIR/depot_tools-main.tar.gz"
+    extracted="$DEPS_DIR/depot_tools-main"
+    rm -rf "$tmp_dir" "$extracted"
+    find "$DEPS_DIR" -maxdepth 1 -type d -name 'depot_tools.tmp.*' -exec rm -rf {} + 2>/dev/null || true
+
+    echo "Cloning depot_tools from official Chromium Gitiles..."
+    if timeout "${OPENOS_CHROMIUM_GIT_TIMEOUT_SEC:-180}" \
+        git clone --depth 1 https://chromium.googlesource.com/chromium/tools/depot_tools.git "$tmp_dir"; then
+        rm -rf "$DEPOT_TOOLS_DIR"
+        mv "$tmp_dir" "$DEPOT_TOOLS_DIR"
+        echo "depot_tools ready from git: $DEPOT_TOOLS_DIR"
+        return 0
+    fi
+
+    echo "Git clone of depot_tools failed; falling back to official Gitiles archive." >&2
+    rm -rf "$tmp_dir" "$extracted"
+    if command -v curl >/dev/null 2>&1; then
+        curl -L --retry 3 --connect-timeout 20 --max-time "${OPENOS_CHROMIUM_CURL_MAX_TIME_SEC:-120}" \
+            -o "$tarball" \
+            https://chromium.googlesource.com/chromium/tools/depot_tools/+archive/refs/heads/main.tar.gz
+    else
+        python3 - <<PY
+import urllib.request
+urllib.request.urlretrieve('https://chromium.googlesource.com/chromium/tools/depot_tools/+archive/refs/heads/main.tar.gz', r'$tarball')
+PY
+    fi
+    tar -xzf "$tarball" -C "$DEPS_DIR"
+    rm -rf "$DEPOT_TOOLS_DIR"
+    mv "$extracted" "$DEPOT_TOOLS_DIR"
+    chmod +x "$DEPOT_TOOLS_DIR/fetch" "$DEPOT_TOOLS_DIR/gclient" || true
+    echo "depot_tools ready from Gitiles archive: $DEPOT_TOOLS_DIR"
 }
 fetch_chromium() {
     check_common || true
