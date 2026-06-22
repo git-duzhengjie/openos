@@ -1,0 +1,49 @@
+# OpenOS Chromium content_shell bootstrap args.
+#
+# This file is intentionally scoped to a single-process, software-rendering
+# content_shell bring-up path. It is an intake target for the real Chromium
+# Content + Blink + V8 + Skia stack, not the current OpenOS demo browser.
+
+target_os = "openos"
+target_cpu = "x86"
+is_debug = false
+is_component_build = false
+is_official_build = false
+
+# Keep the first bring-up path small and deterministic.
+blink_symbol_level = 0
+symbol_level = 0
+treat_warnings_as_errors = false
+use_custom_libcxx = false
+use_sysroot = false
+
+# Single-process software rendering: no GPU process or hardware graphics stack
+# is required for the first OpenOS content_shell smoke path.
+use_ozone = true
+ozone_auto_platforms = false
+ozone_platform = "headless"
+ozone_platform_headless = true
+use_x11 = false
+use_wayland = false
+use_glib = false
+use_gtk = false
+use_pangocairo = false
+use_cups = false
+use_gio = false
+use_dbus = false
+use_udev = false
+use_aura = true
+enable_vulkan = false
+enable_swiftshader = false
+enable_basic_printing = false
+enable_print_preview = false
+enable_pdf = false
+enable_extensions = false
+enable_nacl = false
+
+# Keep renderer/runtime dependencies explicit for the OpenOS porting backlog.
+v8_enable_i18n_support = false
+v8_use_external_startup_data = false
+rtc_use_h264 = false
+proprietary_codecs = false
+ffmpeg_branding = "Chromium"

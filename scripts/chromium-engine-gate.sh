@@ -33,6 +33,24 @@ check_contains() {
     fi
 }
 
+check_real_pin() {
+    local pin="$1"
+    if [ ! -s "$pin" ]; then
+        echo "  MISS strict pin: $pin" >&2
+        return 1
+    fi
+    if grep -Eq '(<pending>|status=pending_|repository=<pending)' "$pin"; then
+        echo "  MISS strict pin is still pending: $pin" >&2
+        return 1
+    fi
+    if grep -Eq '^commit=[0-9a-f]{40}$' "$pin"; then
+        echo "  OK   strict pin: $pin"
+        return 0
+    fi
+    echo "  MISS strict pin lacks a real 40-hex commit: $pin" >&2
+    return 1
+}
+
 check_gate() {
     local strict="${1:-0}"
     local fail=0
@@ -42,12 +60,7 @@ check_gate() {
     check_contains "$CHROMIUM_DEMO" "Not Chrome engine" "runtime UI disclaims Chrome engine" || fail=1
     if [ "$strict" = "1" ]; then
         for pin in "$SKIA_PIN" "$V8_PIN" "$BLINK_PIN" "$CONTENT_PIN"; do
-            if [ -s "$pin" ]; then
-                echo "  OK   strict pin: $pin"
-            else
-                echo "  MISS strict pin: $pin" >&2
-                fail=1
-            fi
+            check_real_pin "$pin" || fail=1
         done
     else
         echo "  INFO strict official-engine pins are not required in --check mode"

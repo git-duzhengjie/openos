@@ -20,9 +20,10 @@
 1. 存在官方 Chromium checkout 的固定提交：`docs/chromium-upstream-pin.md` 记录实际 commit。
 2. 存在官方 Skia 构建产物或 pin：`ports/chromium-openos/skia.official.pin`。
 3. 存在官方 V8 构建产物或 pin：`ports/chromium-openos/v8.official.pin`。
-4. 存在 Blink/content_shell 构建产物或 pin：
+4. 存在 Blink/content_shell 构建产物或真实 pin：
    - `ports/chromium-openos/blink.official.pin`
    - `ports/chromium-openos/content_shell.official.pin`
+   - 占位 pin（`status=pending_*` 或 `<pending>`）只能表示路线入口存在，不能让严格门禁通过。
 5. OpenOS 运行路径使用 Chromium Content/Blink/V8/Skia，而不是自研 HTML 文本折叠 demo。
 6. 构建日志能证明目标为：
 
@@ -45,7 +46,7 @@ target_cpu = "x86"
 scripts/chromium-engine-gate.sh --strict
 ```
 
-当前阶段只要求普通检查通过；严格检查会在 P4/P5/P6 逐步补齐官方 Skia/V8/Blink/content_shell 后通过。
+当前阶段只要求普通检查通过；严格检查会在 P4/P5/P6 逐步补齐官方 Skia/V8/Blink/content_shell 后通过。P6 已建立 `scripts/chromium-content-shell.sh` 和 `args.content-shell-openos-i386.gn`，但在真实 Chromium checkout、足够磁盘空间和成功 `content_shell` 构建前，Blink/content_shell pin 仍必须被视为 pending。
 
 ## 禁止说法
 

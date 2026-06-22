@@ -42,6 +42,10 @@ usage() {
     echo "       ./build.sh v8-official-sync-deps # sync official V8 minimal DEPS for d8 build"
     echo "       ./build.sh v8-official-build # build official V8 d8 for host jitless smoke"
     echo "       ./build.sh v8-official-smoke # run official V8 d8 --jitless smoke"
+    echo "       ./build.sh chromium-content-shell-check # check Blink/content_shell single-process software path"
+    echo "       ./build.sh chromium-content-shell-gn-gen # generate OpenOS content_shell GN output"
+    echo "       ./build.sh chromium-content-shell-build # build official Chromium content_shell"
+    echo "       ./build.sh chromium-content-shell-smoke # run content_shell single-process software smoke"
     echo "       ./build.sh host-tools-check # check no-sudo host tool bootstrap"
 }
 
@@ -110,6 +114,18 @@ case "${1:-}" in
         ;;
     v8-official-smoke|v8-smoke|official-v8-smoke)
         exec bash scripts/v8-official.sh --smoke
+        ;;
+    chromium-content-shell-check|content-shell-check|blink-content-shell-check)
+        exec bash scripts/chromium-content-shell.sh --check
+        ;;
+    chromium-content-shell-gn-gen|content-shell-gn-gen|blink-content-shell-gn-gen)
+        exec bash scripts/chromium-content-shell.sh --gn-gen
+        ;;
+    chromium-content-shell-build|content-shell-build|blink-content-shell-build)
+        exec bash scripts/chromium-content-shell.sh --build
+        ;;
+    chromium-content-shell-smoke|content-shell-smoke|blink-content-shell-smoke)
+        exec bash scripts/chromium-content-shell.sh --smoke
         ;;
     host-tools-check|bootstrap-host-tools-check)
         exec bash scripts/bootstrap-host-tools.sh --check

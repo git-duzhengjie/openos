@@ -1,0 +1,10 @@
+official_component=content_shell
+repository=<pending-real-chromium-checkout>
+commit=<pending>
+commit_short=<pending>
+source_path=.openos-deps/chromium/src
+gn_out=.openos-deps/chromium/src/out/OpenOSContentShell-i386
+gn_args_file=ports/chromium-openos/args.content-shell-openos-i386.gn
+target=//content/shell:content_shell
+status=pending_real_chromium_checkout
+note=Placeholder pin path for P6 gate; run scripts/chromium-content-shell.sh --pin after a real Chromium checkout exists.

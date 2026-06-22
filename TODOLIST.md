@@ -396,7 +396,7 @@
     - [√] P4.2：拉取官方 Skia checkout 并写入 `ports/chromium-openos/skia.official.pin`
     - [√] P4.3：完成官方 Skia 软件 raster 最小库构建
   - [√] P5：接入官方 V8 `d8`/shell 的 jitless 最小构建入口与 pin/检查/同步/构建/smoke 脚本；当前完整 d8 构建受 `chromium.googlesource.com` 依赖归档网络超时阻塞，已提供 GitHub 优先、Gitiles 兜底和 `OPENOS_V8_DEP_SEED_DIR` 本地种子目录机制
-  - [ ] P6：接入 Blink/content_shell 单进程软件渲染最小启动链路
+  - [√] P6：接入 Blink/content_shell 单进程软件渲染最小启动链路入口、OpenOS GN args、check/gn-gen/build/smoke 命令和 reality gate pending-pin 防误判；当前本机缺少完整 Chromium checkout/足够构建空间，真实 content_shell 构建待后续具备环境后执行
 - [√] 文档化浏览器路线
   - [√] README 和路线文档必须说明：当前 Browser 能力边界是基础 HTTP/HTML 文本化，不等同于 Chromium/Blink/V8/Skia 级完整浏览器
 
