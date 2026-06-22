@@ -50,6 +50,7 @@ typedef struct browser_load_context {
     int focus_mode;
     int address_label_id;
     int address_editing;
+    int home_visible;
     char address_text[BROWSER_ADDRESS_MAX];
     ob_dom_document_t dom;
     ob_form_state_t form_state;
@@ -304,12 +305,22 @@ static void browser_make_error_page(browser_load_context_t *ctx, const char *sum
     char target[BROWSER_HOST_MAX + BROWSER_PATH_MAX + 16];
     if (!ctx) return;
     browser_target_url(ctx, target, sizeof(target));
-    snprintf(ctx->title, sizeof(ctx->title), "OpenOS Browser Error");
+    snprintf(ctx->title, sizeof(ctx->title), "OpenOS Browser");
     snprintf(ctx->status, sizeof(ctx->status), "%s", summary && summary[0] ? summary : "Load failed");
     snprintf(ctx->body, sizeof(ctx->body),
-             "OpenOS Browser Error\nURL: %s\nReason: %s",
+             "\n"
+             "\n"
+             "                              Page could not be loaded\n"
+             "\n"
+             "                 ----------------------------------------\n"
+             "                 URL: %s\n"
+             "                 Reason: %s\n"
+             "                 ----------------------------------------\n"
+             "\n"
+             "                 Edit the address above, then press Enter.",
              target,
              detail && detail[0] ? detail : (summary && summary[0] ? summary : "unknown error"));
+    ctx->home_visible = 0;
 }
 
 static void browser_extract_title(char *dst, int dst_size, const char *html)
@@ -423,15 +434,19 @@ static void browser_make_home_view(char *out, int out_size, const char *address)
 {
     if (!out || out_size <= 0) return;
     snprintf(out, out_size,
-             "                              OpenOS Browser\n"
              "\n"
-             "                    Search OpenOS or type a URL\n"
-             "              [ %s ]\n"
              "\n"
-             "          ( GitHub )     ( Docs )     ( Samples )     ( Network )\n"
+             "                                  OpenOS\n"
+             "                              Browser Search\n"
              "\n"
-             "       Tips: type an address, press Enter to load. Tab selects links/forms.",
-             address && address[0] ? address : "http://example.com/");
+             "                 ----------------------------------------\n"
+             "                 |  %s  |\n"
+             "                 ----------------------------------------\n"
+             "\n"
+             "                   GitHub      Docs      Samples      Network\n"
+             "\n"
+             "              Type an address above, then press Enter to load.",
+             address && address[0] ? address : "Search OpenOS or type a URL");
 }
 
 static int browser_parse_file_arg(const char *url, char *path, int path_size)
@@ -584,7 +599,11 @@ static void browser_start_load(browser_load_context_t *load, int win, int status
 {
     openos_thread_t tid;
     char loading[128];
+    int address_label_id;
+    char address_text[BROWSER_ADDRESS_MAX];
     if (!load || !host || !path) return;
+    address_label_id = load->address_label_id;
+    snprintf(address_text, sizeof(address_text), "%s", load->address_text);
     if (load->active && !load->done) {
         openos_gui_set_text(win, status_label, "Loading");
         openos_gui_set_text(win, body_label, "Load already in progress...");
@@ -597,6 +616,9 @@ static void browser_start_load(browser_load_context_t *load, int win, int status
     load->window_id = win;
     load->status_label_id = status_label;
     load->body_label_id = body_label;
+    load->address_label_id = address_label_id;
+    snprintf(load->address_text, sizeof(load->address_text), "%s", address_text);
+    load->home_visible = 0;
     snprintf(loading, sizeof(loading), "Loading %s%s%s ...", is_file ? "file://" : "http://", is_file ? "" : load->host, load->path);
     load->active = 1;
     load->done = 0;
@@ -1029,6 +1051,7 @@ static void browser_load_worker(void *arg)
         }
     }
     ctx->result = rc;
+    ctx->home_visible = 0;
     if (rc < 0) {
         browser_make_error_page(ctx, ctx->is_file ? "File load failed" : "Network load failed", ctx->response);
         printf("browser: %s\n", ctx->response);
@@ -1175,7 +1198,10 @@ int main(int argc, char **argv)
     address_label = openos_gui_add_label(win, 188, 20, 620, 20, "[ search or URL: ]");
     close_button = openos_gui_add_button(win, 824, 18, 56, 24, "Close");
 
-    browser_format_address(home_address, sizeof(home_address), host, path, is_file);
+    if (argc > 1 && argv && argv[1] && argv[1][0])
+        browser_format_address(home_address, sizeof(home_address), host, path, is_file);
+    else
+        snprintf(home_address, sizeof(home_address), "Search OpenOS or type a URL");
     browser_make_home_view(summary, sizeof(summary), home_address);
     body_label = openos_gui_add_label(win, 56, 96, 790, 280, summary);
 
@@ -1190,8 +1216,14 @@ int main(int argc, char **argv)
     load.status_label_id = status_label;
     load.body_label_id = body_label;
     load.address_label_id = address_label;
-    browser_sync_address_from_target(&load, host, path, is_file);
-    printf("browser: ready %s%s%s\n", is_file ? "file://" : "http://", is_file ? "" : host, path);
+    load.home_visible = 1;
+    if (argc > 1 && argv && argv[1] && argv[1][0]) {
+        browser_sync_address_from_target(&load, host, path, is_file);
+    } else {
+        snprintf(load.address_text, sizeof(load.address_text), "Search OpenOS or type a URL");
+        browser_update_address_label(&load);
+    }
+    printf("browser: ready home\n");
 
     for (;;) {
         openos_gui_event_t event;
@@ -1203,10 +1235,16 @@ int main(int argc, char **argv)
                     continue;
                 }
                 if (event.type == OPENOS_GUI_EVENT_KEY_DOWN && event.key == OPENOS_GUI_KEY_ENTER && !load.address_editing) {
-                    if (load.focus_mode == BROWSER_FOCUS_FORM)
+                    if (load.home_visible) {
+                        load.address_editing = 1;
+                        snprintf(load.address_text, sizeof(load.address_text), "");
+                        browser_update_address_label(&load);
+                        openos_gui_set_text(win, status_label, "Type an address, then press Enter");
+                    } else if (load.focus_mode == BROWSER_FOCUS_FORM) {
                         browser_submit_current_form(&load, &history, win, status_label, body_label, &scroll_line);
-                    else
+                    } else {
                         browser_open_selected_link(&load, &history, win, status_label, body_label, &scroll_line);
+                    }
                     continue;
                 }
                 char next_host[BROWSER_HOST_MAX];
@@ -1241,7 +1279,12 @@ int main(int argc, char **argv)
                 break;
             if (event.widget_id == (unsigned int)load_button) {
                 const browser_history_entry_t *cur = browser_history_current(&history);
-                if (cur) {
+                if (load.home_visible) {
+                    load.address_editing = 1;
+                    snprintf(load.address_text, sizeof(load.address_text), "");
+                    browser_update_address_label(&load);
+                    openos_gui_set_text(win, status_label, "Type an address, then press Enter");
+                } else if (cur) {
                     scroll_line = 0;
                     browser_sync_address_from_target(&load, cur->host, cur->path, cur->is_file);
                     browser_start_load(&load, win, status_label, body_label, cur->host, cur->path, cur->is_file);

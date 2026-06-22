@@ -856,6 +856,17 @@ static void ob_dom_render_append_heading_prefix(char *out, int out_size, int *po
     if (*pos < out_size - 1) out[(*pos)++] = ' ';
 }
 
+static int ob_dom_is_hidden_content_node(const ob_dom_node_t *node)
+{
+    if (!node || node->type != OB_DOM_NODE_ELEMENT) return 0;
+    return ob_token_eq_ci(node->name, "head") ||
+           ob_token_eq_ci(node->name, "style") ||
+           ob_token_eq_ci(node->name, "script") ||
+           ob_token_eq_ci(node->name, "title") ||
+           ob_token_eq_ci(node->name, "meta") ||
+           ob_token_eq_ci(node->name, "link");
+}
+
 static void ob_dom_render_node_text_ex(const ob_dom_document_t *doc, int node_id, char *out, int out_size, int *pos, int *link_count, const ob_form_state_t *form_state)
 {
     int child;
@@ -863,7 +874,7 @@ static void ob_dom_render_node_text_ex(const ob_dom_document_t *doc, int node_id
     int heading_level;
     int is_list_item;
     if (!doc || node_id < 0 || node_id >= doc->count || !out || !pos || *pos >= out_size - 1) return;
-    if (doc->nodes[node_id].style_display == OB_DISPLAY_NONE) return;
+    if (doc->nodes[node_id].style_display == OB_DISPLAY_NONE || ob_dom_is_hidden_content_node(&doc->nodes[node_id])) return;
     is_block = doc->nodes[node_id].type == OB_DOM_NODE_ELEMENT && doc->nodes[node_id].style_display == OB_DISPLAY_BLOCK;
     heading_level = ob_dom_heading_level(&doc->nodes[node_id]);
     is_list_item = doc->nodes[node_id].type == OB_DOM_NODE_ELEMENT && ob_token_eq_ci(doc->nodes[node_id].name, "li");
