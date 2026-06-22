@@ -377,8 +377,13 @@ static void browser_format_address(char *out, int out_size, const char *host, co
 static void browser_update_address_label(browser_load_context_t *ctx)
 {
     char label[BROWSER_ADDRESS_MAX + 32];
+    const char *text;
     if (!ctx || ctx->window_id <= 0 || ctx->address_label_id <= 0) return;
-    snprintf(label, sizeof(label), "[ %s%s ]", ctx->address_editing ? "editing: " : "search or URL: ", ctx->address_text);
+    text = ctx->address_text[0] ? ctx->address_text : "Search OpenOS or type a URL";
+    if (ctx->address_editing)
+        snprintf(label, sizeof(label), "  %s|", text);
+    else
+        snprintf(label, sizeof(label), "  %s", text);
     openos_gui_set_text(ctx->window_id, ctx->address_label_id, label);
 }
 
@@ -1195,7 +1200,7 @@ int main(int argc, char **argv)
     back_button = openos_gui_add_button(win, 16, 18, 40, 24, "<");
     forward_button = openos_gui_add_button(win, 60, 18, 40, 24, ">");
     load_button = openos_gui_add_button(win, 104, 18, 72, 24, "Reload");
-    address_label = openos_gui_add_label(win, 188, 20, 620, 20, "[ search or URL: ]");
+    address_label = openos_gui_add_button(win, 188, 18, 620, 24, "  Search OpenOS or type a URL");
     close_button = openos_gui_add_button(win, 824, 18, 56, 24, "Close");
 
     if (argc > 1 && argv && argv[1] && argv[1][0])
@@ -1220,7 +1225,7 @@ int main(int argc, char **argv)
     if (argc > 1 && argv && argv[1] && argv[1][0]) {
         browser_sync_address_from_target(&load, host, path, is_file);
     } else {
-        snprintf(load.address_text, sizeof(load.address_text), "Search OpenOS or type a URL");
+        load.address_text[0] = 0;
         browser_update_address_label(&load);
     }
     printf("browser: ready home\n");
@@ -1277,7 +1282,13 @@ int main(int argc, char **argv)
             }
             if (event.widget_id == (unsigned int)close_button)
                 break;
-            if (event.widget_id == (unsigned int)load_button) {
+            if (event.widget_id == (unsigned int)address_label) {
+                load.address_editing = 1;
+                if (load.home_visible && strcmp(load.address_text, "Search OpenOS or type a URL") == 0)
+                    load.address_text[0] = 0;
+                browser_update_address_label(&load);
+                openos_gui_set_text(win, status_label, "Address bar selected - type a URL, then press Enter");
+            } else if (event.widget_id == (unsigned int)load_button) {
                 const browser_history_entry_t *cur = browser_history_current(&history);
                 if (load.home_visible) {
                     load.address_editing = 1;
