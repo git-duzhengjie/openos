@@ -180,30 +180,6 @@ static int browser_tag_matches(const char *p, const char *tag)
     return p[i] == '>' || p[i] == '/' || p[i] == ' ' || p[i] == '\t' || p[i] == '\r' || p[i] == '\n';
 }
 
-static int browser_is_block_tag(const char *p)
-{
-    char tag[OB_MAX_TAG_NAME];
-    const char *q = p;
-    int len = 0;
-    ob_default_style_resolver_t resolver;
-    if (!p || *p != '<') return 0;
-    ++q;
-    if (*q == '/') ++q;
-    while (*q == ' ' || *q == '\t' || *q == '\r' || *q == '\n') ++q;
-    while (q[len] && q[len] != '>' && q[len] != '/' && q[len] != ' ' &&
-           q[len] != '\t' && q[len] != '\r' && q[len] != '\n' && len < OB_MAX_TAG_NAME - 1)
-        ++len;
-    ob_copy_tag_name(tag, sizeof(tag), q, len);
-    ob_default_style_resolver_init(&resolver);
-    return resolver.iface.display_for_tag(&resolver.iface, tag) == OB_DISPLAY_BLOCK;
-}
-
-static void browser_append_newline(char *dst, int dst_size, int *out)
-{
-    if (!dst || !out || *out <= 0 || *out >= dst_size - 1) return;
-    if (dst[*out - 1] != '\n') dst[(*out)++] = '\n';
-}
-
 static char browser_decode_entity(const char **pp)
 {
     const char *p = *pp;
@@ -260,44 +236,6 @@ static void browser_extract_title(char *dst, int dst_size, const char *html)
         dst[out++] = c;
         ++p;
     }
-    dst[out] = 0;
-}
-
-static void collapse_html_text(char *dst, int dst_size, const char *src)
-{
-    int out = 0;
-    int in_tag = 0;
-    int pending_space = 0;
-
-    if (!dst || dst_size <= 0) return;
-    dst[0] = 0;
-    if (!src) return;
-
-    for (const char *p = src; *p && out < dst_size - 1; ++p) {
-        char c = *p;
-        if (c == '<') {
-            if (browser_is_block_tag(p)) browser_append_newline(dst, dst_size, &out);
-            in_tag = 1;
-            pending_space = 0;
-            continue;
-        }
-        if (in_tag) {
-            if (c == '>') in_tag = 0;
-            continue;
-        }
-        if (c == '&') c = browser_decode_entity(&p);
-        if (c == '\r' || c == '\n' || c == '\t' || c == ' ') {
-            pending_space = 1;
-            continue;
-        }
-        if (pending_space && out > 0 && dst[out - 1] != '\n') {
-            dst[out++] = ' ';
-            if (out >= dst_size - 1) break;
-        }
-        pending_space = 0;
-        dst[out++] = c;
-    }
-    while (out > 0 && (dst[out - 1] == ' ' || dst[out - 1] == '\n')) --out;
     dst[out] = 0;
 }
 
@@ -579,11 +517,15 @@ static void browser_load_worker(void *arg)
         browser_extract_title(ctx->title, sizeof(ctx->title), body);
         {
             ob_html_parser_base_t parser;
+            ob_dom_text_renderer_base_t renderer;
             ob_dom_document_t doc;
             ob_html_parser_base_init(&parser);
-            parser.iface.parse(&parser.iface, body, &doc);
+            ob_dom_text_renderer_base_init(&renderer);
+            if (parser.iface.parse(&parser.iface, body, &doc) > 0)
+                renderer.iface.render(&renderer.iface, &doc, ctx->body, sizeof(ctx->body));
+            else
+                ctx->body[0] = 0;
         }
-        collapse_html_text(ctx->body, sizeof(ctx->body), body);
         if (!ctx->body[0])
             snprintf(ctx->body, sizeof(ctx->body), "Empty response");
         snprintf(ctx->status, sizeof(ctx->status), "%s", ctx->http_status[0] ? ctx->http_status : "Done");

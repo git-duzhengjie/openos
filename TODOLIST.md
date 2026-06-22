@@ -51,9 +51,9 @@
 - [x] P1.1：HTML parser 闭合标签按标签名匹配回退栈
   - [x] 修复任意 `</...>` 都盲目弹出一层 DOM 栈的问题
   - [x] 增加嵌套标签闭合顺序 smoke 覆盖
-- [ ] P1.2：DOM 文本渲染入口替换纯字符串折叠输出
-  - [ ] 基于 DOM 遍历输出文本
-  - [ ] 按默认 display 类型输出块级换行
+- [x] P1.2：DOM 文本渲染入口替换纯字符串折叠输出
+  - [x] 基于 DOM 遍历输出文本
+  - [x] 按默认 display 类型输出块级换行
 - [ ] P1.3：扩展默认 CSS display 分类
   - [ ] 覆盖 `article` / `section` / `nav` / `header` / `footer` / `main`
   - [ ] 增加默认样式 smoke 覆盖

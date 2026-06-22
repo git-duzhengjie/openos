@@ -9,6 +9,8 @@
  * The structs below emulate interface/base/implementation layering in C.
  */
 
+#include <string.h>
+
 #define OB_HTML_TOKEN_TEXT 1
 #define OB_HTML_TOKEN_TAG 2
 #define OB_HTML_TOKEN_EOF 3
@@ -79,6 +81,15 @@ typedef struct ob_default_style_resolver {
     ob_style_resolver_i_t iface;
 } ob_default_style_resolver_t;
 
+typedef struct ob_dom_text_renderer_i ob_dom_text_renderer_i_t;
+struct ob_dom_text_renderer_i {
+    int (*render)(ob_dom_text_renderer_i_t *self, const ob_dom_document_t *doc, char *out, int out_size);
+};
+
+typedef struct ob_dom_text_renderer_base {
+    ob_dom_text_renderer_i_t iface;
+} ob_dom_text_renderer_base_t;
+
 static int ob_ascii_equal_ci(char a, char b)
 {
     if (a >= 'A' && a <= 'Z') a = (char)(a - 'A' + 'a');
@@ -127,6 +138,49 @@ static int ob_cstr_len(const char *s)
     if (!s) return 0;
     while (s[n]) ++n;
     return n;
+}
+
+static char ob_decode_entity_char(const char **pp)
+{
+    const char *p = *pp;
+    if (!p || *p != '&') return p ? *p : 0;
+    if (!strncmp(p, "&amp;", 5)) { *pp = p + 4; return '&'; }
+    if (!strncmp(p, "&lt;", 4)) { *pp = p + 3; return '<'; }
+    if (!strncmp(p, "&gt;", 4)) { *pp = p + 3; return '>'; }
+    if (!strncmp(p, "&quot;", 6)) { *pp = p + 5; return '"'; }
+    if (!strncmp(p, "&#39;", 5)) { *pp = p + 4; return '\''; }
+    if (!strncmp(p, "&apos;", 6)) { *pp = p + 5; return '\''; }
+    if (!strncmp(p, "&nbsp;", 6)) { *pp = p + 5; return ' '; }
+    return '&';
+}
+
+static void ob_dom_render_append_newline(char *out, int out_size, int *pos)
+{
+    if (!out || !pos || *pos <= 0 || *pos >= out_size - 1) return;
+    if (out[*pos - 1] != '\n') out[(*pos)++] = '\n';
+}
+
+static void ob_dom_render_append_text(char *out, int out_size, int *pos, const char *text)
+{
+    int pending_space = 0;
+    const char *p = text;
+    if (!out || !pos || !text) return;
+    while (*p && *pos < out_size - 1) {
+        char c = *p;
+        if (c == '&') c = ob_decode_entity_char(&p);
+        if (c == '\r' || c == '\n' || c == '\t' || c == ' ') {
+            pending_space = 1;
+            ++p;
+            continue;
+        }
+        if (pending_space && *pos > 0 && out[*pos - 1] != '\n') {
+            out[(*pos)++] = ' ';
+            if (*pos >= out_size - 1) break;
+        }
+        pending_space = 0;
+        out[(*pos)++] = c;
+        ++p;
+    }
 }
 
 static void ob_copy_tag_name(char *dst, int dst_size, const char *src, int len)
@@ -272,6 +326,42 @@ static void ob_html_parser_base_init(ob_html_parser_base_t *parser)
 {
     if (!parser) return;
     parser->iface.parse = ob_html_parse_impl;
+}
+
+static void ob_dom_render_node_text(const ob_dom_document_t *doc, int node_id, char *out, int out_size, int *pos)
+{
+    int child;
+    int is_block;
+    if (!doc || node_id < 0 || node_id >= doc->count || !out || !pos || *pos >= out_size - 1) return;
+    if (doc->nodes[node_id].style_display == OB_DISPLAY_NONE) return;
+    is_block = doc->nodes[node_id].type == OB_DOM_NODE_ELEMENT && doc->nodes[node_id].style_display == OB_DISPLAY_BLOCK;
+    if (is_block && *pos > 0) ob_dom_render_append_newline(out, out_size, pos);
+    if (doc->nodes[node_id].type == OB_DOM_NODE_TEXT) ob_dom_render_append_text(out, out_size, pos, doc->nodes[node_id].text);
+    child = doc->nodes[node_id].first_child;
+    while (child >= 0 && *pos < out_size - 1) {
+        ob_dom_render_node_text(doc, child, out, out_size, pos);
+        child = doc->nodes[child].next_sibling;
+    }
+    if (is_block && *pos > 0) ob_dom_render_append_newline(out, out_size, pos);
+}
+
+static int ob_dom_text_render_impl(ob_dom_text_renderer_i_t *iface, const ob_dom_document_t *doc, char *out, int out_size)
+{
+    int pos = 0;
+    (void)iface;
+    if (!out || out_size <= 0) return -1;
+    out[0] = 0;
+    if (!doc || doc->root < 0 || doc->root >= doc->count) return -1;
+    ob_dom_render_node_text(doc, doc->root, out, out_size, &pos);
+    while (pos > 0 && (out[pos - 1] == ' ' || out[pos - 1] == '\n')) --pos;
+    out[pos] = 0;
+    return pos;
+}
+
+static void ob_dom_text_renderer_base_init(ob_dom_text_renderer_base_t *renderer)
+{
+    if (!renderer) return;
+    renderer->iface.render = ob_dom_text_render_impl;
 }
 
 #endif /* OPENOS_USER_BROWSER_ENGINE_H */

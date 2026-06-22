@@ -10,7 +10,9 @@ int main(void)
     ob_html_tokenizer_base_t tokenizer;
     ob_html_token_t tok;
     ob_html_parser_base_t parser;
+    ob_dom_text_renderer_base_t renderer;
     ob_dom_document_t doc;
+    char rendered[256];
     int saw_html = 0;
     int saw_text = 0;
 
@@ -25,12 +27,20 @@ int main(void)
     }
 
     ob_html_parser_base_init(&parser);
+    ob_dom_text_renderer_base_init(&renderer);
     if (parser.iface.parse(&parser.iface, html, &doc) <= 1) {
         fprintf(stderr, "browser parser smoke failed\n");
         return 1;
     }
     if (doc.root != 0 || doc.nodes[0].type != OB_DOM_NODE_DOCUMENT) {
         fprintf(stderr, "browser DOM root smoke failed\n");
+        return 1;
+    }
+
+    if (renderer.iface.render(&renderer.iface, &doc, rendered, sizeof(rendered)) <= 0 ||
+        strstr(rendered, "OpenOS & Browser") ||
+        !strstr(rendered, "Hello\nLightweight engine")) {
+        fprintf(stderr, "browser DOM text renderer smoke failed: %s\n", rendered);
         return 1;
     }
 
