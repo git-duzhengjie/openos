@@ -1122,8 +1122,8 @@ int main(int argc, char **argv)
     int close_button;
     int rc = 0;
     int scroll_line = 0;
-    browser_load_context_t load;
-    browser_history_t history;
+    static browser_load_context_t load;
+    static browser_history_t history;
 
     memset(&load, 0, sizeof(load));
 
