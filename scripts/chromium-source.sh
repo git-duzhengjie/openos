@@ -20,11 +20,12 @@ Environment:
   OPENOS_DEPOT_TOOLS_DIR     depot_tools path, default: \$OPENOS_CHROMIUM_DEPS_DIR/depot_tools
   OPENOS_CHROMIUM_ROOT       Chromium checkout root, default: \$OPENOS_CHROMIUM_DEPS_DIR/chromium
   OPENOS_CHROMIUM_MIN_FREE_GB Required free space for minimal source/dependency closure, default: 40
+  OPENOS_CHROMIUM_GIT_TIMEOUT_SEC Network timeout for git clone/fetch, default: 600
 
 Notes:
   --check never downloads Chromium.
   --fetch-depot-tools downloads depot_tools only, using official Chromium Gitiles git clone first and Gitiles archive fallback.
-  --fetch downloads only the minimal Chromium src entrypoint first; hooks and full DEPS are intentionally not synced.
+  --fetch downloads only the minimal Chromium src entrypoint first, preferring the official GitHub mirror for src; hooks and full DEPS are intentionally not synced.
   --fetch-full explicitly runs the official fetch/gclient flow and may consume very large disk space. Do not use it as the default OpenOS route.
 USAGE
 }
@@ -141,18 +142,36 @@ PY
 
 fetch_chromium_minimal() {
     check_common || true
-    fetch_depot_tools
     mkdir -p "$CHROMIUM_ROOT"
+    local git_timeout
+    git_timeout="${OPENOS_CHROMIUM_GIT_TIMEOUT_SEC:-600}"
     if [ -d "$CHROMIUM_SRC/.git" ]; then
         echo "Chromium src already exists: $CHROMIUM_SRC"
         echo "Updating minimal shallow origin ref only; hooks and full DEPS are intentionally skipped."
-        git -C "$CHROMIUM_SRC" fetch --depth=1 origin main || git -C "$CHROMIUM_SRC" fetch --depth=1 origin master
+        timeout "$git_timeout" git -C "$CHROMIUM_SRC" fetch --depth=1 origin main || timeout "$git_timeout" git -C "$CHROMIUM_SRC" fetch --depth=1 origin master
         return 0
     fi
 
     echo "Cloning minimal Chromium src entrypoint only."
     echo "Full third_party/gclient sync is intentionally skipped; build scripts must add only the content_shell dependency closure."
-    git clone --depth=1 https://chromium.googlesource.com/chromium/src.git "$CHROMIUM_SRC"
+    local src_url
+    src_url="${OPENOS_CHROMIUM_SRC_URL:-https://github.com/chromium/chromium.git}"
+    rm -rf "$CHROMIUM_SRC"
+    if timeout "$git_timeout" git clone --depth=1 "$src_url" "$CHROMIUM_SRC"; then
+        return 0
+    fi
+    echo "Chromium minimal src clone failed from $src_url" >&2
+    rm -rf "$CHROMIUM_SRC"
+    if [ "$src_url" != "https://chromium.googlesource.com/chromium/src.git" ]; then
+        echo "GitHub mirror clone failed; falling back to Chromium Gitiles src." >&2
+        timeout "$git_timeout" git clone --depth=1 https://chromium.googlesource.com/chromium/src.git "$CHROMIUM_SRC" || {
+            echo "Chromium Gitiles fallback clone failed." >&2
+            rm -rf "$CHROMIUM_SRC"
+            return 1
+        }
+    else
+        return 1
+    fi
 }
 
 fetch_chromium_full() {

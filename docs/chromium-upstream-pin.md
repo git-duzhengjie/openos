@@ -73,7 +73,13 @@ scripts/chromium-source.sh --fetch
 该命令只做最小起步：
 
 ```bash
-git clone --depth=1 https://chromium.googlesource.com/chromium/src.git .openos-deps/chromium/src
+git clone --depth=1 https://github.com/chromium/chromium.git .openos-deps/chromium/src
+```
+
+`OPENOS_CHROMIUM_SRC_URL` 可覆盖源码入口；GitHub 镜像失败时脚本才回退到 Chromium Gitiles：
+
+```bash
+OPENOS_CHROMIUM_SRC_URL=https://chromium.googlesource.com/chromium/src.git scripts/chromium-source.sh --fetch
 ```
 
 它不会默认执行完整：
@@ -119,13 +125,17 @@ git -C "$OPENOS_DEPOT_TOOLS_DIR" rev-parse HEAD
 
 记录时间：2026-06-22
 
-当前机器不应再以“180GB 完整 checkout”作为默认阻塞项。当前真实阻塞是网络和 host tool：
+当前机器不应再以“180GB 完整 checkout”作为默认阻塞项。当前真实阻塞是 depot_tools 官方源网络和 host tool：
 
 ```text
-WSL 访问 chromium.googlesource.com: 连接超时
+Chromium src 最小入口：优先 https://github.com/chromium/chromium.git
+2026-06-22 GitHub 最小 src 浅克隆结果：fetch-pack unexpected disconnect while reading sideband packet
+WSL 访问 chromium.googlesource.com: 连接超时，影响 depot_tools 获取和 Gitiles fallback
 host tool: unzip 缺失
 默认阈值：OPENOS_CHROMIUM_MIN_FREE_GB=40
 ```
+
+该失败发生在 Chromium `src` 仓库自身的浅克隆阶段，尚未进入 DEPS/`third_party` 同步，因此不能再归因为“需要完整海量 third_party”。
 
 `depot_tools` 官方源为：
 
