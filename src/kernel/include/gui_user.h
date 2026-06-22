@@ -7,6 +7,8 @@
 
 #include "types.h"
 
+typedef struct gui_window gui_window_t;
+
 #define GUI_USER_DRAW_FILL_RECT 1u
 #define GUI_USER_DRAW_TEXT      2u
 #define GUI_USER_DRAW_BLIT_RGBA32 3u
@@ -74,6 +76,7 @@ int gui_user_destroy_window(uint32_t window_id);
 int gui_user_add_label(uint32_t window_id, int x, int y, int w, int h, const char *text);
 int gui_user_add_button(uint32_t window_id, int x, int y, int w, int h, const char *text);
 int gui_user_poll_event(gui_user_event_t *out_event);
+void gui_user_post_key_event(gui_window_t *window, int key);
 int gui_user_set_text(uint32_t window_id, uint32_t widget_id, const char *text);
 int gui_user_draw(const gui_user_draw_request_t *request);
 int gui_user_resize_window(uint32_t window_id, int w, int h);

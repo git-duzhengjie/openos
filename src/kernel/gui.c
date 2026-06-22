@@ -6,6 +6,7 @@
  * ============================================================ */
 
 #include "gui.h"
+#include "gui_user.h"
 #include "framebuffer.h"
 #include "mouse.h"
 #include "usb_tablet.h"
@@ -2540,6 +2541,7 @@ void gui_process_events(void) {
     gui_event_t ev;
     while (gui_event_pop(&ev)) {
         if (ev.type == GUI_EVENT_KEY_DOWN) {
+            gui_user_post_key_event(g_gui.active_window, ev.key);
             if (g_gui.taskbar_search_focused && gui_taskbar_search_handle_key(ev.key)) {
                 /* taskbar search consumed the key */
             } else if (ev.key == GUI_KEY_ALT_TAB) {

@@ -767,4 +767,80 @@ static void ob_url_join_relative_path(char *out, int out_size, const char *base_
     ob_url_normalize_path(out, out_size, combined, (int)strlen(combined), suffix);
 }
 
+typedef struct ob_url_parts {
+    char host[128];
+    char path[256];
+    int is_file;
+} ob_url_parts_t;
+
+static int ob_ascii_match_ci(const char *p, const char *token)
+{
+    int i = 0;
+    if (!p || !token) return 0;
+    while (token[i]) {
+        char a = p[i];
+        char b = token[i];
+        if (!a) return 0;
+        if (a >= 'A' && a <= 'Z') a = (char)(a - 'A' + 'a');
+        if (b >= 'A' && b <= 'Z') b = (char)(b - 'A' + 'a');
+        if (a != b) return 0;
+        ++i;
+    }
+    return 1;
+}
+
+static int ob_url_parse_address(const char *text, const char *default_host, ob_url_parts_t *out, char *error, int error_size)
+{
+    const char *p = text;
+    const char *slash;
+    int host_len;
+    if (error && error_size > 0) error[0] = 0;
+    if (!text || !out) return -1;
+    while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') ++p;
+    if (!*p) {
+        if (error && error_size > 0) snprintf(error, error_size, "empty address");
+        return -1;
+    }
+    memset(out, 0, sizeof(*out));
+    if (ob_ascii_match_ci(p, "https://")) {
+        if (error && error_size > 0) snprintf(error, error_size, "HTTPS is not supported yet");
+        return -1;
+    }
+    if (ob_ascii_match_ci(p, "file://")) {
+        p += 7;
+        if (!*p) {
+            if (error && error_size > 0) snprintf(error, error_size, "empty file path");
+            return -1;
+        }
+        out->is_file = 1;
+        snprintf(out->path, sizeof(out->path), "%s", p);
+        return 0;
+    }
+    if (p[0] == '/') {
+        if (default_host && default_host[0]) {
+            out->is_file = 0;
+            snprintf(out->host, sizeof(out->host), "%s", default_host);
+            ob_url_join_relative_path(out->path, sizeof(out->path), "/", p);
+        } else {
+            out->is_file = 1;
+            snprintf(out->path, sizeof(out->path), "%s", p);
+        }
+        return 0;
+    }
+    if (ob_ascii_match_ci(p, "http://")) p += 7;
+    slash = strchr(p, '/');
+    host_len = slash ? (int)(slash - p) : (int)strlen(p);
+    while (host_len > 0 && (p[host_len - 1] == ' ' || p[host_len - 1] == '\t' || p[host_len - 1] == '\r' || p[host_len - 1] == '\n')) --host_len;
+    if (host_len <= 0 || host_len >= (int)sizeof(out->host)) {
+        if (error && error_size > 0) snprintf(error, error_size, "invalid host");
+        return -1;
+    }
+    out->is_file = 0;
+    memcpy(out->host, p, host_len);
+    out->host[host_len] = 0;
+    if (slash && *slash) ob_url_join_relative_path(out->path, sizeof(out->path), "/", slash);
+    else snprintf(out->path, sizeof(out->path), "/");
+    return 0;
+}
+
 #endif /* OPENOS_USER_BROWSER_ENGINE_H */

@@ -20,6 +20,7 @@
 #define BROWSER_LINK_MAX 8
 #define BROWSER_VIEW_LINES 6
 #define BROWSER_LINE_MAX 72
+#define BROWSER_ADDRESS_MAX 256
 
 typedef struct browser_load_context {
     volatile int active;
@@ -39,6 +40,9 @@ typedef struct browser_load_context {
     char links[BROWSER_LINK_MAX][OB_MAX_ATTR_VALUE];
     int link_count;
     int selected_link;
+    int address_label_id;
+    int address_editing;
+    char address_text[BROWSER_ADDRESS_MAX];
 } browser_load_context_t;
 
 typedef struct browser_history_entry {
@@ -316,22 +320,77 @@ static void browser_extract_title(char *dst, int dst_size, const char *html)
 
 static int browser_parse_url_arg(const char *url, char *host, int host_size, char *path, int path_size)
 {
-    const char *p = url;
-    const char *slash;
-    int host_len;
+    ob_url_parts_t parts;
+    char error[64];
     if (!url || !host || !path || host_size <= 0 || path_size <= 0) return -1;
-    if (browser_match_token_ci(p, "http://")) p += 7;
-    else if (browser_match_token_ci(p, "https://")) return -1;
-    slash = strchr(p, '/');
-    host_len = slash ? (int)(slash - p) : (int)strlen(p);
-    if (host_len <= 0 || host_len >= host_size) return -1;
-    memcpy(host, p, host_len);
-    host[host_len] = 0;
-    if (slash && *slash) snprintf(path, path_size, "%s", slash);
-    else snprintf(path, path_size, "/");
+    if (ob_url_parse_address(url, 0, &parts, error, sizeof(error)) != 0 || parts.is_file) return -1;
+    snprintf(host, host_size, "%s", parts.host);
+    snprintf(path, path_size, "%s", parts.path);
     return 0;
 }
 
+static void browser_format_address(char *out, int out_size, const char *host, const char *path, int is_file)
+{
+    if (!out || out_size <= 0) return;
+    if (is_file) snprintf(out, out_size, "file://%s", path && path[0] ? path : "/");
+    else snprintf(out, out_size, "http://%s%s", host && host[0] ? host : BROWSER_DEFAULT_HOST, path && path[0] ? path : "/");
+}
+
+static void browser_update_address_label(browser_load_context_t *ctx)
+{
+    char label[BROWSER_ADDRESS_MAX + 16];
+    if (!ctx || ctx->window_id <= 0 || ctx->address_label_id <= 0) return;
+    snprintf(label, sizeof(label), "%s%s", ctx->address_editing ? "URL*: " : "URL: ", ctx->address_text);
+    openos_gui_set_text(ctx->window_id, ctx->address_label_id, label);
+}
+
+static void browser_sync_address_from_target(browser_load_context_t *ctx, const char *host, const char *path, int is_file)
+{
+    if (!ctx) return;
+    browser_format_address(ctx->address_text, sizeof(ctx->address_text), host, path, is_file);
+    browser_update_address_label(ctx);
+}
+
+static int browser_address_handle_key(browser_load_context_t *ctx, unsigned int key, char *host, int host_size, char *path, int path_size, int *is_file, char *error, int error_size)
+{
+    int len;
+    ob_url_parts_t parts;
+    if (!ctx) return 0;
+    if (!ctx->address_editing) ctx->address_editing = 1;
+    if (key == OPENOS_GUI_KEY_ESCAPE) {
+        ctx->address_editing = 0;
+        browser_update_address_label(ctx);
+        return 0;
+    }
+    if (key == OPENOS_GUI_KEY_BACKSPACE || key == 127u) {
+        len = (int)strlen(ctx->address_text);
+        if (len > 0) ctx->address_text[len - 1] = 0;
+        browser_update_address_label(ctx);
+        return 0;
+    }
+    if (key == OPENOS_GUI_KEY_ENTER || key == '\n') {
+        if (ob_url_parse_address(ctx->address_text, host && host[0] ? host : BROWSER_DEFAULT_HOST, &parts, error, error_size) != 0) return -1;
+        if (host && host_size > 0) snprintf(host, host_size, "%s", parts.host);
+        if (path && path_size > 0) snprintf(path, path_size, "%s", parts.path);
+        if (is_file) *is_file = parts.is_file;
+        ctx->address_editing = 0;
+        browser_sync_address_from_target(ctx, parts.host, parts.path, parts.is_file);
+        return 1;
+    }
+    if (key >= 32u && key <= 126u) {
+        if (ctx->address_editing == 1) {
+            ctx->address_text[0] = 0;
+            ctx->address_editing = 2;
+        }
+        len = (int)strlen(ctx->address_text);
+        if (len < (int)sizeof(ctx->address_text) - 1) {
+            ctx->address_text[len] = (char)key;
+            ctx->address_text[len + 1] = 0;
+        }
+        browser_update_address_label(ctx);
+    }
+    return 0;
+}
 
 static int browser_parse_file_arg(const char *url, char *path, int path_size)
 {
@@ -738,6 +797,7 @@ int main(int argc, char **argv)
     char summary[160];
     int win;
     int status_label;
+    int address_label;
     int body_label;
     int load_button;
     int back_button;
@@ -785,8 +845,9 @@ int main(int argc, char **argv)
     }
 
     status_label = openos_gui_add_label(win, 16, 24, 640, 20, "Ready");
+    address_label = openos_gui_add_label(win, 16, 48, 650, 20, "URL: ");
     snprintf(summary, sizeof(summary), "Ready: %s%s%s", is_file ? "file://" : "http://", is_file ? "" : host, path);
-    body_label = openos_gui_add_label(win, 16, 56, 650, 170, summary);
+    body_label = openos_gui_add_label(win, 16, 76, 650, 150, summary);
     load_button = openos_gui_add_button(win, 16, 248, 80, 24, "Refresh");
     back_button = openos_gui_add_button(win, 104, 248, 64, 24, "Back");
     forward_button = openos_gui_add_button(win, 176, 248, 72, 24, "Forward");
@@ -795,24 +856,54 @@ int main(int argc, char **argv)
     next_link_button = openos_gui_add_button(win, 384, 248, 72, 24, "NextLink");
     open_link_button = openos_gui_add_button(win, 464, 248, 72, 24, "OpenLink");
     close_button = openos_gui_add_button(win, 584, 248, 80, 24, "Close");
-    printf("browser: ready http://%s%s\n", host, path);
+    load.window_id = win;
+    load.status_label_id = status_label;
+    load.body_label_id = body_label;
+    load.address_label_id = address_label;
+    browser_sync_address_from_target(&load, host, path, is_file);
+    printf("browser: ready %s%s%s\n", is_file ? "file://" : "http://", is_file ? "" : host, path);
 
     for (;;) {
         openos_gui_event_t event;
         int ev = openos_gui_poll_event(&event);
         if (ev == 0 && event.type != OPENOS_GUI_EVENT_NONE && event.window_id == (unsigned int)win) {
+            if (event.type == OPENOS_GUI_EVENT_KEY_DOWN || event.type == OPENOS_GUI_EVENT_TEXT_INPUT) {
+                char next_host[BROWSER_HOST_MAX];
+                char next_path[BROWSER_PATH_MAX];
+                char error[96];
+                int next_is_file = 0;
+                int key_rc;
+                snprintf(next_host, sizeof(next_host), "%s", host ? host : "");
+                snprintf(next_path, sizeof(next_path), "%s", path ? path : "/");
+                error[0] = 0;
+                key_rc = browser_address_handle_key(&load, event.key, next_host, sizeof(next_host), next_path, sizeof(next_path), &next_is_file, error, sizeof(error));
+                if (key_rc < 0) {
+                    openos_gui_set_text(win, status_label, error[0] ? error : "Invalid address");
+                } else if (key_rc > 0) {
+                    host = next_is_file ? "" : load.host;
+                    path = load.path;
+                    snprintf(load.host, sizeof(load.host), "%s", next_host);
+                    snprintf(load.path, sizeof(load.path), "%s", next_path);
+                    browser_history_push(&history, next_host, next_path, next_is_file);
+                    scroll_line = 0;
+                    browser_start_load(&load, win, status_label, body_label, next_host, next_path, next_is_file);
+                }
+                continue;
+            }
             if (event.widget_id == (unsigned int)close_button)
                 break;
             if (event.widget_id == (unsigned int)load_button) {
                 const browser_history_entry_t *cur = browser_history_current(&history);
                 if (cur) {
                     scroll_line = 0;
+                    browser_sync_address_from_target(&load, cur->host, cur->path, cur->is_file);
                     browser_start_load(&load, win, status_label, body_label, cur->host, cur->path, cur->is_file);
                 }
             } else if (event.widget_id == (unsigned int)back_button) {
                 if (browser_history_go(&history, -1) == 0) {
                     const browser_history_entry_t *cur = browser_history_current(&history);
                     scroll_line = 0;
+                    browser_sync_address_from_target(&load, cur->host, cur->path, cur->is_file);
                     browser_start_load(&load, win, status_label, body_label, cur->host, cur->path, cur->is_file);
                 } else {
                     openos_gui_set_text(win, status_label, "Back: no history");
@@ -821,6 +912,7 @@ int main(int argc, char **argv)
                 if (browser_history_go(&history, 1) == 0) {
                     const browser_history_entry_t *cur = browser_history_current(&history);
                     scroll_line = 0;
+                    browser_sync_address_from_target(&load, cur->host, cur->path, cur->is_file);
                     browser_start_load(&load, win, status_label, body_label, cur->host, cur->path, cur->is_file);
                 } else {
                     openos_gui_set_text(win, status_label, "Forward: no history");
@@ -847,6 +939,7 @@ int main(int argc, char **argv)
                 } else if (browser_resolve_link(cur, selected_href, next_host, sizeof(next_host), next_path, sizeof(next_path), &next_is_file, error, sizeof(error)) == 0) {
                     scroll_line = 0;
                     browser_history_push(&history, next_host, next_path, next_is_file);
+                    browser_sync_address_from_target(&load, next_host, next_path, next_is_file);
                     browser_start_load(&load, win, status_label, body_label, next_host, next_path, next_is_file);
                 } else {
                     openos_gui_set_text(win, status_label, error[0] ? error : "OpenLink: unsupported link");

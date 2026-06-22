@@ -71,6 +71,18 @@ static void gui_user_button_on_click(gui_widget_t *widget, void *user_data) {
     gui_user_push_event(&event);
 }
 
+void gui_user_post_key_event(gui_window_t *window, int key) {
+    gui_user_event_t event;
+    if (!window || window->user_owner_pid == 0 || key == 0) return;
+    memset(&event, 0, sizeof(event));
+    event.owner_pid = window->user_owner_pid;
+    event.type = GUI_EVENT_KEY_DOWN;
+    event.window_id = window->id;
+    event.widget_id = 0;
+    event.key = key;
+    gui_user_push_event(&event);
+}
+
 static uint32_t gui_user_current_pid(void) {
     int pid = proc_current_pid();
     return pid > 0 ? (uint32_t)pid : 0;

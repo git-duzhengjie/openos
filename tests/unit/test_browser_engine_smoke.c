@@ -209,6 +209,31 @@ int main(void)
         }
     }
 
+    {
+        ob_url_parts_t parts;
+        char error[64];
+        if (ob_url_parse_address("http://example.com/docs/../index.html?q=1#top", 0, &parts, error, sizeof(error)) != 0 ||
+            parts.is_file || strcmp(parts.host, "example.com") != 0 || strcmp(parts.path, "/index.html?q=1#top") != 0) {
+            fprintf(stderr, "browser address parse http smoke failed: host=%s path=%s error=%s\n", parts.host, parts.path, error);
+            return 1;
+        }
+        if (ob_url_parse_address("/local/page.html", 0, &parts, error, sizeof(error)) != 0 ||
+            !parts.is_file || strcmp(parts.path, "/local/page.html") != 0) {
+            fprintf(stderr, "browser address parse file path smoke failed: path=%s error=%s\n", parts.path, error);
+            return 1;
+        }
+        if (ob_url_parse_address("/remote/path", "openos.local", &parts, error, sizeof(error)) != 0 ||
+            parts.is_file || strcmp(parts.host, "openos.local") != 0 || strcmp(parts.path, "/remote/path") != 0) {
+            fprintf(stderr, "browser address parse default host smoke failed: host=%s path=%s error=%s\n", parts.host, parts.path, error);
+            return 1;
+        }
+        if (ob_url_parse_address("https://example.com/", 0, &parts, error, sizeof(error)) == 0 ||
+            !strstr(error, "HTTPS")) {
+            fprintf(stderr, "browser address parse https rejection smoke failed: error=%s\n", error);
+            return 1;
+        }
+    }
+
     printf("browser engine smoke ok: nodes=%d\n", doc.count);
     return 0;
 }
