@@ -385,7 +385,7 @@
 - [√] 明确废弃 NetSurf / 轻量浏览器内核路线：不再把 `/bin/nsdemo` 或任何自研 HTML demo 作为最终浏览器路线
   - [√] 从活跃构建、内核 `/bin` 安装流程和源码树移除 NetSurf/OpenOS demo
   - [√] 后续浏览器目标仅允许 Chromium Content + Blink + V8 + Skia 组合，不能用 NetSurf/Dillo/Links/QuickJS demo 替代
-- [ ] Chrome/Chromium 引擎近期落地任务
+- [√] Chrome/Chromium 引擎近期落地任务（P0-P6 入口、文档、门禁与阶段性验证已完成；真实 V8/content_shell 完整构建仍受外部依赖网络、Chromium checkout 与构建空间条件约束）
   - [√] P0：清理 NetSurf/nsdemo 活跃路线，保证镜像不再安装 `/bin/nsdemo`
   - [√] P1：固定 Chromium 上游源码获取入口，记录版本/目录/磁盘需求和 depot_tools 前置检查
   - [√] P2：新增 OpenOS Chromium GN/toolchain 骨架，目标为 `target_os="openos"`、`target_cpu="x86"`
