@@ -194,6 +194,18 @@ static int tcp_next_id = 1;
 static uint16_t ipv4_ident = 1;
 static uint32_t tcp_clock_ms;
 
+/*
+ * Keep MTU-sized transmit scratch buffers out of the kernel stack.
+ * Browser form submit can issue HTTP requests from GUI paths, and the TCP send
+ * path nests tcp_send_segment_window -> tcp_checksum -> net_send_ipv4 ->
+ * eth_send.  A NET_ETH_MTU/NET_FRAME_MAX_SIZE automatic buffer in each layer can
+ * consume several kilobytes of a small kernel stack and corrupt trap frames.
+ */
+static uint8_t net_tx_frame[NET_FRAME_MAX_SIZE];
+static uint8_t net_tx_ipv4_packet[NET_ETH_MTU];
+static uint8_t net_tx_tcp_payload[NET_ETH_MTU];
+static uint8_t net_tx_tcp_pseudo[NET_ETH_MTU];
+
 static uint16_t bswap16(uint16_t x) {
     return (uint16_t)((x << 8) | (x >> 8));
 }
@@ -281,7 +293,7 @@ static uint16_t checksum16(const void *data, uint16_t len) {
 
 static int eth_send(net_device_t *dev, const uint8_t *dst, uint16_t type,
                     const uint8_t *payload, uint16_t payload_len) {
-    uint8_t frame[NET_FRAME_MAX_SIZE];
+    uint8_t *frame = net_tx_frame;
     struct eth_header *eth;
     uint16_t frame_len;
 
@@ -369,7 +381,7 @@ static void handle_arp(net_device_t *dev, const uint8_t *data, uint16_t len) {
 }
 
 int net_send_ipv4(uint32_t dst_ip, uint8_t protocol, const uint8_t *payload, uint16_t payload_len) {
-    uint8_t packet[NET_ETH_MTU];
+    uint8_t *packet = net_tx_ipv4_packet;
     struct ipv4_header *ip;
     uint8_t dst_mac[NET_ETH_ADDR_LEN];
     uint16_t total_len;
@@ -581,9 +593,9 @@ int net_tcp_listen(uint16_t port, tcp_recv_func_t cb) {
 }
 
 static uint16_t tcp_checksum(uint32_t src_ip, uint32_t dst_ip, const uint8_t *tcp, uint16_t tcp_len) {
-    uint8_t pseudo[NET_ETH_MTU];
+    uint8_t *pseudo = net_tx_tcp_pseudo;
     uint16_t plen;
-    if ((uint32_t)tcp_len + 12U > (uint32_t)sizeof(pseudo)) return 0;
+    if ((uint32_t)tcp_len + 12U > NET_ETH_MTU) return 0;
     *(uint32_t *)(pseudo + 0) = htonl(src_ip);
     *(uint32_t *)(pseudo + 4) = htonl(dst_ip);
     pseudo[8] = 0;
@@ -597,10 +609,10 @@ static uint16_t tcp_checksum(uint32_t src_ip, uint32_t dst_ip, const uint8_t *tc
 static int tcp_send_segment_window(uint32_t dst_ip, uint16_t src_port, uint16_t dst_port,
                                    uint32_t seq, uint32_t ack, uint8_t flags,
                                    uint16_t window, const uint8_t *data, uint16_t data_len) {
-    uint8_t payload[NET_ETH_MTU];
+    uint8_t *payload = net_tx_tcp_payload;
     struct tcp_header *tcp;
     uint16_t tcp_len;
-    if (sizeof(struct tcp_header) + data_len > sizeof(payload)) return -1;
+    if (sizeof(struct tcp_header) + data_len > NET_ETH_MTU) return -1;
     tcp = (struct tcp_header *)payload;
     tcp_len = (uint16_t)(sizeof(struct tcp_header) + data_len);
     memset(tcp, 0, sizeof(struct tcp_header));
