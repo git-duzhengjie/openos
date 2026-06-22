@@ -620,6 +620,11 @@ typedef struct openos_gui_widget_request {
 #define OPENOS_GUI_KEY_TAB 9u
 #define OPENOS_GUI_KEY_ENTER 13u
 #define OPENOS_GUI_KEY_ESCAPE 27u
+#define OPENOS_GUI_KEY_DELETE 0x101u
+#define OPENOS_GUI_KEY_LEFT 0x102u
+#define OPENOS_GUI_KEY_RIGHT 0x103u
+#define OPENOS_GUI_KEY_HOME 0x104u
+#define OPENOS_GUI_KEY_END 0x105u
 
 static inline int openos_syscall3(int num, int a, int b, int c)
 {

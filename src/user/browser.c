@@ -50,6 +50,7 @@ typedef struct browser_load_context {
     int focus_mode;
     int address_label_id;
     int address_editing;
+    int address_cursor;
     int home_visible;
     char address_text[BROWSER_ADDRESS_MAX];
     ob_dom_document_t dom;
@@ -382,8 +383,12 @@ static void browser_update_address_label(browser_load_context_t *ctx)
     if (!ctx || ctx->window_id <= 0 || ctx->address_label_id <= 0) return;
     text = ctx->address_text[0] ? ctx->address_text : "Search OpenOS or type a URL";
     len = (int)strlen(text);
+    if (ctx->address_cursor < 0 || ctx->address_cursor > len) ctx->address_cursor = len;
     if (ctx->address_text[0] && len > 60) {
-        snprintf(visible, sizeof(visible), "...%s", text + len - 60);
+        int start = ctx->address_cursor - 30;
+        if (start < 0) start = 0;
+        if (start > len - 60) start = len - 60;
+        snprintf(visible, sizeof(visible), "%s%.*s%s", start > 0 ? "..." : "", 60, text + start, start + 60 < len ? "..." : "");
         text = visible;
     }
     openos_gui_set_text(ctx->window_id, ctx->address_label_id, text);
@@ -393,24 +398,63 @@ static void browser_sync_address_from_target(browser_load_context_t *ctx, const 
 {
     if (!ctx) return;
     browser_format_address(ctx->address_text, sizeof(ctx->address_text), host, path, is_file);
+    ctx->address_cursor = (int)strlen(ctx->address_text);
     browser_update_address_label(ctx);
 }
 
 static int browser_address_handle_key(browser_load_context_t *ctx, unsigned int key, char *host, int host_size, char *path, int path_size, int *is_file, char *error, int error_size)
 {
     int len;
+    int i;
     ob_url_parts_t parts;
     if (!ctx) return 0;
     if (!ctx->address_editing) ctx->address_editing = 1;
+    len = (int)strlen(ctx->address_text);
+    if (ctx->address_cursor < 0 || ctx->address_cursor > len) ctx->address_cursor = len;
     if (key == OPENOS_GUI_KEY_ESCAPE) {
         ctx->address_editing = 0;
+        ctx->address_cursor = (int)strlen(ctx->address_text);
+        browser_update_address_label(ctx);
+        return 0;
+    }
+    if (key == OPENOS_GUI_KEY_LEFT) {
+        if (ctx->address_cursor > 0) ctx->address_cursor--;
+        browser_update_address_label(ctx);
+        return 0;
+    }
+    if (key == OPENOS_GUI_KEY_RIGHT) {
+        if (ctx->address_cursor < len) ctx->address_cursor++;
+        browser_update_address_label(ctx);
+        return 0;
+    }
+    if (key == OPENOS_GUI_KEY_HOME) {
+        ctx->address_cursor = 0;
+        browser_update_address_label(ctx);
+        return 0;
+    }
+    if (key == OPENOS_GUI_KEY_END) {
+        ctx->address_cursor = len;
         browser_update_address_label(ctx);
         return 0;
     }
     if (key == OPENOS_GUI_KEY_BACKSPACE || key == 127u || key == '\b') {
         ctx->address_editing = 2;
-        len = (int)strlen(ctx->address_text);
-        if (len > 0) ctx->address_text[len - 1] = 0;
+        if (ctx->address_cursor > 0 && len > 0) {
+            memmove(ctx->address_text + ctx->address_cursor - 1,
+                    ctx->address_text + ctx->address_cursor,
+                    len - ctx->address_cursor + 1);
+            ctx->address_cursor--;
+        }
+        browser_update_address_label(ctx);
+        return 0;
+    }
+    if (key == OPENOS_GUI_KEY_DELETE) {
+        ctx->address_editing = 2;
+        if (ctx->address_cursor < len) {
+            memmove(ctx->address_text + ctx->address_cursor,
+                    ctx->address_text + ctx->address_cursor + 1,
+                    len - ctx->address_cursor);
+        }
         browser_update_address_label(ctx);
         return 0;
     }
@@ -426,12 +470,14 @@ static int browser_address_handle_key(browser_load_context_t *ctx, unsigned int 
     if (key >= 32u && key <= 126u) {
         if (ctx->address_editing == 1) {
             ctx->address_text[0] = 0;
+            ctx->address_cursor = 0;
             ctx->address_editing = 2;
+            len = 0;
         }
-        len = (int)strlen(ctx->address_text);
         if (len < (int)sizeof(ctx->address_text) - 1) {
-            ctx->address_text[len] = (char)key;
-            ctx->address_text[len + 1] = 0;
+            for (i = len; i >= ctx->address_cursor; --i)
+                ctx->address_text[i + 1] = ctx->address_text[i];
+            ctx->address_text[ctx->address_cursor++] = (char)key;
         }
         browser_update_address_label(ctx);
     }
