@@ -842,6 +842,7 @@ int main(int argc, char **argv)
     int next_link_button;
     int open_link_button;
     int next_field_button;
+    int submit_button;
     int close_button;
     int rc = 0;
     int scroll_line = 0;
@@ -874,7 +875,7 @@ int main(int argc, char **argv)
 
     browser_history_init(&history, host, path, is_file);
 
-    win = openos_gui_create_window("用户态浏览器", 80, 80, 700, 300);
+    win = openos_gui_create_window("用户态浏览器", 80, 80, 700, 332);
     if (win < 0) {
         printf("browser: failed to create GUI window\n");
         return 1;
@@ -892,7 +893,8 @@ int main(int argc, char **argv)
     next_link_button = openos_gui_add_button(win, 384, 248, 72, 24, "NextLink");
     open_link_button = openos_gui_add_button(win, 464, 248, 72, 24, "OpenLink");
     next_field_button = openos_gui_add_button(win, 544, 248, 80, 24, "NextField");
-    close_button = openos_gui_add_button(win, 632, 248, 56, 24, "Close");
+    submit_button = openos_gui_add_button(win, 16, 280, 80, 24, "Submit");
+    close_button = openos_gui_add_button(win, 632, 280, 56, 24, "Close");
     load.window_id = win;
     load.status_label_id = status_label;
     load.body_label_id = body_label;
@@ -973,6 +975,30 @@ int main(int argc, char **argv)
                     browser_update_form_status(win, status_label, &load);
                 } else {
                     openos_gui_set_text(win, status_label, "No editable form fields");
+                }
+            } else if (event.widget_id == (unsigned int)submit_button) {
+                const browser_history_entry_t *cur = browser_history_current(&history);
+                char action_url[BROWSER_ADDRESS_MAX];
+                char next_host[BROWSER_HOST_MAX];
+                char next_path[BROWSER_PATH_MAX];
+                char error[96];
+                int next_is_file = 0;
+                int submit_id = -1;
+                int build_rc;
+                error[0] = 0;
+                if (load.form_state.count > 0 && load.form_state.focused >= 0 && load.form_state.focused < load.form_state.count)
+                    submit_id = load.form_state.controls[load.form_state.focused].node_id;
+                build_rc = ob_form_build_get_url(&load.dom, &load.form_state, submit_id,
+                                                  cur ? cur->path : path, action_url, sizeof(action_url));
+                if (!cur || build_rc < 0) {
+                    openos_gui_set_text(win, status_label, build_rc == -2 ? "Submit: only GET forms supported" : "Submit: no GET form target");
+                } else if (browser_resolve_link(cur, action_url, next_host, sizeof(next_host), next_path, sizeof(next_path), &next_is_file, error, sizeof(error)) == 0) {
+                    scroll_line = 0;
+                    browser_history_push(&history, next_host, next_path, next_is_file);
+                    browser_sync_address_from_target(&load, next_host, next_path, next_is_file);
+                    browser_start_load(&load, win, status_label, body_label, next_host, next_path, next_is_file);
+                } else {
+                    openos_gui_set_text(win, status_label, error[0] ? error : "Submit: unsupported target");
                 }
             } else if (event.widget_id == (unsigned int)open_link_button) {
                 const browser_history_entry_t *cur = browser_history_current(&history);

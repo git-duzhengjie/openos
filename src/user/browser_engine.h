@@ -63,6 +63,9 @@ typedef struct ob_dom_node {
     char form_value[OB_MAX_ATTR_VALUE];
     char form_placeholder[OB_MAX_ATTR_VALUE];
     char form_name[OB_MAX_ATTR_VALUE];
+    char form_action[OB_MAX_ATTR_VALUE];
+    char form_method[OB_MAX_ATTR_VALUE];
+    int form_owner;
 } ob_dom_node_t;
 
 typedef struct ob_dom_document {
@@ -96,6 +99,9 @@ static void ob_dom_node_copy(ob_dom_node_t *dst, const ob_dom_node_t *src)
     ob_dom_copy_text(dst->form_value, sizeof(dst->form_value), src->form_value);
     ob_dom_copy_text(dst->form_placeholder, sizeof(dst->form_placeholder), src->form_placeholder);
     ob_dom_copy_text(dst->form_name, sizeof(dst->form_name), src->form_name);
+    ob_dom_copy_text(dst->form_action, sizeof(dst->form_action), src->form_action);
+    ob_dom_copy_text(dst->form_method, sizeof(dst->form_method), src->form_method);
+    dst->form_owner = src->form_owner;
 }
 
 static void ob_dom_document_copy(ob_dom_document_t *dst, const ob_dom_document_t *src)
@@ -153,6 +159,7 @@ typedef struct ob_dom_text_renderer_base {
 
 typedef struct ob_form_control_state {
     int node_id;
+    int editable;
     char name[OB_MAX_ATTR_VALUE];
     char value[OB_MAX_ATTR_VALUE];
 } ob_form_control_state_t;
@@ -483,7 +490,11 @@ static void ob_css_apply_inline_style(ob_dom_node_t *node, const ob_html_token_t
 static void ob_dom_extract_form_attrs(ob_dom_node_t *node, const ob_html_token_t *tok)
 {
     if (!node || !tok) return;
-    if (ob_token_eq_ci(node->name, "input")) {
+    if (ob_token_eq_ci(node->name, "form")) {
+        ob_extract_attr_value(tok->attrs, tok->attrs_len, "action", node->form_action, sizeof(node->form_action));
+        ob_extract_attr_value(tok->attrs, tok->attrs_len, "method", node->form_method, sizeof(node->form_method));
+        if (!node->form_method[0]) ob_copy_attr_value(node->form_method, sizeof(node->form_method), "get", 3);
+    } else if (ob_token_eq_ci(node->name, "input")) {
         ob_extract_attr_value(tok->attrs, tok->attrs_len, "type", node->form_type, sizeof(node->form_type));
         ob_extract_attr_value(tok->attrs, tok->attrs_len, "value", node->form_value, sizeof(node->form_value));
         ob_extract_attr_value(tok->attrs, tok->attrs_len, "placeholder", node->form_placeholder, sizeof(node->form_placeholder));
@@ -516,6 +527,9 @@ static int ob_dom_add_node(ob_dom_document_t *doc, int type, const char *name, c
     doc->nodes[id].form_value[0] = 0;
     doc->nodes[id].form_placeholder[0] = 0;
     doc->nodes[id].form_name[0] = 0;
+    doc->nodes[id].form_action[0] = 0;
+    doc->nodes[id].form_method[0] = 0;
+    doc->nodes[id].form_owner = -1;
     if (name) ob_copy_tag_name(doc->nodes[id].name, sizeof(doc->nodes[id].name), name, ob_cstr_len(name));
     if (text && text_len > 0) {
         for (i = 0; i < text_len && i < OB_MAX_NODE_TEXT - 1; ++i) doc->nodes[id].text[i] = text[i];
@@ -575,8 +589,20 @@ static int ob_html_parse_impl(ob_html_parser_i_t *iface, const char *html, ob_do
                 int id = ob_dom_add_node(doc, OB_DOM_NODE_ELEMENT, tok.name, 0, 0, current, display);
                 if (id >= 0 && ob_token_eq_ci(tok.name, "a"))
                     ob_extract_attr_value(tok.attrs, tok.attrs_len, "href", doc->nodes[id].href, sizeof(doc->nodes[id].href));
+                if (id >= 0) {
+                    int form_depth;
+                    doc->nodes[id].form_owner = -1;
+                    for (form_depth = depth - 1; form_depth > 0; --form_depth) {
+                        int owner = stack[form_depth];
+                        if (owner >= 0 && owner < doc->count && ob_token_eq_ci(doc->nodes[owner].name, "form")) {
+                            doc->nodes[id].form_owner = owner;
+                            break;
+                        }
+                    }
+                }
                 if (id >= 0) ob_css_apply_inline_style(&doc->nodes[id], &tok);
                 if (id >= 0) ob_dom_extract_form_attrs(&doc->nodes[id], &tok);
+                if (id >= 0 && ob_token_eq_ci(tok.name, "form")) doc->nodes[id].form_owner = id;
                 if (id >= 0 && !tok.self_closing && !ob_is_void_tag(tok.name) && depth < OB_MAX_DOM_NODES) stack[depth++] = id;
             }
         }
@@ -636,6 +662,15 @@ static int ob_dom_is_editable_form_control(const ob_dom_node_t *node)
     return 0;
 }
 
+static int ob_dom_is_submit_form_control(const ob_dom_node_t *node)
+{
+    if (!node || node->type != OB_DOM_NODE_ELEMENT) return 0;
+    if (ob_token_eq_ci(node->name, "button")) return 1;
+    if (ob_token_eq_ci(node->name, "input"))
+        return ob_token_eq_ci(node->form_type, "submit") || ob_token_eq_ci(node->form_type, "button");
+    return 0;
+}
+
 static int ob_dom_is_form_control(const ob_dom_node_t *node)
 {
     if (!node || node->type != OB_DOM_NODE_ELEMENT) return 0;
@@ -667,6 +702,16 @@ static int ob_form_state_is_focused(const ob_form_state_t *state, int node_id)
     return state->controls[state->focused].node_id == node_id;
 }
 
+static const char *ob_dom_first_child_text(const ob_dom_document_t *doc, int parent_id)
+{
+    int i;
+    if (!doc || parent_id < 0) return "";
+    for (i = 0; i < doc->count; ++i) {
+        if (doc->nodes[i].parent == parent_id && doc->nodes[i].type == OB_DOM_NODE_TEXT) return doc->nodes[i].text;
+    }
+    return "";
+}
+
 static int ob_form_state_collect_from_dom(ob_form_state_t *state, const ob_dom_document_t *doc)
 {
     int i;
@@ -674,13 +719,19 @@ static int ob_form_state_collect_from_dom(ob_form_state_t *state, const ob_dom_d
     ob_form_state_init(state);
     for (i = 0; i < doc->count && state->count < OB_FORM_STATE_MAX_CONTROLS; ++i) {
         const ob_dom_node_t *node = &doc->nodes[i];
-        if (!ob_dom_is_editable_form_control(node)) continue;
+        if (!ob_dom_is_editable_form_control(node) && !ob_dom_is_submit_form_control(node)) continue;
         state->controls[state->count].node_id = i;
+        state->controls[state->count].editable = ob_dom_is_editable_form_control(node);
         ob_copy_attr_value(state->controls[state->count].name, sizeof(state->controls[state->count].name),
                            node->form_name[0] ? node->form_name : node->name,
                            ob_cstr_len(node->form_name[0] ? node->form_name : node->name));
-        ob_copy_attr_value(state->controls[state->count].value, sizeof(state->controls[state->count].value),
-                           node->form_value, ob_cstr_len(node->form_value));
+        {
+            const char *initial_value = node->form_value;
+            if (ob_token_eq_ci(node->name, "textarea") && !initial_value[0])
+                initial_value = ob_dom_first_child_text(doc, i);
+            ob_copy_attr_value(state->controls[state->count].value, sizeof(state->controls[state->count].value),
+                               initial_value, ob_cstr_len(initial_value));
+        }
         ++state->count;
     }
     if (state->count > 0) state->focused = 0;
@@ -699,6 +750,7 @@ static int ob_form_state_handle_key(ob_form_state_t *state, unsigned int key)
     char *value;
     int len;
     if (!state || state->focused < 0 || state->focused >= state->count) return 0;
+    if (!state->controls[state->focused].editable) return 0;
     value = state->controls[state->focused].value;
     len = ob_cstr_len(value);
     if (key == 8u || key == 127u) {
@@ -800,6 +852,88 @@ static void ob_dom_render_node_text_with_form_state(const ob_dom_document_t *doc
 {
     int link_count = 0;
     ob_dom_render_node_text_ex(doc, node_id, out, out_size, pos, &link_count, form_state);
+}
+
+static int ob_form_url_append_char(char *out, int out_size, int *pos, char ch)
+{
+    if (!out || !pos || out_size <= 0 || *pos >= out_size - 1) return -1;
+    out[(*pos)++] = ch;
+    out[*pos] = 0;
+    return 0;
+}
+
+static int ob_form_url_append_text(char *out, int out_size, int *pos, const char *text)
+{
+    int i = 0;
+    if (!text) text = "";
+    while (text[i]) {
+        if (ob_form_url_append_char(out, out_size, pos, text[i++]) < 0) return -1;
+    }
+    return 0;
+}
+
+static int ob_form_url_append_encoded(char *out, int out_size, int *pos, const char *text)
+{
+    static const char hex[] = "0123456789ABCDEF";
+    int i = 0;
+    if (!text) text = "";
+    while (text[i]) {
+        unsigned char ch = (unsigned char)text[i++];
+        if ((ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') ||
+            ch == '-' || ch == '_' || ch == '.' || ch == '~') {
+            if (ob_form_url_append_char(out, out_size, pos, (char)ch) < 0) return -1;
+        } else if (ch == ' ') {
+            if (ob_form_url_append_char(out, out_size, pos, '+') < 0) return -1;
+        } else {
+            if (ob_form_url_append_char(out, out_size, pos, '%') < 0) return -1;
+            if (ob_form_url_append_char(out, out_size, pos, hex[(ch >> 4) & 15]) < 0) return -1;
+            if (ob_form_url_append_char(out, out_size, pos, hex[ch & 15]) < 0) return -1;
+        }
+    }
+    return 0;
+}
+
+static int ob_form_find_owner_for_node(const ob_dom_document_t *doc, int node_id)
+{
+    if (!doc || node_id < 0 || node_id >= doc->count) return -1;
+    return doc->nodes[node_id].form_owner;
+}
+
+static int ob_form_build_get_url(const ob_dom_document_t *doc, const ob_form_state_t *state,
+                                 int submit_node_id, const char *base_url, char *out, int out_size)
+{
+    int owner;
+    int i;
+    int pos = 0;
+    int has_query = 0;
+    const char *action = "";
+    if (!doc || !out || out_size <= 0) return -1;
+    out[0] = 0;
+    owner = ob_form_find_owner_for_node(doc, submit_node_id);
+    if (owner >= 0 && owner < doc->count) {
+        if (doc->nodes[owner].form_method[0] && !ob_token_eq_ci(doc->nodes[owner].form_method, "get")) return -2;
+        action = doc->nodes[owner].form_action;
+    }
+    if (!action || !action[0]) action = base_url ? base_url : "";
+    if (ob_form_url_append_text(out, out_size, &pos, action) < 0) return -1;
+    for (i = 0; i < pos; ++i) {
+        if (out[i] == '?') has_query = 1;
+    }
+    if (state) {
+        for (i = 0; i < state->count; ++i) {
+            int cid = state->controls[i].node_id;
+            if (cid < 0 || cid >= doc->count) continue;
+            if (owner >= 0 && doc->nodes[cid].form_owner != owner) continue;
+            if (!state->controls[i].editable) continue;
+            if (!state->controls[i].name[0]) continue;
+            if (ob_form_url_append_char(out, out_size, &pos, has_query ? '&' : '?') < 0) return -1;
+            has_query = 1;
+            if (ob_form_url_append_encoded(out, out_size, &pos, state->controls[i].name) < 0) return -1;
+            if (ob_form_url_append_char(out, out_size, &pos, '=') < 0) return -1;
+            if (ob_form_url_append_encoded(out, out_size, &pos, state->controls[i].value) < 0) return -1;
+        }
+    }
+    return pos;
 }
 
 static int ob_dom_text_render_with_form_state(const ob_dom_document_t *doc, const ob_form_state_t *form_state, char *out, int out_size)

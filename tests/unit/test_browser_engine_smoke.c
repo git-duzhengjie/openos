@@ -210,6 +210,37 @@ int main(void)
     }
 
     {
+        const char *submit_form = "<form action='/search' method='get'><input name='q' value='hello world'>"
+                                  "<textarea name='msg'>a&b</textarea><input type='submit' value='Go'></form>"
+                                  "<form action='/post' method='post'><input name='x' value='1'><button>Send</button></form>";
+        ob_form_state_t form;
+        int first_input = -1;
+        int submit_input = -1;
+        int post_button = -1;
+        int i;
+        char url[160];
+        if (parser.iface.parse(&parser.iface, submit_form, &doc) <= 1 ||
+            ob_form_state_collect_from_dom(&form, &doc) != 5) {
+            fprintf(stderr, "browser form submit collect smoke failed\n");
+            return 1;
+        }
+        for (i = 0; i < doc.count; ++i) {
+            if (strcmp(doc.nodes[i].name, "input") == 0 && strcmp(doc.nodes[i].form_name, "q") == 0) first_input = i;
+            if (strcmp(doc.nodes[i].name, "input") == 0 && strcmp(doc.nodes[i].form_type, "submit") == 0) submit_input = i;
+            if (strcmp(doc.nodes[i].name, "button") == 0) post_button = i;
+        }
+        if (first_input < 0 || submit_input < 0 || post_button < 0 ||
+            ob_form_build_get_url(&doc, &form, first_input, "/base", url, sizeof(url)) <= 0 ||
+            strcmp(url, "/search?q=hello+world&msg=a%26b") != 0 ||
+            ob_form_build_get_url(&doc, &form, submit_input, "/base", url, sizeof(url)) <= 0 ||
+            strcmp(url, "/search?q=hello+world&msg=a%26b") != 0 ||
+            ob_form_build_get_url(&doc, &form, post_button, "/base", url, sizeof(url)) != -2) {
+            fprintf(stderr, "browser form GET submit smoke failed: %s\n", url);
+            return 1;
+        }
+    }
+
+    {
         char url[128];
         ob_url_join_relative_path(url, sizeof(url), "/docs/guide/index.html", "./intro.html");
         if (strcmp(url, "/docs/guide/intro.html") != 0) {
