@@ -147,6 +147,24 @@ int main(void)
         }
     }
 
+    {
+        const char *comments = "<!doctype html><!-- hidden --><main>Visible<!-- ignored --><p>Text</p></main>";
+        int saw_bang_tag = 0;
+        int saw_hidden_text = 0;
+        ob_html_tokenizer_base_init(&tokenizer, comments);
+        while (tokenizer.iface.next(&tokenizer.iface, &tok) == 0 && tok.type != OB_HTML_TOKEN_EOF) {
+            if (tok.type == OB_HTML_TOKEN_TAG && tok.name[0] == '!') saw_bang_tag = 1;
+            if (tok.type == OB_HTML_TOKEN_TEXT && tok.text_len == 6 && strncmp(tok.text, "hidden", 6) == 0) saw_hidden_text = 1;
+        }
+        if (saw_bang_tag || saw_hidden_text ||
+            parser.iface.parse(&parser.iface, comments, &doc) <= 1 ||
+            renderer.iface.render(&renderer.iface, &doc, rendered, sizeof(rendered)) <= 0 ||
+            !strstr(rendered, "Visible\nText") || strstr(rendered, "doctype") || strstr(rendered, "hidden") || strstr(rendered, "ignored")) {
+            fprintf(stderr, "browser comment/doctype smoke failed: %s\n", rendered);
+            return 1;
+        }
+    }
+
     printf("browser engine smoke ok: nodes=%d\n", doc.count);
     return 0;
 }

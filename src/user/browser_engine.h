@@ -244,6 +244,18 @@ static int ob_tokenizer_next_impl(ob_html_tokenizer_i_t *iface, ob_html_token_t 
         return 0;
     }
     ++self->pos;
+    if (s[self->pos] == '!') {
+        if (s[self->pos + 1] == '-' && s[self->pos + 2] == '-') {
+            self->pos += 3;
+            while (s[self->pos] && !(s[self->pos] == '-' && s[self->pos + 1] == '-' && s[self->pos + 2] == '>')) ++self->pos;
+            if (s[self->pos]) self->pos += 3;
+        } else {
+            ++self->pos;
+            while (s[self->pos] && s[self->pos] != '>') ++self->pos;
+            if (s[self->pos] == '>') ++self->pos;
+        }
+        return ob_tokenizer_next_impl(iface, out);
+    }
     if (s[self->pos] == '/') { out->closing = 1; ++self->pos; }
     while (s[self->pos] == ' ' || s[self->pos] == '\t' || s[self->pos] == '\r' || s[self->pos] == '\n') ++self->pos;
     name_start = self->pos;

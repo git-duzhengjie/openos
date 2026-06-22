@@ -95,10 +95,10 @@
   - [√] `input` 保存并渲染 `type/value/placeholder/name` 等关键属性
   - [√] `button/textarea/select/option` 输出可读文本提示
   - [√] 单元测试覆盖常见表单控件输出
-- [ ] P3.2：HTML 注释与 doctype 容错
-  - [ ] tokenizer 跳过 `<!-- -->` 注释
-  - [ ] `<!doctype html>` 不进入可见 DOM
-  - [ ] 单元测试覆盖注释、doctype 与普通标签混排
+- [√] P3.2：HTML 注释与 doctype 容错
+  - [√] tokenizer 跳过 `<!-- -->` 注释
+  - [√] `<!doctype html>` 不进入可见 DOM
+  - [√] 单元测试覆盖注释、doctype 与普通标签混排
 - [ ] P3.3：基础 CSS 样式解析雏形
   - [ ] 解析内联 `style` 的 `display:none/block/inline`
   - [ ] 支持 `font-weight:bold` 或等价文本提示
