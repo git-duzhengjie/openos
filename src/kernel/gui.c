@@ -4037,6 +4037,19 @@ int gui_should_capture_key_code(int key) {
         return 0;
     }
 
+    /* User-owned windows receive editing/navigation keys even when widget
+     * focus is temporarily stale. This keeps user text boxes, such as the
+     * browser address bar, responsive for Backspace/Delete/Home/End/arrows.
+     * Printable keys still require a focused widget so terminal typing keeps
+     * flowing through shell_run() when no GUI textbox is focused.
+     */
+    if (g_gui.active_window && g_gui.active_window->user_owner_pid != 0) {
+        if (key == GUI_KEY_BACKSPACE || key == GUI_KEY_DELETE ||
+            key == GUI_KEY_LEFT || key == GUI_KEY_RIGHT ||
+            key == GUI_KEY_HOME || key == GUI_KEY_END ||
+            key == GUI_KEY_ENTER || key == GUI_KEY_TAB) return 1;
+    }
+
     /* GUI Terminal is the Shell's graphical output window. Do not capture
      * printable keys here: shell_run() must receive them so command editing,
      * history, backspace and enter keep working. Ordinary GUI widgets are the

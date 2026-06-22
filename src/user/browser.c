@@ -1284,7 +1284,17 @@ int main(int argc, char **argv)
         int ev = openos_gui_poll_event(&event);
         if (ev == 0 && event.type != OPENOS_GUI_EVENT_NONE && event.window_id == (unsigned int)win) {
             if (event.type == OPENOS_GUI_EVENT_KEY_DOWN || event.type == OPENOS_GUI_EVENT_TEXT_INPUT) {
-                int address_focused = (event.widget_id == (unsigned int)address_label);
+                int address_focused = (event.widget_id == (unsigned int)address_label) ||
+                                      (load.address_editing && event.widget_id == 0 &&
+                                       (event.key == OPENOS_GUI_KEY_BACKSPACE ||
+                                        event.key == OPENOS_GUI_KEY_DELETE ||
+                                        event.key == OPENOS_GUI_KEY_LEFT ||
+                                        event.key == OPENOS_GUI_KEY_RIGHT ||
+                                        event.key == OPENOS_GUI_KEY_HOME ||
+                                        event.key == OPENOS_GUI_KEY_END ||
+                                        event.key == OPENOS_GUI_KEY_ENTER ||
+                                        event.key == OPENOS_GUI_KEY_TAB ||
+                                        (event.key >= 32u && event.key <= 126u)));
                 if (address_focused) {
                     load.address_editing = 1;
                 }
