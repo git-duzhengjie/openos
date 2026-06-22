@@ -1,4 +1,5 @@
 #include "openos.h"
+#include "browser_engine.h"
 
 #define BROWSER_DEFAULT_HOST "example.com"
 #define BROWSER_DEFAULT_PATH "/"
@@ -12,12 +13,18 @@
 #define BROWSER_RECV_CHUNK_MAX 1400
 #define BROWSER_HOST_MAX 128
 #define BROWSER_PATH_MAX 256
-#define BROWSER_BODY_MAX 512
+#define BROWSER_BODY_MAX 768
+#define BROWSER_TITLE_MAX 96
+#define BROWSER_STATUS_MAX 96
+#define BROWSER_HISTORY_MAX 8
+#define BROWSER_VIEW_LINES 6
+#define BROWSER_LINE_MAX 72
 
 typedef struct browser_load_context {
     volatile int active;
     volatile int done;
     volatile int result;
+    int is_file;
     int window_id;
     int status_label_id;
     int body_label_id;
@@ -25,8 +32,24 @@ typedef struct browser_load_context {
     char path[BROWSER_PATH_MAX];
     char response[BROWSER_RECV_MAX + 1];
     char body[BROWSER_BODY_MAX];
+    char title[BROWSER_TITLE_MAX];
+    char http_status[BROWSER_STATUS_MAX];
     char status[64];
 } browser_load_context_t;
+
+typedef struct browser_history_entry {
+    char host[BROWSER_HOST_MAX];
+    char path[BROWSER_PATH_MAX];
+    int is_file;
+} browser_history_entry_t;
+
+typedef struct browser_history {
+    browser_history_entry_t entries[BROWSER_HISTORY_MAX];
+    int count;
+    int current;
+} browser_history_t;
+
+static void browser_load_worker(void *arg);
 
 static void browser_format_ip(unsigned int ip, char *out, int out_size)
 {
@@ -125,6 +148,121 @@ static const char *find_body(const char *response)
     return response;
 }
 
+static int browser_ascii_equal_ci(char a, char b)
+{
+    if (a >= 'A' && a <= 'Z') a = (char)(a - 'A' + 'a');
+    if (b >= 'A' && b <= 'Z') b = (char)(b - 'A' + 'a');
+    return a == b;
+}
+
+static int browser_match_token_ci(const char *p, const char *token)
+{
+    int i = 0;
+    if (!p || !token) return 0;
+    while (token[i]) {
+        if (!p[i] || !browser_ascii_equal_ci(p[i], token[i])) return 0;
+        ++i;
+    }
+    return 1;
+}
+
+static int browser_tag_matches(const char *p, const char *tag)
+{
+    int i = 0;
+    if (!p || *p != '<') return 0;
+    ++p;
+    if (*p == '/') ++p;
+    while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') ++p;
+    while (tag[i]) {
+        if (!p[i] || !browser_ascii_equal_ci(p[i], tag[i])) return 0;
+        ++i;
+    }
+    return p[i] == '>' || p[i] == '/' || p[i] == ' ' || p[i] == '\t' || p[i] == '\r' || p[i] == '\n';
+}
+
+static int browser_is_block_tag(const char *p)
+{
+    char tag[OB_MAX_TAG_NAME];
+    const char *q = p;
+    int len = 0;
+    ob_default_style_resolver_t resolver;
+    if (!p || *p != '<') return 0;
+    ++q;
+    if (*q == '/') ++q;
+    while (*q == ' ' || *q == '\t' || *q == '\r' || *q == '\n') ++q;
+    while (q[len] && q[len] != '>' && q[len] != '/' && q[len] != ' ' &&
+           q[len] != '\t' && q[len] != '\r' && q[len] != '\n' && len < OB_MAX_TAG_NAME - 1)
+        ++len;
+    ob_copy_tag_name(tag, sizeof(tag), q, len);
+    ob_default_style_resolver_init(&resolver);
+    return resolver.iface.display_for_tag(&resolver.iface, tag) == OB_DISPLAY_BLOCK;
+}
+
+static void browser_append_newline(char *dst, int dst_size, int *out)
+{
+    if (!dst || !out || *out <= 0 || *out >= dst_size - 1) return;
+    if (dst[*out - 1] != '\n') dst[(*out)++] = '\n';
+}
+
+static char browser_decode_entity(const char **pp)
+{
+    const char *p = *pp;
+    if (!strncmp(p, "&amp;", 5)) { *pp = p + 4; return '&'; }
+    if (!strncmp(p, "&lt;", 4)) { *pp = p + 3; return '<'; }
+    if (!strncmp(p, "&gt;", 4)) { *pp = p + 3; return '>'; }
+    if (!strncmp(p, "&quot;", 6)) { *pp = p + 5; return '"'; }
+    if (!strncmp(p, "&#39;", 5)) { *pp = p + 4; return '\''; }
+    if (!strncmp(p, "&apos;", 6)) { *pp = p + 5; return '\''; }
+    if (!strncmp(p, "&nbsp;", 6)) { *pp = p + 5; return ' '; }
+    return '&';
+}
+
+static void browser_extract_http_status(const char *response, char *out, int out_size)
+{
+    int i = 0;
+    if (!out || out_size <= 0) return;
+    out[0] = 0;
+    if (!response) return;
+    while (response[i] && response[i] != '\r' && response[i] != '\n' && i < out_size - 1) {
+        out[i] = response[i];
+        ++i;
+    }
+    out[i] = 0;
+}
+
+static void browser_extract_title(char *dst, int dst_size, const char *html)
+{
+    const char *p = html;
+    int out = 0;
+    int in_title = 0;
+    int pending_space = 0;
+    if (!dst || dst_size <= 0) return;
+    dst[0] = 0;
+    if (!html) return;
+    while (*p && out < dst_size - 1) {
+        if (!in_title) {
+            if (*p == '<' && browser_tag_matches(p, "title")) {
+                const char *end = strchr(p, '>');
+                if (!end) break;
+                p = end + 1;
+                in_title = 1;
+                continue;
+            }
+            ++p;
+            continue;
+        }
+        if (*p == '<' && p[1] == '/' && browser_tag_matches(p, "title")) break;
+        char c = *p;
+        if (c == '&') c = browser_decode_entity(&p);
+        if (c == '\r' || c == '\n' || c == '\t' || c == ' ') { pending_space = 1; ++p; continue; }
+        if (pending_space && out > 0) dst[out++] = ' ';
+        pending_space = 0;
+        dst[out++] = c;
+        ++p;
+    }
+    dst[out] = 0;
+}
+
 static void collapse_html_text(char *dst, int dst_size, const char *src)
 {
     int out = 0;
@@ -138,21 +276,16 @@ static void collapse_html_text(char *dst, int dst_size, const char *src)
     for (const char *p = src; *p && out < dst_size - 1; ++p) {
         char c = *p;
         if (c == '<') {
+            if (browser_is_block_tag(p)) browser_append_newline(dst, dst_size, &out);
             in_tag = 1;
-            pending_space = 1;
+            pending_space = 0;
             continue;
         }
         if (in_tag) {
             if (c == '>') in_tag = 0;
             continue;
         }
-        if (c == '&') {
-            if (!strncmp(p, "&amp;", 5)) { c = '&'; p += 4; }
-            else if (!strncmp(p, "&lt;", 4)) { c = '<'; p += 3; }
-            else if (!strncmp(p, "&gt;", 4)) { c = '>'; p += 3; }
-            else if (!strncmp(p, "&quot;", 6)) { c = '"'; p += 5; }
-            else if (!strncmp(p, "&nbsp;", 6)) { c = ' '; p += 5; }
-        }
+        if (c == '&') c = browser_decode_entity(&p);
         if (c == '\r' || c == '\n' || c == '\t' || c == ' ') {
             pending_space = 1;
             continue;
@@ -164,7 +297,150 @@ static void collapse_html_text(char *dst, int dst_size, const char *src)
         pending_space = 0;
         dst[out++] = c;
     }
+    while (out > 0 && (dst[out - 1] == ' ' || dst[out - 1] == '\n')) --out;
     dst[out] = 0;
+}
+
+static int browser_parse_url_arg(const char *url, char *host, int host_size, char *path, int path_size)
+{
+    const char *p = url;
+    const char *slash;
+    int host_len;
+    if (!url || !host || !path || host_size <= 0 || path_size <= 0) return -1;
+    if (browser_match_token_ci(p, "http://")) p += 7;
+    else if (browser_match_token_ci(p, "https://")) return -1;
+    slash = strchr(p, '/');
+    host_len = slash ? (int)(slash - p) : (int)strlen(p);
+    if (host_len <= 0 || host_len >= host_size) return -1;
+    memcpy(host, p, host_len);
+    host[host_len] = 0;
+    if (slash && *slash) snprintf(path, path_size, "%s", slash);
+    else snprintf(path, path_size, "/");
+    return 0;
+}
+
+
+static int browser_parse_file_arg(const char *url, char *path, int path_size)
+{
+    const char *p = url;
+    if (!url || !path || path_size <= 0) return -1;
+    if (browser_match_token_ci(p, "file://")) p += 7;
+    if (!p[0]) return -1;
+    snprintf(path, path_size, "%s", p);
+    return 0;
+}
+
+static void browser_history_init(browser_history_t *history, const char *host, const char *path, int is_file)
+{
+    if (!history) return;
+    memset(history, 0, sizeof(*history));
+    snprintf(history->entries[0].host, sizeof(history->entries[0].host), "%s", host ? host : BROWSER_DEFAULT_HOST);
+    snprintf(history->entries[0].path, sizeof(history->entries[0].path), "%s", path ? path : BROWSER_DEFAULT_PATH);
+    history->entries[0].is_file = is_file;
+    history->count = 1;
+    history->current = 0;
+}
+
+static const browser_history_entry_t *browser_history_current(const browser_history_t *history)
+{
+    if (!history || history->count <= 0 || history->current < 0 || history->current >= history->count) return 0;
+    return &history->entries[history->current];
+}
+
+static int browser_history_go(browser_history_t *history, int delta)
+{
+    int next;
+    if (!history) return -1;
+    next = history->current + delta;
+    if (next < 0 || next >= history->count) return -1;
+    history->current = next;
+    return 0;
+}
+
+static void browser_make_view(char *out, int out_size, const browser_load_context_t *load, int scroll_line)
+{
+    int line = 0;
+    int written = 0;
+    const char *body;
+    if (!out || out_size <= 0) return;
+    out[0] = 0;
+    if (!load) return;
+    if (load->title[0]) {
+        written += snprintf(out + written, out_size - written, "%s\n\n", load->title);
+    }
+    body = load->body[0] ? load->body : (load->result < 0 ? "Load failed" : "Empty response");
+    while (*body && line < scroll_line) {
+        if (*body == '\n') ++line;
+        ++body;
+    }
+    line = 0;
+    while (*body && written < out_size - 1 && line < BROWSER_VIEW_LINES) {
+        out[written++] = *body;
+        if (*body == '\n') ++line;
+        ++body;
+    }
+    out[written] = 0;
+}
+
+static void browser_start_load(browser_load_context_t *load, int win, int status_label, int body_label,
+                               const char *host, const char *path, int is_file)
+{
+    openos_thread_t tid;
+    char loading[128];
+    if (!load || !host || !path) return;
+    if (load->active && !load->done) {
+        openos_gui_set_text(win, status_label, "Loading");
+        openos_gui_set_text(win, body_label, "Load already in progress...");
+        return;
+    }
+    memset(load, 0, sizeof(*load));
+    snprintf(load->host, sizeof(load->host), "%s", host ? host : "");
+    snprintf(load->path, sizeof(load->path), "%s", path);
+    load->is_file = is_file;
+    load->window_id = win;
+    load->status_label_id = status_label;
+    load->body_label_id = body_label;
+    snprintf(loading, sizeof(loading), "Loading %s%s%s ...", is_file ? "file://" : "http://", is_file ? "" : load->host, load->path);
+    load->active = 1;
+    load->done = 0;
+    load->result = -1;
+    openos_gui_set_text(win, status_label, loading);
+    openos_gui_set_text(win, body_label, "Waiting for HTTP response...");
+    if (openos_thread_create(&tid, browser_load_worker, load) != 0) {
+        load->active = 0;
+        load->done = 1;
+        load->result = -1;
+        snprintf(load->status, sizeof(load->status), "Failed");
+        snprintf(load->body, sizeof(load->body), "failed to create browser loader thread");
+        openos_gui_set_text(win, status_label, "Failed");
+        openos_gui_set_text(win, body_label, load->body);
+    }
+}
+
+static int browser_fetch_file(const char *path, char *out, int out_size)
+{
+    int fd;
+    int total = 0;
+    if (!path || !out || out_size <= 0) return -1;
+    out[0] = 0;
+    fd = openos_open(path, 0, 0);
+    if (fd < 0) {
+        snprintf(out, out_size, "Could not open local file: %s", path);
+        return -1;
+    }
+    while (total < out_size - 1) {
+        int n = openos_read(fd, out + total, out_size - 1 - total);
+        if (n < 0) {
+            openos_close(fd);
+            snprintf(out, out_size, "Could not read local file: %s", path);
+            return -1;
+        }
+        if (n == 0) break;
+        total += n;
+    }
+    out[total] = 0;
+    openos_close(fd);
+    return 0;
 }
 
 static int browser_fetch_http(const char *host, const char *path, char *out, int out_size)
@@ -287,26 +563,44 @@ static void browser_load_worker(void *arg)
     if (!ctx)
         return;
 
-    rc = browser_fetch_http(ctx->host, ctx->path, ctx->response, sizeof(ctx->response));
+    rc = ctx->is_file ? browser_fetch_file(ctx->path, ctx->response, sizeof(ctx->response))
+                      : browser_fetch_http(ctx->host, ctx->path, ctx->response, sizeof(ctx->response));
     ctx->result = rc;
     if (rc < 0) {
         snprintf(ctx->status, sizeof(ctx->status), "Failed");
         snprintf(ctx->body, sizeof(ctx->body), "%s", ctx->response);
         printf("browser: %s\n", ctx->response);
     } else {
-        collapse_html_text(ctx->body, sizeof(ctx->body), find_body(ctx->response));
+        const char *body = ctx->is_file ? ctx->response : find_body(ctx->response);
+        if (ctx->is_file)
+            snprintf(ctx->http_status, sizeof(ctx->http_status), "FILE loaded");
+        else
+            browser_extract_http_status(ctx->response, ctx->http_status, sizeof(ctx->http_status));
+        browser_extract_title(ctx->title, sizeof(ctx->title), body);
+        {
+            ob_html_parser_base_t parser;
+            ob_dom_document_t doc;
+            ob_html_parser_base_init(&parser);
+            parser.iface.parse(&parser.iface, body, &doc);
+        }
+        collapse_html_text(ctx->body, sizeof(ctx->body), body);
         if (!ctx->body[0])
             snprintf(ctx->body, sizeof(ctx->body), "Empty response");
-        snprintf(ctx->status, sizeof(ctx->status), "Done");
-        printf("browser: loaded http://%s%s\n", ctx->host, ctx->path);
+        snprintf(ctx->status, sizeof(ctx->status), "%s", ctx->http_status[0] ? ctx->http_status : "Done");
+        printf("browser: loaded http://%s%s %s\n", ctx->host, ctx->path, ctx->status);
+        if (ctx->title[0]) printf("title: %s\n", ctx->title);
         printf("%s\n", ctx->body);
     }
 
     if (ctx->window_id >= 0 && ctx->status_label_id >= 0 && ctx->body_label_id >= 0) {
+        char view[BROWSER_BODY_MAX + BROWSER_TITLE_MAX + 32];
         openos_gui_set_text(ctx->window_id, ctx->status_label_id,
                             ctx->status[0] ? ctx->status : (rc < 0 ? "Failed" : "Done"));
-        openos_gui_set_text(ctx->window_id, ctx->body_label_id,
-                            ctx->body[0] ? ctx->body : (rc < 0 ? "Load failed" : "Empty response"));
+        if (ctx->title[0])
+            snprintf(view, sizeof(view), "%s\n\n%s", ctx->title, ctx->body[0] ? ctx->body : "Empty response");
+        else
+            snprintf(view, sizeof(view), "%s", ctx->body[0] ? ctx->body : (rc < 0 ? "Load failed" : "Empty response"));
+        openos_gui_set_text(ctx->window_id, ctx->body_label_id, view);
     }
     ctx->done = 1;
 }
@@ -315,33 +609,63 @@ int main(int argc, char **argv)
 {
     const char *host = BROWSER_DEFAULT_HOST;
     const char *path = BROWSER_DEFAULT_PATH;
-    char summary[128];
+    int is_file = 0;
+    char summary[160];
     int win;
     int status_label;
     int body_label;
     int load_button;
+    int back_button;
+    int forward_button;
+    int up_button;
+    int down_button;
     int close_button;
     int rc = 0;
+    int scroll_line = 0;
     browser_load_context_t load;
+    browser_history_t history;
 
     memset(&load, 0, sizeof(load));
 
-    if (argc > 1 && argv && argv[1] && argv[1][0]) host = argv[1];
-    if (argc > 2 && argv && argv[2] && argv[2][0]) path = argv[2];
-    if (!host || !host[0]) host = BROWSER_DEFAULT_HOST;
+    if (argc > 1 && argv && argv[1] && argv[1][0]) {
+        if (browser_match_token_ci(argv[1], "file://") || argv[1][0] == '/') {
+            if (browser_parse_file_arg(argv[1], load.path, sizeof(load.path)) == 0) {
+                host = "";
+                path = load.path;
+                is_file = 1;
+            }
+        } else if (strstr(argv[1], "://") || strchr(argv[1], '/')) {
+            if (browser_parse_url_arg(argv[1], load.host, sizeof(load.host), load.path, sizeof(load.path)) == 0) {
+                host = load.host;
+                path = load.path;
+            } else {
+                host = argv[1];
+            }
+        } else {
+            host = argv[1];
+        }
+    }
+    if (argc > 2 && argv && argv[2] && argv[2][0]) { path = argv[2]; is_file = 0; }
+    if (!is_file && (!host || !host[0])) host = BROWSER_DEFAULT_HOST;
     if (!path || !path[0]) path = BROWSER_DEFAULT_PATH;
 
-    win = openos_gui_create_window("用户态浏览器", 80, 80, 560, 260);
+    browser_history_init(&history, host, path, is_file);
+
+    win = openos_gui_create_window("用户态浏览器", 80, 80, 600, 300);
     if (win < 0) {
         printf("browser: failed to create GUI window\n");
         return 1;
     }
 
     status_label = openos_gui_add_label(win, 16, 24, 500, 20, "Ready");
-    snprintf(summary, sizeof(summary), "Ready: http://%s%s", host, path);
-    body_label = openos_gui_add_label(win, 16, 56, 520, 150, summary);
-    load_button = openos_gui_add_button(win, 16, 216, 80, 24, "Load");
-    close_button = openos_gui_add_button(win, 112, 216, 80, 24, "Close");
+    snprintf(summary, sizeof(summary), "Ready: %s%s%s", is_file ? "file://" : "http://", is_file ? "" : host, path);
+    body_label = openos_gui_add_label(win, 16, 56, 560, 170, summary);
+    load_button = openos_gui_add_button(win, 16, 248, 80, 24, "Refresh");
+    back_button = openos_gui_add_button(win, 104, 248, 64, 24, "Back");
+    forward_button = openos_gui_add_button(win, 176, 248, 72, 24, "Forward");
+    up_button = openos_gui_add_button(win, 256, 248, 56, 24, "Up");
+    down_button = openos_gui_add_button(win, 320, 248, 56, 24, "Down");
+    close_button = openos_gui_add_button(win, 488, 248, 80, 24, "Close");
     printf("browser: ready http://%s%s\n", host, path);
 
     for (;;) {
@@ -351,40 +675,48 @@ int main(int argc, char **argv)
             if (event.widget_id == (unsigned int)close_button)
                 break;
             if (event.widget_id == (unsigned int)load_button) {
-                if (load.active && !load.done) {
-                    openos_gui_set_text(win, status_label, "Loading");
-                    openos_gui_set_text(win, body_label, "Load already in progress...");
-                } else {
-                    openos_thread_t tid;
-                    char loading[128];
-
-                    memset(&load, 0, sizeof(load));
-                    snprintf(load.host, sizeof(load.host), "%s", host);
-                    snprintf(load.path, sizeof(load.path), "%s", path);
-                    load.window_id = win;
-                    load.status_label_id = status_label;
-                    load.body_label_id = body_label;
-                    snprintf(loading, sizeof(loading), "Loading http://%s%s ...", load.host, load.path);
-                    load.active = 1;
-                    load.done = 0;
-                    load.result = -1;
-                    openos_gui_set_text(win, status_label, loading);
-                    openos_gui_set_text(win, body_label, "Waiting for HTTP response...");
-                    if (openos_thread_create(&tid, browser_load_worker, &load) != 0) {
-                        load.active = 0;
-                        load.done = 1;
-                        load.result = -1;
-                        rc = -1;
-                        openos_gui_set_text(win, status_label, "Failed");
-                        openos_gui_set_text(win, body_label, "failed to create browser loader thread");
-                    }
+                const browser_history_entry_t *cur = browser_history_current(&history);
+                if (cur) {
+                    scroll_line = 0;
+                    browser_start_load(&load, win, status_label, body_label, cur->host, cur->path, cur->is_file);
                 }
+            } else if (event.widget_id == (unsigned int)back_button) {
+                if (browser_history_go(&history, -1) == 0) {
+                    const browser_history_entry_t *cur = browser_history_current(&history);
+                    scroll_line = 0;
+                    browser_start_load(&load, win, status_label, body_label, cur->host, cur->path, cur->is_file);
+                } else {
+                    openos_gui_set_text(win, status_label, "Back: no history");
+                }
+            } else if (event.widget_id == (unsigned int)forward_button) {
+                if (browser_history_go(&history, 1) == 0) {
+                    const browser_history_entry_t *cur = browser_history_current(&history);
+                    scroll_line = 0;
+                    browser_start_load(&load, win, status_label, body_label, cur->host, cur->path, cur->is_file);
+                } else {
+                    openos_gui_set_text(win, status_label, "Forward: no history");
+                }
+            } else if (event.widget_id == (unsigned int)up_button) {
+                char view[BROWSER_BODY_MAX + BROWSER_TITLE_MAX + 32];
+                if (scroll_line > 0) --scroll_line;
+                browser_make_view(view, sizeof(view), &load, scroll_line);
+                openos_gui_set_text(win, body_label, view[0] ? view : "Nothing to scroll");
+            } else if (event.widget_id == (unsigned int)down_button) {
+                char view[BROWSER_BODY_MAX + BROWSER_TITLE_MAX + 32];
+                ++scroll_line;
+                browser_make_view(view, sizeof(view), &load, scroll_line);
+                openos_gui_set_text(win, body_label, view[0] ? view : "End of page");
             }
         }
         if (load.active && load.done) {
             rc = load.result;
             openos_gui_set_text(win, status_label, load.status[0] ? load.status : (rc < 0 ? "Failed" : "Done"));
-            openos_gui_set_text(win, body_label, load.body[0] ? load.body : (rc < 0 ? "Load failed" : "Empty response"));
+            {
+                char view[BROWSER_BODY_MAX + BROWSER_TITLE_MAX + 32];
+                scroll_line = 0;
+                browser_make_view(view, sizeof(view), &load, scroll_line);
+                openos_gui_set_text(win, body_label, view);
+            }
             load.active = 0;
         }
         openos_sleep(10);

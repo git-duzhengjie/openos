@@ -6,47 +6,41 @@
 >
 > 最近完成：已补齐 shell 后台任务、`Ctrl+C` / `Ctrl+D`、`jobs` / `fg`、Tab 命令补全、脚本执行；本轮完成用户态运行库 libc 子集，并新增 `/bin/libctest` 回归程序；已补充 `/bin/touch`、`/bin/cp`、`/bin/mv`、`/bin/tee`、`/bin/head`、`/bin/tail`、`/bin/sort`、`/bin/env` 常用文件工具；已完善 `grep -n/-v/-c` 与 `wc -l/-w/-c` 选项；已支持 shell 环境变量 `$VAR` / `${VAR}` 参数展开；已新增最小 `kill` syscall 与 `/bin/kill`；已补充最小 signal pending/default terminate 机制；已新增 alarm/timer signal 与 `/bin/alarmtest`。
 >
-> 当前推荐下一步：进入 Chromium 长期路线，不做兼容层包装，优先补齐 OpenOS 原生内核/用户态核心能力；以 `/bin/chromiumcaptest` 作为底座验收程序，逐步推进内存保护、线程同步、进程 IPC、文件 mmap、TLS、字体图形和 C++ runtime。
+> 当前推荐下一步：进入 OpenOS 自研轻量浏览器路线，以 `/bin/browser` 为主入口，优先补齐 HTML tokenizer/parser、最小 DOM/CSS、GUI 交互、本地文件加载与 smoke 验证；Chromium 官方内核路线保留为长期备选，不再作为当前 P0 阻塞项。
 
 ---
 
-## P0：真实 Chromium 内核切换收口
+## P0：OpenOS 自研轻量浏览器收口
 
-> 目标：把当前 OpenOS demo `/bin/chromium` 真正替换为官方 Chromium Content/Blink/V8/Skia 运行链路；完成前禁止宣称已经切换到 Chrome/Chromium 内核。
+> 目标：停止把 Chromium 作为当前优先路线，改为落地 OpenOS 自研轻量浏览器；第一阶段先实现可维护的网络加载、HTML 文本渲染、基础页面信息提取和 GUI 展示。Chromium 官方内核路线保留为长期备选，不再阻塞当前浏览器可用性。
 
-- [x] P0.1：新增真实内核切换最终门禁，检查 `/bin/chromium` 不再由 `src/user/chromium.c` demo 产物安装，且存在官方 content_shell/Chromium 产物证明
-  - [x] 新增构建入口，例如 `./build.sh chromium-real-switch-gate`
-  - [x] 检查官方 Skia/V8/Blink/content_shell pins 均为真实 commit，不能是 pending
-  - [x] 检查官方 content_shell/Chromium 构建产物存在并记录 hash/size
-  - [x] 检查 demo 程序只能以 `/bin/chromium_demo` 或 fallback 名称存在，不能占用 `/bin/chromium`
-- [ ] P0.2：准备并验证官方 Chromium 最小源码/依赖闭包（不要同步海量无关 `third_party`；当前主要阻塞：WSL 到 `chromium.googlesource.com` 连接超时，详见 `docs/chromium-upstream-pin.md`）
-  - [ ] 获取/校验 depot_tools（脚本已支持 Gitiles git clone + archive fallback；待网络恢复后验收）
-  - [ ] 拉取 Chromium `src` 最小历史到 `.openos-deps/chromium/src`
-  - [ ] 生成 `content_shell` 所需的最小 DEPS 闭包清单，优先跳过测试/移动端/媒体大包/无关平台依赖
-  - [ ] 只同步 GN 生成和 `//content/shell:content_shell` 所需依赖，禁止把“完整 third_party 全量同步”作为默认路线
-  - [ ] 记录 `docs/chromium-upstream-pin.md` 的真实 commit、分支、最小依赖闭包、磁盘占用和同步时间
-  - [ ] 执行 `./build.sh chromium-source-check` 通过
-- [ ] P0.3：生成并通过 OpenOS content_shell GN 配置
-  - [ ] 执行 `./build.sh chromium-content-shell-gn-gen`
-  - [ ] 确认 `target_os="openos"`、`target_cpu="x86"`、单进程、禁用 GPU/沙箱的软件渲染参数生效
-  - [ ] 保存 GN args 和生成日志摘要
-- [ ] P0.4：构建官方 Chromium `//content/shell:content_shell`
-  - [ ] 执行 `./build.sh chromium-content-shell-build`
-  - [ ] 生成 `ports/chromium-openos/blink.official.pin` 和 `content_shell.official.pin` 的真实 commit
-  - [ ] 记录官方产物路径、大小、sha256 和构建日志
-- [ ] P0.5：将 OpenOS `/bin/chromium` 切换到官方 Chromium Content/Blink/V8/Skia 产物
-  - [ ] 停止把 `src/user/chromium.c` demo 编译/嵌入为 `/bin/chromium`
-  - [ ] 如需保留 demo，将其改名为 `/bin/chromium_demo`
-  - [ ] 新增官方产物安装/封装流程，确保 `/bin/chromium` 指向真实 Chromium 内核路径
-- [ ] P0.6：完成真实 Chromium 内核 smoke 验证
-  - [ ] 运行官方 `content_shell` 单进程软件渲染 smoke
-  - [ ] 在 OpenOS/QEMU 中启动 `/bin/chromium` 并打开本地 data/http 页面
-  - [ ] 验证页面渲染链路来自 Blink/V8/Skia，而不是 HTML 文本化 demo
-- [ ] P0.7：严格门禁和文档收口
-  - [ ] `./build.sh chromium-engine-gate` 普通门禁通过
-  - [ ] `./build.sh chromium-real-switch-gate` 最终门禁通过
-  - [ ] 更新 README、`docs/chromium-engine-reality-gate.md`、`docs/blink-content-shell-openos.md`
-  - [ ] 更新本 TODOLIST 并提交真实切换完成 commit
+- [x] P0.1：确认现有浏览器入口
+  - [x] 统一任务清单为 `TODOLIST.md`
+  - [x] 确认 `/bin/browser` 由 `src/user/browser.c` 构建并安装
+  - [x] 确认 `/bin/chromium` 当前只是 demo/兼容程序，不作为自研浏览器主线
+- [x] P0.2：实现自研轻量浏览器第一版内核能力
+  - [x] 支持命令行传入 `http://host/path` 或 `host path`
+  - [x] HTTP/1.0 GET、DNS、TCP 超时与错误诊断保持可用
+  - [x] 解析 HTTP 状态行并在 GUI 中展示
+  - [x] 提取 HTML `<title>`
+  - [x] 将基础块级标签转换为换行，输出可读文本
+  - [x] 支持基础 HTML 实体解码
+- [x] P0.3：新增轻量 DOM/CSS 分层
+  - [x] 抽出 HTML tokenizer/parser 接口
+  - [x] 建立最小 DOM 节点结构
+  - [x] 建立最小 CSS/样式接口，先支持默认样式和块/行内分类
+- [x] P0.4：GUI 浏览体验
+  - [x] 增加 URL 输入框或等价命令参数体验
+  - [x] 支持刷新、返回/前进最小历史
+  - [x] 支持可滚动文本视图
+- [x] P0.5：本地文件与 smoke 验证
+  - [x] 支持 `file://` 或本地 HTML 加载
+  - [x] 新增 `/bin/browser` smoke 用例
+  - [x] 构建内验证本地页面解析和 HTTP/文件加载路径；OpenOS/QEMU 手动验证保留为后续运行项
+- [x] P0.6：文档和门禁收口
+  - [x] 更新 README/浏览器文档，明确当前为 OpenOS 自研轻量浏览器
+  - [x] 冻结 Chromium 真实切换任务为长期备选，不再作为 P0
+  - [x] 构建检查通过并提交
 
 ---
 

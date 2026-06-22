@@ -50,11 +50,11 @@ bash scripts/package-release.sh --version nightly
 
 ## Browser 当前能力边界
 
-OpenOS 当前内置 Browser 是过渡性的轻量浏览器，用于验证 GUI、DNS、TCP、HTTP 和基础 HTML 文本化显示能力。
+OpenOS 当前浏览器主线已经切换为自研轻量浏览器，入口是 `/bin/browser`，源码位于 `src/user/browser.c`，引擎接口位于 `src/user/browser_engine.h`。
 
-当前支持基础 HTTP 页面访问、非阻塞 DNS/TCP/HTTP 加载、简单 HTML 转可读文本，以及基础链接点击导航；HTTPS 目前仅支持 TLS 握手摘要探测，不支持完整 TLS 加密通道内的网页解密加载。
+当前支持 HTTP/1.0 页面访问、DNS/TCP/HTTP 加载诊断、`file://`/绝对本地路径 HTML 加载、`<title>` 提取、基础 HTML 实体解码、常见块级标签换行、最小 tokenizer/parser/DOM/CSS display 分层，以及 GUI 中的 Refresh / Back / Forward / Up / Down 操作。
 
-它暂不等同于 Chromium / WebKit / Gecko 级完整浏览器，不支持完整 DOM、CSS 布局、JavaScript、图片、复杂表单和现代网页兼容。后续路线见 [`docs/browser-engine-roadmap.md`](docs/browser-engine-roadmap.md)。
+它暂不等同于 Chromium / WebKit / Gecko 级完整浏览器，不支持 JavaScript、复杂 CSS 布局、图片、媒体播放和现代网页兼容。Chromium 官方内核路线保留为长期备选，不再作为当前 P0 阻塞项。当前路线见 [`docs/openos-light-browser.md`](docs/openos-light-browser.md)。
 
 ## 中文字库资源
 
