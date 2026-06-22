@@ -3061,6 +3061,9 @@ uint32_t syscall_dispatch(uint32_t num,
             if (copy_from_user(&req, (const void *)a, sizeof(req)) < 0)
                 return (uint32_t)-1;
             req.text[sizeof(req.text) - 1] = 0;
+            if (req.y == 1) {
+                return (uint32_t)gui_user_set_text_cursor(req.window_id, req.widget_id, req.text, req.x);
+            }
             return (uint32_t)gui_user_set_text(req.window_id, req.widget_id, req.text);
         }
 

@@ -51,6 +51,8 @@ typedef struct browser_load_context {
     int address_label_id;
     int address_editing;
     int address_cursor;
+    int address_visible_start;
+    int address_visible_prefix;
     int home_visible;
     char address_text[BROWSER_ADDRESS_MAX];
     ob_dom_document_t dom;
@@ -380,18 +382,28 @@ static void browser_update_address_label(browser_load_context_t *ctx)
     const char *text;
     char visible[BROWSER_ADDRESS_MAX];
     int len;
+    int start = 0;
+    int visible_cursor;
     if (!ctx || ctx->window_id <= 0 || ctx->address_label_id <= 0) return;
     text = ctx->address_text[0] ? ctx->address_text : "Search OpenOS or type a URL";
     len = (int)strlen(text);
     if (ctx->address_cursor < 0 || ctx->address_cursor > len) ctx->address_cursor = len;
+    ctx->address_visible_start = 0;
+    ctx->address_visible_prefix = 0;
     if (ctx->address_text[0] && len > 60) {
-        int start = ctx->address_cursor - 30;
+        start = ctx->address_cursor - 30;
         if (start < 0) start = 0;
         if (start > len - 60) start = len - 60;
-        snprintf(visible, sizeof(visible), "%s%.*s%s", start > 0 ? "..." : "", 60, text + start, start + 60 < len ? "..." : "");
-        text = visible;
+        ctx->address_visible_start = start;
+        ctx->address_visible_prefix = start > 0 ? 3 : 0;
+        snprintf(visible, sizeof(visible), "%s%.*s%s", ctx->address_visible_prefix ? "..." : "", 60, text + start, start + 60 < len ? "..." : "");
+        visible_cursor = ctx->address_cursor - start + ctx->address_visible_prefix;
+        if (visible_cursor < 0) visible_cursor = 0;
+        if (visible_cursor > (int)strlen(visible)) visible_cursor = (int)strlen(visible);
+        openos_gui_set_text_cursor(ctx->window_id, ctx->address_label_id, visible, visible_cursor);
+        return;
     }
-    openos_gui_set_text(ctx->window_id, ctx->address_label_id, text);
+    openos_gui_set_text_cursor(ctx->window_id, ctx->address_label_id, text, ctx->address_cursor);
 }
 
 static void browser_sync_address_from_target(browser_load_context_t *ctx, const char *host, const char *path, int is_file)
@@ -1346,9 +1358,18 @@ int main(int argc, char **argv)
             if (event.widget_id == (unsigned int)close_button)
                 break;
             if (event.widget_id == (unsigned int)address_label) {
+                int len;
+                int click_col;
                 load.address_editing = 1;
                 if (load.home_visible && strcmp(load.address_text, "Search OpenOS or type a URL") == 0)
                     load.address_text[0] = 0;
+                len = (int)strlen(load.address_text);
+                click_col = (event.x - 4) / 8;
+                if (click_col < 0) click_col = 0;
+                click_col -= load.address_visible_prefix;
+                if (click_col < 0) click_col = 0;
+                load.address_cursor = load.address_visible_start + click_col;
+                if (load.address_cursor > len) load.address_cursor = len;
                 browser_update_address_label(&load);
                 openos_gui_set_text(win, status_label, "Address bar selected - type a URL, then press Enter");
             } else if (event.widget_id == (unsigned int)load_button) {

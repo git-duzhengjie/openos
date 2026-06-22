@@ -833,6 +833,19 @@ static inline int openos_gui_set_text(int window_id, int widget_id, const char *
     return openos_syscall_result(openos_syscall1(SYS_GUI_SET_TEXT, (int)&req));
 }
 
+static inline int openos_gui_set_text_cursor(int window_id, int widget_id, const char *text, int cursor)
+{
+    openos_gui_widget_request_t req;
+    req.window_id = (unsigned int)window_id;
+    req.widget_id = (unsigned int)widget_id;
+    req.x = cursor;
+    req.y = 1;
+    req.w = 0;
+    req.h = 0;
+    openos_gui_copy_text64(req.text, text);
+    return openos_syscall_result(openos_syscall1(SYS_GUI_SET_TEXT, (int)&req));
+}
+
 static inline void openos_gui_copy_text128(char *dst, const char *src)
 {
     unsigned int i;

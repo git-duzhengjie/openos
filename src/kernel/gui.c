@@ -2441,6 +2441,9 @@ static void gui_handle_mouse_down(int x, int y) {
             gui_invalidate_all();
         } else if (gui_widget_can_focus(wg)) {
             gui_set_focused_widget(wg);
+            if (wg && wg->type == GUI_WIDGET_TEXTBOX && wg->owner && wg->owner->user_owner_pid != 0) {
+                gui_user_widget_click_at(wg, sx - wg->rect.x, sy - wg->rect.y);
+            }
         } else {
             gui_set_focused_widget(0);
         }
