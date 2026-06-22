@@ -2553,7 +2553,8 @@ void gui_process_events(void) {
             } else if (browser_handle_address_enter(ev.key)) {
                 /* Browser address bar consumed Enter. */
             } else if (g_gui.focused_widget && g_gui.focused_widget->focused &&
-                       g_gui.focused_widget->type == GUI_WIDGET_TEXTBOX) {
+                       g_gui.focused_widget->type == GUI_WIDGET_TEXTBOX &&
+                       (!g_gui.focused_widget->owner || g_gui.focused_widget->owner->user_owner_pid == 0)) {
                 gui_textbox_on_key(g_gui.focused_widget, ev.key);
             } else if (g_gui.focused_widget && g_gui.focused_widget->focused &&
                        g_gui.focused_widget->type == GUI_WIDGET_BUTTON &&
@@ -4416,7 +4417,7 @@ void gui_widget_set_text(gui_widget_t *widget, const char *text) {
     if (!widget) return;
     gui_copy_text(widget->text, text ? text : "", sizeof(widget->text));
     len = (uint32_t)strlen(widget->text);
-    if (widget->cursor > len || widget->type != GUI_WIDGET_TEXTBOX) widget->cursor = len;
+    if (widget->type == GUI_WIDGET_TEXTBOX || widget->cursor > len) widget->cursor = len;
     gui_widget_invalidate(widget);
 }
 
