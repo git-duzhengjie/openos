@@ -20,8 +20,8 @@
 #define BROWSER_LINK_MAX 8
 #define BROWSER_CACHE_MAX 4
 #define BROWSER_REDIRECT_MAX 4
-#define BROWSER_VIEW_LINES 6
-#define BROWSER_LINE_MAX 72
+#define BROWSER_VIEW_LINES 12
+#define BROWSER_LINE_MAX 96
 #define BROWSER_ADDRESS_MAX 256
 #define BROWSER_FOCUS_LINK 1
 #define BROWSER_FOCUS_FORM 2
@@ -365,9 +365,9 @@ static void browser_format_address(char *out, int out_size, const char *host, co
 
 static void browser_update_address_label(browser_load_context_t *ctx)
 {
-    char label[BROWSER_ADDRESS_MAX + 16];
+    char label[BROWSER_ADDRESS_MAX + 32];
     if (!ctx || ctx->window_id <= 0 || ctx->address_label_id <= 0) return;
-    snprintf(label, sizeof(label), "%s%s", ctx->address_editing ? "URL*: " : "URL: ", ctx->address_text);
+    snprintf(label, sizeof(label), "[ %s%s ]", ctx->address_editing ? "editing: " : "search or URL: ", ctx->address_text);
     openos_gui_set_text(ctx->window_id, ctx->address_label_id, label);
 }
 
@@ -417,6 +417,21 @@ static int browser_address_handle_key(browser_load_context_t *ctx, unsigned int 
         browser_update_address_label(ctx);
     }
     return 0;
+}
+
+static void browser_make_home_view(char *out, int out_size, const char *address)
+{
+    if (!out || out_size <= 0) return;
+    snprintf(out, out_size,
+             "                              OpenOS Browser\n"
+             "\n"
+             "                    Search OpenOS or type a URL\n"
+             "              [ %s ]\n"
+             "\n"
+             "          ( GitHub )     ( Docs )     ( Samples )     ( Network )\n"
+             "\n"
+             "       Tips: type an address, press Enter to load. Tab selects links/forms.",
+             address && address[0] ? address : "http://example.com/");
 }
 
 static int browser_parse_file_arg(const char *url, char *path, int path_size)
@@ -1101,7 +1116,8 @@ int main(int argc, char **argv)
     const char *host = BROWSER_DEFAULT_HOST;
     const char *path = BROWSER_DEFAULT_PATH;
     int is_file = 0;
-    char summary[160];
+    char summary[BROWSER_BODY_MAX];
+    char home_address[BROWSER_ADDRESS_MAX];
     int win;
     int status_label;
     int address_label;
@@ -1147,26 +1163,29 @@ int main(int argc, char **argv)
 
     browser_history_init(&history, host, path, is_file);
 
-    win = openos_gui_create_window("用户态浏览器", 80, 80, 700, 332);
+    win = openos_gui_create_window("OpenOS Browser", 54, 44, 900, 520);
     if (win < 0) {
         printf("browser: failed to create GUI window\n");
         return 1;
     }
 
-    status_label = openos_gui_add_label(win, 16, 24, 640, 20, "Ready");
-    address_label = openos_gui_add_label(win, 16, 48, 650, 20, "URL: ");
-    snprintf(summary, sizeof(summary), "Ready: %s%s%s", is_file ? "file://" : "http://", is_file ? "" : host, path);
-    body_label = openos_gui_add_label(win, 16, 76, 650, 150, summary);
-    load_button = openos_gui_add_button(win, 16, 248, 80, 24, "Refresh");
-    back_button = openos_gui_add_button(win, 104, 248, 64, 24, "Back");
-    forward_button = openos_gui_add_button(win, 176, 248, 72, 24, "Forward");
-    up_button = openos_gui_add_button(win, 256, 248, 56, 24, "Up");
-    down_button = openos_gui_add_button(win, 320, 248, 56, 24, "Down");
-    next_link_button = openos_gui_add_button(win, 384, 248, 72, 24, "NextLink");
-    open_link_button = openos_gui_add_button(win, 464, 248, 72, 24, "OpenLink");
-    next_field_button = openos_gui_add_button(win, 544, 248, 80, 24, "NextField");
-    submit_button = openos_gui_add_button(win, 16, 280, 80, 24, "Submit");
-    close_button = openos_gui_add_button(win, 632, 280, 56, 24, "Close");
+    back_button = openos_gui_add_button(win, 16, 18, 40, 24, "<");
+    forward_button = openos_gui_add_button(win, 60, 18, 40, 24, ">");
+    load_button = openos_gui_add_button(win, 104, 18, 72, 24, "Reload");
+    address_label = openos_gui_add_label(win, 188, 20, 620, 20, "[ search or URL: ]");
+    close_button = openos_gui_add_button(win, 824, 18, 56, 24, "Close");
+
+    browser_format_address(home_address, sizeof(home_address), host, path, is_file);
+    browser_make_home_view(summary, sizeof(summary), home_address);
+    body_label = openos_gui_add_label(win, 56, 96, 790, 280, summary);
+
+    status_label = openos_gui_add_label(win, 56, 396, 790, 20, "Ready - type an address and press Enter");
+    up_button = openos_gui_add_button(win, 56, 438, 56, 24, "Up");
+    down_button = openos_gui_add_button(win, 120, 438, 56, 24, "Down");
+    next_link_button = openos_gui_add_button(win, 208, 438, 80, 24, "NextLink");
+    open_link_button = openos_gui_add_button(win, 296, 438, 80, 24, "OpenLink");
+    next_field_button = openos_gui_add_button(win, 408, 438, 88, 24, "NextField");
+    submit_button = openos_gui_add_button(win, 504, 438, 72, 24, "Submit");
     load.window_id = win;
     load.status_label_id = status_label;
     load.body_label_id = body_label;
