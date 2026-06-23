@@ -8,7 +8,7 @@
 #define BROWSER_DEFAULT_HOST "example.com"
 #define BROWSER_DEFAULT_PATH "/"
 #define BROWSER_HTTP_PORT "80"
-#define BROWSER_RECV_MAX 1536
+#define BROWSER_RECV_MAX 8192
 #define BROWSER_NET_WAIT_TRIES 80
 #define BROWSER_DNS_RETRIES 8
 #define BROWSER_CONNECT_TIMEOUT_MS 4000
@@ -367,7 +367,7 @@ static void browser_target_url(const browser_load_context_t *ctx, char *out, int
     if (ctx->is_file)
         snprintf(out, out_size, "file://%s", ctx->path);
     else
-        snprintf(out, out_size, "http://%s%s", ctx->host, ctx->path);
+        snprintf(out, out_size, "%s://%s%s", ctx->is_https ? "https" : "http", ctx->host, ctx->path);
 }
 
 static void browser_make_error_page(browser_load_context_t *ctx, const char *summary, const char *detail)
@@ -1722,10 +1722,7 @@ static int browser_fetch_http_once(const char *host, const char *path, int is_ht
         snprintf(out, out_size, "receive stage timeout from %s", host);
         return -1;
     }
-    if (total >= out_size - 1 || total >= BROWSER_RECV_MAX) {
-        snprintf(out, out_size, "resource limit exceeded: response too large host=%s path=%s limit=%d bytes", host, path, out_size - 1);
-        return -2;
-    }
+
     if (headers) ob_http_parse_headers(out, headers);
     return 0;
 }
