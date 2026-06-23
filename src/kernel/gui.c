@@ -4075,8 +4075,60 @@ static int gui_tabview_copy_tab(gui_widget_t *wg, int index, char *out, uint32_t
     return -1;
 }
 
+static const char *gui_tabview_visible_label(const char *label, int *out_icon_kind) {
+    const unsigned char *p = (const unsigned char *)label;
+    if (out_icon_kind) *out_icon_kind = 0;
+    if (p && p[0] == 0x1f && p[1] >= '0' && p[1] <= '9' && p[2] == ':') {
+        if (out_icon_kind) *out_icon_kind = (int)(p[1] - '0');
+        return (const char *)(p + 3);
+    }
+    return label ? label : "";
+}
+
+static void gui_draw_tabview_site_icon(int x, int y, int kind, int active) {
+    uint32_t blue = gui_rgb(50, 112, 220);
+    uint32_t green = gui_rgb(42, 150, 96);
+    uint32_t orange = gui_rgb(220, 132, 36);
+    uint32_t red = gui_rgb(210, 64, 64);
+    uint32_t gray = gui_rgb(128, 140, 156);
+    uint32_t fill = active ? gui_rgb(255, 255, 255) : gui_rgb(246, 248, 252);
+    uint32_t border = gray;
+
+    if (kind <= 0) kind = 1;
+    if (kind == 2) border = green;
+    else if (kind == 3) border = orange;
+    else if (kind == 4) border = red;
+    else border = blue;
+
+    gui_raw_fill_rect(x + 1, y + 1, 12, 12, fill);
+    gui_raw_line(x + 2, y, x + 10, y, border);
+    gui_raw_line(x + 1, y + 1, x + 12, y + 1, border);
+    gui_raw_line(x, y + 2, x, y + 10, border);
+    gui_raw_line(x + 13, y + 2, x + 13, y + 10, border);
+    gui_raw_line(x + 1, y + 12, x + 12, y + 12, border);
+    gui_raw_line(x + 2, y + 13, x + 10, y + 13, border);
+    if (kind == 2) {
+        gui_raw_line(x + 3, y + 7, x + 6, y + 10, green);
+        gui_raw_line(x + 6, y + 10, x + 11, y + 4, green);
+    } else if (kind == 3) {
+        gui_raw_fill_rect(x + 3, y + 3, 8, 9, gui_rgb(255, 246, 226));
+        gui_raw_line(x + 8, y + 3, x + 11, y + 6, orange);
+        gui_raw_line(x + 3, y + 6, x + 9, y + 6, orange);
+    } else if (kind == 4) {
+        gui_raw_line(x + 4, y + 4, x + 9, y + 9, red);
+        gui_raw_line(x + 9, y + 4, x + 4, y + 9, red);
+    } else {
+        gui_raw_line(x + 3, y + 5, x + 10, y + 5, blue);
+        gui_raw_line(x + 3, y + 8, x + 10, y + 8, blue);
+        gui_raw_line(x + 5, y + 3, x + 5, y + 10, blue);
+        gui_raw_line(x + 8, y + 3, x + 8, y + 10, blue);
+    }
+}
+
 static int gui_tabview_tab_width(const char *label, int closeable) {
-    int w = (int)font_measure_text_width(font_get_default(), label ? label : "") + 30 + (closeable ? 18 : 0);
+    int icon_kind = 0;
+    const char *visible = gui_tabview_visible_label(label, &icon_kind);
+    int w = (int)font_measure_text_width(font_get_default(), visible ? visible : "") + 30 + (icon_kind ? 18 : 0) + (closeable ? 18 : 0);
     if (w < 58) w = 58;
     if (w > 150) w = 150;
     return w;
@@ -4191,9 +4243,13 @@ static void gui_draw_tabview_widget(gui_widget_t *wg, int ax, int ay) {
     x = ax + 2;
     for (i = 0; i < count; ++i) {
         int tw;
+        int icon_kind = 0;
+        int text_x;
         uint32_t bg;
         gui_rect_t clip;
+        const char *visible_label;
         if (gui_tabview_copy_tab(wg, i, label, sizeof(label)) < 0) continue;
+        visible_label = gui_tabview_visible_label(label, &icon_kind);
         tw = gui_tabview_tab_width(label, closeable);
         if (x + tw > ax + wg->rect.w - 2) tw = ax + wg->rect.w - 2 - x;
         if (tw <= 18) break;
@@ -4203,11 +4259,16 @@ static void gui_draw_tabview_widget(gui_widget_t *wg, int ax, int ay) {
         gui_raw_line(x, ay + 3, x, ay + 27, gui_rgb(166, 174, 188));
         gui_raw_line(x + tw - 1, ay + 3, x + tw - 1, ay + 27, gui_rgb(166, 174, 188));
         if (i != wg->value) gui_raw_line(x, ay + 27, x + tw - 1, ay + 27, gui_rgb(166, 174, 188));
-        clip.x = x + 10;
+        text_x = x + 10;
+        if (icon_kind) {
+            gui_draw_tabview_site_icon(x + 8, ay + 9, icon_kind, i == wg->value);
+            text_x += 18;
+        }
+        clip.x = text_x;
         clip.y = ay + 5;
-        clip.w = tw - 18 - (closeable ? 18 : 0);
+        clip.w = tw - (text_x - x) - 8 - (closeable ? 18 : 0);
         clip.h = 20;
-        if (clip.w > 0) gui_draw_window_title_text(clip.x, gui_text_center_y(ay + 3, 25), label, g_gui.colors.text_fg, &clip);
+        if (clip.w > 0) gui_draw_window_title_text(clip.x, gui_text_center_y(ay + 3, 25), visible_label, g_gui.colors.text_fg, &clip);
         if (closeable) {
             int cx = x + tw - 15;
             int cy = ay + 15;

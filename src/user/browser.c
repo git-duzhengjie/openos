@@ -38,6 +38,14 @@
 #define BROWSER_FOCUS_LINK 1
 #define BROWSER_FOCUS_FORM 2
 
+typedef enum browser_tab_icon_kind {
+    BROWSER_TAB_ICON_DEFAULT = 0,
+    BROWSER_TAB_ICON_PAGE = 1,
+    BROWSER_TAB_ICON_SITE = 2,
+    BROWSER_TAB_ICON_FILE = 3,
+    BROWSER_TAB_ICON_ERROR = 4
+} browser_tab_icon_kind_t;
+
 typedef struct browser_load_context {
     volatile int active;
     volatile int done;
@@ -57,6 +65,7 @@ typedef struct browser_load_context {
     char location[OB_MAX_HEADER_VALUE];
     char status[BROWSER_STATUS_MAX];
     char links[BROWSER_LINK_MAX][OB_MAX_ATTR_VALUE];
+    int tab_icon;
     int link_count;
     int selected_link;
     int focus_mode;
@@ -115,10 +124,12 @@ typedef struct browser_tab_snapshot {
     char status[BROWSER_STATUS_MAX];
     char links[BROWSER_LINK_MAX][OB_MAX_ATTR_VALUE];
     char address_text[BROWSER_ADDRESS_MAX];
+    int tab_icon;
 } browser_tab_snapshot_t;
 
 typedef struct browser_tab_entry {
     char title[BROWSER_TAB_TITLE_MAX];
+    int icon_kind;
     int has_page;
     int scroll_line;
     browser_tab_snapshot_t page;
@@ -621,6 +632,14 @@ static const char *browser_tabs_title_at(const browser_tabs_t *tabs, int index)
     return tabs->items[index].title[0] ? tabs->items[index].title : "New Tab";
 }
 
+static int browser_tabs_icon_at(const browser_tabs_t *tabs, int index)
+{
+    if (!tabs || !tabs->items || index < 0 || index >= tabs->count) return BROWSER_TAB_ICON_DEFAULT;
+    if (tabs->items[index].icon_kind < BROWSER_TAB_ICON_DEFAULT || tabs->items[index].icon_kind > BROWSER_TAB_ICON_ERROR)
+        return BROWSER_TAB_ICON_DEFAULT;
+    return tabs->items[index].icon_kind;
+}
+
 static void browser_tabs_refresh(int win, browser_tabs_t *tabs, int tabview_id)
 {
     char *joined;
@@ -635,14 +654,20 @@ static void browser_tabs_refresh(int win, browser_tabs_t *tabs, int tabview_id)
         return;
     }
 
-    joined_size = tabs->count * (BROWSER_TAB_TITLE_MAX + 1) + 1;
+    joined_size = tabs->count * (BROWSER_TAB_TITLE_MAX + 5) + 1;
     joined = (char *)malloc(joined_size);
     if (!joined) return;
     joined[0] = 0;
 
     for (i = 0; i < tabs->count; ++i) {
         const char *title = browser_tabs_title_at(tabs, i);
+        int icon = browser_tabs_icon_at(tabs, i);
         if (i > 0 && used < joined_size - 1) joined[used++] = '|';
+        if (used < joined_size - 4) {
+            joined[used++] = '';
+            joined[used++] = (char)('0' + icon);
+            joined[used++] = ':';
+        }
         while (*title && used < joined_size - 1) joined[used++] = *title++;
         joined[used] = 0;
     }
@@ -660,6 +685,7 @@ static void browser_tabs_init(int win, browser_tabs_t *tabs, int tabview_id)
     tabs->count = 1;
     tabs->active = 0;
     snprintf(tabs->items[0].title, sizeof(tabs->items[0].title), "New Tab");
+    tabs->items[0].icon_kind = BROWSER_TAB_ICON_DEFAULT;
     browser_tabs_refresh(win, tabs, tabview_id);
 }
 
@@ -682,6 +708,42 @@ static void browser_sanitize_tab_title(char *out, int out_size, const char *titl
     if (!out[0]) snprintf(out, out_size, "New Tab");
 }
 
+static int browser_text_contains_case_insensitive(const char *text, const char *needle)
+{
+    int i;
+    int j;
+
+    if (!text || !needle || !needle[0]) return 0;
+    for (i = 0; text[i]; ++i) {
+        for (j = 0; needle[j]; ++j) {
+            char a = text[i + j];
+            char b = needle[j];
+            if (!a) return 0;
+            if (a >= 'A' && a <= 'Z') a = (char)(a + ('a' - 'A'));
+            if (b >= 'A' && b <= 'Z') b = (char)(b + ('a' - 'A'));
+            if (a != b) break;
+        }
+        if (!needle[j]) return 1;
+    }
+    return 0;
+}
+
+static int browser_detect_tab_icon_kind(const browser_load_context_t *load)
+{
+    if (!load) return BROWSER_TAB_ICON_DEFAULT;
+    if (load->result < 0) return BROWSER_TAB_ICON_ERROR;
+    if (load->is_file) return BROWSER_TAB_ICON_FILE;
+    if ((browser_text_contains_case_insensitive(load->response, "rel=") &&
+         browser_text_contains_case_insensitive(load->response, "icon")) ||
+        browser_text_contains_case_insensitive(load->response, "shortcut icon") ||
+        browser_text_contains_case_insensitive(load->response, "apple-touch-icon") ||
+        browser_text_contains_case_insensitive(load->response, "/favicon.ico")) {
+        return BROWSER_TAB_ICON_SITE;
+    }
+    if (load->title[0] || load->host[0]) return BROWSER_TAB_ICON_PAGE;
+    return BROWSER_TAB_ICON_DEFAULT;
+}
+
 static void browser_update_tab_title(int win, int tabview_id, browser_tabs_t *tabs, const browser_load_context_t *load)
 {
     char title[BROWSER_TITLE_MAX + 16];
@@ -695,6 +757,9 @@ static void browser_update_tab_title(int win, int tabview_id, browser_tabs_t *ta
     }
     browser_sanitize_tab_title(title, sizeof(title), source);
     snprintf(tabs->items[tabs->active].title, sizeof(tabs->items[tabs->active].title), "%s", title);
+    tabs->items[tabs->active].icon_kind = load->tab_icon;
+    if (tabs->items[tabs->active].icon_kind < BROWSER_TAB_ICON_DEFAULT || tabs->items[tabs->active].icon_kind > BROWSER_TAB_ICON_ERROR)
+        tabs->items[tabs->active].icon_kind = browser_detect_tab_icon_kind(load);
     browser_tabs_refresh(win, tabs, tabview_id);
 }
 
@@ -732,6 +797,7 @@ static void browser_tab_snapshot_save(browser_tab_snapshot_t *page, const browse
     snprintf(page->location, sizeof(page->location), "%s", load->location);
     snprintf(page->status, sizeof(page->status), "%s", load->status);
     browser_copy_bytes(page->links, load->links, (int)sizeof(page->links));
+    page->tab_icon = load->tab_icon;
     snprintf(page->address_text, sizeof(page->address_text), "%s", load->address_text);
 }
 
@@ -756,6 +822,7 @@ static void browser_tab_snapshot_restore(browser_load_context_t *load, const bro
     snprintf(load->location, sizeof(load->location), "%s", page->location);
     snprintf(load->status, sizeof(load->status), "%s", page->status);
     browser_copy_bytes(load->links, page->links, (int)sizeof(load->links));
+    load->tab_icon = page->tab_icon;
     snprintf(load->address_text, sizeof(load->address_text), "%s", page->address_text);
 }
 
@@ -768,6 +835,7 @@ static void browser_tab_save_current(browser_tabs_t *tabs, const browser_load_co
     tab = &tabs->items[tabs->active];
     snprintf(title, sizeof(title), "%s", tab->title);
     browser_tab_snapshot_save(&tab->page, load);
+    tab->icon_kind = tab->page.tab_icon;
     tab->has_page = 1;
     tab->scroll_line = scroll_line;
     snprintf(tab->title, sizeof(tab->title), "%s", title[0] ? title : "New Tab");
@@ -836,6 +904,7 @@ static int browser_tabs_new(int win, browser_tabs_t *tabs, int tabview_id)
     tabs->active = tabs->count;
     memset(&tabs->items[tabs->count], 0, sizeof(tabs->items[tabs->count]));
     snprintf(tabs->items[tabs->count].title, sizeof(tabs->items[tabs->count].title), "New Tab");
+    tabs->items[tabs->count].icon_kind = BROWSER_TAB_ICON_DEFAULT;
     tabs->count++;
     browser_tabs_refresh(win, tabs, tabview_id);
     return 0;
@@ -1366,6 +1435,7 @@ static int browser_cache_restore(browser_load_context_t *load, int win, int stat
             snprintf(load->content_type, sizeof(load->content_type), "%s", g_page_cache[i].content_type);
             snprintf(load->content_length, sizeof(load->content_length), "%s", g_page_cache[i].content_length);
             snprintf(load->location, sizeof(load->location), "%s", g_page_cache[i].location);
+            load->tab_icon = browser_detect_tab_icon_kind(load);
             if (scroll_line) *scroll_line = g_page_cache[i].scroll_line;
             openos_gui_set_text(win, status_label, load->status);
             browser_update_tab_title(win, tabview_id, tabs, load);
@@ -1622,6 +1692,7 @@ static void browser_load_worker(void *arg)
         }
     }
 
+    ctx->tab_icon = browser_detect_tab_icon_kind(ctx);
     __sync_synchronize();
     ctx->done = 1;
     __sync_synchronize();
