@@ -1327,6 +1327,9 @@ int main(int argc, char **argv)
     browser_make_home_view(summary, sizeof(summary), home_address);
 
     body_label = openos_gui_add_label(win, 18, 96, 860, 278, summary);
+    openos_gui_set_label_options(win, body_label,
+                                 OPENOS_GUI_LABEL_MULTILINE | OPENOS_GUI_LABEL_SELECTABLE | OPENOS_GUI_LABEL_COPYABLE,
+                                 OPENOS_GUI_LABEL_ALIGN_LEFT);
 
     status_label = openos_gui_add_statusbar(win, 0, 394, 900, 24, "Ready - type an address and press Enter|OpenOS Browser|", OPENOS_GUI_STATUSBAR_SIZE_GRIP | OPENOS_GUI_STATUSBAR_TOP_BORDER | OPENOS_GUI_STATUSBAR_LINK_PROMPT);
     up_button = openos_gui_add_button(win, 56, 438, 56, 24, "Up");
