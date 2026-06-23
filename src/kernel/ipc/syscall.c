@@ -3296,6 +3296,60 @@ uint32_t syscall_dispatch(uint32_t num,
     case SYS_GUI_SET_SPINNER_TEXT:
         return gui_user_set_text((uint32_t)a, (uint32_t)b, (const char *)c);
 
+    case SYS_GUI_ADD_IMAGEVIEW:
+        {
+            gui_user_imageview_request_t req;
+            int id;
+            if (!a || !user_ptr_valid((void *)a, sizeof(req), USERMEM_READ))
+                return (uint32_t)-1;
+            if (copy_from_user(&req, (const void *)a, sizeof(req)) < 0)
+                return (uint32_t)-1;
+            id = gui_user_add_imageview(req.window_id, req.x, req.y, req.w, req.h, req.flags);
+            if (id < 0)
+                return (uint32_t)-1;
+            return (uint32_t)id;
+        }
+
+    case SYS_GUI_SET_IMAGEVIEW_RGBA:
+        {
+            gui_user_imageview_request_t req;
+            uint32_t bytes;
+            if (!a || !user_ptr_valid((void *)a, sizeof(req), USERMEM_READ))
+                return (uint32_t)-1;
+            if (copy_from_user(&req, (const void *)a, sizeof(req)) < 0)
+                return (uint32_t)-1;
+            if (req.image_width == 0 || req.image_height == 0 || req.image_width > 256 || req.image_height > 256)
+                return (uint32_t)-1;
+            bytes = req.image_width * req.image_height * sizeof(uint32_t);
+            if (req.image_height != 0 && req.image_width * req.image_height / req.image_height != req.image_width)
+                return (uint32_t)-1;
+            if (req.pixels_size < bytes || !req.pixels_user_ptr || !user_ptr_valid((void *)req.pixels_user_ptr, bytes, USERMEM_READ))
+                return (uint32_t)-1;
+            return (uint32_t)gui_user_set_imageview_rgba(req.window_id, req.widget_id, (const uint32_t *)req.pixels_user_ptr, req.image_width, req.image_height, req.flags);
+        }
+
+    case SYS_GUI_SET_IMAGEVIEW_BITMAP:
+        {
+            gui_user_imageview_request_t req;
+            uint32_t stride;
+            uint32_t bytes;
+            if (!a || !user_ptr_valid((void *)a, sizeof(req), USERMEM_READ))
+                return (uint32_t)-1;
+            if (copy_from_user(&req, (const void *)a, sizeof(req)) < 0)
+                return (uint32_t)-1;
+            if (req.image_width == 0 || req.image_height == 0 || req.image_width > 256 || req.image_height > 256)
+                return (uint32_t)-1;
+            stride = req.stride ? req.stride : req.image_width;
+            if (stride < req.image_width)
+                return (uint32_t)-1;
+            bytes = stride * req.image_height;
+            if (req.image_height != 0 && bytes / req.image_height != stride)
+                return (uint32_t)-1;
+            if (req.pixels_size < bytes || !req.pixels_user_ptr || !user_ptr_valid((void *)req.pixels_user_ptr, bytes, USERMEM_READ))
+                return (uint32_t)-1;
+            return (uint32_t)gui_user_set_imageview_bitmap(req.window_id, req.widget_id, (const uint8_t *)req.pixels_user_ptr, req.image_width, req.image_height, stride, req.fg_color, req.bg_color, req.flags);
+        }
+
     case SYS_GUI_ADD_SCROLLBAR:
         {
             gui_user_scrollbar_request_t req;

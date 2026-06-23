@@ -187,6 +187,23 @@ typedef struct gui_user_progressbar_request {
     uint32_t flags;
 } gui_user_progressbar_request_t;
 
+typedef struct gui_user_imageview_request {
+    uint32_t window_id;
+    uint32_t widget_id;
+    int32_t x;
+    int32_t y;
+    int32_t w;
+    int32_t h;
+    uint32_t flags;
+    uint32_t image_width;
+    uint32_t image_height;
+    uint32_t stride;
+    uint32_t fg_color;
+    uint32_t bg_color;
+    uint32_t pixels_user_ptr;
+    uint32_t pixels_size;
+} gui_user_imageview_request_t;
+
 typedef struct gui_user_scrollbar_request {
     uint32_t window_id;
     uint32_t widget_id;
@@ -308,6 +325,9 @@ int gui_user_set_progressbar_value(uint32_t window_id, uint32_t widget_id, int v
 int gui_user_get_progressbar_value(uint32_t window_id, uint32_t widget_id, int *out_value);
 int gui_user_set_progressbar_flags(uint32_t window_id, uint32_t widget_id, uint32_t flags);
 int gui_user_add_spinner(uint32_t window_id, int x, int y, int w, int h, const char *text, uint32_t flags);
+int gui_user_add_imageview(uint32_t window_id, int x, int y, int w, int h, uint32_t flags);
+int gui_user_set_imageview_rgba(uint32_t window_id, uint32_t widget_id, const uint32_t *pixels, uint32_t width, uint32_t height, uint32_t flags);
+int gui_user_set_imageview_bitmap(uint32_t window_id, uint32_t widget_id, const uint8_t *pixels, uint32_t width, uint32_t height, uint32_t stride, uint32_t fg_color, uint32_t bg_color, uint32_t flags);
 int gui_user_set_spinner_running(uint32_t window_id, uint32_t widget_id, int running);
 int gui_user_set_spinner_text(uint32_t window_id, uint32_t widget_id, const char *text);
 int gui_user_set_scrollbar_value(uint32_t window_id, uint32_t widget_id, int value);

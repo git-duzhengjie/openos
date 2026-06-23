@@ -3824,6 +3824,65 @@ static void gui_draw_widget(gui_widget_t *wg) {
         if ((wg->label_flags & GUI_SPINNER_SHOW_LABEL) && wg->text[0]) {
             gui_draw_window_title_text(ax + size + 6, gui_text_center_y(ay, wg->rect.h), wg->text, wg->enabled ? g_gui.colors.text_fg : gui_rgb(125, 130, 140), &clip);
         }
+    } else if (wg->type == GUI_WIDGET_IMAGEVIEW) {
+        uint32_t border = wg->enabled ? gui_rgb(148, 163, 184) : gui_rgb(199, 205, 214);
+        uint32_t bg = wg->bg_color ? wg->bg_color : gui_rgb(248, 250, 252);
+        int pad = 3;
+        int inner_x = ax + pad;
+        int inner_y = ay + pad;
+        int inner_w = wg->rect.w - pad * 2;
+        int inner_h = wg->rect.h - pad * 2;
+        gui_rect_t text_clip = { inner_x, inner_y, inner_w, inner_h };
+        gui_raw_fill_rect(ax, ay, wg->rect.w, wg->rect.h, bg);
+        gui_raw_line(ax, ay, ax + wg->rect.w - 1, ay, border);
+        gui_raw_line(ax, ay, ax, ay + wg->rect.h - 1, border);
+        gui_raw_line(ax + wg->rect.w - 1, ay, ax + wg->rect.w - 1, ay + wg->rect.h - 1, border);
+        gui_raw_line(ax, ay + wg->rect.h - 1, ax + wg->rect.w - 1, ay + wg->rect.h - 1, border);
+        if (inner_w > 0 && inner_h > 0 && wg->image_pixels && wg->image_width > 0 && wg->image_height > 0) {
+            int draw_w = inner_w;
+            int draw_h = inner_h;
+            int dx;
+            int dy;
+            if (wg->image_flags & GUI_IMAGEVIEW_KEEP_ASPECT) {
+                uint32_t iw = wg->image_width;
+                uint32_t ih = wg->image_height;
+                if (iw > 0 && ih > 0) {
+                    if ((uint32_t)inner_w * ih <= (uint32_t)inner_h * iw) {
+                        draw_w = inner_w;
+                        draw_h = (int)(((uint32_t)inner_w * ih) / iw);
+                    } else {
+                        draw_h = inner_h;
+                        draw_w = (int)(((uint32_t)inner_h * iw) / ih);
+                    }
+                    if (draw_w < 1) draw_w = 1;
+                    if (draw_h < 1) draw_h = 1;
+                }
+            }
+            dx = inner_x + (inner_w - draw_w) / 2;
+            dy = inner_y + (inner_h - draw_h) / 2;
+            for (int yy = 0; yy < draw_h; ++yy) {
+                uint32_t sy = (uint32_t)(((uint32_t)yy * wg->image_height) / (uint32_t)draw_h);
+                for (int xx = 0; xx < draw_w; ++xx) {
+                    uint32_t sx = (uint32_t)(((uint32_t)xx * wg->image_width) / (uint32_t)draw_w);
+                    uint32_t color = wg->image_pixels[sy * wg->image_width + sx];
+                    uint8_t alpha = (uint8_t)(color >> 24);
+                    if (alpha == 0) continue;
+                    gui_raw_put_pixel(dx + xx, dy + yy, color);
+                }
+            }
+        } else {
+            uint32_t line = (wg->image_flags & GUI_IMAGEVIEW_PLACEHOLDER) ? gui_rgb(148, 163, 184) : gui_rgb(203, 213, 225);
+            gui_raw_fill_rect(inner_x, inner_y, inner_w, inner_h, gui_rgb(239, 246, 255));
+            gui_raw_line(inner_x, inner_y, inner_x + inner_w - 1, inner_y, line);
+            gui_raw_line(inner_x, inner_y, inner_x, inner_y + inner_h - 1, line);
+            gui_raw_line(inner_x + inner_w - 1, inner_y, inner_x + inner_w - 1, inner_y + inner_h - 1, line);
+            gui_raw_line(inner_x, inner_y + inner_h - 1, inner_x + inner_w - 1, inner_y + inner_h - 1, line);
+            if (inner_w > 10 && inner_h > 10) {
+                gui_raw_line(inner_x + 3, inner_y + 3, inner_x + inner_w - 4, inner_y + inner_h - 4, line);
+                gui_raw_line(inner_x + inner_w - 4, inner_y + 3, inner_x + 3, inner_y + inner_h - 4, line);
+            }
+            gui_draw_window_title_text(inner_x + 6, gui_text_center_y(inner_y, inner_h), "Image", gui_rgb(100, 116, 139), &text_clip);
+        }
     } else if (wg->type == GUI_WIDGET_PROGRESSBAR) {
         int min = wg->min_value;
         int max = wg->max_value;
@@ -4544,6 +4603,16 @@ void gui_toggle_start_menu(void) {
     gui_invalidate_all();
 }
 
+static void gui_widget_release_resources(gui_widget_t *widget) {
+    if (!widget) return;
+    if (widget->image_pixels) {
+        kfree(widget->image_pixels);
+        widget->image_pixels = 0;
+    }
+    widget->image_width = 0;
+    widget->image_height = 0;
+}
+
 void gui_destroy_window(gui_window_t *window) {
     int idx;
     uint32_t i;
@@ -4572,6 +4641,10 @@ void gui_destroy_window(gui_window_t *window) {
         if (app->main_window == window) app->main_window = 0;
         if (app->window_count == 0) app->running = 0;
     }
+    for (i = 0; i < window->widget_count && i < GUI_MAX_WIDGETS_PER_WIN; ++i) {
+        gui_widget_release_resources(&window->widgets[i]);
+    }
+
     /* fire on_close hook (if any) before zeroing memory */
     if (window->on_close) {
         void (*cb)(gui_window_t *, void *) = window->on_close;
@@ -7874,6 +7947,65 @@ int gui_spinner_set_running(gui_widget_t *widget, int running) {
 int gui_spinner_set_text(gui_widget_t *widget, const char *text) {
     if (!widget || widget->type != GUI_WIDGET_SPINNER) return -1;
     gui_widget_set_text(widget, text ? text : "");
+    return 0;
+}
+
+gui_widget_t *gui_add_imageview(gui_window_t *window, int x, int y, int w, int h, uint32_t flags) {
+    gui_widget_t *wg = gui_alloc_widget(window, GUI_WIDGET_IMAGEVIEW, x, y, w, h, "");
+    if (wg) {
+        wg->image_flags = flags & (GUI_IMAGEVIEW_KEEP_ASPECT | GUI_IMAGEVIEW_PLACEHOLDER | GUI_IMAGEVIEW_BITMAP_ALPHA);
+        wg->bg_color = 0xFFF8FAFC;
+        wg->fg_color = 0xFF334155;
+    }
+    return wg;
+}
+
+int gui_imageview_set_rgba(gui_widget_t *widget, const uint32_t *pixels, uint32_t width, uint32_t height, uint32_t flags) {
+    uint32_t count;
+    uint32_t *copy;
+    if (!widget || widget->type != GUI_WIDGET_IMAGEVIEW || !pixels || width == 0 || height == 0) return -1;
+    if (width > 256 || height > 256) return -1;
+    count = width * height;
+    if (height != 0 && count / height != width) return -1;
+    copy = (uint32_t *)kmalloc(count * sizeof(uint32_t));
+    if (!copy) return -1;
+    memcpy(copy, pixels, count * sizeof(uint32_t));
+    gui_widget_release_resources(widget);
+    widget->image_pixels = copy;
+    widget->image_width = width;
+    widget->image_height = height;
+    widget->image_flags = flags & (GUI_IMAGEVIEW_KEEP_ASPECT | GUI_IMAGEVIEW_PLACEHOLDER | GUI_IMAGEVIEW_BITMAP_ALPHA);
+    return 0;
+}
+
+int gui_imageview_set_bitmap(gui_widget_t *widget, const uint8_t *pixels, uint32_t width, uint32_t height, uint32_t stride, uint32_t fg_color, uint32_t bg_color, uint32_t flags) {
+    uint32_t count;
+    uint32_t *copy;
+    if (!widget || widget->type != GUI_WIDGET_IMAGEVIEW || !pixels || width == 0 || height == 0) return -1;
+    if (width > 256 || height > 256) return -1;
+    if (stride == 0) stride = width;
+    if (stride < width) return -1;
+    count = width * height;
+    if (height != 0 && count / height != width) return -1;
+    copy = (uint32_t *)kmalloc(count * sizeof(uint32_t));
+    if (!copy) return -1;
+    for (uint32_t y = 0; y < height; ++y) {
+        for (uint32_t x = 0; x < width; ++x) {
+            uint8_t v = pixels[y * stride + x];
+            if (flags & GUI_IMAGEVIEW_BITMAP_ALPHA) {
+                uint8_t a = v;
+                uint32_t rgb = fg_color & 0x00FFFFFFu;
+                copy[y * width + x] = ((uint32_t)a << 24) | rgb;
+            } else {
+                copy[y * width + x] = v ? fg_color : bg_color;
+            }
+        }
+    }
+    gui_widget_release_resources(widget);
+    widget->image_pixels = copy;
+    widget->image_width = width;
+    widget->image_height = height;
+    widget->image_flags = flags & (GUI_IMAGEVIEW_KEEP_ASPECT | GUI_IMAGEVIEW_PLACEHOLDER | GUI_IMAGEVIEW_BITMAP_ALPHA);
     return 0;
 }
 

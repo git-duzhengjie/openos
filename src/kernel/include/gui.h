@@ -70,6 +70,9 @@
 
 #define GUI_SPINNER_RUNNING                 0x00000001u
 #define GUI_SPINNER_SHOW_LABEL              0x00000002u
+#define GUI_IMAGEVIEW_KEEP_ASPECT           0x00000001u
+#define GUI_IMAGEVIEW_PLACEHOLDER           0x00000002u
+#define GUI_IMAGEVIEW_BITMAP_ALPHA          0x00000004u
 
 #define GUI_DIALOG_TYPE_MASK               0x0000000fu
 #define GUI_DIALOG_TYPE_INFO               0x00000000u
@@ -157,6 +160,7 @@ typedef enum gui_widget_type {
     GUI_WIDGET_TOAST,
     GUI_WIDGET_PROGRESSBAR,
     GUI_WIDGET_SPINNER,
+    GUI_WIDGET_IMAGEVIEW,
     GUI_WIDGET_TREEVIEW,
     GUI_WIDGET_SCROLLBAR,
     GUI_WIDGET_SCROLLVIEW
@@ -255,6 +259,10 @@ struct gui_widget {
     int table_sort_column;
     int table_sort_ascending;
     gui_icon_id_t icon;
+    uint32_t *image_pixels;
+    uint32_t image_width;
+    uint32_t image_height;
+    uint32_t image_flags;
 };
 
 struct gui_window {
@@ -589,6 +597,9 @@ int gui_listview_set_items(gui_widget_t *widget, const char *items);
 gui_widget_t *gui_add_slider(gui_window_t *window, int x, int y, int w, int h, int min, int max, int value, int step, gui_widget_callback_t cb, void *user_data);
 gui_widget_t *gui_add_progressbar(gui_window_t *window, int x, int y, int w, int h, int min, int max, int value, uint32_t flags);
 gui_widget_t *gui_add_spinner(gui_window_t *window, int x, int y, int w, int h, const char *text, uint32_t flags);
+gui_widget_t *gui_add_imageview(gui_window_t *window, int x, int y, int w, int h, uint32_t flags);
+int gui_imageview_set_rgba(gui_widget_t *widget, const uint32_t *pixels, uint32_t width, uint32_t height, uint32_t flags);
+int gui_imageview_set_bitmap(gui_widget_t *widget, const uint8_t *pixels, uint32_t width, uint32_t height, uint32_t stride, uint32_t fg_color, uint32_t bg_color, uint32_t flags);
 gui_widget_t *gui_add_scrollbar(gui_window_t *window, int x, int y, int w, int h, int min, int max, int value, int step, gui_widget_callback_t cb, void *user_data);
 gui_widget_t *gui_add_scrollview(gui_window_t *window, int x, int y, int w, int h, int content_w, int content_h);
 gui_widget_t *gui_find_widget(gui_window_t *window, uint32_t id);

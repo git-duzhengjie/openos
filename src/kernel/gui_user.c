@@ -374,6 +374,40 @@ int gui_user_add_progressbar(uint32_t window_id, int x, int y, int w, int h, int
     return (int)widget->id;
 }
 
+int gui_user_add_imageview(uint32_t window_id, int x, int y, int w, int h, uint32_t flags) {
+    gui_window_t *win = gui_find_window(window_id);
+    gui_widget_t *widget;
+    if (!gui_user_window_owned_by_current(win) || w <= 0 || h <= 0) {
+        return -1;
+    }
+    widget = gui_add_imageview(win, x, y, w, h, flags);
+    if (!widget) {
+        return -1;
+    }
+    gui_invalidate_rect(win->rect.x, win->rect.y, win->rect.w, win->rect.h);
+    return (int)widget->id;
+}
+
+int gui_user_set_imageview_rgba(uint32_t window_id, uint32_t widget_id, const uint32_t *pixels, uint32_t width, uint32_t height, uint32_t flags) {
+    gui_window_t *win = gui_find_window(window_id);
+    gui_widget_t *widget;
+    if (!gui_user_window_owned_by_current(win)) return -1;
+    widget = gui_find_widget(win, widget_id);
+    if (gui_imageview_set_rgba(widget, pixels, width, height, flags) < 0) return -1;
+    gui_invalidate_rect(win->rect.x, win->rect.y, win->rect.w, win->rect.h);
+    return 0;
+}
+
+int gui_user_set_imageview_bitmap(uint32_t window_id, uint32_t widget_id, const uint8_t *pixels, uint32_t width, uint32_t height, uint32_t stride, uint32_t fg_color, uint32_t bg_color, uint32_t flags) {
+    gui_window_t *win = gui_find_window(window_id);
+    gui_widget_t *widget;
+    if (!gui_user_window_owned_by_current(win)) return -1;
+    widget = gui_find_widget(win, widget_id);
+    if (gui_imageview_set_bitmap(widget, pixels, width, height, stride, fg_color, bg_color, flags) < 0) return -1;
+    gui_invalidate_rect(win->rect.x, win->rect.y, win->rect.w, win->rect.h);
+    return 0;
+}
+
 int gui_user_add_scrollbar(uint32_t window_id, int x, int y, int w, int h, int min, int max, int value, int step) {
     gui_window_t *win = gui_find_window(window_id);
     gui_widget_t *widget;

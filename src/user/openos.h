@@ -227,6 +227,9 @@
 #define SYS_GUI_ADD_SPINNER 430
 #define SYS_GUI_SET_SPINNER_RUNNING 431
 #define SYS_GUI_SET_SPINNER_TEXT 432
+#define SYS_GUI_ADD_IMAGEVIEW 433
+#define SYS_GUI_SET_IMAGEVIEW_RGBA 434
+#define SYS_GUI_SET_IMAGEVIEW_BITMAP 435
 
 #define OPENOS_GUI_TEXTBOX_READONLY  (1u << 0)
 #define OPENOS_GUI_TEXTBOX_DISABLED  (1u << 1)
@@ -257,6 +260,9 @@
 #define OPENOS_GUI_PROGRESSBAR_SHOW_PERCENT   0x00000002u
 #define OPENOS_GUI_SPINNER_RUNNING             0x00000001u
 #define OPENOS_GUI_SPINNER_SHOW_LABEL          0x00000002u
+#define OPENOS_GUI_IMAGEVIEW_KEEP_ASPECT       0x00000001u
+#define OPENOS_GUI_IMAGEVIEW_PLACEHOLDER       0x00000002u
+#define OPENOS_GUI_IMAGEVIEW_BITMAP_ALPHA      0x00000004u
 
 #define OPENOS_GUI_TOAST_INFO                OPENOS_GUI_DIALOG_INFO
 #define OPENOS_GUI_TOAST_WARNING             OPENOS_GUI_DIALOG_WARNING
@@ -821,6 +827,23 @@ typedef struct openos_gui_progressbar_request {
     int value;
     unsigned int flags;
 } openos_gui_progressbar_request_t;
+
+typedef struct openos_gui_imageview_request {
+    unsigned int window_id;
+    unsigned int widget_id;
+    int x;
+    int y;
+    int w;
+    int h;
+    unsigned int flags;
+    unsigned int image_width;
+    unsigned int image_height;
+    unsigned int stride;
+    unsigned int fg_color;
+    unsigned int bg_color;
+    unsigned int pixels_user_ptr;
+    unsigned int pixels_size;
+} openos_gui_imageview_request_t;
 
 typedef struct openos_gui_scrollbar_request {
     unsigned int window_id;
@@ -1551,6 +1574,68 @@ static inline int openos_gui_add_progressbar(int window_id, int x, int y, int w,
     req.value = value;
     req.flags = flags;
     return openos_syscall_result(openos_syscall1(SYS_GUI_ADD_PROGRESSBAR, (int)&req));
+}
+
+static inline int openos_gui_add_imageview(int window_id, int x, int y, int w, int h, unsigned int flags)
+{
+    openos_gui_imageview_request_t req;
+    req.window_id = (unsigned int)window_id;
+    req.widget_id = 0;
+    req.x = x;
+    req.y = y;
+    req.w = w;
+    req.h = h;
+    req.flags = flags;
+    req.image_width = 0;
+    req.image_height = 0;
+    req.stride = 0;
+    req.fg_color = 0;
+    req.bg_color = 0;
+    req.pixels_user_ptr = 0;
+    req.pixels_size = 0;
+    return openos_syscall_result(openos_syscall1(SYS_GUI_ADD_IMAGEVIEW, (int)&req));
+}
+
+static inline int openos_gui_set_imageview_rgba(int window_id, int widget_id, const unsigned int *pixels, unsigned int width, unsigned int height, unsigned int flags)
+{
+    openos_gui_imageview_request_t req;
+    if (!pixels || width == 0 || height == 0) return -1;
+    req.window_id = (unsigned int)window_id;
+    req.widget_id = (unsigned int)widget_id;
+    req.x = 0;
+    req.y = 0;
+    req.w = 0;
+    req.h = 0;
+    req.flags = flags;
+    req.image_width = width;
+    req.image_height = height;
+    req.stride = width;
+    req.fg_color = 0;
+    req.bg_color = 0;
+    req.pixels_user_ptr = (unsigned int)pixels;
+    req.pixels_size = width * height * sizeof(unsigned int);
+    return openos_syscall_result(openos_syscall1(SYS_GUI_SET_IMAGEVIEW_RGBA, (int)&req));
+}
+
+static inline int openos_gui_set_imageview_bitmap(int window_id, int widget_id, const unsigned char *pixels, unsigned int width, unsigned int height, unsigned int stride, unsigned int fg_color, unsigned int bg_color, unsigned int flags)
+{
+    openos_gui_imageview_request_t req;
+    if (!pixels || width == 0 || height == 0) return -1;
+    req.window_id = (unsigned int)window_id;
+    req.widget_id = (unsigned int)widget_id;
+    req.x = 0;
+    req.y = 0;
+    req.w = 0;
+    req.h = 0;
+    req.flags = flags;
+    req.image_width = width;
+    req.image_height = height;
+    req.stride = stride ? stride : width;
+    req.fg_color = fg_color;
+    req.bg_color = bg_color;
+    req.pixels_user_ptr = (unsigned int)pixels;
+    req.pixels_size = (stride ? stride : width) * height;
+    return openos_syscall_result(openos_syscall1(SYS_GUI_SET_IMAGEVIEW_BITMAP, (int)&req));
 }
 
 static inline int openos_gui_add_scrollbar(int window_id, int x, int y, int w, int h, int min, int max, int value, int step)

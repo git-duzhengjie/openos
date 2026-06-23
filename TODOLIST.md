@@ -594,8 +594,8 @@
   - [x] 支持确定进度和不确定加载状态
 - [x] Spinner / BusyIndicator：加载动画组件
   - [x] 支持网络加载、后台任务等待状态
-- [ ] ImageView：图片显示组件
-  - [ ] 支持 RGBA/位图显示、缩放、保持比例、占位图
+- [x] ImageView：图片显示组件
+  - [x] 支持 RGBA/位图显示、缩放、保持比例、占位图
 - [ ] IconView / IconButton：图标视图和图标按钮组件
   - [ ] 支持桌面、工具栏、文件管理器复用
 - [ ] Toolbar：工具栏组件
