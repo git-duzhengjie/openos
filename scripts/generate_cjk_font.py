@@ -261,7 +261,7 @@ def rle8_compress(data: bytes) -> bytes:
             run = 1
             while i + run < len(data) and run < 128 and data[i + run] == data[i]:
                 run += 1
-            if run >= 3 or i - start >= 128:
+            if run >= 3 or i - start + run > 128:
                 break
             i += run
         literal_len = i - start
