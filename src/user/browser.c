@@ -86,6 +86,8 @@ static browser_page_cache_entry_t g_page_cache[BROWSER_CACHE_MAX];
 
 static void browser_load_worker(void *arg);
 static void browser_render_current_view(browser_load_context_t *load, int body_label, int scroll_line);
+static void browser_update_form_status(int win, int status_label, const browser_load_context_t *load);
+static int browser_finish_completed_load(browser_load_context_t *load, int win, int status_label, int body_label, int *scroll_line, int *rc);
 
 static void browser_format_ip(unsigned int ip, char *out, int out_size)
 {
@@ -976,6 +978,32 @@ static void browser_render_current_view(browser_load_context_t *load, int body_l
     openos_gui_set_text(load->window_id, body_label, view[0] ? view : "Empty response");
 }
 
+static int browser_finish_completed_load(browser_load_context_t *load, int win, int status_label, int body_label, int *scroll_line, int *rc)
+{
+    char view[BROWSER_BODY_MAX + BROWSER_TITLE_MAX + 32];
+
+    if (!load || !scroll_line || !rc)
+        return 0;
+    if (!load->active || !load->done)
+        return 0;
+
+    __sync_synchronize();
+    *rc = load->result;
+    openos_gui_set_text(win, status_label, load->status[0] ? load->status : (*rc < 0 ? "Failed" : "Done"));
+    *scroll_line = 0;
+    browser_make_view(view, sizeof(view), load, *scroll_line);
+    openos_gui_set_text(win, body_label, view[0] ? view : (*rc < 0 ? "Load failed" : "Empty response"));
+    browser_cache_store(load, *scroll_line);
+    load->focus_mode = load->link_count > 0 ? BROWSER_FOCUS_LINK : (load->form_state.count > 0 ? BROWSER_FOCUS_FORM : 0);
+    if (load->link_count > 0)
+        browser_update_link_status(win, status_label, load);
+    else if (load->form_state.count > 0)
+        browser_update_form_status(win, status_label, load);
+    load->active = 0;
+    printf("browser: gui updated result=%d status=%s\n", *rc, load->status[0] ? load->status : (*rc < 0 ? "Failed" : "Done"));
+    return 1;
+}
+
 static void browser_refresh_form_body(browser_load_context_t *load, int body_label, int scroll_line)
 {
     if (!load) return;
@@ -1184,7 +1212,9 @@ static void browser_load_worker(void *arg)
         }
     }
 
+    __sync_synchronize();
     ctx->done = 1;
+    __sync_synchronize();
     printf("browser: load complete result=%d status=%s\n", ctx->result, ctx->status[0] ? ctx->status : (ctx->result < 0 ? "Failed" : "Done"));
 }
 
@@ -1285,6 +1315,10 @@ int main(int argc, char **argv)
 
     for (;;) {
         openos_gui_event_t event;
+        if (browser_finish_completed_load(&load, win, status_label, body_label, &scroll_line, &rc)) {
+            openos_sleep(10);
+            continue;
+        }
         int ev = openos_gui_poll_event(&event);
         if (ev > 0 && event.type != OPENOS_GUI_EVENT_NONE && event.window_id == (unsigned int)win) {
             if (event.type == OPENOS_GUI_EVENT_TEXT_CHANGED && event.widget_id == (unsigned int)address_label) {
@@ -1385,21 +1419,7 @@ int main(int argc, char **argv)
                 openos_gui_set_text(win, body_label, view[0] ? view : "End of page");
             }
         }
-        if (load.active && load.done) {
-            rc = load.result;
-            openos_gui_set_text(win, status_label, load.status[0] ? load.status : (rc < 0 ? "Failed" : "Done"));
-            {
-                char view[BROWSER_BODY_MAX + BROWSER_TITLE_MAX + 32];
-                scroll_line = 0;
-                browser_make_view(view, sizeof(view), &load, scroll_line);
-                openos_gui_set_text(win, body_label, view);
-                browser_cache_store(&load, scroll_line);
-                load.focus_mode = load.link_count > 0 ? BROWSER_FOCUS_LINK : (load.form_state.count > 0 ? BROWSER_FOCUS_FORM : 0);
-                if (load.link_count > 0) browser_update_link_status(win, status_label, &load);
-                else if (load.form_state.count > 0) browser_update_form_status(win, status_label, &load);
-            }
-            load.active = 0;
-        }
+        browser_finish_completed_load(&load, win, status_label, body_label, &scroll_line, &rc);
         openos_sleep(10);
     }
 
