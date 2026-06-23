@@ -27,6 +27,8 @@
 #define OB_MAX_ATTR_VALUE 96
 #define OB_FORM_STATE_MAX_CONTROLS 8
 #define OB_MAX_HEADER_VALUE 128
+#define OB_MAX_CSS_RULES 12
+#define OB_MAX_CSS_SELECTOR 32
 #define OB_HTML_LIMIT_BYTES 4096
 
 
@@ -62,6 +64,8 @@ typedef struct ob_dom_node {
     char name[OB_MAX_TAG_NAME];
     char text[OB_MAX_NODE_TEXT];
     char href[OB_MAX_ATTR_VALUE];
+    char dom_id[OB_MAX_ATTR_VALUE];
+    char dom_class[OB_MAX_ATTR_VALUE];
     char img_src[OB_MAX_ATTR_VALUE];
     char img_alt[OB_MAX_ATTR_VALUE];
     char img_width[OB_MAX_ATTR_VALUE];
@@ -102,6 +106,8 @@ static void ob_dom_node_copy(ob_dom_node_t *dst, const ob_dom_node_t *src)
     ob_dom_copy_text(dst->name, sizeof(dst->name), src->name);
     ob_dom_copy_text(dst->text, sizeof(dst->text), src->text);
     ob_dom_copy_text(dst->href, sizeof(dst->href), src->href);
+    ob_dom_copy_text(dst->dom_id, sizeof(dst->dom_id), src->dom_id);
+    ob_dom_copy_text(dst->dom_class, sizeof(dst->dom_class), src->dom_class);
     ob_dom_copy_text(dst->img_src, sizeof(dst->img_src), src->img_src);
     ob_dom_copy_text(dst->img_alt, sizeof(dst->img_alt), src->img_alt);
     ob_dom_copy_text(dst->img_width, sizeof(dst->img_width), src->img_width);
@@ -134,6 +140,8 @@ static void ob_dom_document_copy(ob_dom_document_t *dst, const ob_dom_document_t
         dst->nodes[i].name[0] = 0;
         dst->nodes[i].text[0] = 0;
         dst->nodes[i].href[0] = 0;
+        dst->nodes[i].dom_id[0] = 0;
+        dst->nodes[i].dom_class[0] = 0;
         dst->nodes[i].img_src[0] = 0;
         dst->nodes[i].img_alt[0] = 0;
         dst->nodes[i].img_width[0] = 0;
@@ -152,6 +160,17 @@ typedef struct ob_html_parser_i ob_html_parser_i_t;
 struct ob_html_parser_i {
     int (*parse)(ob_html_parser_i_t *self, const char *html, ob_dom_document_t *doc);
 };
+
+typedef struct ob_css_rule {
+    char selector[OB_MAX_CSS_SELECTOR];
+    int display;
+    int font_weight_bold;
+} ob_css_rule_t;
+
+typedef struct ob_css_stylesheet {
+    ob_css_rule_t rules[OB_MAX_CSS_RULES];
+    int count;
+} ob_css_stylesheet_t;
 
 typedef struct ob_html_parser_base {
     ob_html_parser_i_t iface;
@@ -469,6 +488,149 @@ static int ob_css_ident_eq_ci(const char *p, int len, const char *name)
     return i == len && name[i] == 0;
 }
 
+
+static int ob_css_is_space(char c)
+{
+    return c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '\f';
+}
+
+static void ob_css_stylesheet_init(ob_css_stylesheet_t *sheet)
+{
+    int i;
+    if (!sheet) return;
+    sheet->count = 0;
+    for (i = 0; i < OB_MAX_CSS_RULES; ++i) {
+        sheet->rules[i].selector[0] = 0;
+        sheet->rules[i].display = 0;
+        sheet->rules[i].font_weight_bold = 0;
+    }
+}
+
+static void ob_css_parse_declarations(const char *css, int start, int end, int *display, int *bold)
+{
+    int pos = start;
+    if (display) *display = 0;
+    if (bold) *bold = 0;
+    while (pos < end) {
+        int key_start;
+        int key_len;
+        int value_start;
+        int value_len;
+        while (pos < end && (ob_css_is_space(css[pos]) || css[pos] == ';')) ++pos;
+        key_start = pos;
+        while (pos < end && css[pos] != ':' && css[pos] != ';' && css[pos] != '}') ++pos;
+        key_len = pos - key_start;
+        while (key_len > 0 && ob_css_is_space(css[key_start + key_len - 1])) --key_len;
+        if (pos >= end || css[pos] != ':') { while (pos < end && css[pos] != ';') ++pos; continue; }
+        ++pos;
+        while (pos < end && ob_css_is_space(css[pos])) ++pos;
+        value_start = pos;
+        while (pos < end && css[pos] != ';' && css[pos] != '}') ++pos;
+        value_len = pos - value_start;
+        while (value_len > 0 && ob_css_is_space(css[value_start + value_len - 1])) --value_len;
+        if (ob_css_ident_eq_ci(css + key_start, key_len, "display") && display) {
+            if (ob_css_ident_eq_ci(css + value_start, value_len, "none")) *display = OB_DISPLAY_NONE;
+            else if (ob_css_ident_eq_ci(css + value_start, value_len, "block")) *display = OB_DISPLAY_BLOCK;
+            else if (ob_css_ident_eq_ci(css + value_start, value_len, "inline")) *display = OB_DISPLAY_INLINE;
+        } else if (ob_css_ident_eq_ci(css + key_start, key_len, "font-weight") && bold) {
+            if (ob_css_ident_eq_ci(css + value_start, value_len, "bold") ||
+                ob_css_ident_eq_ci(css + value_start, value_len, "700") ||
+                ob_css_ident_eq_ci(css + value_start, value_len, "800") ||
+                ob_css_ident_eq_ci(css + value_start, value_len, "900")) *bold = 1;
+        }
+        if (pos < end && css[pos] == ';') ++pos;
+    }
+}
+
+static void ob_css_parse_stylesheet(ob_css_stylesheet_t *sheet, const char *css)
+{
+    int pos = 0;
+    if (!sheet || !css) return;
+    ob_css_stylesheet_init(sheet);
+    while (css[pos] && sheet->count < OB_MAX_CSS_RULES) {
+        int selector_start;
+        int selector_len;
+        int block_start;
+        int block_end;
+        int i;
+        while (css[pos] && ob_css_is_space(css[pos])) ++pos;
+        selector_start = pos;
+        while (css[pos] && css[pos] != '{') ++pos;
+        if (!css[pos]) break;
+        selector_len = pos - selector_start;
+        while (selector_len > 0 && ob_css_is_space(css[selector_start + selector_len - 1])) --selector_len;
+        ++pos;
+        block_start = pos;
+        while (css[pos] && css[pos] != '}') ++pos;
+        block_end = pos;
+        if (css[pos] == '}') ++pos;
+        while (selector_len > 0 && ob_css_is_space(css[selector_start])) { ++selector_start; --selector_len; }
+        if (selector_len <= 0 || selector_len >= OB_MAX_CSS_SELECTOR) continue;
+        for (i = 0; i < selector_len; ++i) {
+            char ch = css[selector_start + i];
+            if (ch == ',' || ob_css_is_space(ch)) break;
+            sheet->rules[sheet->count].selector[i] = ch;
+        }
+        sheet->rules[sheet->count].selector[i] = 0;
+        if (!sheet->rules[sheet->count].selector[0]) continue;
+        ob_css_parse_declarations(css, block_start, block_end,
+                                  &sheet->rules[sheet->count].display,
+                                  &sheet->rules[sheet->count].font_weight_bold);
+        if (sheet->rules[sheet->count].display || sheet->rules[sheet->count].font_weight_bold) ++sheet->count;
+    }
+}
+
+static int ob_css_prefix_eq_ci(const char *text, const char *prefix)
+{
+    int i = 0;
+    if (!text || !prefix) return 0;
+    while (prefix[i]) {
+        if (!text[i] || !ob_ascii_equal_ci(text[i], prefix[i])) return 0;
+        ++i;
+    }
+    return 1;
+}
+
+static int ob_css_class_contains(const char *classes, const char *needle)
+{
+    int pos = 0;
+    int nlen = ob_cstr_len(needle);
+    if (!classes || !needle || !needle[0]) return 0;
+    while (classes[pos]) {
+        while (ob_css_is_space(classes[pos])) ++pos;
+        if (!classes[pos]) break;
+        if (ob_css_prefix_eq_ci(classes + pos, needle)) {
+            char end = classes[pos + nlen];
+            if (end == 0 || ob_css_is_space(end)) return 1;
+        }
+        while (classes[pos] && !ob_css_is_space(classes[pos])) ++pos;
+    }
+    return 0;
+}
+
+static int ob_css_rule_matches(const ob_css_rule_t *rule, const ob_dom_node_t *node)
+{
+    if (!rule || !node || node->type != OB_DOM_NODE_ELEMENT || !rule->selector[0]) return 0;
+    if (rule->selector[0] == '#') return ob_token_eq_ci(node->dom_id, rule->selector + 1);
+    if (rule->selector[0] == '.') return ob_css_class_contains(node->dom_class, rule->selector + 1);
+    return ob_token_eq_ci(node->name, rule->selector);
+}
+
+static void ob_css_apply_stylesheet(ob_dom_document_t *doc, const ob_css_stylesheet_t *sheet)
+{
+    int i;
+    int r;
+    if (!doc || !sheet) return;
+    for (i = 0; i < doc->count; ++i) {
+        for (r = 0; r < sheet->count; ++r) {
+            if (ob_css_rule_matches(&sheet->rules[r], &doc->nodes[i])) {
+                if (sheet->rules[r].display) doc->nodes[i].style_display = sheet->rules[r].display;
+                if (sheet->rules[r].font_weight_bold) doc->nodes[i].font_weight_bold = 1;
+            }
+        }
+    }
+}
+
 static void ob_css_apply_inline_style(ob_dom_node_t *node, const ob_html_token_t *tok)
 {
     char style[OB_MAX_ATTR_VALUE];
@@ -515,6 +677,8 @@ static void ob_css_apply_inline_style(ob_dom_node_t *node, const ob_html_token_t
 static void ob_dom_extract_resource_attrs(ob_dom_node_t *node, const ob_html_token_t *tok)
 {
     if (!node || !tok) return;
+    ob_extract_attr_value(tok->attrs, tok->attrs_len, "id", node->dom_id, sizeof(node->dom_id));
+    ob_extract_attr_value(tok->attrs, tok->attrs_len, "class", node->dom_class, sizeof(node->dom_class));
     if (ob_token_eq_ci(node->name, "img")) {
         ob_extract_attr_value(tok->attrs, tok->attrs_len, "src", node->img_src, sizeof(node->img_src));
         ob_extract_attr_value(tok->attrs, tok->attrs_len, "alt", node->img_alt, sizeof(node->img_alt));
@@ -559,6 +723,12 @@ static int ob_dom_add_node(ob_dom_document_t *doc, int type, const char *name, c
     doc->nodes[id].name[0] = 0;
     doc->nodes[id].text[0] = 0;
     doc->nodes[id].href[0] = 0;
+    doc->nodes[id].dom_id[0] = 0;
+    doc->nodes[id].dom_class[0] = 0;
+    doc->nodes[id].img_src[0] = 0;
+    doc->nodes[id].img_alt[0] = 0;
+    doc->nodes[id].img_width[0] = 0;
+    doc->nodes[id].img_height[0] = 0;
     doc->nodes[id].form_type[0] = 0;
     doc->nodes[id].form_value[0] = 0;
     doc->nodes[id].form_placeholder[0] = 0;
@@ -621,11 +791,129 @@ static int ob_html_should_skip_subtree_tag(const char *tag)
            ob_token_eq_ci(tag, "noscript");
 }
 
+
+static void ob_dom_set_text_content(ob_dom_document_t *doc, int node_id, const char *text)
+{
+    int child;
+    if (!doc || node_id < 0 || node_id >= doc->count) return;
+    child = doc->nodes[node_id].first_child;
+    if (child >= 0 && child < doc->count && doc->nodes[child].type == OB_DOM_NODE_TEXT) {
+        ob_dom_copy_text(doc->nodes[child].text, sizeof(doc->nodes[child].text), text ? text : "");
+    } else {
+        int id = ob_dom_add_node(doc, OB_DOM_NODE_TEXT, "#text", text ? text : "", ob_cstr_len(text ? text : ""), node_id, OB_DISPLAY_INLINE);
+        if (id >= 0) doc->nodes[node_id].first_child = id;
+    }
+}
+
+static int ob_dom_find_by_id(ob_dom_document_t *doc, const char *id)
+{
+    int i;
+    if (!doc || !id || !id[0]) return -1;
+    for (i = 0; i < doc->count; ++i) {
+        if (ob_token_eq_ci(doc->nodes[i].dom_id, id)) return i;
+    }
+    return -1;
+}
+
+static int ob_js_read_quoted(const char *js, int *pos, char *out, int out_size)
+{
+    char quote;
+    int w = 0;
+    if (!js || !pos || !out || out_size <= 0) return 0;
+    while (js[*pos] == ' ' || js[*pos] == '\t' || js[*pos] == '\r' || js[*pos] == '\n') ++(*pos);
+    quote = js[*pos];
+    if (quote != '\'' && quote != '"') return 0;
+    ++(*pos);
+    while (js[*pos] && js[*pos] != quote) {
+        char ch = js[*pos];
+        if (ch == '\\' && js[*pos + 1]) {
+            ++(*pos);
+            ch = js[*pos];
+            if (ch == 'n') ch = '\n';
+            else if (ch == 't') ch = '\t';
+        }
+        if (w < out_size - 1) out[w++] = ch;
+        ++(*pos);
+    }
+    if (js[*pos] == quote) ++(*pos);
+    out[w] = 0;
+    return 1;
+}
+
+static void ob_js_execute_inline(ob_dom_document_t *doc, const char *js)
+{
+    int pos = 0;
+    if (!doc || !js) return;
+    while (js[pos]) {
+        if (ob_css_prefix_eq_ci(js + pos, "document.writeln") || ob_css_prefix_eq_ci(js + pos, "document.write")) {
+            char text[OB_MAX_NODE_TEXT];
+            int p = pos;
+            int writeln = ob_css_prefix_eq_ci(js + pos, "document.writeln");
+            while (js[p] && js[p] != '(') ++p;
+            if (js[p] == '(') {
+                ++p;
+                if (ob_js_read_quoted(js, &p, text, sizeof(text))) {
+                    int len = ob_cstr_len(text);
+                    if (writeln && len < (int)sizeof(text) - 2) { text[len] = '\n'; text[len + 1] = 0; }
+                    ob_dom_add_node(doc, OB_DOM_NODE_TEXT, "#text", text, ob_cstr_len(text), doc->root, OB_DISPLAY_INLINE);
+                }
+            }
+            pos = p;
+        } else if (ob_css_prefix_eq_ci(js + pos, "document.getElementById")) {
+            char id[OB_MAX_ATTR_VALUE];
+            char value[OB_MAX_NODE_TEXT];
+            int p = pos;
+            int node;
+            while (js[p] && js[p] != '(') ++p;
+            if (js[p] == '(') ++p;
+            if (ob_js_read_quoted(js, &p, id, sizeof(id))) {
+                while (js[p] && js[p] != '=') ++p;
+                if (js[p] == '=') ++p;
+                if (ob_js_read_quoted(js, &p, value, sizeof(value))) {
+                    node = ob_dom_find_by_id(doc, id);
+                    if (node >= 0) ob_dom_set_text_content(doc, node, value);
+                }
+            }
+            pos = p;
+        }
+        if (js[pos]) ++pos;
+    }
+}
+
+static void ob_html_collect_embedded_code(const char *html, const char *tag, char *out, int out_size)
+{
+    int pos = 0;
+    int w = 0;
+    int tag_len = ob_cstr_len(tag);
+    if (!html || !tag || !out || out_size <= 0) return;
+    out[0] = 0;
+    while (html[pos] && w < out_size - 1) {
+        if (html[pos] == '<' && ob_css_prefix_eq_ci(html + pos + 1, tag)) {
+            int p = pos + 1 + tag_len;
+            while (html[p] && html[p] != '>') ++p;
+            if (!html[p]) break;
+            ++p;
+            while (html[p]) {
+                if (html[p] == '<' && html[p + 1] == '/' && ob_css_prefix_eq_ci(html + p + 2, tag)) break;
+                if (w < out_size - 1) out[w++] = html[p];
+                ++p;
+            }
+            if (w < out_size - 1) out[w++] = '\n';
+            pos = p;
+        }
+        if (html[pos]) ++pos;
+    }
+    out[w] = 0;
+}
+
 static int ob_html_parse_impl(ob_html_parser_i_t *iface, const char *html, ob_dom_document_t *doc)
 {
     ob_html_tokenizer_base_t tokenizer;
     ob_default_style_resolver_t styles;
     ob_html_token_t tok;
+    ob_css_stylesheet_t stylesheet;
+    char embedded_css[OB_HTML_LIMIT_BYTES];
+    char embedded_js[OB_HTML_LIMIT_BYTES];
     int stack[OB_MAX_DOM_NODES];
     int depth = 0;
     int skip_depth = 0;
@@ -637,6 +925,9 @@ static int ob_html_parse_impl(ob_html_parser_i_t *iface, const char *html, ob_do
     if (doc->root < 0) return -1;
     stack[depth++] = doc->root;
     ob_default_style_resolver_init(&styles);
+    ob_html_collect_embedded_code(html ? html : "", "style", embedded_css, sizeof(embedded_css));
+    ob_html_collect_embedded_code(html ? html : "", "script", embedded_js, sizeof(embedded_js));
+    ob_css_parse_stylesheet(&stylesheet, embedded_css);
     ob_html_tokenizer_base_init(&tokenizer, html);
     while (tokenizer.iface.next(&tokenizer.iface, &tok) == 0 && tok.type != OB_HTML_TOKEN_EOF) {
         if (skip_depth > 0) {
@@ -688,6 +979,8 @@ static int ob_html_parse_impl(ob_html_parser_i_t *iface, const char *html, ob_do
             }
         }
     }
+    ob_css_apply_stylesheet(doc, &stylesheet);
+    ob_js_execute_inline(doc, embedded_js);
     return doc->count;
 }
 

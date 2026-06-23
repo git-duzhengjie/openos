@@ -370,6 +370,29 @@ int main(void)
         }
     }
 
+    {
+        const char *styled = "<html><head><style>.hide{display:none} #hero{font-weight:bold}</style></head>"
+                             "<body><p class='hide'>secret</p><p id='hero'>visible</p></body></html>";
+        if (parser.iface.parse(&parser.iface, styled, &doc) <= 1 ||
+            renderer.iface.render(&renderer.iface, &doc, rendered, sizeof(rendered)) <= 0 ||
+            strstr(rendered, "secret") || !strstr(rendered, "**visible**")) {
+            fprintf(stderr, "browser inline CSS smoke failed: %s\n", rendered);
+            return 1;
+        }
+    }
+
+    {
+        const char *scripted = "<html><body><div id='target'>old</div>"
+                              "<script>document.getElementById('target').innerText='new';document.write(' added');</script>"
+                              "</body></html>";
+        if (parser.iface.parse(&parser.iface, scripted, &doc) <= 1 ||
+            renderer.iface.render(&renderer.iface, &doc, rendered, sizeof(rendered)) <= 0 ||
+            !strstr(rendered, "new") || !strstr(rendered, "added") || strstr(rendered, "old")) {
+            fprintf(stderr, "browser inline JS smoke failed: %s\n", rendered);
+            return 1;
+        }
+    }
+
     printf("browser engine smoke ok: nodes=%d\n", doc.count);
     return 0;
 }
