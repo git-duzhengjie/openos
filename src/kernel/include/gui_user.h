@@ -129,6 +129,23 @@ typedef struct gui_user_groupbox_request {
     char title[256];
 } gui_user_groupbox_request_t;
 
+typedef struct gui_user_form_request {
+    uint32_t window_id;
+    uint32_t form_id;
+    uint32_t widget_id;
+    int32_t x;
+    int32_t y;
+    int32_t w;
+    int32_t h;
+    int32_t row;
+    uint32_t flags;
+    char title[256];
+    char label[128];
+    char value[128];
+    char hint[256];
+    char submit_text[64];
+} gui_user_form_request_t;
+
 typedef struct gui_user_radio_request {
     uint32_t window_id;
     uint32_t group_id;
@@ -369,6 +386,9 @@ int gui_user_set_splitview_ratio(uint32_t window_id, uint32_t widget_id, int rat
 int gui_user_get_splitview_ratio(uint32_t window_id, uint32_t widget_id, int *out_ratio);
 int gui_user_add_groupbox(uint32_t window_id, int x, int y, int w, int h, const char *title, uint32_t bg_color, uint32_t border_color, uint32_t flags, uint32_t padding);
 int gui_user_set_groupbox_options(uint32_t window_id, uint32_t widget_id, const char *title, uint32_t bg_color, uint32_t border_color, uint32_t flags, uint32_t padding);
+int gui_user_add_form(uint32_t window_id, int x, int y, int w, int h, const char *title, uint32_t flags);
+int gui_user_add_form_field(uint32_t window_id, uint32_t form_id, int row, const char *label, const char *value, const char *hint, uint32_t flags);
+int gui_user_add_form_submit(uint32_t window_id, uint32_t form_id, int row, const char *text);
 int gui_user_add_panel(uint32_t window_id, int x, int y, int w, int h, uint32_t color);
 int gui_user_add_canvas(uint32_t window_id, int x, int y, int w, int h, uint32_t color);
 int gui_user_add_toggle(uint32_t window_id, int x, int y, int w, int h, const char *text, int checked);

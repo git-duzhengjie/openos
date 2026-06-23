@@ -9158,6 +9158,69 @@ gui_widget_t *gui_add_groupbox(gui_window_t *window, int x, int y, int w, int h,
     return wg;
 }
 
+gui_widget_t *gui_add_form(gui_window_t *window, int x, int y, int w, int h, const char *title, uint32_t flags) {
+    uint32_t group_flags = GUI_GROUPBOX_FLAG_BORDER | GUI_GROUPBOX_FLAG_CARD | GUI_GROUPBOX_FLAG_TITLEBAR;
+    gui_widget_t *form = gui_add_groupbox(window, x, y, w, h, title ? title : "Form");
+    if (!form) return NULL;
+    if (!(flags & GUI_FORM_FLAG_BORDER)) group_flags &= ~GUI_GROUPBOX_FLAG_BORDER;
+    if (!(flags & GUI_FORM_FLAG_CARD)) group_flags &= ~GUI_GROUPBOX_FLAG_CARD;
+    if (!(flags & GUI_FORM_FLAG_TITLEBAR)) group_flags &= ~GUI_GROUPBOX_FLAG_TITLEBAR;
+    gui_widget_set_groupbox_options(form, title ? title : "Form", gui_rgb(255, 255, 255), g_gui.colors.button_border, group_flags, 12);
+    return form;
+}
+
+gui_widget_t *gui_add_form_field(gui_window_t *window, gui_widget_t *form, int row, const char *label, const char *value, const char *hint, uint32_t flags) {
+    int pad = 12;
+    int title_h = (form && form->text[0] != '\0') ? 26 : 6;
+    int row_h = 54;
+    int label_w;
+    int input_x;
+    int y;
+    int input_w;
+    gui_widget_t *label_wg;
+    gui_widget_t *input_wg;
+    gui_widget_t *hint_wg;
+    if (!window || !form || form->type != GUI_WIDGET_GROUPBOX) return NULL;
+    if (row < 0) row = 0;
+    pad = (int)(form->panel_padding ? form->panel_padding : 12);
+    label_w = form->rect.w / 3;
+    if (label_w < 72) label_w = 72;
+    if (label_w > 160) label_w = 160;
+    input_x = form->rect.x + pad + label_w + 8;
+    input_w = form->rect.w - pad * 2 - label_w - 8;
+    if (input_w < 48) input_w = 48;
+    y = form->rect.y + title_h + pad + row * row_h;
+    label_wg = gui_add_label(window, form->rect.x + pad, y + 5, label_w, 20, label ? label : "Label");
+    if (label_wg) { label_wg->parent_id = form->id; label_wg->fg_color = g_gui.colors.text_fg; }
+    input_wg = gui_add_textbox(window, input_x, y, input_w, 24, value ? value : "");
+    if (!input_wg) return NULL;
+    input_wg->parent_id = form->id;
+    if (hint && hint[0]) {
+        hint_wg = gui_add_label(window, input_x, y + 28, input_w, 18, hint);
+        if (hint_wg) {
+            hint_wg->parent_id = form->id;
+            hint_wg->fg_color = (flags & GUI_FORM_FIELD_ERROR) ? gui_rgb(185, 28, 28) : gui_rgb(100, 116, 139);
+        }
+    }
+    return input_wg;
+}
+
+gui_widget_t *gui_add_form_submit(gui_window_t *window, gui_widget_t *form, const char *text, int row) {
+    int pad;
+    int title_h;
+    int row_h = 54;
+    int y;
+    gui_widget_t *button;
+    if (!window || !form || form->type != GUI_WIDGET_GROUPBOX) return NULL;
+    if (row < 0) row = 0;
+    pad = (int)(form->panel_padding ? form->panel_padding : 12);
+    title_h = (form->text[0] != '\0') ? 26 : 6;
+    y = form->rect.y + title_h + pad + row * row_h + 6;
+    button = gui_add_button(window, form->rect.x + form->rect.w - pad - 96, y, 96, 26, text ? text : "Submit", NULL, NULL);
+    if (button) button->parent_id = form->id;
+    return button;
+}
+
 gui_widget_t *gui_add_canvas(gui_window_t *window, int x, int y, int w, int h, uint32_t color) {
     gui_widget_t *wg = gui_alloc_widget(window, GUI_WIDGET_CANVAS, x, y, w, h, "");
     if (wg) {

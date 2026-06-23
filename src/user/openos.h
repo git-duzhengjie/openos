@@ -249,6 +249,9 @@
 #define SYS_GUI_GET_SPLITVIEW_RATIO 452
 #define SYS_GUI_ADD_GROUPBOX 453
 #define SYS_GUI_SET_GROUPBOX_OPTIONS 454
+#define SYS_GUI_ADD_FORM 455
+#define SYS_GUI_ADD_FORM_FIELD 456
+#define SYS_GUI_ADD_FORM_SUBMIT 457
 
 #define OPENOS_GUI_TEXTBOX_READONLY  (1u << 0)
 #define OPENOS_GUI_TEXTBOX_DISABLED  (1u << 1)
@@ -310,6 +313,12 @@
 #define OPENOS_GUI_GROUPBOX_CARD                  0x00000002u
 #define OPENOS_GUI_GROUPBOX_ERROR                 0x00000004u
 #define OPENOS_GUI_GROUPBOX_TITLEBAR              0x00000008u
+
+#define OPENOS_GUI_FORM_BORDER                    0x00000001u
+#define OPENOS_GUI_FORM_CARD                      0x00000002u
+#define OPENOS_GUI_FORM_TITLEBAR                  0x00000004u
+#define OPENOS_GUI_FORM_FIELD_ERROR               0x00000001u
+#define OPENOS_GUI_FORM_FIELD_HELP                0x00000002u
 
 #define OPENOS_GUI_TOAST_INFO                OPENOS_GUI_DIALOG_INFO
 #define OPENOS_GUI_TOAST_WARNING             OPENOS_GUI_DIALOG_WARNING
@@ -898,6 +907,23 @@ typedef struct openos_gui_groupbox_request {
     unsigned int padding;
     char title[256];
 } openos_gui_groupbox_request_t;
+
+typedef struct openos_gui_form_request {
+    unsigned int window_id;
+    unsigned int form_id;
+    unsigned int widget_id;
+    int x;
+    int y;
+    int w;
+    int h;
+    int row;
+    unsigned int flags;
+    char title[256];
+    char label[128];
+    char value[128];
+    char hint[256];
+    char submit_text[64];
+} openos_gui_form_request_t;
 
 typedef struct openos_gui_text_request {
     unsigned int window_id;
@@ -1533,6 +1559,50 @@ static inline int openos_gui_set_groupbox_options(int window_id, int widget_id, 
     req.padding = padding;
     openos_gui_copy_text256(req.title, title);
     return openos_syscall_result(openos_syscall1(SYS_GUI_SET_GROUPBOX_OPTIONS, (int)&req));
+}
+
+static inline int openos_gui_add_form(int window_id, int x, int y, int w, int h, const char *title, unsigned int flags)
+{
+    openos_gui_form_request_t req;
+    req.window_id = (unsigned int)window_id;
+    req.form_id = 0;
+    req.widget_id = 0;
+    req.x = x; req.y = y; req.w = w; req.h = h; req.row = 0;
+    req.flags = flags;
+    openos_gui_copy_text256(req.title, title);
+    req.label[0] = req.value[0] = req.hint[0] = req.submit_text[0] = 0;
+    return openos_syscall_result(openos_syscall1(SYS_GUI_ADD_FORM, (int)&req));
+}
+
+static inline int openos_gui_add_form_field(int window_id, int form_id, int row, const char *label, const char *value, const char *hint, unsigned int flags)
+{
+    openos_gui_form_request_t req;
+    req.window_id = (unsigned int)window_id;
+    req.form_id = (unsigned int)form_id;
+    req.widget_id = 0;
+    req.x = req.y = req.w = req.h = 0;
+    req.row = row;
+    req.flags = flags;
+    req.title[0] = 0;
+    openos_gui_copy_text128(req.label, label);
+    openos_gui_copy_text128(req.value, value);
+    openos_gui_copy_text256(req.hint, hint);
+    req.submit_text[0] = 0;
+    return openos_syscall_result(openos_syscall1(SYS_GUI_ADD_FORM_FIELD, (int)&req));
+}
+
+static inline int openos_gui_add_form_submit(int window_id, int form_id, int row, const char *text)
+{
+    openos_gui_form_request_t req;
+    req.window_id = (unsigned int)window_id;
+    req.form_id = (unsigned int)form_id;
+    req.widget_id = 0;
+    req.x = req.y = req.w = req.h = 0;
+    req.row = row;
+    req.flags = 0;
+    req.title[0] = req.label[0] = req.value[0] = req.hint[0] = 0;
+    openos_gui_copy_text64(req.submit_text, text);
+    return openos_syscall_result(openos_syscall1(SYS_GUI_ADD_FORM_SUBMIT, (int)&req));
 }
 
 static inline int openos_gui_add_splitview(int window_id, int x, int y, int w, int h, int ratio, unsigned int flags)

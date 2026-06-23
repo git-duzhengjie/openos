@@ -3206,6 +3206,41 @@ uint32_t syscall_dispatch(uint32_t num,
             return (uint32_t)gui_user_set_groupbox_options(req.window_id, req.widget_id, req.title, req.bg_color, req.border_color, req.flags, req.padding);
         }
 
+    case SYS_GUI_ADD_FORM:
+        {
+            gui_user_form_request_t req;
+            if (!a || !user_ptr_valid((void *)a, sizeof(req), USERMEM_READ))
+                return (uint32_t)-1;
+            if (copy_from_user(&req, (const void *)a, sizeof(req)) < 0)
+                return (uint32_t)-1;
+            req.title[sizeof(req.title) - 1] = 0;
+            return (uint32_t)gui_user_add_form(req.window_id, req.x, req.y, req.w, req.h, req.title, req.flags);
+        }
+
+    case SYS_GUI_ADD_FORM_FIELD:
+        {
+            gui_user_form_request_t req;
+            if (!a || !user_ptr_valid((void *)a, sizeof(req), USERMEM_READ))
+                return (uint32_t)-1;
+            if (copy_from_user(&req, (const void *)a, sizeof(req)) < 0)
+                return (uint32_t)-1;
+            req.label[sizeof(req.label) - 1] = 0;
+            req.value[sizeof(req.value) - 1] = 0;
+            req.hint[sizeof(req.hint) - 1] = 0;
+            return (uint32_t)gui_user_add_form_field(req.window_id, req.form_id, req.row, req.label, req.value, req.hint, req.flags);
+        }
+
+    case SYS_GUI_ADD_FORM_SUBMIT:
+        {
+            gui_user_form_request_t req;
+            if (!a || !user_ptr_valid((void *)a, sizeof(req), USERMEM_READ))
+                return (uint32_t)-1;
+            if (copy_from_user(&req, (const void *)a, sizeof(req)) < 0)
+                return (uint32_t)-1;
+            req.submit_text[sizeof(req.submit_text) - 1] = 0;
+            return (uint32_t)gui_user_add_form_submit(req.window_id, req.form_id, req.row, req.submit_text);
+        }
+
     case SYS_GUI_ADD_SPLITVIEW:
         {
             gui_user_splitview_request_t req;

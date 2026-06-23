@@ -533,6 +533,7 @@ int main(int argc, char **argv)
     openos_gui_add_tabview(win, 10, 76, 560, 30, "New Tab|Docs|Console", 0, OPENOS_GUI_TABVIEW_CLOSE_BUTTONS | OPENOS_GUI_TABVIEW_BOTTOM_BORDER);
     openos_gui_add_splitview(win, 12, 112, 220, 120, 40, OPENOS_GUI_SPLITVIEW_RESIZABLE | OPENOS_GUI_SPLITVIEW_SHOW_GRIP | OPENOS_GUI_SPLITVIEW_PANE_BORDER);
     openos_gui_add_groupbox(win, 246, 112, 160, 72, "设置卡片", OPENOS_GUI_GROUPBOX_BORDER | OPENOS_GUI_GROUPBOX_CARD | OPENOS_GUI_GROUPBOX_TITLEBAR);
+    { int form = openos_gui_add_form(win, 246, 190, 220, 116, "表单", OPENOS_GUI_FORM_BORDER | OPENOS_GUI_FORM_CARD | OPENOS_GUI_FORM_TITLEBAR); if (form >= 0) { openos_gui_add_form_field(win, form, 0, "地址", "http://", "帮助文本", OPENOS_GUI_FORM_FIELD_HELP); openos_gui_add_form_submit(win, form, 1, "提交"); } }
     (void)back_button;
     (void)forward_button;
     (void)go_button;

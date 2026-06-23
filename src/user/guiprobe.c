@@ -95,6 +95,14 @@ int main(void)
     openos_gui_add_splitview(win, 436, 270, 164, 84, 45, OPENOS_GUI_SPLITVIEW_HORIZONTAL | OPENOS_GUI_SPLITVIEW_RESIZABLE | OPENOS_GUI_SPLITVIEW_SHOW_GRIP | OPENOS_GUI_SPLITVIEW_PANE_BORDER);
     openos_gui_add_groupbox(win, 612, 150, 166, 88, "设置分组", OPENOS_GUI_GROUPBOX_BORDER | OPENOS_GUI_GROUPBOX_CARD | OPENOS_GUI_GROUPBOX_TITLEBAR);
     openos_gui_add_groupbox(win, 612, 248, 166, 88, "错误页", OPENOS_GUI_GROUPBOX_BORDER | OPENOS_GUI_GROUPBOX_CARD | OPENOS_GUI_GROUPBOX_ERROR | OPENOS_GUI_GROUPBOX_TITLEBAR);
+    {
+        int form = openos_gui_add_form(win, 16, 344, 360, 132, "登录表单", OPENOS_GUI_FORM_BORDER | OPENOS_GUI_FORM_CARD | OPENOS_GUI_FORM_TITLEBAR);
+        if (form >= 0) {
+            openos_gui_add_form_field(win, form, 0, "用户名", "openos", "请输入账户名", OPENOS_GUI_FORM_FIELD_HELP);
+            openos_gui_add_form_field(win, form, 1, "密码", "", "密码不能为空", OPENOS_GUI_FORM_FIELD_ERROR);
+            openos_gui_add_form_submit(win, form, 2, "提交");
+        }
+    }
     label = openos_gui_add_label(win, 16, 32, 260, 20, "Hello from user mode GUI ABI");
     button = openos_gui_add_button(win, 16, 72, 120, 24, "OK");
     panel = openos_gui_add_panel(win, 150, 66, 150, 42, 0xFFEAF4FFu);

@@ -381,6 +381,52 @@ int gui_user_set_groupbox_options(uint32_t window_id, uint32_t widget_id, const 
     return 0;
 }
 
+int gui_user_add_form(uint32_t window_id, int x, int y, int w, int h, const char *title, uint32_t flags) {
+    gui_window_t *win = gui_find_window(window_id);
+    gui_widget_t *widget;
+    char safe_title[GUI_USER_TEXT_MAX + 1];
+    if (!gui_user_window_owned_by_current(win) || w <= 0 || h <= 0) return -1;
+    gui_user_copy_text(safe_title, sizeof(safe_title), title ? title : "Form");
+    widget = gui_add_form(win, x, y, w, h, safe_title, flags);
+    if (!widget) return -1;
+    gui_invalidate_rect(win->rect.x, win->rect.y, win->rect.w, win->rect.h);
+    return (int)widget->id;
+}
+
+int gui_user_add_form_field(uint32_t window_id, uint32_t form_id, int row, const char *label, const char *value, const char *hint, uint32_t flags) {
+    gui_window_t *win = gui_find_window(window_id);
+    gui_widget_t *form;
+    gui_widget_t *input;
+    char safe_label[129];
+    char safe_value[129];
+    char safe_hint[GUI_USER_TEXT_MAX + 1];
+    if (!gui_user_window_owned_by_current(win)) return -1;
+    form = gui_find_widget(win, form_id);
+    if (!form || form->type != GUI_WIDGET_GROUPBOX) return -1;
+    gui_user_copy_text(safe_label, sizeof(safe_label), label ? label : "Label");
+    gui_user_copy_text(safe_value, sizeof(safe_value), value ? value : "");
+    gui_user_copy_text(safe_hint, sizeof(safe_hint), hint ? hint : "");
+    input = gui_add_form_field(win, form, row, safe_label, safe_value, safe_hint, flags);
+    if (!input) return -1;
+    gui_invalidate_rect(win->rect.x, win->rect.y, win->rect.w, win->rect.h);
+    return (int)input->id;
+}
+
+int gui_user_add_form_submit(uint32_t window_id, uint32_t form_id, int row, const char *text) {
+    gui_window_t *win = gui_find_window(window_id);
+    gui_widget_t *form;
+    gui_widget_t *button;
+    char safe_text[65];
+    if (!gui_user_window_owned_by_current(win)) return -1;
+    form = gui_find_widget(win, form_id);
+    if (!form || form->type != GUI_WIDGET_GROUPBOX) return -1;
+    gui_user_copy_text(safe_text, sizeof(safe_text), text ? text : "Submit");
+    button = gui_add_form_submit(win, form, safe_text, row);
+    if (!button) return -1;
+    gui_invalidate_rect(win->rect.x, win->rect.y, win->rect.w, win->rect.h);
+    return (int)button->id;
+}
+
 int gui_user_add_splitview(uint32_t window_id, int x, int y, int w, int h, int ratio, uint32_t flags) {
     gui_window_t *win = gui_find_window(window_id);
     gui_widget_t *widget;

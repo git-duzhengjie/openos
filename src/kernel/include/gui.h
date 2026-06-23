@@ -111,6 +111,12 @@
 #define GUI_GROUPBOX_FLAG_ERROR     0x00000004u
 #define GUI_GROUPBOX_FLAG_TITLEBAR  0x00000008u
 
+#define GUI_FORM_FLAG_BORDER         0x00000001u
+#define GUI_FORM_FLAG_CARD           0x00000002u
+#define GUI_FORM_FLAG_TITLEBAR       0x00000004u
+#define GUI_FORM_FIELD_ERROR         0x00000001u
+#define GUI_FORM_FIELD_HELP          0x00000002u
+
 #define GUI_WINDOW_FLAG_NONE      0x00000000u
 #define GUI_WINDOW_FLAG_CLOSABLE  0x00000001u
 #define GUI_WINDOW_FLAG_MINIMIZED 0x00000002u
@@ -589,6 +595,9 @@ gui_widget_t *gui_add_label(gui_window_t *window, int x, int y, int w, int h, co
 gui_widget_t *gui_add_button(gui_window_t *window, int x, int y, int w, int h, const char *text, gui_widget_callback_t cb, void *user_data);
 gui_widget_t *gui_add_panel(gui_window_t *window, int x, int y, int w, int h, uint32_t color);
 gui_widget_t *gui_add_groupbox(gui_window_t *window, int x, int y, int w, int h, const char *title);
+gui_widget_t *gui_add_form(gui_window_t *window, int x, int y, int w, int h, const char *title, uint32_t flags);
+gui_widget_t *gui_add_form_field(gui_window_t *window, gui_widget_t *form, int row, const char *label, const char *value, const char *hint, uint32_t flags);
+gui_widget_t *gui_add_form_submit(gui_window_t *window, gui_widget_t *form, const char *text, int row);
 gui_widget_t *gui_add_textbox(gui_window_t *window, int x, int y, int w, int h, const char *text);
 gui_widget_t *gui_add_textarea(gui_window_t *window, int x, int y, int w, int h, const char *text);
 gui_widget_t *gui_add_canvas(gui_window_t *window, int x, int y, int w, int h, uint32_t color);
