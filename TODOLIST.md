@@ -625,9 +625,9 @@
   - [x] MouseMove / MouseDown / MouseUp / MouseWheel
   - [x] KeyUp
   - [x] ValueChanged / SelectionChanged
-- [ ] 补齐键盘事件修饰键
-  - [ ] Shift / Ctrl / Alt / Meta modifiers
-  - [ ] 支持 Shift+Tab、Ctrl+A/C/V/X、快捷键分发
+- [x] 补齐键盘事件修饰键
+  - [x] Shift / Ctrl / Alt / Meta modifiers
+  - [x] 支持 Shift+Tab、Ctrl+A/C/V/X、快捷键分发
 - [ ] 补齐文本输入 ABI
   - [ ] 区分物理按键 KeyDown 与文本输入 TextInput
   - [ ] 为 UTF-8 / 中文输入法预留接口

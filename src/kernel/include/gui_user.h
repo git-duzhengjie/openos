@@ -34,6 +34,11 @@ typedef struct gui_widget gui_widget_t;
 #define GUI_USER_EVENT_KEY_UP       15u
 #define GUI_USER_EVENT_SELECTION_CHANGED 16u
 
+#define GUI_USER_KEYMOD_SHIFT 1u
+#define GUI_USER_KEYMOD_CTRL  2u
+#define GUI_USER_KEYMOD_ALT   4u
+#define GUI_USER_KEYMOD_META  8u
+
 typedef struct gui_user_event {
     uint32_t owner_pid;
     uint32_t type;
@@ -43,6 +48,7 @@ typedef struct gui_user_event {
     int32_t y;
     int32_t key;
     int32_t button;
+    uint32_t modifiers;
 } gui_user_event_t;
 
 typedef struct gui_user_widget_request {

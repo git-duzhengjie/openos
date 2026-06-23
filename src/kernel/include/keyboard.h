@@ -11,6 +11,7 @@ typedef struct keyboard_state {
     uint8_t shift;
     uint8_t ctrl;
     uint8_t alt;
+    uint8_t meta;
     uint8_t caps_lock;
     uint8_t num_lock;
     uint8_t scroll_lock;
@@ -25,5 +26,7 @@ void keyboard_init(void);
 
 /* 获取当前键盘修饰键/锁定键状态 */
 const keyboard_state_t *keyboard_get_state(void);
+uint32_t keyboard_get_modifiers(void);
+
 
 #endif /* KEYBOARD_H */

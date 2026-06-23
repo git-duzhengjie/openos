@@ -792,6 +792,7 @@ typedef struct openos_gui_event {
     int y;
     int key;
     int button;
+    unsigned int modifiers;
 } openos_gui_event_t;
 
 typedef struct openos_gui_toast_request {
@@ -1119,6 +1120,11 @@ typedef struct openos_gui_label_measure_request {
 #define OPENOS_GUI_EVENT_MOUSE_WHEEL 14u
 #define OPENOS_GUI_EVENT_KEY_UP 15u
 #define OPENOS_GUI_EVENT_SELECTION_CHANGED 16u
+
+#define OPENOS_GUI_KEYMOD_SHIFT 1u
+#define OPENOS_GUI_KEYMOD_CTRL 2u
+#define OPENOS_GUI_KEYMOD_ALT 4u
+#define OPENOS_GUI_KEYMOD_META 8u
 #define OPENOS_GUI_KEY_BACKSPACE 8u
 #define OPENOS_GUI_KEY_TAB 9u
 #define OPENOS_GUI_KEY_ENTER 13u

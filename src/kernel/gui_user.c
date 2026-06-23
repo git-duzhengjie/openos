@@ -100,6 +100,7 @@ void gui_user_post_key_event(gui_window_t *window, int key) {
     gui_widget_t *focused = gui_get_focused_widget();
     event.widget_id = (focused && focused->owner == window) ? focused->id : 0;
     event.key = key;
+    event.modifiers = gui_get_last_key_modifiers();
     gui_user_push_event(&event);
 }
 
@@ -113,6 +114,7 @@ void gui_user_post_key_up_event(gui_window_t *window, int key) {
     gui_widget_t *focused = gui_get_focused_widget();
     event.widget_id = (focused && focused->owner == window) ? focused->id : 0;
     event.key = key;
+    event.modifiers = gui_get_last_key_modifiers();
     gui_user_push_event(&event);
 }
 
@@ -143,6 +145,7 @@ void gui_user_post_mouse_event(gui_window_t *window, uint32_t event_type, int x,
     event.y = y - window->rect.y;
     event.button = button;
     event.key = wheel_delta;
+    event.modifiers = gui_get_last_key_modifiers();
     gui_user_push_event(&event);
 }
 

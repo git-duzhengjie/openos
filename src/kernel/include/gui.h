@@ -229,6 +229,7 @@ typedef struct gui_event {
     int dx;
     int dy;
     uint8_t button;
+    uint32_t modifiers;
     int key;
     gui_window_t *window;
     gui_widget_t *widget;
@@ -732,7 +733,10 @@ int gui_event_pop(gui_event_t *event);
 void gui_process_events(void);
 void gui_post_key(char ch);
 void gui_post_key_code(int key);
+void gui_post_key_code_with_modifiers(int key, uint32_t modifiers);
 int gui_should_capture_key_code(int key);
+int gui_should_capture_key_code_with_modifiers(int key, uint32_t modifiers);
+uint32_t gui_get_last_key_modifiers(void);
 void gui_invalidate_rect(int x, int y, int w, int h);
 void gui_invalidate_all(void);
 int gui_blit_rgba32(int x, int y, int w, int h, const uint32_t *pixels, uint32_t src_stride);

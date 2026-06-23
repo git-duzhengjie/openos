@@ -1603,6 +1603,36 @@ static void gui_focus_next_widget(void) {
     }
 }
 
+static void gui_focus_prev_widget(void) {
+    gui_window_t *w;
+    int start = -1;
+    uint32_t i;
+    uint32_t count;
+    if (g_gui.focused_widget && g_gui.focused_widget->owner) {
+        w = g_gui.focused_widget->owner;
+    } else {
+        w = g_gui.active_window ? g_gui.active_window : gui_top_window();
+    }
+    if (!w || !w->used || !w->visible || (w->flags & GUI_WINDOW_FLAG_MINIMIZED)) return;
+    count = w->widget_count;
+    if (count == 0) return;
+    for (i = 0; i < count; i++) {
+        if (&w->widgets[i] == g_gui.focused_widget) {
+            start = (int)i;
+            break;
+        }
+    }
+    if (start < 0) start = (int)count;
+    for (i = 1; i <= count; i++) {
+        int raw = start - (int)i;
+        uint32_t idx = (uint32_t)((raw < 0) ? (raw + (int)count) : raw);
+        if (gui_widget_can_focus(&w->widgets[idx])) {
+            gui_set_focused_widget(&w->widgets[idx]);
+            return;
+        }
+    }
+}
+
 static uint32_t gui_textbox_visible_chars(const gui_widget_t *wg) {
     int text_w;
     if (!wg || GUI_CHAR_W <= 0) return 0;
@@ -1986,8 +2016,17 @@ static int gui_textbox_on_key(gui_widget_t *wg, int key) {
     if (wg->cursor > len) wg->cursor = len;
     old_cursor = wg->cursor;
 
-    if (key == 3) {
+    if (key == 1) {
+        wg->selection_anchor = 0;
+        wg->selection_start = 0;
+        wg->selection_end = len;
+        wg->cursor = len;
+        return 1;
+    } else if (key == 3) {
         return gui_text_widget_copy_selection(wg);
+    } else if (key == 24) {
+        if (wg->textbox_flags & GUI_TEXTBOX_FLAG_READONLY) return gui_text_widget_copy_selection(wg);
+        if (gui_text_widget_copy_selection(wg)) text_changed = gui_text_widget_delete_selection(wg);
     } else if (key == 22) {
         if (wg->textbox_flags & GUI_TEXTBOX_FLAG_READONLY) return 0;
         text_changed = gui_text_widget_paste_clipboard(wg);
@@ -5742,14 +5781,26 @@ static void gui_desktop_invalidate_hover_changes(int old_x, int old_y, int new_x
     }
 }
 
-void gui_post_key_code(int key) {
+static uint32_t g_gui_last_key_modifiers = 0;
+
+uint32_t gui_get_last_key_modifiers(void) {
+    return g_gui_last_key_modifiers;
+}
+
+void gui_post_key_code_with_modifiers(int key, uint32_t modifiers) {
     gui_event_t ev;
     if (!g_gui.initialized || !key) return;
     memset(&ev, 0, sizeof(ev));
     ev.type = GUI_EVENT_KEY_DOWN;
     ev.key = key;
+    ev.modifiers = modifiers;
     ev.window = g_gui.active_window;
+    g_gui_last_key_modifiers = modifiers;
     gui_event_push(ev);
+}
+
+void gui_post_key_code(int key) {
+    gui_post_key_code_with_modifiers(key, 0);
 }
 
 void gui_post_key(char ch) {
@@ -6391,7 +6442,8 @@ void gui_process_events(void) {
             } else if (ev.key == GUI_KEY_SUPER) {
                 gui_toggle_start_menu();
             } else if (ev.key == GUI_KEY_TAB) {
-                gui_focus_next_widget();
+                if (ev.modifiers & GUI_USER_KEYMOD_SHIFT) gui_focus_prev_widget();
+                else gui_focus_next_widget();
             } else if (g_gui.focused_widget && g_gui.focused_widget->focused &&
                        (g_gui.focused_widget->type == GUI_WIDGET_TEXTBOX ||
                         g_gui.focused_widget->type == GUI_WIDGET_TEXTAREA)) {
@@ -8192,9 +8244,10 @@ gui_widget_t *gui_get_focused_widget(void) {
     return g_gui.focused_widget;
 }
 
-int gui_should_capture_key_code(int key) {
+int gui_should_capture_key_code_with_modifiers(int key, uint32_t modifiers) {
     gui_widget_t *wg;
 
+    (void)modifiers;
     if (!g_gui.initialized) return 0;
 
     /* Global hotkeys: always capture regardless of focus. */
@@ -8240,13 +8293,17 @@ int gui_should_capture_key_code(int key) {
 
     if (key == GUI_KEY_UP || key == GUI_KEY_DOWN) return 0;
 
-    if (wg->type == GUI_WIDGET_TEXTBOX) return 1;
+    if (wg->type == GUI_WIDGET_TEXTBOX || wg->type == GUI_WIDGET_TEXTAREA) return 1;
 
     if (wg->type == GUI_WIDGET_BUTTON) {
         return key == GUI_KEY_ENTER || key == GUI_KEY_SPACE;
     }
 
     return 0;
+}
+
+int gui_should_capture_key_code(int key) {
+    return gui_should_capture_key_code_with_modifiers(key, 0);
 }
 
 void gui_shutdown_to_text_note(void) { serial_write("[GUI] text mode restore is not implemented yet\n"); }

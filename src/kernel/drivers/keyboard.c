@@ -9,6 +9,7 @@
 #include "../include/io.h"
 #include "../include/input_buffer.h"
 #include "../include/gui.h"
+#include "../include/gui_user.h"
 
 #define KEYBOARD_DATA_PORT   0x60
 #define KEYBOARD_STATUS_PORT 0x64
@@ -80,8 +81,9 @@ static void keyboard_put_csi_number_tilde(const char *number) {
 }
 
 static int keyboard_gui_post_if_captured(int key) {
-    if (!gui_should_capture_key_code(key)) return 0;
-    gui_post_key_code(key);
+    uint32_t mods = keyboard_get_modifiers();
+    if (!gui_should_capture_key_code_with_modifiers(key, mods)) return 0;
+    gui_post_key_code_with_modifiers(key, mods);
     return 1;
 }
 
@@ -266,6 +268,10 @@ static void keyboard_handler(registers_t *regs) {
         case 0x38:
             kb.alt = release ? 0 : 1;
             return;
+        case 0x5B:
+        case 0x5C:
+            kb.meta = release ? 0 : 1;
+            return;
         case 0x3A:
             if (!release) { kb.caps_lock ^= 1; keyboard_update_leds(); }
             return;
@@ -310,10 +316,20 @@ const keyboard_state_t *keyboard_get_state(void) {
     return &kb;
 }
 
+uint32_t keyboard_get_modifiers(void) {
+    uint32_t mods = 0;
+    if (kb.shift) mods |= GUI_USER_KEYMOD_SHIFT;
+    if (kb.ctrl) mods |= GUI_USER_KEYMOD_CTRL;
+    if (kb.alt) mods |= GUI_USER_KEYMOD_ALT;
+    if (kb.meta) mods |= GUI_USER_KEYMOD_META;
+    return mods;
+}
+
 void keyboard_init(void) {
     kb.shift = 0;
     kb.ctrl = 0;
     kb.alt = 0;
+    kb.meta = 0;
     kb.caps_lock = 0;
     kb.num_lock = 1;
     kb.scroll_lock = 0;
