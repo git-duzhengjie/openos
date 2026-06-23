@@ -24,6 +24,8 @@
 #define BROWSER_VIEW_LINES 12
 #define BROWSER_LINE_MAX 96
 #define BROWSER_ADDRESS_MAX 256
+#define BROWSER_TAB_MAX 8
+#define BROWSER_TAB_TITLE_MAX 32
 #define BROWSER_FOCUS_LINK 1
 #define BROWSER_FOCUS_FORM 2
 
@@ -52,6 +54,7 @@ typedef struct browser_load_context {
     int address_label_id;
     int tabview_id;
     int home_visible;
+    void *tabs;
     char address_text[BROWSER_ADDRESS_MAX];
     ob_dom_document_t dom;
     ob_form_state_t form_state;
@@ -83,12 +86,18 @@ typedef struct browser_page_cache_entry {
     char location[OB_MAX_HEADER_VALUE];
 } browser_page_cache_entry_t;
 
+typedef struct browser_tabs {
+    char titles[BROWSER_TAB_MAX][BROWSER_TAB_TITLE_MAX];
+    int count;
+    int active;
+} browser_tabs_t;
+
 static browser_page_cache_entry_t g_page_cache[BROWSER_CACHE_MAX];
 
 static void browser_load_worker(void *arg);
 static void browser_render_current_view(browser_load_context_t *load, int body_label, int scroll_line);
 static void browser_update_form_status(int win, int status_label, const browser_load_context_t *load);
-static int browser_finish_completed_load(browser_load_context_t *load, int win, int status_label, int body_label, int tabview_id, int *scroll_line, int *rc);
+static int browser_finish_completed_load(browser_load_context_t *load, int win, int status_label, int body_label, int tabview_id, browser_tabs_t *tabs, int *scroll_line, int *rc);
 
 static void browser_format_ip(unsigned int ip, char *out, int out_size)
 {
@@ -545,32 +554,76 @@ static void browser_update_link_status(int win, int status_label, const browser_
     openos_gui_set_text(win, status_label, status);
 }
 
-static void browser_update_tab_title(int win, int tabview_id, const browser_load_context_t *load)
+static void browser_tabs_refresh(int win, browser_tabs_t *tabs, int tabview_id)
 {
-    char tab_title[BROWSER_TITLE_MAX + 16];
-    const char *title = "New Tab";
+    char joined[BROWSER_TAB_MAX * BROWSER_TAB_TITLE_MAX];
+    int i;
+
+    if (win < 0 || tabview_id < 0 || !tabs) return;
+    joined[0] = 0;
+    for (i = 0; i < tabs->count; ++i) {
+        if (i > 0) strncat(joined, "|", sizeof(joined) - strlen(joined) - 1);
+        strncat(joined,
+                tabs->titles[i][0] ? tabs->titles[i] : "New Tab",
+                sizeof(joined) - strlen(joined) - 1);
+    }
+    openos_gui_set_tabview_tabs(win, tabview_id, joined[0] ? joined : "New Tab");
+    openos_gui_set_tabview_active(win, tabview_id, tabs->active);
+}
+
+static void browser_tabs_init(int win, browser_tabs_t *tabs, int tabview_id)
+{
+    if (!tabs) return;
+    memset(tabs, 0, sizeof(*tabs));
+    tabs->count = 1;
+    tabs->active = 0;
+    snprintf(tabs->titles[0], sizeof(tabs->titles[0]), "New Tab");
+    browser_tabs_refresh(win, tabs, tabview_id);
+}
+
+static void browser_sanitize_tab_title(char *out, int out_size, const char *title)
+{
     int i;
     int j = 0;
 
-    if (tabview_id < 0 || !load) return;
-    if (load->title[0]) {
-        title = load->title;
-    } else if (load->host[0]) {
-        title = load->host;
-    }
-
+    if (!out || out_size <= 0) return;
+    out[0] = 0;
+    if (!title || !title[0]) title = "New Tab";
     while (title[j] == ' ' || title[j] == '\t' || title[j] == '\n' || title[j] == '\r') ++j;
-    for (i = 0; title[j] && i < (int)sizeof(tab_title) - 1; ++j) {
+    for (i = 0; title[j] && i < out_size - 1; ++j) {
         char ch = title[j];
         if (ch == '\n' || ch == '\r' || ch == '|') ch = ' ';
-        if (i == 0 || ch != ' ' || tab_title[i - 1] != ' ') {
-            tab_title[i++] = ch;
-        }
+        if (i == 0 || ch != ' ' || out[i - 1] != ' ') out[i++] = ch;
     }
-    while (i > 0 && tab_title[i - 1] == ' ') --i;
-    tab_title[i] = 0;
-    if (!tab_title[0]) snprintf(tab_title, sizeof(tab_title), "New Tab");
-    openos_gui_set_tabview_tabs(win, tabview_id, tab_title);
+    while (i > 0 && out[i - 1] == ' ') --i;
+    out[i] = 0;
+    if (!out[0]) snprintf(out, out_size, "New Tab");
+}
+
+static void browser_update_tab_title(int win, int tabview_id, browser_tabs_t *tabs, const browser_load_context_t *load)
+{
+    char title[BROWSER_TITLE_MAX + 16];
+    const char *source = "New Tab";
+
+    if (tabview_id < 0 || !load || !tabs || tabs->active < 0 || tabs->active >= tabs->count) return;
+    if (load->title[0]) {
+        source = load->title;
+    } else if (load->host[0]) {
+        source = load->host;
+    }
+    browser_sanitize_tab_title(title, sizeof(title), source);
+    snprintf(tabs->titles[tabs->active], sizeof(tabs->titles[tabs->active]), "%s", title);
+    browser_tabs_refresh(win, tabs, tabview_id);
+}
+
+static int browser_tabs_new(int win, browser_tabs_t *tabs, int tabview_id)
+{
+    if (!tabs || tabs->count >= BROWSER_TAB_MAX) return -1;
+    tabs->active = tabs->count;
+    snprintf(tabs->titles[tabs->count], sizeof(tabs->titles[tabs->count]), "New Tab");
+    tabs->count++;
+    browser_tabs_refresh(win, tabs, tabview_id);
+    return 0;
 }
 
 static void browser_make_view(char *out, int out_size, const browser_load_context_t *load, int scroll_line)
@@ -602,10 +655,12 @@ static void browser_start_load(browser_load_context_t *load, int win, int status
     char loading[128];
     int address_label_id;
     int tabview_id;
+    void *tabs;
     char address_text[BROWSER_ADDRESS_MAX];
     if (!load || !host || !path) return;
     address_label_id = load->address_label_id;
     tabview_id = load->tabview_id;
+    tabs = load->tabs;
     snprintf(address_text, sizeof(address_text), "%s", load->address_text);
     if (load->active && !load->done) {
         openos_gui_set_text(win, status_label, "Loading");
@@ -621,6 +676,7 @@ static void browser_start_load(browser_load_context_t *load, int win, int status
     load->body_label_id = body_label;
     load->address_label_id = address_label_id;
     load->tabview_id = tabview_id;
+    load->tabs = tabs;
     snprintf(load->address_text, sizeof(load->address_text), "%s", address_text);
     load->home_visible = 0;
     snprintf(loading, sizeof(loading), "Loading %s%s%s ...", is_file ? "file://" : "http://", is_file ? "" : load->host, load->path);
@@ -628,7 +684,7 @@ static void browser_start_load(browser_load_context_t *load, int win, int status
     load->done = 0;
     load->result = -1;
     openos_gui_set_text(win, status_label, loading);
-    browser_update_tab_title(win, tabview_id, load);
+    browser_update_tab_title(win, tabview_id, (browser_tabs_t *)load->tabs, load);
     openos_gui_set_text(win, body_label, "Waiting for HTTP response...");
     if (openos_thread_create(&tid, browser_load_worker, load) != 0) {
         load->active = 0;
@@ -969,7 +1025,7 @@ static void browser_cache_store(const browser_load_context_t *load, int scroll_l
     snprintf(g_page_cache[slot].location, sizeof(g_page_cache[slot].location), "%s", load->location);
 }
 
-static int browser_cache_restore(browser_load_context_t *load, int win, int status_label, int body_label, int tabview_id,
+static int browser_cache_restore(browser_load_context_t *load, int win, int status_label, int body_label, int tabview_id, browser_tabs_t *tabs,
                                  const char *host, const char *path, int is_file, int *scroll_line)
 {
     int i;
@@ -994,7 +1050,7 @@ static int browser_cache_restore(browser_load_context_t *load, int win, int stat
             snprintf(load->location, sizeof(load->location), "%s", g_page_cache[i].location);
             if (scroll_line) *scroll_line = g_page_cache[i].scroll_line;
             openos_gui_set_text(win, status_label, load->status);
-            browser_update_tab_title(win, tabview_id, load);
+            browser_update_tab_title(win, tabview_id, (browser_tabs_t *)load->tabs, load);
             browser_render_current_view(load, body_label, scroll_line ? *scroll_line : 0);
             return 0;
         }
@@ -1010,7 +1066,7 @@ static void browser_render_current_view(browser_load_context_t *load, int body_l
     openos_gui_set_text(load->window_id, body_label, view[0] ? view : "Empty response");
 }
 
-static int browser_finish_completed_load(browser_load_context_t *load, int win, int status_label, int body_label, int tabview_id, int *scroll_line, int *rc)
+static int browser_finish_completed_load(browser_load_context_t *load, int win, int status_label, int body_label, int tabview_id, browser_tabs_t *tabs, int *scroll_line, int *rc)
 {
     char view[BROWSER_BODY_MAX + BROWSER_TITLE_MAX + 32];
 
@@ -1023,7 +1079,7 @@ static int browser_finish_completed_load(browser_load_context_t *load, int win, 
     *rc = load->result;
     openos_gui_set_text(win, status_label, load->status[0] ? load->status : (*rc < 0 ? "Failed" : "Done"));
     load->tabview_id = tabview_id;
-    browser_update_tab_title(win, tabview_id, load);
+    browser_update_tab_title(win, tabview_id, (browser_tabs_t *)load->tabs, load);
     *scroll_line = 0;
     browser_make_view(view, sizeof(view), load, *scroll_line);
     openos_gui_set_text(win, body_label, view[0] ? view : (*rc < 0 ? "Load failed" : "Empty response"));
@@ -1264,6 +1320,7 @@ int main(int argc, char **argv)
     int address_label;
     int body_label;
     int tabview;
+    int new_tab_button;
     int load_button;
     int back_button;
     int forward_button;
@@ -1278,6 +1335,7 @@ int main(int argc, char **argv)
     int scroll_line = 0;
     static browser_load_context_t load;
     static browser_history_t history;
+    static browser_tabs_t tabs;
 
     memset(&load, 0, sizeof(load));
 
@@ -1312,6 +1370,8 @@ int main(int argc, char **argv)
     }
 
     tabview = openos_gui_add_tabview(win, 10, 0, 220, 30, "New Tab", 0, OPENOS_GUI_TABVIEW_BOTTOM_BORDER);
+    new_tab_button = openos_gui_add_button(win, 236, 2, 28, 24, "+");
+    browser_tabs_init(win, &tabs, tabview);
 
     toolbar = openos_gui_add_toolbar(win, 0, 30, 900, 54, "<|>|Reload|addr:Search OpenOS or type a URL", OPENOS_GUI_TOOLBAR_SHOW_GRIP | OPENOS_GUI_TOOLBAR_GROUPED_BUTTONS | OPENOS_GUI_TOOLBAR_HAS_ADDRESS | OPENOS_GUI_TOOLBAR_BOTTOM_BORDER);
     (void)toolbar;
@@ -1343,6 +1403,7 @@ int main(int argc, char **argv)
     load.body_label_id = body_label;
     load.address_label_id = address_label;
     load.tabview_id = tabview;
+    load.tabs = &tabs;
     load.home_visible = 1;
     if (argc > 1 && argv && argv[1] && argv[1][0]) {
         browser_sync_address_from_target(&load, host, path, is_file);
@@ -1355,7 +1416,7 @@ int main(int argc, char **argv)
 
     for (;;) {
         openos_gui_event_t event;
-        if (browser_finish_completed_load(&load, win, status_label, body_label, tabview, &scroll_line, &rc)) {
+        if (browser_finish_completed_load(&load, win, status_label, body_label, tabview, &tabs, &scroll_line, &rc)) {
             openos_sleep(10);
             continue;
         }
@@ -1398,6 +1459,29 @@ int main(int argc, char **argv)
                     openos_gui_set_text_cursor(win, address_label, "", 0);
                 }
                 openos_gui_set_text(win, status_label, "Address bar selected - type a URL, then press Enter");
+            } else if (event.widget_id == (unsigned int)new_tab_button) {
+                if (browser_tabs_new(win, &tabs, tabview) == 0) {
+                    char new_home[BROWSER_BODY_MAX];
+                    history.count = 0;
+                    history.current = -1;
+                    scroll_line = 0;
+                    rc = 0;
+                    memset(&load, 0, sizeof(load));
+                    load.window_id = win;
+                    load.status_label_id = status_label;
+                    load.body_label_id = body_label;
+                    load.address_label_id = address_label;
+                    load.tabview_id = tabview;
+                    load.tabs = &tabs;
+                    load.home_visible = 1;
+                    load.address_text[0] = 0;
+                    browser_update_address_label(&load);
+                    browser_make_home_view(new_home, sizeof(new_home), "Search OpenOS or type a URL");
+                    openos_gui_set_text(win, body_label, new_home);
+                    openos_gui_set_text(win, status_label, "New tab - type an address and press Enter");
+                } else {
+                    openos_gui_set_text(win, status_label, "Maximum tabs reached");
+                }
             } else if (event.widget_id == (unsigned int)load_button) {
                 const browser_history_entry_t *cur = browser_history_current(&history);
                 if (load.home_visible) {
@@ -1412,7 +1496,7 @@ int main(int argc, char **argv)
                     const browser_history_entry_t *cur = browser_history_current(&history);
                     scroll_line = 0;
                     browser_sync_address_from_target(&load, cur->host, cur->path, cur->is_file);
-                    if (browser_cache_restore(&load, win, status_label, body_label, tabview, cur->host, cur->path, cur->is_file, &scroll_line) != 0)
+                    if (browser_cache_restore(&load, win, status_label, body_label, tabview, &tabs, cur->host, cur->path, cur->is_file, &scroll_line) != 0)
                         browser_start_load(&load, win, status_label, body_label, cur->host, cur->path, cur->is_file);
                 } else {
                     openos_gui_set_text(win, status_label, "Back: no history");
@@ -1422,7 +1506,7 @@ int main(int argc, char **argv)
                     const browser_history_entry_t *cur = browser_history_current(&history);
                     scroll_line = 0;
                     browser_sync_address_from_target(&load, cur->host, cur->path, cur->is_file);
-                    if (browser_cache_restore(&load, win, status_label, body_label, tabview, cur->host, cur->path, cur->is_file, &scroll_line) != 0)
+                    if (browser_cache_restore(&load, win, status_label, body_label, tabview, &tabs, cur->host, cur->path, cur->is_file, &scroll_line) != 0)
                         browser_start_load(&load, win, status_label, body_label, cur->host, cur->path, cur->is_file);
                 } else {
                     openos_gui_set_text(win, status_label, "Forward: no history");
@@ -1459,7 +1543,7 @@ int main(int argc, char **argv)
                 openos_gui_set_text(win, body_label, view[0] ? view : "End of page");
             }
         }
-        browser_finish_completed_load(&load, win, status_label, body_label, tabview, &scroll_line, &rc);
+        browser_finish_completed_load(&load, win, status_label, body_label, tabview, &tabs, &scroll_line, &rc);
         openos_sleep(10);
     }
 
