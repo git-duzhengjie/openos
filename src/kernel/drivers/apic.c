@@ -111,9 +111,20 @@ static void apic_add_irq_override(uint32_t bus, uint32_t source_irq,
     g_apic_info.irq_overrides[index].flags = flags;
 }
 
-static void apic_map_mmio(uint32_t addr) {
-    if (addr == 0) return;
-    vmm_map_range(addr & PAGE_MASK, addr & PAGE_MASK, PAGE_SIZE, VMM_RW);
+static int apic_map_mmio(uint32_t addr) {
+    uint32_t page;
+    uint32_t pte;
+    if (addr == 0) return 0;
+    page = addr & PAGE_MASK;
+    vmm_map_range(page, page, PAGE_SIZE, VMM_RW);
+    pte = vmm_get_mapping(page);
+    if ((pte & PTE_PRESENT) == 0) {
+        serial_write("[APIC] MMIO map failed, skip addr=");
+        serial_write_hex(page);
+        serial_write("\n");
+        return 0;
+    }
+    return 1;
 }
 
 static uint32_t ioapic_read_at(uint32_t base, uint32_t reg) {
@@ -217,7 +228,10 @@ static void apic_probe_ioapic_versions(void) {
 
     for (i = 0; i < g_apic_info.ioapic_count; ++i) {
         uint32_t version;
-        apic_map_mmio(g_apic_info.ioapics[i].addr);
+        if (!apic_map_mmio(g_apic_info.ioapics[i].addr)) {
+            g_apic_info.ioapics[i].gsi_count = IOAPIC_DEFAULT_GSI_COUNT;
+            continue;
+        }
         version = ioapic_read_at(g_apic_info.ioapics[i].addr, IOAPIC_REG_VERSION);
         g_apic_info.ioapics[i].gsi_count = ((version >> 16) & 0xFFu) + 1u;
         if (g_apic_info.ioapics[i].gsi_count == 0) {
@@ -404,7 +418,9 @@ void apic_init(void) {
         apic_base_msr = apic_read_msr(APIC_BASE_MSR);
         g_apic_info.lapic_base = (uint32_t)(apic_base_msr & 0xFFFFF000u);
         g_apic_info.lapic_enabled = (apic_base_msr & APIC_BASE_ENABLE) ? 1u : 0u;
-        apic_map_mmio(g_apic_info.lapic_base);
+        if (!apic_map_mmio(g_apic_info.lapic_base)) {
+            g_apic_info.lapic_enabled = 0;
+        }
     }
 
     madt = (const acpi_madt_t *)acpi_find_table("APIC");

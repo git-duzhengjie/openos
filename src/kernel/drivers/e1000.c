@@ -127,16 +127,23 @@ static uint32_t e1000_ptr32(const void *ptr) {
     return (uint32_t)(uintptr_t)ptr;
 }
 
-static void e1000_map_mmio(uint32_t mmio_base) {
+static int e1000_map_mmio(uint32_t mmio_base) {
     uint32_t start;
     uint32_t end;
-    if (mmio_base == 0u) return;
+    if (mmio_base == 0u) return 0;
 
     start = mmio_base & PAGE_MASK;
     end = (mmio_base + E1000_MMIO_MAP_SIZE + PAGE_SIZE - 1u) & PAGE_MASK;
-    if (end <= start) return;
+    if (end <= start) return 0;
 
     vmm_map_range(start, start, end - start, VMM_RW);
+    if ((vmm_get_mapping(start) & PTE_PRESENT) == 0u) {
+        serial_write("[e1000] MMIO map failed, skip mmio=0x");
+        serial_write_hex(start);
+        serial_write("\n");
+        return 0;
+    }
+    return 1;
 }
 
 static uint32_t e1000_read(e1000_device_t *edev, uint32_t reg) {
@@ -300,7 +307,7 @@ static void e1000_irq(registers_t *regs) {
 static int e1000_hw_init(e1000_device_t *edev, uint32_t index) {
     uint32_t i;
     if (edev->mmio_base == 0u) return -1;
-    e1000_map_mmio(edev->mmio_base);
+    if (!e1000_map_mmio(edev->mmio_base)) return -1;
     edev->mmio = (volatile uint32_t *)(uintptr_t)edev->mmio_base;
     edev->rx_desc = e1000_rx_descs[index];
     edev->tx_desc = e1000_tx_descs[index];

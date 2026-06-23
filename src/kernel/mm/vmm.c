@@ -134,6 +134,7 @@ void vmm_map_page(uint32_t vaddr, uint32_t paddr, uint32_t flags) {
 
         /* 通过递归映射设置当前地址空间 PDE */
         *pgd_rec = pt_phys | (flags & 0x07) | 1;  /* inherit U/S from flags */
+        __asm__ volatile ("invlpg (%0)" : : "r"((void *)(0xFFC00000 + (pgd_idx << 12))));
 
 #if VMM_DEBUG_LOG
         serial_write("[VMM] PDE[");
@@ -198,6 +199,7 @@ void vmm_map_range(uint32_t vaddr, uint32_t paddr, uint32_t size, uint32_t flags
             }
 
             *pgd_rec = (pt_phys & ~0xFFFu) | (flags & 0x07u) | PTE_PRESENT;
+            __asm__ volatile ("invlpg (%0)" : : "r"((void *)(0xFFC00000 + (pgd_idx << 12))));
         } else if (flags & PTE_USER) {
             *pgd_rec |= PTE_USER;
         }

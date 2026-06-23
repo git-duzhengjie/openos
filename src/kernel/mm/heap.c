@@ -11,9 +11,15 @@
 #define NULL ((void *)0)
 #endif
 
-/* 堆区域：内核高端地址 */
-#define HEAP_START  0x00400000UL   /* 4MB处，在恒等映射范围内 */
-#define HEAP_END    0x00C00000UL   /* 12MB处，8MB堆空间 */
+/* 堆区域：恒等映射内核堆。
+ * 不能固定从 4MB 开始：随着内核镜像/BSS 增长，固定地址可能覆盖
+ * 静态全局区（例如 VFS dentry/inode 池），导致启动期随机崩溃。
+ */
+#define HEAP_MIN_START      0x00400000UL
+#define HEAP_BOOT_GUARD     (10UL * 4096UL)
+#define HEAP_END            0x00C00000UL   /* 12MB处 */
+
+extern uint32_t __kernel_end;
 
 /* 分配头部（4字节）：块总大小，低2位保留 */
 typedef struct alloc_header {
@@ -32,7 +38,12 @@ typedef struct free_block {
 
 /* 全局状态 */
 static free_block_t *g_free_list = NULL;
-static uint32_t      g_heap_top = (uint32_t)HEAP_START;
+static uint32_t      g_heap_top = HEAP_MIN_START;
+
+static uint32_t heap_align_up(uint32_t value, uint32_t align)
+{
+    return (value + align - 1) & ~(align - 1);
+}
 
 /* ---- 内部：扩展堆，返回新的虚拟地址起点 ---- */
 static uint32_t heap_expand(uint32_t nbytes)
@@ -61,7 +72,15 @@ uint32_t heap_get_current(void)
 /* ---- 初始化堆 ---- */
 void heap_init(void)
 {
-    g_heap_top  = (uint32_t)HEAP_START;
+    /* PMM places its page bitmap immediately after __kernel_end and keeps a
+     * small bootstrap guard there.  The heap uses virtual addresses that are
+     * remapped to freshly allocated physical pages, so starting exactly at
+     * __kernel_end would hide the PMM bitmap and break all later page
+     * allocations.  Start after that bootstrap bookkeeping area.
+     */
+    g_heap_top = heap_align_up((uint32_t)&__kernel_end + HEAP_BOOT_GUARD, 4096);
+    if (g_heap_top < HEAP_MIN_START)
+        g_heap_top = HEAP_MIN_START;
     g_free_list = NULL;
 
     /* 预分配 16KB */
