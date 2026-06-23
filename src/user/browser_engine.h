@@ -671,13 +671,18 @@ static void ob_dom_render_append_int(char *out, int out_size, int *pos, int valu
     while (count > 0 && *pos < out_size - 1) out[(*pos)++] = digits[--count];
 }
 
-static void ob_dom_render_append_link_marker(char *out, int out_size, int *pos, int link_number)
+static void ob_dom_render_append_link_marker(char *out, int out_size, int *pos, int link_number, const char *href)
 {
     if (!out || !pos || link_number <= 0 || *pos >= out_size - 1) return;
     if (*pos > 0 && out[*pos - 1] != ' ' && out[*pos - 1] != '\n') out[(*pos)++] = ' ';
     if (*pos < out_size - 1) out[(*pos)++] = '[';
     ob_dom_render_append_int(out, out_size, pos, link_number);
     if (*pos < out_size - 1) out[(*pos)++] = ']';
+    if (href && href[0]) {
+        int i = 0;
+        if (*pos < out_size - 1) out[(*pos)++] = ' ';
+        while (href[i] && *pos < out_size - 1) out[(*pos)++] = href[i++];
+    }
     if (*pos < out_size - 1) out[(*pos)++] = ' ';
 }
 
@@ -907,7 +912,7 @@ static void ob_dom_render_node_text_ex(const ob_dom_document_t *doc, int node_id
     if (doc->nodes[node_id].font_weight_bold) ob_dom_render_append_literal(out, out_size, pos, "**");
     if (doc->nodes[node_id].type == OB_DOM_NODE_ELEMENT && ob_token_eq_ci(doc->nodes[node_id].name, "a") && doc->nodes[node_id].href[0] && link_count) {
         ++(*link_count);
-        ob_dom_render_append_link_marker(out, out_size, pos, *link_count);
+        ob_dom_render_append_link_marker(out, out_size, pos, *link_count, doc->nodes[node_id].href);
     }
     if (is_block && *pos > 0) ob_dom_render_append_newline(out, out_size, pos);
 }
