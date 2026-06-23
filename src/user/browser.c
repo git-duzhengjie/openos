@@ -95,11 +95,33 @@ typedef struct browser_page_cache_entry {
     char location[OB_MAX_HEADER_VALUE];
 } browser_page_cache_entry_t;
 
+typedef struct browser_tab_snapshot {
+    int active;
+    int done;
+    int result;
+    int is_file;
+    int home_visible;
+    int link_count;
+    int selected_link;
+    int focus_mode;
+    char host[BROWSER_HOST_MAX];
+    char path[BROWSER_PATH_MAX];
+    char body[BROWSER_BODY_MAX];
+    char title[BROWSER_TITLE_MAX];
+    char http_status[BROWSER_STATUS_MAX];
+    char content_type[OB_MAX_HEADER_VALUE];
+    char content_length[OB_MAX_HEADER_VALUE];
+    char location[OB_MAX_HEADER_VALUE];
+    char status[BROWSER_STATUS_MAX];
+    char links[BROWSER_LINK_MAX][OB_MAX_ATTR_VALUE];
+    char address_text[BROWSER_ADDRESS_MAX];
+} browser_tab_snapshot_t;
+
 typedef struct browser_tab_entry {
     char title[BROWSER_TAB_TITLE_MAX];
     int has_page;
     int scroll_line;
-    browser_load_context_t page;
+    browser_tab_snapshot_t page;
 } browser_tab_entry_t;
 
 typedef struct browser_tabs {
@@ -579,10 +601,10 @@ static int browser_tabs_reserve(browser_tabs_t *tabs, int needed)
     if (!tabs || needed <= 0) return -1;
     if (tabs->capacity >= needed) return 0;
 
-    new_capacity = tabs->capacity > 0 ? tabs->capacity : 4;
+    new_capacity = tabs->capacity > 0 ? tabs->capacity : 1;
     while (new_capacity < needed) {
         if (new_capacity > 1024 * 1024) return -1;
-        new_capacity *= 2;
+        ++new_capacity;
     }
 
     next = (browser_tab_entry_t *)realloc(tabs->items, new_capacity * (int)sizeof(browser_tab_entry_t));
@@ -683,14 +705,58 @@ static void browser_copy_bytes(void *dst, const void *src, int len)
     while (len-- > 0) *d++ = *s++;
 }
 
-static void browser_copy_load_context(browser_load_context_t *dst, const browser_load_context_t *src)
+static void browser_copy_tab_entry(browser_tab_entry_t *dst, const browser_tab_entry_t *src)
 {
     browser_copy_bytes(dst, src, (int)sizeof(*dst));
 }
 
-static void browser_copy_tab_entry(browser_tab_entry_t *dst, const browser_tab_entry_t *src)
+static void browser_tab_snapshot_save(browser_tab_snapshot_t *page, const browser_load_context_t *load)
 {
-    browser_copy_bytes(dst, src, (int)sizeof(*dst));
+    if (!page || !load) return;
+    memset(page, 0, sizeof(*page));
+    page->active = load->active;
+    page->done = load->done;
+    page->result = load->result;
+    page->is_file = load->is_file;
+    page->home_visible = load->home_visible;
+    page->link_count = load->link_count;
+    page->selected_link = load->selected_link;
+    page->focus_mode = load->focus_mode;
+    snprintf(page->host, sizeof(page->host), "%s", load->host);
+    snprintf(page->path, sizeof(page->path), "%s", load->path);
+    snprintf(page->body, sizeof(page->body), "%s", load->body);
+    snprintf(page->title, sizeof(page->title), "%s", load->title);
+    snprintf(page->http_status, sizeof(page->http_status), "%s", load->http_status);
+    snprintf(page->content_type, sizeof(page->content_type), "%s", load->content_type);
+    snprintf(page->content_length, sizeof(page->content_length), "%s", load->content_length);
+    snprintf(page->location, sizeof(page->location), "%s", load->location);
+    snprintf(page->status, sizeof(page->status), "%s", load->status);
+    browser_copy_bytes(page->links, load->links, (int)sizeof(page->links));
+    snprintf(page->address_text, sizeof(page->address_text), "%s", load->address_text);
+}
+
+static void browser_tab_snapshot_restore(browser_load_context_t *load, const browser_tab_snapshot_t *page)
+{
+    if (!load || !page) return;
+    load->active = page->active;
+    load->done = page->done;
+    load->result = page->result;
+    load->is_file = page->is_file;
+    load->home_visible = page->home_visible;
+    load->link_count = page->link_count;
+    load->selected_link = page->selected_link;
+    load->focus_mode = page->focus_mode;
+    snprintf(load->host, sizeof(load->host), "%s", page->host);
+    snprintf(load->path, sizeof(load->path), "%s", page->path);
+    snprintf(load->body, sizeof(load->body), "%s", page->body);
+    snprintf(load->title, sizeof(load->title), "%s", page->title);
+    snprintf(load->http_status, sizeof(load->http_status), "%s", page->http_status);
+    snprintf(load->content_type, sizeof(load->content_type), "%s", page->content_type);
+    snprintf(load->content_length, sizeof(load->content_length), "%s", page->content_length);
+    snprintf(load->location, sizeof(load->location), "%s", page->location);
+    snprintf(load->status, sizeof(load->status), "%s", page->status);
+    browser_copy_bytes(load->links, page->links, (int)sizeof(load->links));
+    snprintf(load->address_text, sizeof(load->address_text), "%s", page->address_text);
 }
 
 static void browser_tab_save_current(browser_tabs_t *tabs, const browser_load_context_t *load, int scroll_line)
@@ -701,8 +767,7 @@ static void browser_tab_save_current(browser_tabs_t *tabs, const browser_load_co
     if (!tabs || !tabs->items || !load || tabs->active < 0 || tabs->active >= tabs->count) return;
     tab = &tabs->items[tabs->active];
     snprintf(title, sizeof(title), "%s", tab->title);
-    browser_copy_load_context(&tab->page, load);
-    tab->page.tabs = 0;
+    browser_tab_snapshot_save(&tab->page, load);
     tab->has_page = 1;
     tab->scroll_line = scroll_line;
     snprintf(tab->title, sizeof(tab->title), "%s", title[0] ? title : "New Tab");
@@ -743,7 +808,8 @@ static void browser_tab_restore_current(browser_tabs_t *tabs, browser_load_conte
         return;
     }
 
-    browser_copy_load_context(load, &tab->page);
+    memset(load, 0, sizeof(*load));
+    browser_tab_snapshot_restore(load, &tab->page);
     load->window_id = win;
     load->status_label_id = status_label;
     load->body_label_id = body_label;
