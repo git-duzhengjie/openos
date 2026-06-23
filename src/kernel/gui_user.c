@@ -490,6 +490,53 @@ int gui_user_add_menubar(uint32_t window_id, int x, int y, int w, int h, const c
     return wg ? (int)wg->id : -1;
 }
 
+int gui_user_add_dialog(uint32_t window_id, int x, int y, int w, int h, const char *title, const char *message, uint32_t flags) {
+    gui_window_t *win = gui_find_window(window_id);
+    char safe_title[64];
+    char safe_message[GUI_USER_TEXT_MAX + 1];
+    gui_widget_t *wg;
+    if (!gui_user_window_owned_by_current(win) || w <= 0 || h <= 0) return -1;
+    gui_user_copy_text(safe_title, sizeof(safe_title), title ? title : "Dialog");
+    gui_user_copy_text(safe_message, sizeof(safe_message), message ? message : "");
+    wg = gui_add_dialog(win, x, y, w, h, safe_title, safe_message, flags, NULL, NULL);
+    if (!wg) return -1;
+    gui_invalidate_rect(win->rect.x, win->rect.y, win->rect.w, win->rect.h);
+    return (int)wg->id;
+}
+
+int gui_user_set_dialog_message(uint32_t window_id, uint32_t widget_id, const char *message) {
+    gui_window_t *win = gui_find_window(window_id);
+    gui_widget_t *widget;
+    char safe_message[GUI_USER_TEXT_MAX + 1];
+    if (!gui_user_window_owned_by_current(win)) return -1;
+    widget = gui_find_widget(win, widget_id);
+    if (!widget || widget->type != GUI_WIDGET_DIALOG) return -1;
+    gui_user_copy_text(safe_message, sizeof(safe_message), message ? message : "");
+    if (gui_dialog_set_message(widget, safe_message) < 0) return -1;
+    gui_invalidate_rect(win->rect.x, win->rect.y, win->rect.w, win->rect.h);
+    return 0;
+}
+
+int gui_user_show_dialog(uint32_t window_id, uint32_t widget_id) {
+    gui_window_t *win = gui_find_window(window_id);
+    gui_widget_t *widget;
+    if (!gui_user_window_owned_by_current(win)) return -1;
+    widget = gui_find_widget(win, widget_id);
+    if (gui_dialog_show(widget) < 0) return -1;
+    gui_invalidate_rect(win->rect.x, win->rect.y, win->rect.w, win->rect.h);
+    return 0;
+}
+
+int gui_user_hide_dialog(uint32_t window_id, uint32_t widget_id) {
+    gui_window_t *win = gui_find_window(window_id);
+    gui_widget_t *widget;
+    if (!gui_user_window_owned_by_current(win)) return -1;
+    widget = gui_find_widget(win, widget_id);
+    if (gui_dialog_hide(widget) < 0) return -1;
+    gui_invalidate_rect(win->rect.x, win->rect.y, win->rect.w, win->rect.h);
+    return 0;
+}
+
 int gui_user_add_treeview(uint32_t window_id, int x, int y, int w, int h, const char *nodes, int selected_node, uint32_t flags) {
     gui_window_t *win = gui_find_window(window_id);
     gui_widget_t *widget;

@@ -585,7 +585,7 @@
   - [x] 支持 File/Edit/View 等菜单入口和快捷键提示
 - [x] ContextMenu：右键菜单组件
   - [x] 支持鼠标位置弹出、点击外部关闭、禁用项
-- [ ] Dialog：通用弹窗组件
+- [x] Dialog：通用弹窗组件
   - [ ] 支持信息/警告/错误/确认弹窗
   - [ ] 支持模态、按钮区、默认按钮、Esc 关闭
 - [ ] Toast / Notification：轻量提示组件

@@ -133,6 +133,7 @@ typedef enum gui_widget_type {
     GUI_WIDGET_TABLEVIEW,
     GUI_WIDGET_MENUBAR,
     GUI_WIDGET_CONTEXTMENU,
+    GUI_WIDGET_DIALOG,
     GUI_WIDGET_TREEVIEW,
     GUI_WIDGET_SCROLLBAR,
     GUI_WIDGET_SCROLLVIEW
@@ -541,6 +542,10 @@ gui_widget_t *gui_add_menubar(gui_window_t *window, int x, int y, int w, int h, 
 int gui_menubar_set_menus(gui_widget_t *widget, const char *menus);
 int gui_menubar_set_active(gui_widget_t *widget, int active_index);
 int gui_menubar_get_active(gui_widget_t *widget, int *out_active_index);
+gui_widget_t *gui_add_dialog(gui_window_t *window, int x, int y, int w, int h, const char *title, const char *message, uint32_t flags, gui_widget_callback_t cb, void *user_data);
+int gui_dialog_set_message(gui_widget_t *widget, const char *message);
+int gui_dialog_show(gui_widget_t *widget);
+int gui_dialog_hide(gui_widget_t *widget);
 gui_widget_t *gui_add_contextmenu(gui_window_t *window, int x, int y, int w, int h, const char *items, int selected_index, uint32_t disabled_mask, gui_widget_callback_t cb, void *user_data);
 int gui_contextmenu_set_items(gui_widget_t *widget, const char *items);
 int gui_contextmenu_set_selected(gui_widget_t *widget, int selected_index);

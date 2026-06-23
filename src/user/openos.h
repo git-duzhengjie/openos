@@ -213,6 +213,10 @@
 #define SYS_GUI_SET_CONTEXTMENU_DISABLED 416
 #define SYS_GUI_SHOW_CONTEXTMENU 417
 #define SYS_GUI_HIDE_CONTEXTMENU 418
+#define SYS_GUI_ADD_DIALOG 419
+#define SYS_GUI_SET_DIALOG_MESSAGE 420
+#define SYS_GUI_SHOW_DIALOG 421
+#define SYS_GUI_HIDE_DIALOG 422
 
 #define OPENOS_GUI_TEXTBOX_READONLY  (1u << 0)
 #define OPENOS_GUI_TEXTBOX_DISABLED  (1u << 1)
@@ -821,6 +825,18 @@ typedef struct openos_gui_menubar_request {
     char menus[256];
 } openos_gui_menubar_request_t;
 
+typedef struct openos_gui_dialog_request {
+    unsigned int window_id;
+    unsigned int widget_id;
+    int x;
+    int y;
+    int w;
+    int h;
+    unsigned int flags;
+    char title[64];
+    char message[256];
+} openos_gui_dialog_request_t;
+
 typedef struct openos_gui_contextmenu_request {
     unsigned int window_id;
     unsigned int widget_id;
@@ -1018,6 +1034,17 @@ static inline int openos_gui_create_window(const char *title, int x, int y, int 
 static inline int openos_gui_destroy_window(int window_id)
 {
     return openos_syscall_result(openos_syscall1(SYS_GUI_DESTROY_WINDOW, window_id));
+}
+
+static inline void openos_gui_copy_text64(char out[64], const char *text)
+{
+    int i = 0;
+    if (!text) text = "";
+    while (i < 63 && text[i]) {
+        out[i] = text[i];
+        i++;
+    }
+    out[i] = 0;
 }
 
 static inline void openos_gui_copy_text256(char out[256], const char *text)
@@ -1271,6 +1298,44 @@ static inline int openos_gui_add_menubar(int window_id, int x, int y, int w, int
     req.active_index = active_index;
     openos_gui_copy_text256(req.menus, menus);
     return openos_syscall_result(openos_syscall1(SYS_GUI_ADD_MENUBAR, (int)&req));
+}
+
+static inline int openos_gui_add_dialog(int window_id, int x, int y, int w, int h, const char *title, const char *message, unsigned int flags)
+{
+    openos_gui_dialog_request_t req;
+    req.window_id = (unsigned int)window_id;
+    req.widget_id = 0;
+    req.x = x;
+    req.y = y;
+    req.w = w;
+    req.h = h;
+    req.flags = flags;
+    openos_gui_copy_text64(req.title, title);
+    openos_gui_copy_text256(req.message, message);
+    return openos_syscall_result(openos_syscall1(SYS_GUI_ADD_DIALOG, (int)&req));
+}
+
+static inline int openos_gui_set_dialog_message(int window_id, int widget_id, const char *message)
+{
+    openos_gui_dialog_request_t req;
+    req.window_id = (unsigned int)window_id;
+    req.widget_id = (unsigned int)widget_id;
+    req.x = 0;
+    req.y = 0;
+    req.w = 0;
+    req.h = 0;
+    req.flags = 0;
+    req.title[0] = 0;
+    openos_gui_copy_text256(req.message, message);
+    return openos_syscall_result(openos_syscall1(SYS_GUI_SET_DIALOG_MESSAGE, (int)&req));
+}
+
+static inline int openos_gui_show_dialog(int window_id, int widget_id) {
+    return openos_syscall_result(openos_syscall2(SYS_GUI_SHOW_DIALOG, window_id, widget_id));
+}
+
+static inline int openos_gui_hide_dialog(int window_id, int widget_id) {
+    return openos_syscall_result(openos_syscall2(SYS_GUI_HIDE_DIALOG, window_id, widget_id));
 }
 
 static inline int openos_gui_add_contextmenu(int window_id, int x, int y, int w, int h, const char *items, int selected_index, unsigned int disabled_mask) {

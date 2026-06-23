@@ -1185,7 +1185,7 @@ static int gui_widget_can_focus(gui_widget_t *wg) {
             wg->type == GUI_WIDGET_CHECKBOX || wg->type == GUI_WIDGET_RADIOBUTTON ||
             wg->type == GUI_WIDGET_SELECT || wg->type == GUI_WIDGET_COMBOBOX || wg->type == GUI_WIDGET_LISTVIEW ||
             wg->type == GUI_WIDGET_TABLEVIEW || wg->type == GUI_WIDGET_MENUBAR ||
-            wg->type == GUI_WIDGET_CONTEXTMENU ||
+            wg->type == GUI_WIDGET_CONTEXTMENU || wg->type == GUI_WIDGET_DIALOG ||
             (wg->type == GUI_WIDGET_LABEL &&
              (wg->label_flags & (GUI_LABEL_FLAG_SELECTABLE | GUI_LABEL_FLAG_COPYABLE)) != 0));
 }
@@ -1197,7 +1197,7 @@ static int gui_widget_is_clickable(gui_widget_t *wg) {
             wg->type == GUI_WIDGET_RADIOBUTTON || wg->type == GUI_WIDGET_SELECT ||
             wg->type == GUI_WIDGET_COMBOBOX ||
             wg->type == GUI_WIDGET_LISTVIEW || wg->type == GUI_WIDGET_TABLEVIEW ||
-            wg->type == GUI_WIDGET_MENUBAR || wg->type == GUI_WIDGET_CONTEXTMENU || wg->type == GUI_WIDGET_TREEVIEW ||
+            wg->type == GUI_WIDGET_MENUBAR || wg->type == GUI_WIDGET_CONTEXTMENU || wg->type == GUI_WIDGET_DIALOG || wg->type == GUI_WIDGET_TREEVIEW ||
             (wg->type == GUI_WIDGET_LABEL && (wg->label_flags & GUI_LABEL_FLAG_COPYABLE)));
 }
 
@@ -1208,7 +1208,7 @@ static int gui_widget_is_hoverable(gui_widget_t *wg) {
             wg->type == GUI_WIDGET_RADIOBUTTON || wg->type == GUI_WIDGET_SELECT ||
             wg->type == GUI_WIDGET_COMBOBOX ||
             wg->type == GUI_WIDGET_LISTVIEW || wg->type == GUI_WIDGET_TABLEVIEW ||
-            wg->type == GUI_WIDGET_MENUBAR || wg->type == GUI_WIDGET_CONTEXTMENU ||
+            wg->type == GUI_WIDGET_MENUBAR || wg->type == GUI_WIDGET_CONTEXTMENU || wg->type == GUI_WIDGET_DIALOG ||
             wg->type == GUI_WIDGET_SLIDER || wg->type == GUI_WIDGET_SCROLLBAR);
 }
 
@@ -7114,7 +7114,7 @@ int gui_should_capture_key_code(int key) {
 
     if (key == GUI_KEY_TAB) return 1;
 
-    if (wg->type == GUI_WIDGET_LISTVIEW || wg->type == GUI_WIDGET_TABLEVIEW || wg->type == GUI_WIDGET_MENUBAR || wg->type == GUI_WIDGET_CONTEXTMENU || wg->type == GUI_WIDGET_TREEVIEW) return 1;
+    if (wg->type == GUI_WIDGET_LISTVIEW || wg->type == GUI_WIDGET_TABLEVIEW || wg->type == GUI_WIDGET_MENUBAR || wg->type == GUI_WIDGET_CONTEXTMENU || wg->type == GUI_WIDGET_DIALOG || wg->type == GUI_WIDGET_TREEVIEW) return 1;
 
     if (key == GUI_KEY_UP || key == GUI_KEY_DOWN) return 0;
 
@@ -7624,6 +7624,39 @@ gui_widget_t *gui_add_menubar(gui_window_t *window, int x, int y, int w, int h, 
     return wg;
 }
 
+
+gui_widget_t *gui_add_dialog(gui_window_t *window, int x, int y, int w, int h, const char *title, const char *message, uint32_t flags, gui_widget_callback_t cb, void *user_data) {
+    gui_widget_t *wg = gui_alloc_widget(window, GUI_WIDGET_DIALOG, x, y, w, h, title ? title : "Dialog");
+    if (wg) {
+        wg->on_click = cb;
+        wg->user_data = user_data;
+        wg->label_flags = flags;
+        wg->value = 0;
+        gui_widget_set_text(wg, title ? title : "Dialog");
+        gui_widget_set_placeholder(wg, message ? message : "");
+        if (w < 160) wg->rect.w = 160;
+        if (h < 90) wg->rect.h = 90;
+    }
+    return wg;
+}
+
+int gui_dialog_set_message(gui_widget_t *widget, const char *message) {
+    if (!widget || widget->type != GUI_WIDGET_DIALOG) return -1;
+    gui_widget_set_placeholder(widget, message ? message : "");
+    return 0;
+}
+
+int gui_dialog_show(gui_widget_t *widget) {
+    if (!widget || widget->type != GUI_WIDGET_DIALOG) return -1;
+    widget->visible = 1;
+    return 0;
+}
+
+int gui_dialog_hide(gui_widget_t *widget) {
+    if (!widget || widget->type != GUI_WIDGET_DIALOG) return -1;
+    widget->visible = 0;
+    return 0;
+}
 
 gui_widget_t *gui_add_contextmenu(gui_window_t *window, int x, int y, int w, int h, const char *items, int selected_index, uint32_t disabled_mask, gui_widget_callback_t cb, void *user_data) {
     gui_widget_t *wg = gui_alloc_widget(window, GUI_WIDGET_CONTEXTMENU, x, y, w, h, "ContextMenu");

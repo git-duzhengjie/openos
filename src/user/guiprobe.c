@@ -93,6 +93,7 @@ int main(void)
     contextmenu_show = openos_gui_show_contextmenu(win, contextmenu, 238, 370);
     contextmenu_disabled_set = openos_gui_set_contextmenu_disabled(win, contextmenu, (1u << 1));
     contextmenu_set = openos_gui_set_contextmenu_index(win, contextmenu, 2);
+    (void)openos_gui_add_dialog(win, 192, 118, 210, 108, "Dialog", "通用弹窗组件：标题、正文、OK/Cancel 按钮。", 1u);
     if (openos_gui_get_contextmenu_index(win, contextmenu, &contextmenu_value) < 0) {
         contextmenu_value = -1;
     }
