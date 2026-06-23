@@ -294,6 +294,10 @@
 #define OPENOS_GUI_TOOLBAR_HAS_SEARCH            0x00000008u
 #define OPENOS_GUI_TOOLBAR_BOTTOM_BORDER         0x00000010u
 
+#define OPENOS_GUI_BUTTON_FLAG_DEFAULT           0x00000001u
+#define OPENOS_GUI_BUTTON_FLAG_DANGER            0x00000002u
+#define OPENOS_GUI_BUTTON_FLAG_FLAT              0x00000004u
+
 #define OPENOS_GUI_STATUSBAR_LOADING             0x00000001u
 #define OPENOS_GUI_STATUSBAR_SIZE_GRIP           0x00000002u
 #define OPENOS_GUI_STATUSBAR_LINK_PROMPT         0x00000004u
@@ -1151,6 +1155,9 @@ typedef struct openos_gui_label_measure_request {
 #define OPENOS_GUI_ICON_FILE_IMAGE 9u
 #define OPENOS_GUI_ICON_FILE_ARCHIVE 10u
 #define OPENOS_GUI_ICON_FILE_MARKUP 11u
+#define OPENOS_GUI_ICON_NAV_BACK 12u
+#define OPENOS_GUI_ICON_NAV_FORWARD 13u
+#define OPENOS_GUI_ICON_NAV_RELOAD 14u
 
 static inline int openos_syscall3(int num, int a, int b, int c)
 {

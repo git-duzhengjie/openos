@@ -1622,12 +1622,18 @@ int main(int argc, char **argv)
     new_tab_button = openos_gui_add_button(win, BROWSER_NEW_TAB_BUTTON_X, 2, BROWSER_NEW_TAB_BUTTON_W, BROWSER_NEW_TAB_BUTTON_H, "+");
     browser_tabs_init(win, &tabs, tabview);
 
-    toolbar = openos_gui_add_toolbar(win, 0, 30, BROWSER_WINDOW_W, 54, "<|>|Reload|addr:Search OpenOS or type a URL", OPENOS_GUI_TOOLBAR_SHOW_GRIP | OPENOS_GUI_TOOLBAR_GROUPED_BUTTONS | OPENOS_GUI_TOOLBAR_HAS_ADDRESS | OPENOS_GUI_TOOLBAR_BOTTOM_BORDER);
+    toolbar = openos_gui_add_toolbar(win, 0, 30, BROWSER_WINDOW_W, 54, "addr:Search OpenOS or type a URL", OPENOS_GUI_TOOLBAR_HAS_ADDRESS | OPENOS_GUI_TOOLBAR_BOTTOM_BORDER);
     (void)toolbar;
-    back_button = openos_gui_add_button(win, 16, 48, 40, 24, "<");
-    forward_button = openos_gui_add_button(win, 60, 48, 40, 24, ">");
-    load_button = openos_gui_add_button(win, 104, 48, 72, 24, "Reload");
-    address_label = openos_gui_add_textbox(win, 188, 48, 692, 24, "");
+    back_button = openos_gui_add_button(win, 18, 48, 28, 24, "");
+    openos_gui_set_button_flags(win, back_button, OPENOS_GUI_BUTTON_FLAG_FLAT);
+    openos_gui_set_icon(win, back_button, OPENOS_GUI_ICON_NAV_BACK);
+    forward_button = openos_gui_add_button(win, 50, 48, 28, 24, "");
+    openos_gui_set_button_flags(win, forward_button, OPENOS_GUI_BUTTON_FLAG_FLAT);
+    openos_gui_set_icon(win, forward_button, OPENOS_GUI_ICON_NAV_FORWARD);
+    load_button = openos_gui_add_button(win, 82, 48, 28, 24, "");
+    openos_gui_set_button_flags(win, load_button, OPENOS_GUI_BUTTON_FLAG_FLAT);
+    openos_gui_set_icon(win, load_button, OPENOS_GUI_ICON_NAV_RELOAD);
+    address_label = openos_gui_add_textbox(win, 120, 48, 760, 24, "");
 
     if (argc > 1 && argv && argv[1] && argv[1][0])
         browser_format_address(home_address, sizeof(home_address), host, path, is_file);

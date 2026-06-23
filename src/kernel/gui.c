@@ -2383,6 +2383,39 @@ static void gui_draw_file_icon(gui_icon_id_t id, int x, int y) {
 
     if (id == GUI_ICON_NONE) return;
 
+    if (id == GUI_ICON_NAV_BACK || id == GUI_ICON_NAV_FORWARD) {
+        uint32_t arrow = gui_rgb(38, 46, 62);
+        uint32_t hi = gui_rgb(255, 255, 255);
+        int dir = (id == GUI_ICON_NAV_BACK) ? -1 : 1;
+        int tip_x = x + (dir < 0 ? 3 : 10);
+        int tail_x = x + (dir < 0 ? 10 : 3);
+        int cy = y + 7;
+        gui_raw_line(tip_x + dir, cy, tail_x + dir, cy - 5, hi);
+        gui_raw_line(tip_x + dir, cy, tail_x + dir, cy + 5, hi);
+        gui_raw_line(tip_x, cy, tail_x, cy - 5, arrow);
+        gui_raw_line(tip_x, cy, tail_x, cy + 5, arrow);
+        gui_raw_line(tip_x + dir, cy, tail_x, cy, arrow);
+        gui_raw_line(tip_x + dir * 2, cy, tail_x, cy, arrow);
+        return;
+    }
+
+    if (id == GUI_ICON_NAV_RELOAD) {
+        uint32_t arrow = gui_rgb(38, 46, 62);
+        uint32_t hi = gui_rgb(255, 255, 255);
+        gui_raw_line(x + 4, y + 3, x + 9, y + 3, arrow);
+        gui_raw_line(x + 9, y + 3, x + 11, y + 5, arrow);
+        gui_raw_line(x + 11, y + 5, x + 11, y + 8, arrow);
+        gui_raw_line(x + 10, y + 4, x + 12, y + 4, arrow);
+        gui_raw_line(x + 12, y + 4, x + 12, y + 6, arrow);
+        gui_raw_line(x + 9, y + 11, x + 4, y + 11, arrow);
+        gui_raw_line(x + 4, y + 11, x + 2, y + 9, arrow);
+        gui_raw_line(x + 2, y + 9, x + 2, y + 6, arrow);
+        gui_raw_line(x + 3, y + 10, x + 1, y + 10, arrow);
+        gui_raw_line(x + 1, y + 10, x + 1, y + 8, arrow);
+        gui_raw_line(x + 5, y + 4, x + 9, y + 4, hi);
+        return;
+    }
+
     gui_raw_fill_rect_alpha(x + 3, y + 3, 11, 11, shadow, 54u);
     g_gui_accel.icon_quality_passes++;
 
@@ -4262,8 +4295,12 @@ static void gui_draw_widget(gui_widget_t *wg) {
     } else if (wg->type == GUI_WIDGET_BUTTON || wg->type == GUI_WIDGET_ICON_BUTTON) {
         uint32_t light = g_gui.colors.button_border;
         uint32_t shadow = gui_rgb(20, 20, 20);
+        int flat = (wg->button_flags & GUI_BUTTON_FLAG_FLAT) != 0;
         int text_dx = wg->pressed ? 9 : 8;
         int text_dy = wg->pressed ? 1 : 0;
+        if (flat) {
+            text_dx = wg->pressed ? 1 : 0;
+        }
         if (!wg->enabled) {
             bg = gui_rgb(170, 174, 184);
             fg = gui_rgb(95, 98, 106);
@@ -4291,12 +4328,21 @@ static void gui_draw_widget(gui_widget_t *wg) {
             bg = wg->bg_color ? wg->bg_color : g_gui.colors.button_bg;
             fg = wg->fg_color ? wg->fg_color : g_gui.colors.button_fg;
         }
-        gui_raw_fill_rect(ax, ay, wg->rect.w, wg->rect.h, bg);
-        gui_raw_line(ax, ay, ax + wg->rect.w - 1, ay, light);
-        gui_raw_line(ax, ay, ax, ay + wg->rect.h - 1, light);
-        gui_raw_line(ax + wg->rect.w - 1, ay, ax + wg->rect.w - 1, ay + wg->rect.h - 1, shadow);
-        gui_raw_line(ax, ay + wg->rect.h - 1, ax + wg->rect.w - 1, ay + wg->rect.h - 1, shadow);
-        if (wg->focused && wg->enabled) {
+        if (flat) {
+            if (wg->pressed) {
+                gui_raw_fill_rect(ax, ay, wg->rect.w, wg->rect.h, gui_rgb(218, 226, 238));
+            } else if (wg->hovered && wg->enabled) {
+                gui_raw_fill_rect(ax, ay, wg->rect.w, wg->rect.h, gui_rgb(232, 238, 248));
+            }
+            fg = wg->enabled ? (wg->fg_color ? wg->fg_color : g_gui.colors.text_fg) : gui_rgb(120, 126, 136);
+        } else {
+            gui_raw_fill_rect(ax, ay, wg->rect.w, wg->rect.h, bg);
+            gui_raw_line(ax, ay, ax + wg->rect.w - 1, ay, light);
+            gui_raw_line(ax, ay, ax, ay + wg->rect.h - 1, light);
+            gui_raw_line(ax + wg->rect.w - 1, ay, ax + wg->rect.w - 1, ay + wg->rect.h - 1, shadow);
+            gui_raw_line(ax, ay + wg->rect.h - 1, ax + wg->rect.w - 1, ay + wg->rect.h - 1, shadow);
+        }
+        if (wg->focused && wg->enabled && !flat) {
             uint32_t focus = gui_rgb(255, 255, 255);
             gui_raw_line(ax + 3, ay + 3, ax + wg->rect.w - 4, ay + 3, focus);
             gui_raw_line(ax + 3, ay + wg->rect.h - 4, ax + wg->rect.w - 4, ay + wg->rect.h - 4, focus);
@@ -4315,12 +4361,17 @@ static void gui_draw_widget(gui_widget_t *wg) {
                 gui_draw_file_icon(wg->icon, icon_x, icon_y + text_dy);
             }
         } else {
-            text_dx += gui_draw_inline_icon(wg->icon, ax + text_dx,
-                                            ay + text_dy, wg->rect.h);
-            {
-                gui_rect_t clip = { ax + text_dx, ay + 2, wg->rect.w - text_dx - 3, wg->rect.h - 4 };
-                gui_draw_window_title_text(ax + text_dx, gui_text_center_y(ay, wg->rect.h) + text_dy,
-                                           wg->text, fg, &clip);
+            if (flat && wg->icon != GUI_ICON_NONE && !wg->text[0]) {
+                gui_draw_file_icon(wg->icon, ax + (wg->rect.w - 14) / 2 + text_dx,
+                                   ay + (wg->rect.h - 14) / 2 + text_dy);
+            } else {
+                text_dx += gui_draw_inline_icon(wg->icon, ax + text_dx,
+                                                ay + text_dy, wg->rect.h);
+                {
+                    gui_rect_t clip = { ax + text_dx, ay + 2, wg->rect.w - text_dx - 3, wg->rect.h - 4 };
+                    gui_draw_window_title_text(ax + text_dx, gui_text_center_y(ay, wg->rect.h) + text_dy,
+                                               wg->text, fg, &clip);
+                }
             }
         }
     } else if (wg->type == GUI_WIDGET_TOOLBAR) {
@@ -9522,7 +9573,7 @@ void gui_widget_set_icon(gui_widget_t *widget, gui_icon_id_t icon) {
 
 void gui_widget_set_button_flags(gui_widget_t *widget, uint32_t flags) {
     if (!widget || (widget->type != GUI_WIDGET_BUTTON && widget->type != GUI_WIDGET_ICON_BUTTON)) return;
-    widget->button_flags = flags & (GUI_BUTTON_FLAG_DEFAULT | GUI_BUTTON_FLAG_DANGER);
+    widget->button_flags = flags & (GUI_BUTTON_FLAG_DEFAULT | GUI_BUTTON_FLAG_DANGER | GUI_BUTTON_FLAG_FLAT);
     if ((widget->button_flags & GUI_BUTTON_FLAG_DEFAULT) && (widget->button_flags & GUI_BUTTON_FLAG_DANGER)) {
         widget->button_flags &= ~GUI_BUTTON_FLAG_DEFAULT;
     }
