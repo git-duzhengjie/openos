@@ -96,7 +96,8 @@ int main(void)
     (void)openos_gui_add_info_dialog(win, 192, 118, 210, 108, "Info", "信息弹窗：用于普通提示。");
     (void)openos_gui_add_warning_dialog(win, 414, 118, 210, 108, "Warning", "警告弹窗：用于风险提示。");
     (void)openos_gui_add_error_dialog(win, 192, 232, 210, 108, "Error", "错误弹窗：用于失败状态。");
-    (void)openos_gui_add_confirm_dialog(win, 414, 232, 210, 108, "Confirm", "确认弹窗：提供 OK / Cancel。");
+    (void)openos_gui_add_dialog(win, 414, 232, 210, 108, "Confirm", "Confirm dialog: default OK, Esc cancels.",
+                                OPENOS_GUI_DIALOG_CONFIRM | OPENOS_GUI_DIALOG_CANCEL | OPENOS_GUI_DIALOG_MODAL | OPENOS_GUI_DIALOG_DEFAULT_OK);
     if (openos_gui_get_contextmenu_index(win, contextmenu, &contextmenu_value) < 0) {
         contextmenu_value = -1;
     }

@@ -70,6 +70,12 @@
 #define GUI_DIALOG_TYPE_ERROR              0x00000002u
 #define GUI_DIALOG_TYPE_CONFIRM            0x00000003u
 #define GUI_DIALOG_FLAG_CANCEL             0x00000010u
+#define GUI_DIALOG_FLAG_MODAL              0x00000020u
+#define GUI_DIALOG_FLAG_DEFAULT_OK         0x00000040u
+#define GUI_DIALOG_FLAG_DEFAULT_CANCEL     0x00000080u
+#define GUI_DIALOG_RESULT_NONE             0
+#define GUI_DIALOG_RESULT_OK               1
+#define GUI_DIALOG_RESULT_CANCEL           2
 #define GUI_TREEVIEW_FLAG_SHOW_LINES        0x00000001u
 #define GUI_TREEVIEW_FLAG_SHOW_ICONS        0x00000002u
 
@@ -89,6 +95,7 @@
 #define GUI_KEY_BACKSPACE  8
 #define GUI_KEY_TAB        9
 #define GUI_KEY_ENTER      13
+#define GUI_KEY_ESCAPE     27
 #define GUI_KEY_SPACE      32
 #define GUI_KEY_DELETE     0x101
 #define GUI_KEY_LEFT       0x102

@@ -1113,6 +1113,8 @@ static int gui_widget_absolute_origin(gui_widget_t *wg, int *out_x, int *out_y) 
     return gui_widget_absolute_origin_depth(wg, out_x, out_y, 0);
 }
 
+static void gui_set_focused_widget(gui_widget_t *wg);
+
 static int gui_widget_local_from_screen(gui_widget_t *wg, int x, int y, int *out_x, int *out_y) {
     int ax;
     int ay;
@@ -1220,6 +1222,63 @@ static void gui_button_activate(gui_widget_t *wg) {
     ev.window = wg->owner;
     ev.widget = wg;
     gui_event_push(ev);
+}
+
+static int gui_dialog_has_cancel(const gui_widget_t *wg) {
+    uint32_t dialog_type;
+    if (!wg || wg->type != GUI_WIDGET_DIALOG) return 0;
+    dialog_type = wg->label_flags & GUI_DIALOG_TYPE_MASK;
+    return ((wg->label_flags & GUI_DIALOG_FLAG_CANCEL) || dialog_type == GUI_DIALOG_TYPE_CONFIRM) ? 1 : 0;
+}
+
+static int gui_dialog_default_result(const gui_widget_t *wg) {
+    if (!wg || wg->type != GUI_WIDGET_DIALOG) return GUI_DIALOG_RESULT_NONE;
+    if ((wg->label_flags & GUI_DIALOG_FLAG_DEFAULT_CANCEL) && gui_dialog_has_cancel(wg)) return GUI_DIALOG_RESULT_CANCEL;
+    return GUI_DIALOG_RESULT_OK;
+}
+
+static void gui_dialog_close(gui_widget_t *wg, int result) {
+    if (!wg || wg->type != GUI_WIDGET_DIALOG) return;
+    wg->value = result;
+    wg->visible = 0;
+    wg->pressed = 0;
+    if (g_gui.pressed_widget == wg) g_gui.pressed_widget = 0;
+    if (g_gui.focused_widget == wg) gui_set_focused_widget(0);
+    if (wg->on_click) wg->on_click(wg, wg->user_data);
+    if (wg->owner && wg->owner->user_owner_pid != 0) gui_user_post_value_event(wg);
+    gui_invalidate_all();
+}
+
+static int gui_dialog_hit_button(gui_widget_t *wg, int screen_x, int screen_y) {
+    int ax, ay;
+    const int button_w = 54;
+    const int button_h = 20;
+    const int button_gap = 8;
+    int ok_x, cancel_x, button_y;
+    if (!wg || wg->type != GUI_WIDGET_DIALOG || !wg->visible || !wg->enabled) return GUI_DIALOG_RESULT_NONE;
+    if (!gui_widget_absolute_origin(wg, &ax, &ay)) return GUI_DIALOG_RESULT_NONE;
+    ok_x = ax + wg->rect.w - button_w - 12;
+    cancel_x = ok_x - button_w - button_gap;
+    button_y = ay + wg->rect.h - button_h - 10;
+    if (screen_x >= ok_x && screen_x < ok_x + button_w &&
+        screen_y >= button_y && screen_y < button_y + button_h) return GUI_DIALOG_RESULT_OK;
+    if (gui_dialog_has_cancel(wg) &&
+        screen_x >= cancel_x && screen_x < cancel_x + button_w &&
+        screen_y >= button_y && screen_y < button_y + button_h) return GUI_DIALOG_RESULT_CANCEL;
+    return GUI_DIALOG_RESULT_NONE;
+}
+
+static int gui_dialog_handle_key(gui_widget_t *wg, int key) {
+    if (!wg || wg->type != GUI_WIDGET_DIALOG || !wg->visible || !wg->enabled) return 0;
+    if (key == GUI_KEY_ESCAPE) {
+        gui_dialog_close(wg, gui_dialog_has_cancel(wg) ? GUI_DIALOG_RESULT_CANCEL : GUI_DIALOG_RESULT_OK);
+        return 1;
+    }
+    if (key == GUI_KEY_ENTER || key == GUI_KEY_SPACE) {
+        gui_dialog_close(wg, gui_dialog_default_result(wg));
+        return 1;
+    }
+    return 0;
 }
 
 int gui_toggle_set_checked(gui_widget_t *widget, int checked) {
@@ -3810,11 +3869,15 @@ static void gui_draw_widget(gui_widget_t *wg) {
         gui_draw_text(ax + 18, ay + title_h + 16, badge, gui_rgb(255, 255, 255));
         gui_draw_window_title_text(msg_clip.x, msg_clip.y, wg->placeholder, wg->enabled ? g_gui.colors.text_fg : gui_rgb(145, 150, 160), &msg_clip);
         if (has_cancel) {
+            uint32_t cancel_border = (wg->label_flags & GUI_DIALOG_FLAG_DEFAULT_CANCEL) ? accent : g_gui.colors.button_border;
             gui_raw_fill_rect(cancel_x, button_y, button_w, button_h, gui_rgb(248, 250, 252));
-            gui_raw_line(cancel_x, button_y, cancel_x + button_w - 1, button_y, g_gui.colors.button_border);
-            gui_raw_line(cancel_x, button_y + button_h - 1, cancel_x + button_w - 1, button_y + button_h - 1, g_gui.colors.button_border);
-            gui_raw_line(cancel_x, button_y, cancel_x, button_y + button_h - 1, g_gui.colors.button_border);
-            gui_raw_line(cancel_x + button_w - 1, button_y, cancel_x + button_w - 1, button_y + button_h - 1, g_gui.colors.button_border);
+            gui_raw_line(cancel_x, button_y, cancel_x + button_w - 1, button_y, cancel_border);
+            gui_raw_line(cancel_x, button_y + button_h - 1, cancel_x + button_w - 1, button_y + button_h - 1, cancel_border);
+            gui_raw_line(cancel_x, button_y, cancel_x, button_y + button_h - 1, cancel_border);
+            gui_raw_line(cancel_x + button_w - 1, button_y, cancel_x + button_w - 1, button_y + button_h - 1, cancel_border);
+            if (wg->label_flags & GUI_DIALOG_FLAG_DEFAULT_CANCEL) {
+                gui_raw_line(cancel_x + 2, button_y + 2, cancel_x + button_w - 3, button_y + 2, cancel_border);
+            }
             gui_draw_text(cancel_x + 12, button_y + 5, "Cancel", g_gui.colors.text_fg);
         }
         gui_raw_fill_rect(ok_x, button_y, button_w, button_h, gui_rgb(224, 238, 255));
@@ -3822,6 +3885,9 @@ static void gui_draw_widget(gui_widget_t *wg) {
         gui_raw_line(ok_x, button_y + button_h - 1, ok_x + button_w - 1, button_y + button_h - 1, accent);
         gui_raw_line(ok_x, button_y, ok_x, button_y + button_h - 1, accent);
         gui_raw_line(ok_x + button_w - 1, button_y, ok_x + button_w - 1, button_y + button_h - 1, accent);
+        if (!(wg->label_flags & GUI_DIALOG_FLAG_DEFAULT_CANCEL)) {
+            gui_raw_line(ok_x + 2, button_y + 2, ok_x + button_w - 3, button_y + 2, accent);
+        }
         gui_draw_text(ok_x + 20, button_y + 5, "OK", g_gui.colors.text_fg);
     } else if (wg->type == GUI_WIDGET_CONTEXTMENU) {
         int count = gui_menubar_item_count(wg);
@@ -5154,6 +5220,11 @@ static void gui_handle_mouse_down(int x, int y) {
                 gui_set_focused_widget(wg);
                 if (tree_index >= 0) { gui_treeview_select(wg, tree_index); gui_treeview_toggle(wg, tree_index); }
                 return;
+            } else if (wg->type == GUI_WIDGET_DIALOG) {
+                int dialog_result = gui_dialog_hit_button(wg, x, y);
+                gui_set_focused_widget(wg);
+                if (dialog_result != GUI_DIALOG_RESULT_NONE) gui_dialog_close(wg, dialog_result);
+                return;
             }
             gui_set_focused_widget(wg);
             wg->pressed = 1;
@@ -5362,6 +5433,10 @@ void gui_process_events(void) {
             } else if (g_gui.focused_widget && g_gui.focused_widget->focused &&
                        g_gui.focused_widget->type == GUI_WIDGET_TREEVIEW) {
                 gui_treeview_handle_key(g_gui.focused_widget, ev.key);
+            } else if (g_gui.focused_widget && g_gui.focused_widget->focused &&
+                       g_gui.focused_widget->type == GUI_WIDGET_DIALOG &&
+                       gui_dialog_handle_key(g_gui.focused_widget, ev.key)) {
+                /* Dialog consumed Enter/Space/Esc. */
             } else if (g_gui.focused_widget && g_gui.focused_widget->focused &&
                        gui_widget_is_clickable(g_gui.focused_widget) &&
                        (ev.key == GUI_KEY_ENTER || ev.key == GUI_KEY_SPACE)) {
@@ -7684,8 +7759,12 @@ gui_widget_t *gui_add_dialog(gui_window_t *window, int x, int y, int w, int h, c
     if (wg) {
         wg->on_click = cb;
         wg->user_data = user_data;
-        wg->label_flags = flags;
-        wg->value = 0;
+        wg->label_flags = flags & (GUI_DIALOG_TYPE_MASK | GUI_DIALOG_FLAG_CANCEL | GUI_DIALOG_FLAG_MODAL | GUI_DIALOG_FLAG_DEFAULT_OK | GUI_DIALOG_FLAG_DEFAULT_CANCEL);
+        if ((wg->label_flags & GUI_DIALOG_FLAG_DEFAULT_CANCEL) && !((wg->label_flags & GUI_DIALOG_FLAG_CANCEL) || ((wg->label_flags & GUI_DIALOG_TYPE_MASK) == GUI_DIALOG_TYPE_CONFIRM))) {
+            wg->label_flags &= ~GUI_DIALOG_FLAG_DEFAULT_CANCEL;
+        }
+        if (!(wg->label_flags & GUI_DIALOG_FLAG_DEFAULT_CANCEL)) wg->label_flags |= GUI_DIALOG_FLAG_DEFAULT_OK;
+        wg->value = GUI_DIALOG_RESULT_NONE;
         gui_widget_set_text(wg, title ? title : "Dialog");
         gui_widget_set_placeholder(wg, message ? message : "");
         if (w < 160) wg->rect.w = 160;
@@ -7703,12 +7782,17 @@ int gui_dialog_set_message(gui_widget_t *widget, const char *message) {
 int gui_dialog_show(gui_widget_t *widget) {
     if (!widget || widget->type != GUI_WIDGET_DIALOG) return -1;
     widget->visible = 1;
+    widget->value = GUI_DIALOG_RESULT_NONE;
+    gui_set_focused_widget(widget);
+    gui_invalidate_all();
     return 0;
 }
 
 int gui_dialog_hide(gui_widget_t *widget) {
     if (!widget || widget->type != GUI_WIDGET_DIALOG) return -1;
     widget->visible = 0;
+    if (g_gui.focused_widget == widget) gui_set_focused_widget(0);
+    gui_invalidate_all();
     return 0;
 }
 
