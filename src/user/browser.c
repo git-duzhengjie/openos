@@ -685,6 +685,7 @@ static int browser_fetch_http_once(const char *host, const char *path, char *out
         snprintf(out, out_size, "socket() failed");
         return -1;
     }
+    openos_fcntl(fd, F_SETFL, O_NONBLOCK);
 
     {
         openos_sockaddr_in_t connect_addr;
@@ -1092,16 +1093,6 @@ static void browser_load_worker(void *arg)
         }
     }
 
-    if (ctx->window_id >= 0 && ctx->status_label_id >= 0 && ctx->body_label_id >= 0) {
-        char view[BROWSER_BODY_MAX + BROWSER_TITLE_MAX + 32];
-        openos_gui_set_text(ctx->window_id, ctx->status_label_id,
-                            ctx->status[0] ? ctx->status : (rc < 0 ? "Failed" : "Done"));
-        if (ctx->title[0])
-            snprintf(view, sizeof(view), "%s\n\n%s", ctx->title, ctx->body[0] ? ctx->body : "Empty response");
-        else
-            snprintf(view, sizeof(view), "%s", ctx->body[0] ? ctx->body : (rc < 0 ? "Load failed" : "Empty response"));
-        openos_gui_set_text(ctx->window_id, ctx->body_label_id, view);
-    }
     ctx->done = 1;
 }
 
@@ -1205,9 +1196,7 @@ int main(int argc, char **argv)
     load.home_visible = 1;
     if (argc > 1 && argv && argv[1] && argv[1][0]) {
         browser_sync_address_from_target(&load, host, path, is_file);
-        load.home_visible = 0;
-        scroll_line = 0;
-        browser_start_load(&load, win, status_label, body_label, host, path, is_file);
+        openos_gui_set_text(win, status_label, "Ready - press Reload to open the address");
     } else {
         load.address_text[0] = 0;
         browser_update_address_label(&load);
