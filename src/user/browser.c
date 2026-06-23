@@ -9,6 +9,7 @@
 #define BROWSER_DNS_RETRIES 8
 #define BROWSER_CONNECT_TIMEOUT_MS 4000
 #define BROWSER_RESPONSE_TIMEOUT_MS 6000
+#define BROWSER_RESPONSE_IDLE_TIMEOUT_MS 500
 #define BROWSER_POLL_SLICE_MS 100
 #define BROWSER_RECV_CHUNK_MAX 1400
 #define BROWSER_HOST_MAX 128
@@ -687,6 +688,46 @@ static int browser_fetch_file(const char *path, char *out, int out_size)
     return 0;
 }
 
+static const char *browser_find_http_body(const char *response)
+{
+    const char *p;
+    if (!response) return 0;
+    p = strstr(response, "\r\n\r\n");
+    if (p) return p + 4;
+    p = strstr(response, "\n\n");
+    if (p) return p + 2;
+    return 0;
+}
+
+static int browser_parse_positive_int(const char *s)
+{
+    int value = 0;
+    if (!s || !s[0]) return -1;
+    while (*s == ' ' || *s == '\t') ++s;
+    while (*s >= '0' && *s <= '9') {
+        int digit = *s - '0';
+        if (value > 1000000) return -1;
+        value = value * 10 + digit;
+        ++s;
+    }
+    return value;
+}
+
+static int browser_response_has_complete_body(const char *response, int total)
+{
+    ob_http_headers_t parsed;
+    const char *body;
+    int expected;
+    if (!response || total <= 0) return 0;
+    body = browser_find_http_body(response);
+    if (!body) return 0;
+    memset(&parsed, 0, sizeof(parsed));
+    if (ob_http_parse_headers(response, &parsed) < 0) return 0;
+    expected = browser_parse_positive_int(parsed.content_length);
+    if (expected < 0) return 0;
+    return (int)(response + total - body) >= expected;
+}
+
 static int browser_fetch_http_once(const char *host, const char *path, char *out, int out_size, ob_http_headers_t *headers)
 {
     int fd;
@@ -762,6 +803,7 @@ static int browser_fetch_http_once(const char *host, const char *path, char *out
 
     {
         unsigned int waited = 0;
+        unsigned int idle_waited = 0;
         while (waited < BROWSER_RESPONSE_TIMEOUT_MS && total < out_size - 1) {
             int ready = browser_poll_fd(fd, OPENOS_POLLIN, BROWSER_POLL_SLICE_MS);
             if (ready < 0) {
@@ -769,8 +811,14 @@ static int browser_fetch_http_once(const char *host, const char *path, char *out
                 openos_close(fd);
                 return -1;
             }
+            waited += BROWSER_POLL_SLICE_MS;
             if (ready == 0) {
-                waited += BROWSER_POLL_SLICE_MS;
+                if (total > 0) {
+                    idle_waited += BROWSER_POLL_SLICE_MS;
+                    if (browser_response_has_complete_body(out, total) ||
+                        idle_waited >= BROWSER_RESPONSE_IDLE_TIMEOUT_MS)
+                        break;
+                }
                 continue;
             }
 
@@ -778,6 +826,8 @@ static int browser_fetch_http_once(const char *host, const char *path, char *out
             unsigned int chunk = room > BROWSER_RECV_CHUNK_MAX ? BROWSER_RECV_CHUNK_MAX : room;
             int n = openos_recv(fd, out + total, chunk, 0);
             if (n < 0) {
+                if (total > 0)
+                    break;
                 snprintf(out, out_size, "recv() failed from %s", host);
                 openos_close(fd);
                 return -1;
@@ -786,6 +836,9 @@ static int browser_fetch_http_once(const char *host, const char *path, char *out
                 break;
             total += n;
             out[total] = 0;
+            idle_waited = 0;
+            if (browser_response_has_complete_body(out, total))
+                break;
             if (total >= BROWSER_RECV_MAX)
                 break;
         }
@@ -1128,11 +1181,11 @@ static void browser_load_worker(void *arg)
                 snprintf(ctx->status, sizeof(ctx->status), "%s", ctx->http_status[0] ? ctx->http_status : "Done");
             printf("browser: loaded %s%s%s %s\n", ctx->is_file ? "file://" : "http://", ctx->is_file ? "" : ctx->host, ctx->path, ctx->status);
             if (ctx->title[0]) printf("title: %s\n", ctx->title);
-            printf("%s\n", ctx->body);
         }
     }
 
     ctx->done = 1;
+    printf("browser: load complete result=%d status=%s\n", ctx->result, ctx->status[0] ? ctx->status : (ctx->result < 0 ? "Failed" : "Done"));
 }
 
 int main(int argc, char **argv)
