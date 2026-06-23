@@ -497,6 +497,7 @@ typedef struct gui_system {
     int mouse_y;
     uint8_t mouse_buttons;
     uint8_t last_mouse_buttons;
+    uint32_t mouse_poll_divider;
     int cursor_visible;
     int cursor_drawn;
     int cursor_fb_x;

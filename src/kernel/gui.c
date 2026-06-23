@@ -6557,7 +6557,15 @@ static void gui_poll_mouse(void) {
     mouse_state_t ms;
     if (!g_gui.initialized) return;
 
-    usb_tablet_poll((int)g_gui.width, (int)g_gui.height);
+    /* Polling the emulated USB tablet every GUI loop iteration is expensive
+     * under QEMU and makes pointer movement stutter.  Keep consuming the
+     * cheap shared mouse snapshot each frame, but sample the tablet at a
+     * reduced rate; the absolute coordinates remain smooth enough while the
+     * desktop has time to redraw. */
+    g_gui.mouse_poll_divider++;
+    if ((g_gui.mouse_poll_divider & 1u) == 0u) {
+        usb_tablet_poll((int)g_gui.width, (int)g_gui.height);
+    }
     mouse_snapshot_and_clear_delta(&ms);
     if (!ms.present) return;
 
@@ -6664,6 +6672,7 @@ void gui_init(void) {
     g_gui.next_app_id = 1;
     g_gui.mouse_x = 512;
     g_gui.mouse_y = 384;
+    g_gui.mouse_poll_divider = 0;
     /* Default on shows the OpenOS software cursor inside the GUI.
      * Use `cursor off` to hide it when the host cursor is preferred.
      */
@@ -6986,13 +6995,16 @@ static void gui_draw_icon_button_frame(const gui_rect_t *rect, const char *label
     int text_w;
     int text_x;
     int text_y;
+    int line_h;
 
     if (!rect) return;
     gui_draw_icon_button_face(rect, selected, highlighted);
     if (icon_w < 0) icon_w = 0;
     if (icon_h < 0) icon_h = 0;
     if (gap < 0) gap = 0;
-    top_pad = (rect->h - (icon_h + gap + GUI_CHAR_H)) / 2;
+    line_h = (int)font_get_line_height(font_get_default());
+    if (line_h < (int)GUI_CHAR_H) line_h = (int)GUI_CHAR_H;
+    top_pad = (rect->h - (icon_h + gap + line_h)) / 2;
     if (top_pad < 0) top_pad = 0;
     if (icon_x) *icon_x = rect->x + (rect->w - icon_w) / 2;
     if (icon_y) *icon_y = rect->y + top_pad;
@@ -7000,7 +7012,11 @@ static void gui_draw_icon_button_frame(const gui_rect_t *rect, const char *label
         text_w = (int)font_measure_text_width(font_get_default(), label);
         text_x = rect->x + (rect->w - text_w) / 2;
         if (text_x < rect->x) text_x = rect->x;
+        if (text_x + text_w > rect->x + rect->w) text_x = rect->x + rect->w - text_w;
+        if (text_x < rect->x) text_x = rect->x;
         text_y = rect->y + top_pad + icon_h + gap;
+        if (text_y + line_h > rect->y + rect->h) text_y = rect->y + rect->h - line_h;
+        if (text_y < rect->y) text_y = rect->y;
         gui_draw_text(text_x, text_y, label, text_color);
     }
 }
@@ -7423,7 +7439,8 @@ static void gui_desktop_draw(void) {
     const char *line1 = i18n_t(I18N_KEY_BANNER_LINE1);
     const char *line2 = i18n_t(I18N_KEY_BANNER_LINE2);
     const int line_gap = 12;                       /* extra gap between lines */
-    const int line_step = GUI_CHAR_H + line_gap;   /* full line stride */
+    int line_h = (int)font_get_line_height(font_get_default());
+    int line_step;
     int block_h;
     int avail_h;
     int top_y;
@@ -7432,7 +7449,9 @@ static void gui_desktop_draw(void) {
 
     if (!g_gui.desktop_enabled) return;
 
-    block_h = GUI_CHAR_H + line_step * 2;          /* 3 lines */
+    if (line_h < (int)GUI_CHAR_H) line_h = (int)GUI_CHAR_H;
+    line_step = line_h + line_gap;                 /* full line stride */
+    block_h = line_h + line_step * 2;              /* 3 lines */
     avail_h = (int)g_gui.height - GUI_TASKBAR_HEIGHT;
     if (avail_h < block_h) avail_h = block_h;
     top_y = (avail_h - block_h) / 2;
