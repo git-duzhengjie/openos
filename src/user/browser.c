@@ -1759,7 +1759,7 @@ int main(int argc, char **argv)
     new_tab_button = openos_gui_add_button(win, BROWSER_NEW_TAB_BUTTON_X, 2, BROWSER_NEW_TAB_BUTTON_W, BROWSER_NEW_TAB_BUTTON_H, "+");
     browser_tabs_init(win, &tabs, tabview);
 
-    toolbar = openos_gui_add_toolbar(win, 0, 30, BROWSER_WINDOW_W, 54, "addr:Search OpenOS or type a URL", OPENOS_GUI_TOOLBAR_HAS_ADDRESS | OPENOS_GUI_TOOLBAR_BOTTOM_BORDER);
+    toolbar = openos_gui_add_toolbar(win, 0, 30, BROWSER_WINDOW_W, 54, "", OPENOS_GUI_TOOLBAR_BOTTOM_BORDER);
     (void)toolbar;
     back_button = openos_gui_add_button(win, 18, 48, 28, 24, "");
     openos_gui_set_button_flags(win, back_button, OPENOS_GUI_BUTTON_FLAG_FLAT);
