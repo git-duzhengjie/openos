@@ -2135,7 +2135,7 @@ static int gui_textbox_on_key(gui_widget_t *wg, int key) {
     else gui_textbox_ensure_cursor_visible(wg);
     if ((text_changed || cursor_changed) && wg->owner) {
         gui_invalidate_rect(wg->owner->rect.x, wg->owner->rect.y, wg->owner->rect.w, wg->owner->rect.h);
-        if (text_changed && wg->owner->user_owner_pid != 0) gui_user_post_text_event(wg, GUI_EVENT_TEXT_CHANGED);
+        if (text_changed && wg->owner->user_owner_pid != 0) gui_user_post_text_event(wg, GUI_USER_EVENT_TEXT_CHANGED);
     }
     return text_changed || cursor_changed;
 }

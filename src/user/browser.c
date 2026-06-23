@@ -1589,7 +1589,7 @@ int main(int argc, char **argv)
                 continue;
             }
             if (event.widget_id == (unsigned int)address_label) {
-                if (load.home_visible) {
+                if (load.home_visible && event.type == OPENOS_GUI_EVENT_MOUSE_DOWN) {
                     snprintf(load.address_text, sizeof(load.address_text), "");
                     openos_gui_set_text_cursor(win, address_label, "", 0);
                 }
