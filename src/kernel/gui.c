@@ -2119,6 +2119,7 @@ static int gui_textbox_on_key(gui_widget_t *wg, int key) {
                 gui_user_post_text_event(wg, GUI_EVENT_TEXT_SUBMIT);
                 gui_user_post_key_event(wg->owner, GUI_KEY_ENTER);
             }
+            return 1;
         }
     } else if (key == GUI_KEY_TAB) {
         /* Tab changes focus at the event dispatcher level. */
