@@ -793,6 +793,10 @@ typedef struct openos_gui_event {
     int key;
     int button;
     unsigned int modifiers;
+    char text[32];
+    unsigned int text_len;
+    unsigned int codepoint;
+    unsigned int ime_state;
 } openos_gui_event_t;
 
 typedef struct openos_gui_toast_request {

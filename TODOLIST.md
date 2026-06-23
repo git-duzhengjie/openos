@@ -628,9 +628,9 @@
 - [x] 补齐键盘事件修饰键
   - [x] Shift / Ctrl / Alt / Meta modifiers
   - [x] 支持 Shift+Tab、Ctrl+A/C/V/X、快捷键分发
-- [ ] 补齐文本输入 ABI
-  - [ ] 区分物理按键 KeyDown 与文本输入 TextInput
-  - [ ] 为 UTF-8 / 中文输入法预留接口
+- [x] 补齐文本输入 ABI
+  - [x] 区分物理按键 KeyDown 与文本输入 TextInput
+  - [x] 为 UTF-8 / 中文输入法预留接口
 - [ ] 建立 GUI 组件 smoke 测试
   - [ ] 新增 `/bin/guicomponenttest` 覆盖 TextInput/Button/List/Dialog 等基础交互
   - [ ] `./build.sh test` 纳入组件事件和 ABI 回归

@@ -1953,6 +1953,15 @@ static int gui_text_widget_insert_text(gui_widget_t *wg, const char *text) {
     memcpy(wg->text + wg->cursor, text, ins_len);
     wg->cursor += ins_len;
     gui_text_widget_clear_selection(wg);
+    if (wg->owner && wg->owner->user_owner_pid != 0) {
+        uint32_t cp = 0;
+        const unsigned char *u = (const unsigned char *)text;
+        if ((u[0] & 0x80u) == 0) cp = u[0];
+        else if ((u[0] & 0xE0u) == 0xC0u && u[1]) cp = ((uint32_t)(u[0] & 0x1Fu) << 6) | (uint32_t)(u[1] & 0x3Fu);
+        else if ((u[0] & 0xF0u) == 0xE0u && u[1] && u[2]) cp = ((uint32_t)(u[0] & 0x0Fu) << 12) | ((uint32_t)(u[1] & 0x3Fu) << 6) | (uint32_t)(u[2] & 0x3Fu);
+        else if ((u[0] & 0xF8u) == 0xF0u && u[1] && u[2] && u[3]) cp = ((uint32_t)(u[0] & 0x07u) << 18) | ((uint32_t)(u[1] & 0x3Fu) << 12) | ((uint32_t)(u[2] & 0x3Fu) << 6) | (uint32_t)(u[3] & 0x3Fu);
+        gui_user_post_text_input_event(wg, text, cp);
+    }
     return 1;
 }
 

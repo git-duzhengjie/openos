@@ -164,6 +164,28 @@ void gui_user_post_window_event(gui_window_t *window, uint32_t event_type) {
     gui_user_push_event(&event);
 }
 
+void gui_user_post_text_input_event(gui_widget_t *widget, const char *utf8_text, uint32_t codepoint) {
+    gui_user_event_t event;
+    uint32_t n = 0;
+    if (!widget || !widget->owner || widget->owner->user_owner_pid == 0 || !utf8_text || utf8_text[0] == '\0') return;
+    memset(&event, 0, sizeof(event));
+    event.owner_pid = widget->owner->user_owner_pid;
+    event.type = GUI_USER_EVENT_TEXT_INPUT;
+    event.window_id = widget->owner->id;
+    event.widget_id = widget->id;
+    event.x = (int32_t)widget->cursor;
+    event.modifiers = gui_get_last_key_modifiers();
+    while (utf8_text[n] && n + 1 < sizeof(event.text)) {
+        event.text[n] = utf8_text[n];
+        n++;
+    }
+    event.text[n] = '\0';
+    event.text_len = n;
+    event.codepoint = codepoint;
+    event.ime_state = 0;
+    gui_user_push_event(&event);
+}
+
 void gui_user_post_text_event(gui_widget_t *widget, uint32_t event_type) {
     gui_user_event_t event;
     if (!widget || !widget->owner || widget->owner->user_owner_pid == 0) return;

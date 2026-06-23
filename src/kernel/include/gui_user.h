@@ -49,6 +49,10 @@ typedef struct gui_user_event {
     int32_t key;
     int32_t button;
     uint32_t modifiers;
+    char text[32];
+    uint32_t text_len;
+    uint32_t codepoint;
+    uint32_t ime_state;
 } gui_user_event_t;
 
 typedef struct gui_user_widget_request {
@@ -425,6 +429,7 @@ int gui_user_add_textarea(uint32_t window_id, int x, int y, int w, int h, const 
 int gui_user_poll_event(gui_user_event_t *out_event);
 void gui_user_post_key_event(gui_window_t *window, int key);
 void gui_user_post_key_up_event(gui_window_t *window, int key);
+void gui_user_post_text_input_event(gui_widget_t *widget, const char *utf8_text, uint32_t codepoint);
 void gui_user_post_text_event(gui_widget_t *widget, uint32_t event_type);
 void gui_user_post_value_event(gui_widget_t *widget);
 void gui_user_post_selection_event(gui_widget_t *widget);
