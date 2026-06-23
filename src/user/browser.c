@@ -13,6 +13,10 @@
 #define BROWSER_DNS_RETRIES 8
 #define BROWSER_CONNECT_TIMEOUT_MS 4000
 #define BROWSER_RESPONSE_TIMEOUT_MS 6000
+#define BROWSER_LOAD_TIMEOUT_MS 15000
+#define BROWSER_TLS_RECORD_TIMEOUT_MS 1000
+#define BROWSER_TLS_HANDSHAKE_RECORD_MAX 12
+#define BROWSER_TLS_APP_RECORD_MAX 12
 #define BROWSER_RESPONSE_IDLE_TIMEOUT_MS 500
 #define BROWSER_POLL_SLICE_MS 100
 #define BROWSER_RECV_CHUNK_MAX 1400
@@ -53,7 +57,9 @@ typedef enum browser_tab_icon_kind {
 typedef struct browser_load_context {
     volatile int active;
     volatile int done;
+    volatile int timed_out;
     volatile int result;
+    unsigned int started_ms;
     int is_file;
     int is_https;
     int window_id;
@@ -156,6 +162,7 @@ static void browser_load_worker(void *arg);
 static void browser_render_current_view(browser_load_context_t *load, int body_label, int scroll_line);
 static void browser_update_form_status(int win, int status_label, const browser_load_context_t *load);
 static int browser_finish_completed_load(browser_load_context_t *load, int win, int status_label, int body_label, int tabview_id, browser_tabs_t *tabs, int *scroll_line, int *rc);
+static int browser_check_load_timeout(browser_load_context_t *load, int win, int status_label, int body_label, int tabview_id, browser_tabs_t *tabs, int *scroll_line, int *rc);
 
 static void browser_format_ip(unsigned int ip, char *out, int out_size)
 {
@@ -1105,6 +1112,7 @@ static void browser_start_load(browser_load_context_t *load, int win, int status
     snprintf(load->host, sizeof(load->host), "%s", host ? host : "");
     snprintf(load->path, sizeof(load->path), "%s", path);
     load->is_file = is_file;
+    load->is_https = is_https;
     load->window_id = win;
     load->status_label_id = status_label;
     load->body_label_id = body_label;
@@ -1116,6 +1124,8 @@ static void browser_start_load(browser_load_context_t *load, int win, int status
     snprintf(loading, sizeof(loading), "Loading %s%s%s ...", is_file ? "file://" : (is_https ? "https://" : "http://"), is_file ? "" : load->host, load->path);
     load->active = 1;
     load->done = 0;
+    load->timed_out = 0;
+    load->started_ms = openos_uptime_ms();
     load->result = -1;
     openos_gui_set_text(win, status_label, loading);
     browser_update_tab_title(win, tabview_id, (browser_tabs_t *)load->tabs, load);
@@ -1273,11 +1283,11 @@ static int browser_sock_send_all(int fd, const unsigned char *buf, int len)
     return 0;
 }
 
-static int browser_sock_recv_all(int fd, unsigned char *buf, int len)
+static int browser_sock_recv_all_timeout(int fd, unsigned char *buf, int len, unsigned int timeout_ms)
 {
     int off = 0;
     unsigned int waited = 0;
-    while (off < len && waited < BROWSER_RESPONSE_TIMEOUT_MS) {
+    while (off < len && waited < timeout_ms) {
         int ready = browser_poll_fd(fd, OPENOS_POLLIN, BROWSER_POLL_SLICE_MS);
         waited += BROWSER_POLL_SLICE_MS;
         if (ready < 0) return -1;
@@ -1292,15 +1302,20 @@ static int browser_sock_recv_all(int fd, unsigned char *buf, int len)
     return off == len ? 0 : -1;
 }
 
+static int browser_sock_recv_all(int fd, unsigned char *buf, int len)
+{
+    return browser_sock_recv_all_timeout(fd, buf, len, BROWSER_RESPONSE_TIMEOUT_MS);
+}
+
 static int browser_tls_read_record_raw(int fd, unsigned char *record, int record_cap, int *record_len, unsigned char *content_type)
 {
     int len;
     if (!record || record_cap < 5 || !record_len || !content_type) return -1;
-    if (browser_sock_recv_all(fd, record, 5) < 0) return -1;
+    if (browser_sock_recv_all_timeout(fd, record, 5, BROWSER_TLS_RECORD_TIMEOUT_MS) < 0) return -1;
     if (record[1] != 0x03) return -1;
     len = ((int)record[3] << 8) | (int)record[4];
     if (len < 0 || len + 5 > record_cap) return -1;
-    if (browser_sock_recv_all(fd, record + 5, len) < 0) return -1;
+    if (browser_sock_recv_all_timeout(fd, record + 5, len, BROWSER_TLS_RECORD_TIMEOUT_MS) < 0) return -1;
     *content_type = record[0];
     *record_len = len + 5;
     return 0;
@@ -1485,7 +1500,7 @@ static int browser_tls_complete_handshake(int fd, const char *host, browser_tls_
         return -1;
     }
 
-    for (guard = 0; guard < 24 && !saw_done; guard++) {
+    for (guard = 0; guard < BROWSER_TLS_HANDSHAKE_RECORD_MAX && !saw_done; guard++) {
         if (browser_tls_read_record_raw(fd, record, (int)sizeof(record), &record_len, &type) < 0) {
             snprintf(err, err_size, "TLS: failed to read server handshake");
             return -1;
@@ -1565,7 +1580,7 @@ static int browser_fetch_https_tls(int fd, const char *host, const char *path, c
         return -1;
     }
 
-    for (guard = 0; guard < 96 && total < out_size - 1; guard++) {
+    for (guard = 0; guard < BROWSER_TLS_APP_RECORD_MAX && total < out_size - 1; guard++) {
         unsigned char plain[4096];
         uint8_t content_type = 0;
         int plain_len = 0;
@@ -1859,6 +1874,13 @@ static int browser_finish_completed_load(browser_load_context_t *load, int win, 
     if (!load->active || !load->done)
         return 0;
 
+    if (load->timed_out) {
+        load->active = 0;
+        load->done = 0;
+        printf("browser: ignored late load result after timeout host=%s path=%s\n", load->host, load->path);
+        return 1;
+    }
+
     __sync_synchronize();
     *rc = load->result;
     openos_gui_set_text(win, status_label, load->status[0] ? load->status : (*rc < 0 ? "Failed" : "Done"));
@@ -1876,6 +1898,43 @@ static int browser_finish_completed_load(browser_load_context_t *load, int win, 
     load->active = 0;
     browser_tab_save_current(tabs, load, *scroll_line);
     printf("browser: gui updated result=%d status=%s\n", *rc, load->status[0] ? load->status : (*rc < 0 ? "Failed" : "Done"));
+    return 1;
+}
+
+static int browser_check_load_timeout(browser_load_context_t *load, int win, int status_label, int body_label, int tabview_id, browser_tabs_t *tabs, int *scroll_line, int *rc)
+{
+    unsigned int now;
+    char body[BROWSER_BODY_MAX];
+
+    if (!load || !scroll_line || !rc)
+        return 0;
+    if (!load->active || load->done || load->timed_out || load->started_ms == 0)
+        return 0;
+    now = openos_uptime_ms();
+    if ((unsigned int)(now - load->started_ms) < BROWSER_LOAD_TIMEOUT_MS)
+        return 0;
+
+    load->timed_out = 1;
+    load->result = -1;
+    snprintf(load->status, sizeof(load->status), "Timeout");
+    snprintf(load->http_status, sizeof(load->http_status), "Load timeout");
+    snprintf(load->body, sizeof(load->body),
+             "Load timeout after %u seconds.\n\n"
+             "The connection was established, but the page did not finish loading.\n"
+             "This usually means the current lightweight HTTPS/browser engine cannot finish the site's TLS/HTTP response path yet.\n\n"
+             "Try Reload, or try a simpler HTTP/HTTPS page.",
+             (unsigned int)(BROWSER_LOAD_TIMEOUT_MS / 1000u));
+    load->link_count = 0;
+    load->form_state.count = 0;
+    load->focus_mode = 0;
+    *rc = -1;
+    *scroll_line = 0;
+    browser_make_view(body, sizeof(body), load, *scroll_line);
+    openos_gui_set_text(win, status_label, load->status);
+    openos_gui_set_text(win, body_label, body[0] ? body : load->body);
+    browser_update_tab_title(win, tabview_id, tabs, load);
+    browser_tab_save_current(tabs, load, *scroll_line);
+    printf("browser: load timeout after %u ms host=%s path=%s\n", BROWSER_LOAD_TIMEOUT_MS, load->host, load->path);
     return 1;
 }
 
@@ -2202,6 +2261,10 @@ int main(int argc, char **argv)
     for (;;) {
         openos_gui_event_t event;
         if (browser_finish_completed_load(&load, win, status_label, body_label, tabview, &tabs, &scroll_line, &rc)) {
+            openos_sleep(10);
+            continue;
+        }
+        if (browser_check_load_timeout(&load, win, status_label, body_label, tabview, &tabs, &scroll_line, &rc)) {
             openos_sleep(10);
             continue;
         }
