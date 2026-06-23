@@ -3769,6 +3769,60 @@ static void gui_draw_widget(gui_widget_t *wg) {
             }
             cx += iw;
         }
+    } else if (wg->type == GUI_WIDGET_DIALOG) {
+        const int title_h = 24;
+        const int icon_size = 18;
+        const int button_w = 54;
+        const int button_h = 20;
+        const int button_gap = 8;
+        uint32_t dialog_type = wg->label_flags & GUI_DIALOG_TYPE_MASK;
+        int has_cancel = (wg->label_flags & GUI_DIALOG_FLAG_CANCEL) || dialog_type == GUI_DIALOG_TYPE_CONFIRM;
+        int ok_x = ax + wg->rect.w - button_w - 12;
+        int cancel_x = ok_x - button_w - button_gap;
+        int button_y = ay + wg->rect.h - button_h - 10;
+        gui_rect_t msg_clip = { ax + 38, ay + title_h + 10, wg->rect.w - 50, wg->rect.h - title_h - button_h - 28 };
+        uint32_t accent = gui_rgb(59, 130, 246);
+        uint32_t title_bg = gui_rgb(235, 241, 252);
+        const char *badge = "i";
+        if (dialog_type == GUI_DIALOG_TYPE_WARNING) {
+            accent = gui_rgb(217, 119, 6);
+            title_bg = gui_rgb(255, 247, 237);
+            badge = "!";
+        } else if (dialog_type == GUI_DIALOG_TYPE_ERROR) {
+            accent = gui_rgb(220, 38, 38);
+            title_bg = gui_rgb(254, 242, 242);
+            badge = "x";
+        } else if (dialog_type == GUI_DIALOG_TYPE_CONFIRM) {
+            accent = gui_rgb(37, 99, 235);
+            title_bg = gui_rgb(239, 246, 255);
+            badge = "?";
+        }
+        if (!wg->enabled) title_bg = gui_rgb(232, 235, 240);
+        gui_raw_fill_rect(ax, ay, wg->rect.w, wg->rect.h, wg->enabled ? gui_rgb(255, 255, 255) : gui_rgb(244, 245, 248));
+        gui_raw_fill_rect(ax, ay, wg->rect.w, title_h, title_bg);
+        gui_raw_line(ax, ay, ax + wg->rect.w - 1, ay, accent);
+        gui_raw_line(ax, ay + wg->rect.h - 1, ax + wg->rect.w - 1, ay + wg->rect.h - 1, g_gui.colors.button_border);
+        gui_raw_line(ax, ay, ax, ay + wg->rect.h - 1, g_gui.colors.button_border);
+        gui_raw_line(ax + wg->rect.w - 1, ay, ax + wg->rect.w - 1, ay + wg->rect.h - 1, g_gui.colors.button_border);
+        gui_raw_line(ax, ay + title_h, ax + wg->rect.w - 1, ay + title_h, gui_rgb(210, 218, 230));
+        gui_draw_window_title_text(ax + 10, gui_text_center_y(ay, title_h), wg->text, g_gui.colors.text_fg, NULL);
+        gui_raw_fill_rect(ax + 12, ay + title_h + 12, icon_size, icon_size, accent);
+        gui_draw_text(ax + 18, ay + title_h + 16, badge, gui_rgb(255, 255, 255));
+        gui_draw_window_title_text(msg_clip.x, msg_clip.y, wg->placeholder, wg->enabled ? g_gui.colors.text_fg : gui_rgb(145, 150, 160), &msg_clip);
+        if (has_cancel) {
+            gui_raw_fill_rect(cancel_x, button_y, button_w, button_h, gui_rgb(248, 250, 252));
+            gui_raw_line(cancel_x, button_y, cancel_x + button_w - 1, button_y, g_gui.colors.button_border);
+            gui_raw_line(cancel_x, button_y + button_h - 1, cancel_x + button_w - 1, button_y + button_h - 1, g_gui.colors.button_border);
+            gui_raw_line(cancel_x, button_y, cancel_x, button_y + button_h - 1, g_gui.colors.button_border);
+            gui_raw_line(cancel_x + button_w - 1, button_y, cancel_x + button_w - 1, button_y + button_h - 1, g_gui.colors.button_border);
+            gui_draw_text(cancel_x + 12, button_y + 5, "Cancel", g_gui.colors.text_fg);
+        }
+        gui_raw_fill_rect(ok_x, button_y, button_w, button_h, gui_rgb(224, 238, 255));
+        gui_raw_line(ok_x, button_y, ok_x + button_w - 1, button_y, accent);
+        gui_raw_line(ok_x, button_y + button_h - 1, ok_x + button_w - 1, button_y + button_h - 1, accent);
+        gui_raw_line(ok_x, button_y, ok_x, button_y + button_h - 1, accent);
+        gui_raw_line(ok_x + button_w - 1, button_y, ok_x + button_w - 1, button_y + button_h - 1, accent);
+        gui_draw_text(ok_x + 20, button_y + 5, "OK", g_gui.colors.text_fg);
     } else if (wg->type == GUI_WIDGET_CONTEXTMENU) {
         int count = gui_menubar_item_count(wg);
         int row_h = gui_contextmenu_row_height();

@@ -93,7 +93,10 @@ int main(void)
     contextmenu_show = openos_gui_show_contextmenu(win, contextmenu, 238, 370);
     contextmenu_disabled_set = openos_gui_set_contextmenu_disabled(win, contextmenu, (1u << 1));
     contextmenu_set = openos_gui_set_contextmenu_index(win, contextmenu, 2);
-    (void)openos_gui_add_dialog(win, 192, 118, 210, 108, "Dialog", "通用弹窗组件：标题、正文、OK/Cancel 按钮。", 1u);
+    (void)openos_gui_add_info_dialog(win, 192, 118, 210, 108, "Info", "信息弹窗：用于普通提示。");
+    (void)openos_gui_add_warning_dialog(win, 414, 118, 210, 108, "Warning", "警告弹窗：用于风险提示。");
+    (void)openos_gui_add_error_dialog(win, 192, 232, 210, 108, "Error", "错误弹窗：用于失败状态。");
+    (void)openos_gui_add_confirm_dialog(win, 414, 232, 210, 108, "Confirm", "确认弹窗：提供 OK / Cancel。");
     if (openos_gui_get_contextmenu_index(win, contextmenu, &contextmenu_value) < 0) {
         contextmenu_value = -1;
     }

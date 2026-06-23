@@ -230,6 +230,12 @@
 #define OPENOS_GUI_TABLEVIEW_GRID_LINES      (1u << 1)
 #define OPENOS_GUI_TABLEVIEW_ROW_SELECT      (1u << 2)
 #define OPENOS_GUI_TABLEVIEW_SORTABLE        (1u << 3)
+#define OPENOS_GUI_DIALOG_TYPE_MASK          0x0000000fu
+#define OPENOS_GUI_DIALOG_INFO               0x00000000u
+#define OPENOS_GUI_DIALOG_WARNING            0x00000001u
+#define OPENOS_GUI_DIALOG_ERROR              0x00000002u
+#define OPENOS_GUI_DIALOG_CONFIRM            0x00000003u
+#define OPENOS_GUI_DIALOG_CANCEL             0x00000010u
 
 #define OPENOS_GUI_TREEVIEW_SHOW_LINES        (1u << 0)
 #define OPENOS_GUI_TREEVIEW_SHOW_ICONS        (1u << 1)
@@ -1313,6 +1319,26 @@ static inline int openos_gui_add_dialog(int window_id, int x, int y, int w, int 
     openos_gui_copy_text64(req.title, title);
     openos_gui_copy_text256(req.message, message);
     return openos_syscall_result(openos_syscall1(SYS_GUI_ADD_DIALOG, (int)&req));
+}
+
+static inline int openos_gui_add_info_dialog(int window_id, int x, int y, int w, int h, const char *title, const char *message)
+{
+    return openos_gui_add_dialog(window_id, x, y, w, h, title, message, OPENOS_GUI_DIALOG_INFO);
+}
+
+static inline int openos_gui_add_warning_dialog(int window_id, int x, int y, int w, int h, const char *title, const char *message)
+{
+    return openos_gui_add_dialog(window_id, x, y, w, h, title, message, OPENOS_GUI_DIALOG_WARNING);
+}
+
+static inline int openos_gui_add_error_dialog(int window_id, int x, int y, int w, int h, const char *title, const char *message)
+{
+    return openos_gui_add_dialog(window_id, x, y, w, h, title, message, OPENOS_GUI_DIALOG_ERROR);
+}
+
+static inline int openos_gui_add_confirm_dialog(int window_id, int x, int y, int w, int h, const char *title, const char *message)
+{
+    return openos_gui_add_dialog(window_id, x, y, w, h, title, message, OPENOS_GUI_DIALOG_CONFIRM | OPENOS_GUI_DIALOG_CANCEL);
 }
 
 static inline int openos_gui_set_dialog_message(int window_id, int widget_id, const char *message)
