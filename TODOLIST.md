@@ -592,8 +592,8 @@
   - [x] 支持短提示、自动消失、通知中心复用
 - [x] ProgressBar：进度条组件
   - [x] 支持确定进度和不确定加载状态
-- [ ] Spinner / BusyIndicator：加载动画组件
-  - [ ] 支持网络加载、后台任务等待状态
+- [x] Spinner / BusyIndicator：加载动画组件
+  - [x] 支持网络加载、后台任务等待状态
 - [ ] ImageView：图片显示组件
   - [ ] 支持 RGBA/位图显示、缩放、保持比例、占位图
 - [ ] IconView / IconButton：图标视图和图标按钮组件

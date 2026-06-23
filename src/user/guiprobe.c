@@ -9,6 +9,7 @@ int main(void)
     int slider;
     int progressbar;
     int busy_progressbar;
+    int spinner;
     int vscrollbar;
     int hscrollbar;
     int icon_button;
@@ -57,6 +58,8 @@ int main(void)
     int progressbar_set;
     int progressbar_value;
     int busy_progressbar_set;
+    int spinner_running_set;
+    int spinner_text_set;
     int scrollbar_set;
     int scrollbar_step_set;
     int scrollbar_value;
@@ -84,6 +87,7 @@ int main(void)
     slider = openos_gui_add_slider(win, 16, 156, 180, 22, 0, 100, 40, 5);
     progressbar = openos_gui_add_progressbar(win, 16, 180, 180, 18, 0, 100, 35, OPENOS_GUI_PROGRESSBAR_SHOW_PERCENT);
     busy_progressbar = openos_gui_add_progressbar(win, 16, 202, 180, 14, 0, 100, 50, OPENOS_GUI_PROGRESSBAR_INDETERMINATE);
+    spinner = openos_gui_add_spinner(win, 210, 158, 150, 28, "Loading network", OPENOS_GUI_SPINNER_RUNNING | OPENOS_GUI_SPINNER_SHOW_LABEL);
     vscrollbar = openos_gui_add_scrollbar(win, 382, 32, 18, 120, 0, 100, 25, 10);
     hscrollbar = openos_gui_add_scrollbar(win, 210, 188, 120, 18, 0, 100, 30, 10);
     icon_button = openos_gui_add_icon_button(win, 220, 138, 72, 64, "Files", OPENOS_GUI_ICON_FOLDER);
@@ -131,6 +135,8 @@ int main(void)
         progressbar_value = -1;
     }
     busy_progressbar_set = openos_gui_set_progressbar_flags(win, busy_progressbar, OPENOS_GUI_PROGRESSBAR_INDETERMINATE);
+    spinner_running_set = openos_gui_set_spinner_running(win, spinner, 1);
+    spinner_text_set = openos_gui_set_spinner_text(win, spinner, "Background task");
     checkbox_set = openos_gui_set_checkbox_checked(win, checkbox, 0);
     if (openos_gui_get_checkbox_checked(win, checkbox, &checkbox_value) < 0) {
         checkbox_value = -1;
@@ -196,7 +202,7 @@ int main(void)
     int scroll = openos_gui_scroll_rect(win, 16, 142, 16, 112, 180, 24);
     int present = openos_gui_present(win);
 
-    printf("guiprobe: window=%d label=%d button=%d panel=%d slider=%d progressbar=%d busy_progressbar=%d vscroll=%d hscroll=%d icon=%d checkbox=%d radio_a=%d radio_b=%d select=%d combo=%d listview=%d checklist=%d tableview=%d treeview=%d contextmenu=%d contextmenu_show=%d contextmenu_disabled_set=%d contextmenu_set=%d contextmenu_value=%d editor=%d log=%d scrollview=%d set_text=%d label_measure=%d label_size=%dx%d slider_set=%d slider_value=%d progressbar_set=%d progressbar_value=%d busy_progressbar_set=%d checkbox_set=%d checkbox_value=%d checkbox_enabled_set=%d checkbox_enabled=%d radio_set=%d radio_a_value=%d radio_b_value=%d select_set=%d select_value=%d combo_items_set=%d combo_set=%d combo_value=%d listview_items_set=%d listview_set=%d listview_value=%d checklist_set=%d checklist_value=%d tableview_rows_set=%d tableview_set=%d tableview_value=%d treeview_nodes_set=%d treeview_set=%d treeview_value=%d scrollbar_set=%d scrollbar_step_set=%d scrollbar_value=%d scrollbar_step=%d scrollview_offset_set=%d scrollview_size_set=%d scrollview_offset=%d,%d scrollview_size=%dx%d fill=%d draw=%d blit=%d scroll=%d present=%d\n", win, label, button, panel, slider, progressbar, busy_progressbar, vscrollbar, hscrollbar, icon_button, checkbox, radio_a, radio_b, select, combo, listview, checklist, tableview, treeview, contextmenu, contextmenu_show, contextmenu_disabled_set, contextmenu_set, contextmenu_value, text_editor, log_view, scrollview, update, label_measure, label_width, label_height, slider_set, slider_value, progressbar_set, progressbar_value, busy_progressbar_set, checkbox_set, checkbox_value, checkbox_enabled_set, checkbox_enabled, radio_set, radio_a_value, radio_b_value, select_set, select_value, combo_items_set, combo_set, combo_value, listview_items_set, listview_set, listview_value, checklist_set, checklist_value, tableview_rows_set, tableview_set, tableview_value, treeview_nodes_set, treeview_set, treeview_value, scrollbar_set, scrollbar_step_set, scrollbar_value, scrollbar_step, scrollview_offset_set, scrollview_size_set, scrollview_x, scrollview_y, scrollview_w, scrollview_h, fill, draw, blit, scroll, present);
+    printf("guiprobe: window=%d label=%d button=%d panel=%d slider=%d progressbar=%d busy_progressbar=%d spinner=%d vscroll=%d hscroll=%d icon=%d checkbox=%d radio_a=%d radio_b=%d select=%d combo=%d listview=%d checklist=%d tableview=%d treeview=%d contextmenu=%d contextmenu_show=%d contextmenu_disabled_set=%d contextmenu_set=%d contextmenu_value=%d editor=%d log=%d scrollview=%d set_text=%d label_measure=%d label_size=%dx%d slider_set=%d slider_value=%d progressbar_set=%d progressbar_value=%d busy_progressbar_set=%d spinner_running_set=%d spinner_text_set=%d checkbox_set=%d checkbox_value=%d checkbox_enabled_set=%d checkbox_enabled=%d radio_set=%d radio_a_value=%d radio_b_value=%d select_set=%d select_value=%d combo_items_set=%d combo_set=%d combo_value=%d listview_items_set=%d listview_set=%d listview_value=%d checklist_set=%d checklist_value=%d tableview_rows_set=%d tableview_set=%d tableview_value=%d treeview_nodes_set=%d treeview_set=%d treeview_value=%d scrollbar_set=%d scrollbar_step_set=%d scrollbar_value=%d scrollbar_step=%d scrollview_offset_set=%d scrollview_size_set=%d scrollview_offset=%d,%d scrollview_size=%dx%d fill=%d draw=%d blit=%d scroll=%d present=%d\n", win, label, button, panel, slider, progressbar, busy_progressbar, spinner, vscrollbar, hscrollbar, icon_button, checkbox, radio_a, radio_b, select, combo, listview, checklist, tableview, treeview, contextmenu, contextmenu_show, contextmenu_disabled_set, contextmenu_set, contextmenu_value, text_editor, log_view, scrollview, update, label_measure, label_width, label_height, slider_set, slider_value, progressbar_set, progressbar_value, busy_progressbar_set, spinner_running_set, spinner_text_set, checkbox_set, checkbox_value, checkbox_enabled_set, checkbox_enabled, radio_set, radio_a_value, radio_b_value, select_set, select_value, combo_items_set, combo_set, combo_value, listview_items_set, listview_set, listview_value, checklist_set, checklist_value, tableview_rows_set, tableview_set, tableview_value, treeview_nodes_set, treeview_set, treeview_value, scrollbar_set, scrollbar_step_set, scrollbar_value, scrollbar_step, scrollview_offset_set, scrollview_size_set, scrollview_x, scrollview_y, scrollview_w, scrollview_h, fill, draw, blit, scroll, present);
     if (openos_gui_poll_event(&event) > 0) {
         printf("guiprobe: event type=%u window=%u widget=%u x=%d\n",
                event.type, event.window_id, event.widget_id, event.x);

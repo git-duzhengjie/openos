@@ -1175,6 +1175,38 @@ int gui_user_set_progressbar_flags(uint32_t window_id, uint32_t widget_id, uint3
     return 0;
 }
 
+int gui_user_add_spinner(uint32_t window_id, int x, int y, int w, int h, const char *text, uint32_t flags) {
+    gui_window_t *win = gui_find_window(window_id);
+    gui_widget_t *widget;
+    if (!gui_user_window_owned_by_current(win) || w <= 0 || h <= 0) return -1;
+    widget = gui_add_spinner(win, x, y, w, h, text ? text : "", flags);
+    if (!widget) return -1;
+    gui_invalidate_rect(win->rect.x, win->rect.y, win->rect.w, win->rect.h);
+    return (int)widget->id;
+}
+
+int gui_user_set_spinner_running(uint32_t window_id, uint32_t widget_id, int running) {
+    gui_window_t *win = gui_find_window(window_id);
+    gui_widget_t *widget;
+    if (!gui_user_window_owned_by_current(win)) return -1;
+    widget = gui_find_widget(win, widget_id);
+    if (!widget || widget->type != GUI_WIDGET_SPINNER) return -1;
+    if (gui_spinner_set_running(widget, running) < 0) return -1;
+    gui_invalidate_rect(win->rect.x, win->rect.y, win->rect.w, win->rect.h);
+    return 0;
+}
+
+int gui_user_set_spinner_text(uint32_t window_id, uint32_t widget_id, const char *text) {
+    gui_window_t *win = gui_find_window(window_id);
+    gui_widget_t *widget;
+    if (!gui_user_window_owned_by_current(win)) return -1;
+    widget = gui_find_widget(win, widget_id);
+    if (!widget || widget->type != GUI_WIDGET_SPINNER) return -1;
+    if (gui_spinner_set_text(widget, text ? text : "") < 0) return -1;
+    gui_invalidate_rect(win->rect.x, win->rect.y, win->rect.w, win->rect.h);
+    return 0;
+}
+
 int gui_user_set_scrollbar_value(uint32_t window_id, uint32_t widget_id, int value) {
     gui_window_t *win = gui_find_window(window_id);
     gui_widget_t *widget;

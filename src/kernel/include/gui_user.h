@@ -307,6 +307,9 @@ int gui_user_add_progressbar(uint32_t window_id, int x, int y, int w, int h, int
 int gui_user_set_progressbar_value(uint32_t window_id, uint32_t widget_id, int value);
 int gui_user_get_progressbar_value(uint32_t window_id, uint32_t widget_id, int *out_value);
 int gui_user_set_progressbar_flags(uint32_t window_id, uint32_t widget_id, uint32_t flags);
+int gui_user_add_spinner(uint32_t window_id, int x, int y, int w, int h, const char *text, uint32_t flags);
+int gui_user_set_spinner_running(uint32_t window_id, uint32_t widget_id, int running);
+int gui_user_set_spinner_text(uint32_t window_id, uint32_t widget_id, const char *text);
 int gui_user_set_scrollbar_value(uint32_t window_id, uint32_t widget_id, int value);
 int gui_user_get_scrollbar_value(uint32_t window_id, uint32_t widget_id, int *out_value);
 int gui_user_set_scrollbar_step(uint32_t window_id, uint32_t widget_id, int step);

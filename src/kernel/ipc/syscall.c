@@ -3276,6 +3276,26 @@ uint32_t syscall_dispatch(uint32_t num,
     case SYS_GUI_SET_PROGRESSBAR_FLAGS:
         return (uint32_t)gui_user_set_progressbar_flags((uint32_t)a, (uint32_t)b, (uint32_t)c);
 
+    case SYS_GUI_ADD_SPINNER:
+        {
+            gui_user_widget_request_t req;
+            int id;
+            if (!a || !user_ptr_valid((void *)a, sizeof(req), USERMEM_READ))
+                return (uint32_t)-1;
+            if (copy_from_user(&req, (const void *)a, sizeof(req)) < 0)
+                return (uint32_t)-1;
+            id = gui_user_add_spinner(req.window_id, req.x, req.y, req.w, req.h, req.text, req.widget_id);
+            if (id < 0)
+                return (uint32_t)-1;
+            return (uint32_t)id;
+        }
+
+    case SYS_GUI_SET_SPINNER_RUNNING:
+        return (uint32_t)gui_user_set_spinner_running((uint32_t)a, (uint32_t)b, (int)c);
+
+    case SYS_GUI_SET_SPINNER_TEXT:
+        return gui_user_set_text((uint32_t)a, (uint32_t)b, (const char *)c);
+
     case SYS_GUI_ADD_SCROLLBAR:
         {
             gui_user_scrollbar_request_t req;

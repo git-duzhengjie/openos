@@ -3800,6 +3800,30 @@ static void gui_draw_widget(gui_widget_t *wg) {
             gui_raw_fill_rect(ax + wg->rect.w - 6, ay + header_h + 2, 4, track_h, gui_rgb(226, 230, 238));
             gui_raw_fill_rect(ax + wg->rect.w - 6, thumb_y, 4, thumb_h, gui_rgb(150, 162, 182));
         }
+    } else if (wg->type == GUI_WIDGET_SPINNER) {
+        int size = wg->rect.h < wg->rect.w ? wg->rect.h : wg->rect.w;
+        int cx = ax + size / 2;
+        int cy = ay + wg->rect.h / 2;
+        int phase = (wg->label_flags & GUI_SPINNER_RUNNING) ? (wg->value & 7) : 0;
+        int i;
+        uint32_t base = wg->enabled ? g_gui.colors.accent : gui_rgb(150, 154, 162);
+        gui_rect_t clip = { ax + size + 6, ay, wg->rect.w - size - 6, wg->rect.h };
+        if (size < 10) size = 10;
+        gui_raw_fill_rect(ax, ay, wg->rect.w, wg->rect.h, wg->bg_color ? wg->bg_color : g_gui.colors.window_bg);
+        for (i = 0; i < 8; ++i) {
+            static const int dx[8] = { 0, 4, 6, 4, 0, -4, -6, -4 };
+            static const int dy[8] = { -6, -4, 0, 4, 6, 4, 0, -4 };
+            int idx = (i + phase) & 7;
+            int dot = 2 + (i == 7 ? 1 : 0);
+            int shade = 92 + i * 18;
+            uint32_t color = wg->enabled ? gui_rgb(70, 120 + shade / 6, 180 + shade / 8) : gui_rgb(118 + shade / 8, 122 + shade / 8, 130 + shade / 8);
+            int px = cx + (dx[idx] * size) / 16;
+            int py = cy + (dy[idx] * size) / 16;
+            gui_raw_fill_rect(px - dot / 2, py - dot / 2, dot, dot, color);
+        }
+        if ((wg->label_flags & GUI_SPINNER_SHOW_LABEL) && wg->text[0]) {
+            gui_draw_window_title_text(ax + size + 6, gui_text_center_y(ay, wg->rect.h), wg->text, wg->enabled ? g_gui.colors.text_fg : gui_rgb(125, 130, 140), &clip);
+        }
     } else if (wg->type == GUI_WIDGET_PROGRESSBAR) {
         int min = wg->min_value;
         int max = wg->max_value;
@@ -7826,6 +7850,30 @@ int gui_progressbar_get_value(gui_widget_t *widget, int *out_value) {
 int gui_progressbar_set_flags(gui_widget_t *widget, uint32_t flags) {
     if (!widget || widget->type != GUI_WIDGET_PROGRESSBAR) return -1;
     widget->label_flags = flags & (GUI_PROGRESSBAR_INDETERMINATE | GUI_PROGRESSBAR_SHOW_PERCENT);
+    return 0;
+}
+
+gui_widget_t *gui_add_spinner(gui_window_t *window, int x, int y, int w, int h, const char *text, uint32_t flags) {
+    gui_widget_t *wg = gui_alloc_widget(window, GUI_WIDGET_SPINNER, x, y, w, h, text ? text : "");
+    if (wg) {
+        wg->label_flags = flags & (GUI_SPINNER_RUNNING | GUI_SPINNER_SHOW_LABEL);
+        wg->value = 0;
+        wg->step = 1;
+    }
+    return wg;
+}
+
+int gui_spinner_set_running(gui_widget_t *widget, int running) {
+    if (!widget || widget->type != GUI_WIDGET_SPINNER) return -1;
+    if (running) widget->label_flags |= GUI_SPINNER_RUNNING;
+    else widget->label_flags &= ~GUI_SPINNER_RUNNING;
+    if (running) widget->value = (widget->value + 1) & 7;
+    return 0;
+}
+
+int gui_spinner_set_text(gui_widget_t *widget, const char *text) {
+    if (!widget || widget->type != GUI_WIDGET_SPINNER) return -1;
+    gui_widget_set_text(widget, text ? text : "");
     return 0;
 }
 

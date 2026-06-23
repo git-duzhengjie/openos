@@ -224,6 +224,9 @@
 #define SYS_GUI_SET_PROGRESSBAR_VALUE 427
 #define SYS_GUI_GET_PROGRESSBAR_VALUE 428
 #define SYS_GUI_SET_PROGRESSBAR_FLAGS 429
+#define SYS_GUI_ADD_SPINNER 430
+#define SYS_GUI_SET_SPINNER_RUNNING 431
+#define SYS_GUI_SET_SPINNER_TEXT 432
 
 #define OPENOS_GUI_TEXTBOX_READONLY  (1u << 0)
 #define OPENOS_GUI_TEXTBOX_DISABLED  (1u << 1)
@@ -252,6 +255,8 @@
 
 #define OPENOS_GUI_PROGRESSBAR_INDETERMINATE 0x00000001u
 #define OPENOS_GUI_PROGRESSBAR_SHOW_PERCENT   0x00000002u
+#define OPENOS_GUI_SPINNER_RUNNING             0x00000001u
+#define OPENOS_GUI_SPINNER_SHOW_LABEL          0x00000002u
 
 #define OPENOS_GUI_TOAST_INFO                OPENOS_GUI_DIALOG_INFO
 #define OPENOS_GUI_TOAST_WARNING             OPENOS_GUI_DIALOG_WARNING
@@ -1513,6 +1518,25 @@ static inline int openos_gui_add_slider(int window_id, int x, int y, int w, int 
     return openos_syscall_result(openos_syscall1(SYS_GUI_ADD_SLIDER, (int)&req));
 }
 
+static inline int openos_gui_add_spinner(int window_id, int x, int y, int w, int h, const char *text, unsigned int flags)
+{
+    openos_gui_widget_request_t req;
+    const char *src = text ? text : "";
+    unsigned int i = 0;
+    req.window_id = (unsigned int)window_id;
+    req.widget_id = flags;
+    req.x = x;
+    req.y = y;
+    req.w = w;
+    req.h = h;
+    while (i + 1 < sizeof(req.text) && src[i]) {
+        req.text[i] = src[i];
+        ++i;
+    }
+    req.text[i] = 0;
+    return openos_syscall_result(openos_syscall1(SYS_GUI_ADD_SPINNER, (int)&req));
+}
+
 static inline int openos_gui_add_progressbar(int window_id, int x, int y, int w, int h, int min, int max, int value, unsigned int flags)
 {
     openos_gui_progressbar_request_t req;
@@ -1897,6 +1921,16 @@ static inline int openos_gui_set_slider_step(int window_id, int widget_id, int s
 static inline int openos_gui_get_slider_step(int window_id, int widget_id, int *step)
 {
     return openos_syscall_result(openos_syscall3(SYS_GUI_GET_SLIDER_STEP, window_id, widget_id, (int)step));
+}
+
+static inline int openos_gui_set_spinner_running(int window_id, int widget_id, int running)
+{
+    return openos_syscall_result(openos_syscall3(SYS_GUI_SET_SPINNER_RUNNING, window_id, widget_id, running ? 1 : 0));
+}
+
+static inline int openos_gui_set_spinner_text(int window_id, int widget_id, const char *text)
+{
+    return openos_gui_set_text(window_id, widget_id, text ? text : "");
 }
 
 static inline int openos_gui_set_progressbar_value(int window_id, int widget_id, int value)
