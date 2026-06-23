@@ -1185,6 +1185,7 @@ static int gui_widget_can_focus(gui_widget_t *wg) {
             wg->type == GUI_WIDGET_CHECKBOX || wg->type == GUI_WIDGET_RADIOBUTTON ||
             wg->type == GUI_WIDGET_SELECT || wg->type == GUI_WIDGET_COMBOBOX || wg->type == GUI_WIDGET_LISTVIEW ||
             wg->type == GUI_WIDGET_TABLEVIEW || wg->type == GUI_WIDGET_MENUBAR ||
+            wg->type == GUI_WIDGET_CONTEXTMENU ||
             (wg->type == GUI_WIDGET_LABEL &&
              (wg->label_flags & (GUI_LABEL_FLAG_SELECTABLE | GUI_LABEL_FLAG_COPYABLE)) != 0));
 }
@@ -1196,7 +1197,7 @@ static int gui_widget_is_clickable(gui_widget_t *wg) {
             wg->type == GUI_WIDGET_RADIOBUTTON || wg->type == GUI_WIDGET_SELECT ||
             wg->type == GUI_WIDGET_COMBOBOX ||
             wg->type == GUI_WIDGET_LISTVIEW || wg->type == GUI_WIDGET_TABLEVIEW ||
-            wg->type == GUI_WIDGET_MENUBAR || wg->type == GUI_WIDGET_TREEVIEW ||
+            wg->type == GUI_WIDGET_MENUBAR || wg->type == GUI_WIDGET_CONTEXTMENU || wg->type == GUI_WIDGET_TREEVIEW ||
             (wg->type == GUI_WIDGET_LABEL && (wg->label_flags & GUI_LABEL_FLAG_COPYABLE)));
 }
 
@@ -1207,7 +1208,8 @@ static int gui_widget_is_hoverable(gui_widget_t *wg) {
             wg->type == GUI_WIDGET_RADIOBUTTON || wg->type == GUI_WIDGET_SELECT ||
             wg->type == GUI_WIDGET_COMBOBOX ||
             wg->type == GUI_WIDGET_LISTVIEW || wg->type == GUI_WIDGET_TABLEVIEW ||
-            wg->type == GUI_WIDGET_MENUBAR || wg->type == GUI_WIDGET_SLIDER || wg->type == GUI_WIDGET_SCROLLBAR);
+            wg->type == GUI_WIDGET_MENUBAR || wg->type == GUI_WIDGET_CONTEXTMENU ||
+            wg->type == GUI_WIDGET_SLIDER || wg->type == GUI_WIDGET_SCROLLBAR);
 }
 
 static void gui_button_activate(gui_widget_t *wg) {
@@ -3039,6 +3041,129 @@ int gui_menubar_get_active(gui_widget_t *widget, int *out_active_index) {
     return 0;
 }
 
+
+static int gui_contextmenu_row_height(void) { return (int)GUI_CHAR_H + 8; }
+
+static int gui_contextmenu_index_at(gui_widget_t *wg, int sx, int sy) {
+    int ax, ay, row;
+    if (!wg || wg->type != GUI_WIDGET_CONTEXTMENU || !wg->visible) return -1;
+    if (!gui_widget_absolute_origin(wg, &ax, &ay)) return -1;
+    if (sx < ax || sx >= ax + wg->rect.w || sy < ay || sy >= ay + wg->rect.h) return -1;
+    row = (sy - ay - 2) / gui_contextmenu_row_height();
+    if (row < 0 || row >= gui_menubar_item_count(wg)) return -1;
+    return row;
+}
+
+static int gui_contextmenu_item_disabled(gui_widget_t *wg, int index) {
+    if (!wg || index < 0 || index >= 32) return 0;
+    return (wg->label_flags & (1u << index)) != 0;
+}
+
+static void gui_contextmenu_activate(gui_widget_t *wg, int index) {
+    int old_value, count;
+    if (!wg || wg->type != GUI_WIDGET_CONTEXTMENU || !wg->enabled || !wg->visible) return;
+    count = gui_menubar_item_count(wg);
+    if (count <= 0 || index < 0 || index >= count) return;
+    if (gui_contextmenu_item_disabled(wg, index)) return;
+    old_value = wg->value;
+    wg->value = index;
+    wg->pressed = 0;
+    wg->visible = 0;
+    if (old_value != wg->value) gui_user_post_value_event(wg);
+    if (wg->on_click) wg->on_click(wg, wg->user_data);
+    gui_invalidate_all();
+}
+
+static void gui_contextmenu_handle_key(gui_widget_t *wg, int key) {
+    int count, next, guard;
+    if (!wg || wg->type != GUI_WIDGET_CONTEXTMENU || !wg->enabled || !wg->visible) return;
+    count = gui_menubar_item_count(wg);
+    if (count <= 0) return;
+    next = wg->value < 0 ? 0 : wg->value;
+    if (key == 27) { gui_contextmenu_hide(wg); return; }
+    if (key == GUI_KEY_UP) next--;
+    else if (key == GUI_KEY_DOWN || key == GUI_KEY_TAB) next++;
+    else if (key == GUI_KEY_HOME) next = 0;
+    else if (key == GUI_KEY_END) next = count - 1;
+    else if (key == GUI_KEY_ENTER || key == GUI_KEY_SPACE) { gui_contextmenu_activate(wg, next); return; }
+    else return;
+    if (next < 0) next = count - 1;
+    if (next >= count) next = 0;
+    for (guard = 0; guard < count && gui_contextmenu_item_disabled(wg, next); ++guard) {
+        next += (key == GUI_KEY_UP) ? -1 : 1;
+        if (next < 0) next = count - 1;
+        if (next >= count) next = 0;
+    }
+    if (!gui_contextmenu_item_disabled(wg, next)) wg->value = next;
+    gui_invalidate_all();
+}
+
+int gui_contextmenu_set_items(gui_widget_t *widget, const char *items) {
+    int count;
+    if (!widget || widget->type != GUI_WIDGET_CONTEXTMENU) return -1;
+    gui_widget_set_text(widget, items ? items : "");
+    count = gui_menubar_item_count(widget);
+    widget->max_value = count - 1;
+    if (count <= 0) widget->value = -1;
+    else if (widget->value < 0 || widget->value >= count || gui_contextmenu_item_disabled(widget, widget->value)) widget->value = 0;
+    gui_invalidate_all();
+    return 0;
+}
+
+int gui_contextmenu_set_selected(gui_widget_t *widget, int selected_index) {
+    int count;
+    if (!widget || widget->type != GUI_WIDGET_CONTEXTMENU) return -1;
+    count = gui_menubar_item_count(widget);
+    if (count <= 0) { widget->value = -1; return selected_index < 0 ? 0 : -1; }
+    if (selected_index < 0 || selected_index >= count || gui_contextmenu_item_disabled(widget, selected_index)) return -1;
+    widget->value = selected_index;
+    gui_invalidate_all();
+    return 0;
+}
+
+int gui_contextmenu_get_selected(gui_widget_t *widget, int *out_selected_index) {
+    if (!widget || !out_selected_index || widget->type != GUI_WIDGET_CONTEXTMENU) return -1;
+    *out_selected_index = widget->value;
+    return 0;
+}
+
+int gui_contextmenu_set_disabled_mask(gui_widget_t *widget, uint32_t disabled_mask) {
+    if (!widget || widget->type != GUI_WIDGET_CONTEXTMENU) return -1;
+    widget->label_flags = disabled_mask;
+    if (gui_contextmenu_item_disabled(widget, widget->value)) widget->value = -1;
+    gui_invalidate_all();
+    return 0;
+}
+
+int gui_contextmenu_show(gui_widget_t *widget, int x, int y) {
+    int count, h, max_x, max_y;
+    if (!widget || widget->type != GUI_WIDGET_CONTEXTMENU || !widget->owner) return -1;
+    count = gui_menubar_item_count(widget);
+    h = count * gui_contextmenu_row_height() + 4;
+    if (h < 24) h = 24;
+    widget->rect.x = x;
+    widget->rect.y = y;
+    widget->rect.h = h;
+    max_x = widget->owner->rect.w - GUI_BORDER_SIZE * 2 - widget->rect.w;
+    max_y = widget->owner->rect.h - GUI_TITLE_HEIGHT - GUI_BORDER_SIZE - widget->rect.h;
+    if (widget->rect.x > max_x) widget->rect.x = max_x;
+    if (widget->rect.y > max_y) widget->rect.y = max_y;
+    if (widget->rect.x < 0) widget->rect.x = 0;
+    if (widget->rect.y < 0) widget->rect.y = 0;
+    widget->visible = 1;
+    gui_set_focused_widget(widget);
+    gui_invalidate_all();
+    return 0;
+}
+
+int gui_contextmenu_hide(gui_widget_t *widget) {
+    if (!widget || widget->type != GUI_WIDGET_CONTEXTMENU) return -1;
+    widget->visible = 0;
+    if (g_gui.focused_widget == widget) gui_set_focused_widget(0);
+    gui_invalidate_all();
+    return 0;
+}
+
 static int gui_treeview_row_height(void) { return (int)GUI_CHAR_H + 8; }
 static int gui_treeview_node_count(const gui_widget_t *wg) { return wg ? gui_tableview_count_lines(wg->placeholder) : 0; }
 static int gui_treeview_visible_rows(const gui_widget_t *wg) {
@@ -3643,6 +3768,29 @@ static void gui_draw_widget(gui_widget_t *wg) {
                 if (sx > cx + 8) gui_draw_window_title_text(sx, gui_text_center_y(ay, wg->rect.h), shortcut, gui_rgb(100, 110, 128), &clip);
             }
             cx += iw;
+        }
+    } else if (wg->type == GUI_WIDGET_CONTEXTMENU) {
+        int count = gui_menubar_item_count(wg);
+        int row_h = gui_contextmenu_row_height();
+        int i;
+        gui_raw_fill_rect(ax, ay, wg->rect.w, wg->rect.h, gui_rgb(255, 255, 255));
+        gui_raw_line(ax, ay, ax + wg->rect.w - 1, ay, g_gui.colors.button_border);
+        gui_raw_line(ax, ay + wg->rect.h - 1, ax + wg->rect.w - 1, ay + wg->rect.h - 1, g_gui.colors.button_border);
+        gui_raw_line(ax, ay, ax, ay + wg->rect.h - 1, g_gui.colors.button_border);
+        gui_raw_line(ax + wg->rect.w - 1, ay, ax + wg->rect.w - 1, ay + wg->rect.h - 1, g_gui.colors.button_border);
+        for (i = 0; i < count; ++i) {
+            char label[64];
+            char shortcut[64];
+            int yy = ay + 2 + i * row_h;
+            int disabled = gui_contextmenu_item_disabled(wg, i);
+            int selected = (i == wg->value);
+            gui_menubar_item_text(wg, i, label, sizeof(label), shortcut, sizeof(shortcut));
+            if (selected && !disabled) gui_raw_fill_rect(ax + 2, yy, wg->rect.w - 4, row_h, gui_rgb(219, 234, 254));
+            gui_draw_text(ax + 8, yy + 4, label, disabled ? gui_rgb(148, 163, 184) : g_gui.colors.text_fg);
+            if (shortcut[0]) {
+                int sw = (int)strlen(shortcut) * (int)GUI_CHAR_W;
+                gui_draw_text(ax + wg->rect.w - sw - 8, yy + 4, shortcut, disabled ? gui_rgb(148, 163, 184) : gui_rgb(75, 85, 99));
+            }
         }
     } else if (wg->type == GUI_WIDGET_TREEVIEW) {
         int total = gui_treeview_visible_count(wg);
@@ -4942,6 +5090,11 @@ static void gui_handle_mouse_down(int x, int y) {
                 gui_set_focused_widget(wg);
                 if (menu_index >= 0) gui_menubar_activate(wg, menu_index);
                 return;
+            } else if (wg->type == GUI_WIDGET_CONTEXTMENU) {
+                int item_index = gui_contextmenu_index_at(wg, x, y);
+                gui_set_focused_widget(wg);
+                if (item_index >= 0) gui_contextmenu_activate(wg, item_index);
+                return;
             } else if (wg->type == GUI_WIDGET_TREEVIEW) {
                 int tree_index = gui_treeview_index_at(wg, x, y);
                 gui_set_focused_widget(wg);
@@ -4978,6 +5131,9 @@ static void gui_handle_mouse_down(int x, int y) {
                 }
             }
         } else {
+            if (g_gui.focused_widget && g_gui.focused_widget->type == GUI_WIDGET_CONTEXTMENU) {
+                gui_contextmenu_hide(g_gui.focused_widget);
+            }
             gui_set_focused_widget(0);
         }
         return;
@@ -5146,6 +5302,9 @@ void gui_process_events(void) {
             } else if (g_gui.focused_widget && g_gui.focused_widget->focused &&
                        g_gui.focused_widget->type == GUI_WIDGET_MENUBAR) {
                 gui_menubar_handle_key(g_gui.focused_widget, ev.key);
+            } else if (g_gui.focused_widget && g_gui.focused_widget->focused &&
+                       g_gui.focused_widget->type == GUI_WIDGET_CONTEXTMENU) {
+                gui_contextmenu_handle_key(g_gui.focused_widget, ev.key);
             } else if (g_gui.focused_widget && g_gui.focused_widget->focused &&
                        g_gui.focused_widget->type == GUI_WIDGET_TREEVIEW) {
                 gui_treeview_handle_key(g_gui.focused_widget, ev.key);
@@ -6955,7 +7114,7 @@ int gui_should_capture_key_code(int key) {
 
     if (key == GUI_KEY_TAB) return 1;
 
-    if (wg->type == GUI_WIDGET_LISTVIEW || wg->type == GUI_WIDGET_TABLEVIEW || wg->type == GUI_WIDGET_MENUBAR || wg->type == GUI_WIDGET_TREEVIEW) return 1;
+    if (wg->type == GUI_WIDGET_LISTVIEW || wg->type == GUI_WIDGET_TABLEVIEW || wg->type == GUI_WIDGET_MENUBAR || wg->type == GUI_WIDGET_CONTEXTMENU || wg->type == GUI_WIDGET_TREEVIEW) return 1;
 
     if (key == GUI_KEY_UP || key == GUI_KEY_DOWN) return 0;
 
@@ -7461,6 +7620,23 @@ gui_widget_t *gui_add_menubar(gui_window_t *window, int x, int y, int w, int h, 
         wg->value = active_index;
         gui_menubar_set_menus(wg, menus ? menus : "");
         if (active_index >= 0) gui_menubar_set_active(wg, active_index);
+    }
+    return wg;
+}
+
+
+gui_widget_t *gui_add_contextmenu(gui_window_t *window, int x, int y, int w, int h, const char *items, int selected_index, uint32_t disabled_mask, gui_widget_callback_t cb, void *user_data) {
+    gui_widget_t *wg = gui_alloc_widget(window, GUI_WIDGET_CONTEXTMENU, x, y, w, h, "ContextMenu");
+    if (wg) {
+        wg->on_click = cb;
+        wg->user_data = user_data;
+        wg->min_value = 0;
+        wg->max_value = -1;
+        wg->value = selected_index;
+        wg->label_flags = disabled_mask;
+        gui_contextmenu_set_items(wg, items ? items : "");
+        if (selected_index >= 0) gui_contextmenu_set_selected(wg, selected_index);
+        wg->visible = 0;
     }
     return wg;
 }

@@ -871,6 +871,74 @@ int gui_user_set_menubar_menus(uint32_t window_id, uint32_t widget_id, const cha
     return gui_menubar_set_menus(widget, safe_menus);
 }
 
+
+int gui_user_add_contextmenu(uint32_t window_id, int x, int y, int w, int h, const char *items, int selected_index, uint32_t disabled_mask) {
+    gui_window_t *win = gui_find_window(window_id);
+    gui_widget_t *wg;
+    char safe_items[256];
+    if (!gui_user_window_owned_by_current(win)) return -1;
+    gui_user_copy_text(safe_items, sizeof(safe_items), items);
+    wg = gui_add_contextmenu(win, x, y, w, h, safe_items, selected_index, disabled_mask, 0, 0);
+    if (!wg) return -1;
+    gui_invalidate_rect(win->rect.x, win->rect.y, win->rect.w, win->rect.h);
+    return (int)wg->id;
+}
+
+int gui_user_set_contextmenu_index(uint32_t window_id, uint32_t widget_id, int selected_index) {
+    gui_window_t *win = gui_find_window(window_id);
+    gui_widget_t *widget;
+    int old_value;
+    if (!gui_user_window_owned_by_current(win)) return -1;
+    widget = gui_find_widget(win, widget_id);
+    if (!widget || widget->type != GUI_WIDGET_CONTEXTMENU) return -1;
+    old_value = widget->value;
+    if (gui_contextmenu_set_selected(widget, selected_index) < 0) return -1;
+    if (widget->value != old_value) gui_user_post_value_event(widget);
+    return 0;
+}
+
+int gui_user_get_contextmenu_index(uint32_t window_id, uint32_t widget_id, int *out_selected_index) {
+    gui_window_t *win = gui_find_window(window_id);
+    gui_widget_t *widget;
+    if (!out_selected_index || !gui_user_window_owned_by_current(win)) return -1;
+    widget = gui_find_widget(win, widget_id);
+    return gui_contextmenu_get_selected(widget, out_selected_index);
+}
+
+int gui_user_set_contextmenu_items(uint32_t window_id, uint32_t widget_id, const char *items) {
+    gui_window_t *win = gui_find_window(window_id);
+    gui_widget_t *widget;
+    char safe_items[256];
+    if (!gui_user_window_owned_by_current(win)) return -1;
+    widget = gui_find_widget(win, widget_id);
+    gui_user_copy_text(safe_items, sizeof(safe_items), items);
+    return gui_contextmenu_set_items(widget, safe_items);
+}
+
+int gui_user_set_contextmenu_disabled(uint32_t window_id, uint32_t widget_id, uint32_t disabled_mask) {
+    gui_window_t *win = gui_find_window(window_id);
+    gui_widget_t *widget;
+    if (!gui_user_window_owned_by_current(win)) return -1;
+    widget = gui_find_widget(win, widget_id);
+    return gui_contextmenu_set_disabled_mask(widget, disabled_mask);
+}
+
+int gui_user_show_contextmenu(uint32_t window_id, uint32_t widget_id, int x, int y) {
+    gui_window_t *win = gui_find_window(window_id);
+    gui_widget_t *widget;
+    if (!gui_user_window_owned_by_current(win)) return -1;
+    widget = gui_find_widget(win, widget_id);
+    return gui_contextmenu_show(widget, x, y);
+}
+
+int gui_user_hide_contextmenu(uint32_t window_id, uint32_t widget_id) {
+    gui_window_t *win = gui_find_window(window_id);
+    gui_widget_t *widget;
+    if (!gui_user_window_owned_by_current(win)) return -1;
+    widget = gui_find_widget(win, widget_id);
+    return gui_contextmenu_hide(widget);
+}
+
 int gui_user_set_treeview_node(uint32_t window_id, uint32_t widget_id, int selected_node) {
     gui_window_t *win = gui_find_window(window_id);
     gui_widget_t *widget;

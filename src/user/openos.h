@@ -206,6 +206,13 @@
 #define SYS_GUI_SET_MENUBAR_ACTIVE 409
 #define SYS_GUI_GET_MENUBAR_ACTIVE 410
 #define SYS_GUI_SET_MENUBAR_MENUS 411
+#define SYS_GUI_ADD_CONTEXTMENU 412
+#define SYS_GUI_SET_CONTEXTMENU_INDEX 413
+#define SYS_GUI_GET_CONTEXTMENU_INDEX 414
+#define SYS_GUI_SET_CONTEXTMENU_ITEMS 415
+#define SYS_GUI_SET_CONTEXTMENU_DISABLED 416
+#define SYS_GUI_SHOW_CONTEXTMENU 417
+#define SYS_GUI_HIDE_CONTEXTMENU 418
 
 #define OPENOS_GUI_TEXTBOX_READONLY  (1u << 0)
 #define OPENOS_GUI_TEXTBOX_DISABLED  (1u << 1)
@@ -814,6 +821,18 @@ typedef struct openos_gui_menubar_request {
     char menus[256];
 } openos_gui_menubar_request_t;
 
+typedef struct openos_gui_contextmenu_request {
+    unsigned int window_id;
+    unsigned int widget_id;
+    int x;
+    int y;
+    int w;
+    int h;
+    int selected_index;
+    unsigned int disabled_mask;
+    char items[256];
+} openos_gui_contextmenu_request_t;
+
 typedef struct openos_gui_treeview_request {
     unsigned int window_id;
     unsigned int widget_id;
@@ -1252,6 +1271,54 @@ static inline int openos_gui_add_menubar(int window_id, int x, int y, int w, int
     req.active_index = active_index;
     openos_gui_copy_text256(req.menus, menus);
     return openos_syscall_result(openos_syscall1(SYS_GUI_ADD_MENUBAR, (int)&req));
+}
+
+static inline int openos_gui_add_contextmenu(int window_id, int x, int y, int w, int h, const char *items, int selected_index, unsigned int disabled_mask) {
+    openos_gui_contextmenu_request_t req;
+    req.window_id = (unsigned int)window_id;
+    req.widget_id = 0;
+    req.x = x;
+    req.y = y;
+    req.w = w;
+    req.h = h;
+    req.selected_index = selected_index;
+    req.disabled_mask = disabled_mask;
+    openos_gui_copy_text256(req.items, items);
+    return openos_syscall_result(openos_syscall1(SYS_GUI_ADD_CONTEXTMENU, (int)&req));
+}
+
+static inline int openos_gui_set_contextmenu_index(int window_id, int widget_id, int selected_index) {
+    return openos_syscall_result(openos_syscall3(SYS_GUI_SET_CONTEXTMENU_INDEX, window_id, widget_id, selected_index));
+}
+
+static inline int openos_gui_get_contextmenu_index(int window_id, int widget_id, int *out_selected_index) {
+    return openos_syscall_result(openos_syscall3(SYS_GUI_GET_CONTEXTMENU_INDEX, window_id, widget_id, (int)out_selected_index));
+}
+
+static inline int openos_gui_set_contextmenu_items(int window_id, int widget_id, const char *items) {
+    openos_gui_contextmenu_request_t req;
+    req.window_id = (unsigned int)window_id;
+    req.widget_id = (unsigned int)widget_id;
+    req.x = 0;
+    req.y = 0;
+    req.w = 0;
+    req.h = 0;
+    req.selected_index = 0;
+    req.disabled_mask = 0;
+    openos_gui_copy_text256(req.items, items);
+    return openos_syscall_result(openos_syscall1(SYS_GUI_SET_CONTEXTMENU_ITEMS, (int)&req));
+}
+
+static inline int openos_gui_set_contextmenu_disabled(int window_id, int widget_id, unsigned int disabled_mask) {
+    return openos_syscall_result(openos_syscall3(SYS_GUI_SET_CONTEXTMENU_DISABLED, window_id, widget_id, (int)disabled_mask));
+}
+
+static inline int openos_gui_show_contextmenu(int window_id, int widget_id, int x, int y) {
+    return openos_syscall_result(openos_syscall4(SYS_GUI_SHOW_CONTEXTMENU, window_id, widget_id, x, y));
+}
+
+static inline int openos_gui_hide_contextmenu(int window_id, int widget_id) {
+    return openos_syscall_result(openos_syscall2(SYS_GUI_HIDE_CONTEXTMENU, window_id, widget_id));
 }
 
 static inline int openos_gui_add_treeview(int window_id, int x, int y, int w, int h, const char *nodes, int selected_node, unsigned int flags)

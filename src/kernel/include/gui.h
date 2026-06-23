@@ -132,6 +132,7 @@ typedef enum gui_widget_type {
     GUI_WIDGET_LISTVIEW,
     GUI_WIDGET_TABLEVIEW,
     GUI_WIDGET_MENUBAR,
+    GUI_WIDGET_CONTEXTMENU,
     GUI_WIDGET_TREEVIEW,
     GUI_WIDGET_SCROLLBAR,
     GUI_WIDGET_SCROLLVIEW
@@ -540,6 +541,13 @@ gui_widget_t *gui_add_menubar(gui_window_t *window, int x, int y, int w, int h, 
 int gui_menubar_set_menus(gui_widget_t *widget, const char *menus);
 int gui_menubar_set_active(gui_widget_t *widget, int active_index);
 int gui_menubar_get_active(gui_widget_t *widget, int *out_active_index);
+gui_widget_t *gui_add_contextmenu(gui_window_t *window, int x, int y, int w, int h, const char *items, int selected_index, uint32_t disabled_mask, gui_widget_callback_t cb, void *user_data);
+int gui_contextmenu_set_items(gui_widget_t *widget, const char *items);
+int gui_contextmenu_set_selected(gui_widget_t *widget, int selected_index);
+int gui_contextmenu_get_selected(gui_widget_t *widget, int *out_selected_index);
+int gui_contextmenu_set_disabled_mask(gui_widget_t *widget, uint32_t disabled_mask);
+int gui_contextmenu_show(gui_widget_t *widget, int x, int y);
+int gui_contextmenu_hide(gui_widget_t *widget);
 gui_widget_t *gui_add_treeview(gui_window_t *window, int x, int y, int w, int h, const char *nodes, int selected_node, uint32_t flags, gui_widget_callback_t cb, void *user_data);
 int gui_select_set_selected(gui_widget_t *widget, int selected_index);
 int gui_select_get_selected(gui_widget_t *widget, int *out_selected_index);

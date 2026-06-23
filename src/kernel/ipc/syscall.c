@@ -3564,6 +3564,45 @@ uint32_t syscall_dispatch(uint32_t num,
             return (uint32_t)gui_user_set_menubar_menus(req.window_id, req.widget_id, req.menus);
         }
 
+    case SYS_GUI_ADD_CONTEXTMENU:
+        {
+            gui_user_contextmenu_request_t req;
+            if (!a || !user_ptr_valid((void *)a, sizeof(req), USERMEM_READ)) return (uint32_t)-1;
+            if (copy_from_user(&req, (const void *)a, sizeof(req)) < 0) return (uint32_t)-1;
+            req.items[sizeof(req.items) - 1] = 0;
+            return (uint32_t)gui_user_add_contextmenu(req.window_id, req.x, req.y, req.w, req.h, req.items, req.selected_index, req.disabled_mask);
+        }
+
+    case SYS_GUI_SET_CONTEXTMENU_INDEX:
+        return (uint32_t)gui_user_set_contextmenu_index((uint32_t)a, (uint32_t)b, (int)c);
+
+    case SYS_GUI_GET_CONTEXTMENU_INDEX:
+        {
+            int selected_index = -1;
+            if (!c || !user_ptr_valid((void *)c, sizeof(selected_index), USERMEM_WRITE)) return (uint32_t)-1;
+            if (gui_user_get_contextmenu_index((uint32_t)a, (uint32_t)b, &selected_index) < 0) return (uint32_t)-1;
+            if (copy_to_user((void *)c, &selected_index, sizeof(selected_index)) < 0) return (uint32_t)-1;
+            return 0;
+        }
+
+    case SYS_GUI_SET_CONTEXTMENU_ITEMS:
+        {
+            gui_user_contextmenu_request_t req;
+            if (!a || !user_ptr_valid((void *)a, sizeof(req), USERMEM_READ)) return (uint32_t)-1;
+            if (copy_from_user(&req, (const void *)a, sizeof(req)) < 0) return (uint32_t)-1;
+            req.items[sizeof(req.items) - 1] = 0;
+            return (uint32_t)gui_user_set_contextmenu_items(req.window_id, req.widget_id, req.items);
+        }
+
+    case SYS_GUI_SET_CONTEXTMENU_DISABLED:
+        return (uint32_t)gui_user_set_contextmenu_disabled((uint32_t)a, (uint32_t)b, (uint32_t)c);
+
+    case SYS_GUI_SHOW_CONTEXTMENU:
+        return (uint32_t)gui_user_show_contextmenu((uint32_t)a, (uint32_t)b, (int)c, (int)d);
+
+    case SYS_GUI_HIDE_CONTEXTMENU:
+        return (uint32_t)gui_user_hide_contextmenu((uint32_t)a, (uint32_t)b);
+
     case SYS_GUI_SET_WIDGET_ENABLED:
         return (uint32_t)gui_user_set_widget_enabled((uint32_t)a, (uint32_t)b, (int)c);
 

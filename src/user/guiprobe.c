@@ -19,6 +19,11 @@ int main(void)
     int checklist;
     int tableview;
     int treeview;
+    int contextmenu;
+    int contextmenu_show;
+    int contextmenu_disabled_set;
+    int contextmenu_set;
+    int contextmenu_value;
     int select_set;
     int select_value;
     int combo_items_set;
@@ -84,6 +89,13 @@ int main(void)
     checklist = openos_gui_add_listview(win, 170, 240, 150, 52, "One\nTwo\nThree\nFour", 0, OPENOS_GUI_LISTVIEW_MULTI_SELECT | OPENOS_GUI_LISTVIEW_SHOW_CHECKBOXES);
     tableview = openos_gui_add_tableview(win, 16, 300, 400, 64, "Name:150,Status:120,Cost:70", "Kernel,Ready,1\r\nGUI,Active,2\r\nApps,Pending,3", 1, OPENOS_GUI_TABLEVIEW_SHOW_HEADER | OPENOS_GUI_TABLEVIEW_GRID_LINES | OPENOS_GUI_TABLEVIEW_SORTABLE);
     treeview = openos_gui_add_treeview(win, 16, 370, 210, 64, "-Root\r\n>+Apps\r\n>>L:Editor\r\n>>L:Terminal\r\n>-System\r\n>>L:Kernel", 0, OPENOS_GUI_TREEVIEW_SHOW_LINES | OPENOS_GUI_TREEVIEW_SHOW_ICONS);
+    contextmenu = openos_gui_add_contextmenu(win, 238, 370, 160, 84, "Open\tEnter|Rename\tF2|Delete\tDel", 0, (1u << 1));
+    contextmenu_show = openos_gui_show_contextmenu(win, contextmenu, 238, 370);
+    contextmenu_disabled_set = openos_gui_set_contextmenu_disabled(win, contextmenu, (1u << 1));
+    contextmenu_set = openos_gui_set_contextmenu_index(win, contextmenu, 2);
+    if (openos_gui_get_contextmenu_index(win, contextmenu, &contextmenu_value) < 0) {
+        contextmenu_value = -1;
+    }
     text_editor = openos_gui_add_text_editor(win, 16, 190, 180, 48, "edit line 1\nedit line 2");
     log_view = openos_gui_add_log_view(win, 210, 210, 180, 48, "log: boot ok\nlog: gui ok");
     scrollview = openos_gui_add_scrollview(win, 310, 66, 76, 64, 180, 150);
@@ -166,7 +178,7 @@ int main(void)
     int scroll = openos_gui_scroll_rect(win, 16, 142, 16, 112, 180, 24);
     int present = openos_gui_present(win);
 
-    printf("guiprobe: window=%d label=%d button=%d panel=%d slider=%d vscroll=%d hscroll=%d icon=%d checkbox=%d radio_a=%d radio_b=%d select=%d combo=%d listview=%d checklist=%d tableview=%d treeview=%d editor=%d log=%d scrollview=%d set_text=%d label_measure=%d label_size=%dx%d slider_set=%d slider_value=%d checkbox_set=%d checkbox_value=%d checkbox_enabled_set=%d checkbox_enabled=%d radio_set=%d radio_a_value=%d radio_b_value=%d select_set=%d select_value=%d combo_items_set=%d combo_set=%d combo_value=%d listview_items_set=%d listview_set=%d listview_value=%d checklist_set=%d checklist_value=%d tableview_rows_set=%d tableview_set=%d tableview_value=%d treeview_nodes_set=%d treeview_set=%d treeview_value=%d scrollbar_set=%d scrollbar_step_set=%d scrollbar_value=%d scrollbar_step=%d scrollview_offset_set=%d scrollview_size_set=%d scrollview_offset=%d,%d scrollview_size=%dx%d fill=%d draw=%d blit=%d scroll=%d present=%d\n", win, label, button, panel, slider, vscrollbar, hscrollbar, icon_button, checkbox, radio_a, radio_b, select, combo, listview, checklist, tableview, treeview, text_editor, log_view, scrollview, update, label_measure, label_width, label_height, slider_set, slider_value, checkbox_set, checkbox_value, checkbox_enabled_set, checkbox_enabled, radio_set, radio_a_value, radio_b_value, select_set, select_value, combo_items_set, combo_set, combo_value, listview_items_set, listview_set, listview_value, checklist_set, checklist_value, tableview_rows_set, tableview_set, tableview_value, treeview_nodes_set, treeview_set, treeview_value, scrollbar_set, scrollbar_step_set, scrollbar_value, scrollbar_step, scrollview_offset_set, scrollview_size_set, scrollview_x, scrollview_y, scrollview_w, scrollview_h, fill, draw, blit, scroll, present);
+    printf("guiprobe: window=%d label=%d button=%d panel=%d slider=%d vscroll=%d hscroll=%d icon=%d checkbox=%d radio_a=%d radio_b=%d select=%d combo=%d listview=%d checklist=%d tableview=%d treeview=%d contextmenu=%d contextmenu_show=%d contextmenu_disabled_set=%d contextmenu_set=%d contextmenu_value=%d editor=%d log=%d scrollview=%d set_text=%d label_measure=%d label_size=%dx%d slider_set=%d slider_value=%d checkbox_set=%d checkbox_value=%d checkbox_enabled_set=%d checkbox_enabled=%d radio_set=%d radio_a_value=%d radio_b_value=%d select_set=%d select_value=%d combo_items_set=%d combo_set=%d combo_value=%d listview_items_set=%d listview_set=%d listview_value=%d checklist_set=%d checklist_value=%d tableview_rows_set=%d tableview_set=%d tableview_value=%d treeview_nodes_set=%d treeview_set=%d treeview_value=%d scrollbar_set=%d scrollbar_step_set=%d scrollbar_value=%d scrollbar_step=%d scrollview_offset_set=%d scrollview_size_set=%d scrollview_offset=%d,%d scrollview_size=%dx%d fill=%d draw=%d blit=%d scroll=%d present=%d\n", win, label, button, panel, slider, vscrollbar, hscrollbar, icon_button, checkbox, radio_a, radio_b, select, combo, listview, checklist, tableview, treeview, contextmenu, contextmenu_show, contextmenu_disabled_set, contextmenu_set, contextmenu_value, text_editor, log_view, scrollview, update, label_measure, label_width, label_height, slider_set, slider_value, checkbox_set, checkbox_value, checkbox_enabled_set, checkbox_enabled, radio_set, radio_a_value, radio_b_value, select_set, select_value, combo_items_set, combo_set, combo_value, listview_items_set, listview_set, listview_value, checklist_set, checklist_value, tableview_rows_set, tableview_set, tableview_value, treeview_nodes_set, treeview_set, treeview_value, scrollbar_set, scrollbar_step_set, scrollbar_value, scrollbar_step, scrollview_offset_set, scrollview_size_set, scrollview_x, scrollview_y, scrollview_w, scrollview_h, fill, draw, blit, scroll, present);
     if (openos_gui_poll_event(&event) > 0) {
         printf("guiprobe: event type=%u window=%u widget=%u x=%d\n",
                event.type, event.window_id, event.widget_id, event.x);

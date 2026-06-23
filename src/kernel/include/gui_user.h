@@ -103,6 +103,18 @@ typedef struct gui_user_menubar_request {
     char menus[256];
 } gui_user_menubar_request_t;
 
+typedef struct gui_user_contextmenu_request {
+    uint32_t window_id;
+    uint32_t widget_id;
+    int32_t x;
+    int32_t y;
+    int32_t w;
+    int32_t h;
+    int32_t selected_index;
+    uint32_t disabled_mask;
+    char items[256];
+} gui_user_contextmenu_request_t;
+
 typedef struct gui_user_treeview_request {
     uint32_t window_id;
     uint32_t widget_id;
@@ -222,6 +234,7 @@ int gui_user_add_combobox(uint32_t window_id, int x, int y, int w, int h, const 
 int gui_user_add_listview(uint32_t window_id, int x, int y, int w, int h, const char *items, int selected_index, uint32_t flags);
 int gui_user_add_tableview(uint32_t window_id, int x, int y, int w, int h, const char *columns, const char *rows, int selected_row, uint32_t flags);
 int gui_user_add_menubar(uint32_t window_id, int x, int y, int w, int h, const char *menus, int active_index);
+int gui_user_add_contextmenu(uint32_t window_id, int x, int y, int w, int h, const char *items, int selected_index, uint32_t disabled_mask);
 int gui_user_add_treeview(uint32_t window_id, int x, int y, int w, int h, const char *nodes, int selected_node, uint32_t flags);
 int gui_user_add_slider(uint32_t window_id, int x, int y, int w, int h, int min, int max, int value, int step);
 int gui_user_add_scrollbar(uint32_t window_id, int x, int y, int w, int h, int min, int max, int value, int step);
@@ -278,6 +291,12 @@ int gui_user_set_tableview_rows(uint32_t window_id, uint32_t widget_id, const ch
 int gui_user_set_menubar_active(uint32_t window_id, uint32_t widget_id, int active_index);
 int gui_user_get_menubar_active(uint32_t window_id, uint32_t widget_id, int *out_active_index);
 int gui_user_set_menubar_menus(uint32_t window_id, uint32_t widget_id, const char *menus);
+int gui_user_set_contextmenu_index(uint32_t window_id, uint32_t widget_id, int selected_index);
+int gui_user_get_contextmenu_index(uint32_t window_id, uint32_t widget_id, int *out_selected_index);
+int gui_user_set_contextmenu_items(uint32_t window_id, uint32_t widget_id, const char *items);
+int gui_user_set_contextmenu_disabled(uint32_t window_id, uint32_t widget_id, uint32_t disabled_mask);
+int gui_user_show_contextmenu(uint32_t window_id, uint32_t widget_id, int x, int y);
+int gui_user_hide_contextmenu(uint32_t window_id, uint32_t widget_id);
 int gui_user_set_treeview_node(uint32_t window_id, uint32_t widget_id, int selected_node);
 int gui_user_get_treeview_node(uint32_t window_id, uint32_t widget_id, int *out_selected_node);
 int gui_user_set_treeview_nodes(uint32_t window_id, uint32_t widget_id, const char *nodes);
