@@ -78,6 +78,7 @@ int main(void)
     int label_width = 0;
     int label_height = 0;
     int label_measure;
+    int toolbar;
     openos_gui_event_t event;
 
     win = openos_gui_create_window("User GUI Probe", 120, 120, 440, 460);
@@ -86,6 +87,8 @@ int main(void)
         return 1;
     }
 
+    toolbar = openos_gui_add_toolbar(win, 8, 8, 420, 26, "New|Open|Save|addr:/home/user|search:Find", OPENOS_GUI_TOOLBAR_SHOW_GRIP | OPENOS_GUI_TOOLBAR_GROUPED_BUTTONS | OPENOS_GUI_TOOLBAR_HAS_ADDRESS | OPENOS_GUI_TOOLBAR_HAS_SEARCH | OPENOS_GUI_TOOLBAR_BOTTOM_BORDER);
+    (void)toolbar;
     label = openos_gui_add_label(win, 16, 32, 260, 20, "Hello from user mode GUI ABI");
     button = openos_gui_add_button(win, 16, 72, 120, 24, "OK");
     panel = openos_gui_add_panel(win, 150, 66, 150, 42, 0xFFEAF4FFu);

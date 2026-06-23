@@ -3644,6 +3644,116 @@ static void gui_draw_select_dropdown(gui_widget_t *wg) {
     gui_raw_line(ax + wg->rect.w - 1, ay + wg->rect.h, ax + wg->rect.w - 1, ay + wg->rect.h + count * 20 - 1, g_gui.colors.button_border);
 }
 
+static void gui_toolbar_draw_separator(int x, int ay, int h) {
+    gui_raw_line(x, ay + 7, x, ay + h - 8, gui_rgb(184, 190, 200));
+    gui_raw_line(x + 1, ay + 7, x + 1, ay + h - 8, gui_rgb(255, 255, 255));
+}
+
+static void gui_toolbar_draw_field(gui_widget_t *wg, int ax, int ay, int *cursor_x, const char *text, int search) {
+    int w = search ? 136 : (wg->rect.w - *cursor_x - ((wg->toolbar_flags & GUI_TOOLBAR_HAS_SEARCH) ? 150 : 12));
+    gui_rect_t clip;
+    if (w < 96) w = 96;
+    if (!search && w > wg->rect.w - *cursor_x - 8) w = wg->rect.w - *cursor_x - 8;
+    if (w <= 24) return;
+    gui_raw_fill_rect(ax + *cursor_x, ay + 5, w, wg->rect.h - 10, gui_rgb(255, 255, 255));
+    gui_raw_line(ax + *cursor_x, ay + 5, ax + *cursor_x + w - 1, ay + 5, gui_rgb(172, 181, 195));
+    gui_raw_line(ax + *cursor_x, ay + wg->rect.h - 6, ax + *cursor_x + w - 1, ay + wg->rect.h - 6, gui_rgb(218, 224, 232));
+    gui_raw_line(ax + *cursor_x, ay + 5, ax + *cursor_x, ay + wg->rect.h - 6, gui_rgb(172, 181, 195));
+    gui_raw_line(ax + *cursor_x + w - 1, ay + 5, ax + *cursor_x + w - 1, ay + wg->rect.h - 6, gui_rgb(218, 224, 232));
+    clip.x = ax + *cursor_x + 8;
+    clip.y = ay + 7;
+    clip.w = w - 16;
+    clip.h = wg->rect.h - 14;
+    gui_draw_window_title_text(clip.x, gui_text_center_y(ay, wg->rect.h), text && text[0] ? text : (search ? "Search" : "Address"), gui_rgb(84, 94, 112), &clip);
+    *cursor_x += w + 8;
+}
+
+static void gui_toolbar_draw_button(gui_widget_t *wg, int ax, int ay, int *cursor_x, const char *label) {
+    int w = (int)strlen(label) * (int)GUI_CHAR_W + 18;
+    int x = ax + *cursor_x;
+    gui_rect_t clip;
+    if (w < 26) w = 26;
+    if (*cursor_x + w >= wg->rect.w - 8) return;
+    if (wg->toolbar_flags & GUI_TOOLBAR_GROUPED_BUTTONS) {
+        gui_raw_fill_rect(x, ay + 5, w, wg->rect.h - 10, gui_rgb(244, 247, 251));
+        gui_raw_line(x, ay + 5, x + w - 1, ay + 5, gui_rgb(255, 255, 255));
+        gui_raw_line(x, ay + wg->rect.h - 6, x + w - 1, ay + wg->rect.h - 6, gui_rgb(166, 174, 188));
+        gui_raw_line(x, ay + 5, x, ay + wg->rect.h - 6, gui_rgb(255, 255, 255));
+        gui_raw_line(x + w - 1, ay + 5, x + w - 1, ay + wg->rect.h - 6, gui_rgb(166, 174, 188));
+    }
+    clip.x = x + 7;
+    clip.y = ay + 6;
+    clip.w = w - 10;
+    clip.h = wg->rect.h - 12;
+    gui_draw_window_title_text(clip.x, gui_text_center_y(ay, wg->rect.h), label, g_gui.colors.text_fg, &clip);
+    *cursor_x += w + ((wg->toolbar_flags & GUI_TOOLBAR_GROUPED_BUTTONS) ? 2 : 6);
+}
+
+static int gui_toolbar_starts_with(const char *text, const char *prefix) {
+    if (!text || !prefix) return 0;
+    while (*prefix) {
+        if (*text != *prefix) return 0;
+        text++;
+        prefix++;
+    }
+    return 1;
+}
+
+static void gui_toolbar_draw_token(gui_widget_t *wg, int ax, int ay, int *cursor_x, const char *token) {
+    const char *text = token;
+    while (text && *text == ' ') text++;
+    if (!text || !*text) return;
+    if (strcmp(text, "sep") == 0 || strcmp(text, "separator") == 0 || strcmp(text, "|") == 0) {
+        gui_toolbar_draw_separator(ax + *cursor_x + 5, ay, wg->rect.h);
+        *cursor_x += 12;
+    } else if (gui_toolbar_starts_with(text, "addr:")) {
+        gui_toolbar_draw_field(wg, ax, ay, cursor_x, text + 5, 0);
+    } else if (gui_toolbar_starts_with(text, "search:")) {
+        gui_toolbar_draw_field(wg, ax, ay, cursor_x, text + 7, 1);
+    } else {
+        gui_toolbar_draw_button(wg, ax, ay, cursor_x, text);
+    }
+}
+
+static void gui_draw_toolbar_widget(gui_widget_t *wg, int ax, int ay) {
+    char token[64];
+    const char *p;
+    int n = 0;
+    int cursor_x = 8;
+    int gy;
+    if (!wg) return;
+    gui_raw_fill_rect(ax, ay, wg->rect.w, wg->rect.h, gui_rgb(247, 250, 253));
+    gui_raw_fill_rect(ax, ay + wg->rect.h / 2, wg->rect.w, wg->rect.h - wg->rect.h / 2, gui_rgb(226, 232, 240));
+    if (wg->toolbar_flags & GUI_TOOLBAR_BOTTOM_BORDER)
+        gui_raw_line(ax, ay + wg->rect.h - 1, ax + wg->rect.w - 1, ay + wg->rect.h - 1, gui_rgb(166, 174, 188));
+    if (wg->toolbar_flags & GUI_TOOLBAR_SHOW_GRIP) {
+        for (gy = ay + 8; gy < ay + wg->rect.h - 8; gy += 4) {
+            gui_raw_fill_rect(ax + 5, gy, 2, 2, gui_rgb(174, 182, 196));
+            gui_raw_fill_rect(ax + 9, gy, 2, 2, gui_rgb(255, 255, 255));
+        }
+        cursor_x = 18;
+    }
+    p = wg->text;
+    while (p && *p) {
+        if (*p == '|' || *p == '\n' || *p == '\r') {
+            token[n] = 0;
+            gui_toolbar_draw_token(wg, ax, ay, &cursor_x, token);
+            if (*p == '|') {
+                gui_toolbar_draw_token(wg, ax, ay, &cursor_x, "|");
+            }
+            n = 0;
+            p++;
+            continue;
+        }
+        if (n < (int)sizeof(token) - 1) token[n++] = *p;
+        p++;
+    }
+    if (n > 0) {
+        token[n] = 0;
+        gui_toolbar_draw_token(wg, ax, ay, &cursor_x, token);
+    }
+}
+
 static void gui_draw_widget(gui_widget_t *wg) {
     uint32_t bg, fg;
     int ax;
@@ -3717,6 +3827,8 @@ static void gui_draw_widget(gui_widget_t *wg) {
                                            wg->text, fg, &clip);
             }
         }
+    } else if (wg->type == GUI_WIDGET_TOOLBAR) {
+        gui_draw_toolbar_widget(wg, ax, ay);
     } else if (wg->type == GUI_WIDGET_ICONVIEW) {
         int count = gui_iconview_count(wg);
         int cols = gui_iconview_columns(wg);
@@ -8232,6 +8344,21 @@ int gui_imageview_set_bitmap(gui_widget_t *widget, const uint8_t *pixels, uint32
     widget->image_width = width;
     widget->image_height = height;
     widget->image_flags = flags & (GUI_IMAGEVIEW_KEEP_ASPECT | GUI_IMAGEVIEW_PLACEHOLDER | GUI_IMAGEVIEW_BITMAP_ALPHA);
+    return 0;
+}
+
+gui_widget_t *gui_add_toolbar(gui_window_t *window, int x, int y, int w, int h, const char *items, uint32_t flags) {
+    gui_widget_t *wg = gui_alloc_widget(window, GUI_WIDGET_TOOLBAR, x, y, w, h, items ? items : "");
+    if (wg) {
+        wg->toolbar_flags = flags & (GUI_TOOLBAR_SHOW_GRIP | GUI_TOOLBAR_GROUPED_BUTTONS | GUI_TOOLBAR_HAS_ADDRESS | GUI_TOOLBAR_HAS_SEARCH | GUI_TOOLBAR_BOTTOM_BORDER);
+        wg->bg_color = 0;
+    }
+    return wg;
+}
+
+int gui_toolbar_set_items(gui_widget_t *widget, const char *items) {
+    if (!widget || widget->type != GUI_WIDGET_TOOLBAR) return -1;
+    gui_widget_set_text(widget, items ? items : "");
     return 0;
 }
 

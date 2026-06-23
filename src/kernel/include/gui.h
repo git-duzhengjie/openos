@@ -165,6 +165,7 @@ typedef enum gui_widget_type {
     GUI_WIDGET_PROGRESSBAR,
     GUI_WIDGET_SPINNER,
     GUI_WIDGET_IMAGEVIEW,
+    GUI_WIDGET_TOOLBAR,
     GUI_WIDGET_TREEVIEW,
     GUI_WIDGET_SCROLLBAR,
     GUI_WIDGET_SCROLLVIEW
@@ -267,6 +268,7 @@ struct gui_widget {
     uint32_t image_width;
     uint32_t image_height;
     uint32_t image_flags;
+    uint32_t toolbar_flags;
 };
 
 struct gui_window {
@@ -567,6 +569,8 @@ gui_widget_t *gui_add_textarea(gui_window_t *window, int x, int y, int w, int h,
 gui_widget_t *gui_add_canvas(gui_window_t *window, int x, int y, int w, int h, uint32_t color);
 gui_widget_t *gui_add_icon_button(gui_window_t *window, int x, int y, int w, int h, const char *text, gui_icon_id_t icon, gui_widget_callback_t cb, void *user_data);
 gui_widget_t *gui_add_iconview(gui_window_t *window, int x, int y, int w, int h, const char *items, int selected_index, uint32_t flags, gui_widget_callback_t cb, void *user_data);
+gui_widget_t *gui_add_toolbar(gui_window_t *window, int x, int y, int w, int h, const char *items, uint32_t flags);
+int gui_toolbar_set_items(gui_widget_t *widget, const char *items);
 int gui_iconview_set_items(gui_widget_t *widget, const char *items);
 int gui_iconview_set_selected(gui_widget_t *widget, int selected_index);
 int gui_iconview_get_selected(gui_widget_t *widget, int *out_selected_index);
@@ -605,6 +609,12 @@ int gui_listview_set_items(gui_widget_t *widget, const char *items);
 gui_widget_t *gui_add_slider(gui_window_t *window, int x, int y, int w, int h, int min, int max, int value, int step, gui_widget_callback_t cb, void *user_data);
 gui_widget_t *gui_add_progressbar(gui_window_t *window, int x, int y, int w, int h, int min, int max, int value, uint32_t flags);
 gui_widget_t *gui_add_spinner(gui_window_t *window, int x, int y, int w, int h, const char *text, uint32_t flags);
+#define GUI_TOOLBAR_SHOW_GRIP       (1u << 0)
+#define GUI_TOOLBAR_GROUPED_BUTTONS  (1u << 1)
+#define GUI_TOOLBAR_HAS_ADDRESS      (1u << 2)
+#define GUI_TOOLBAR_HAS_SEARCH       (1u << 3)
+#define GUI_TOOLBAR_BOTTOM_BORDER    (1u << 4)
+
 gui_widget_t *gui_add_imageview(gui_window_t *window, int x, int y, int w, int h, uint32_t flags);
 int gui_imageview_set_rgba(gui_widget_t *widget, const uint32_t *pixels, uint32_t width, uint32_t height, uint32_t flags);
 int gui_imageview_set_bitmap(gui_widget_t *widget, const uint8_t *pixels, uint32_t width, uint32_t height, uint32_t stride, uint32_t fg_color, uint32_t bg_color, uint32_t flags);

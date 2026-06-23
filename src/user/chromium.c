@@ -510,6 +510,7 @@ int main(int argc, char **argv)
     int go_button;
     int download_button;
     int close_button;
+    int toolbar;
 
     if (argc > 1 && argv && argv[1] && argv[1][0]) initial_url = argv[1];
 
@@ -519,6 +520,8 @@ int main(int argc, char **argv)
         return 1;
     }
 
+    toolbar = openos_gui_add_toolbar(win, 0, 0, CHROME_W, 42, "<|>|R|addr:URL|Go|Save|search:Find", OPENOS_GUI_TOOLBAR_SHOW_GRIP | OPENOS_GUI_TOOLBAR_GROUPED_BUTTONS | OPENOS_GUI_TOOLBAR_HAS_ADDRESS | OPENOS_GUI_TOOLBAR_HAS_SEARCH | OPENOS_GUI_TOOLBAR_BOTTOM_BORDER);
+    (void)toolbar;
     back_button = openos_gui_add_button(win, 8, 8, 24, 26, "<");
     forward_button = openos_gui_add_button(win, 38, 8, 24, 26, ">");
     refresh_button = openos_gui_add_button(win, 68, 8, 34, 26, "R");

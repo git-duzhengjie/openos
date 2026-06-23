@@ -234,6 +234,8 @@
 #define SYS_GUI_SET_ICONVIEW_ITEMS 437
 #define SYS_GUI_SET_ICONVIEW_SELECTED 438
 #define SYS_GUI_GET_ICONVIEW_SELECTED 439
+#define SYS_GUI_ADD_TOOLBAR 440
+#define SYS_GUI_SET_TOOLBAR_ITEMS 441
 
 #define OPENOS_GUI_TEXTBOX_READONLY  (1u << 0)
 #define OPENOS_GUI_TEXTBOX_DISABLED  (1u << 1)
@@ -270,6 +272,11 @@
 #define OPENOS_GUI_ICONVIEW_SHOW_LABELS         0x00000001u
 #define OPENOS_GUI_ICONVIEW_COMPACT             0x00000002u
 #define OPENOS_GUI_ICONVIEW_LIST_MODE           0x00000004u
+#define OPENOS_GUI_TOOLBAR_SHOW_GRIP            0x00000001u
+#define OPENOS_GUI_TOOLBAR_GROUPED_BUTTONS       0x00000002u
+#define OPENOS_GUI_TOOLBAR_HAS_ADDRESS           0x00000004u
+#define OPENOS_GUI_TOOLBAR_HAS_SEARCH            0x00000008u
+#define OPENOS_GUI_TOOLBAR_BOTTOM_BORDER         0x00000010u
 
 #define OPENOS_GUI_TOAST_INFO                OPENOS_GUI_DIALOG_INFO
 #define OPENOS_GUI_TOAST_WARNING             OPENOS_GUI_DIALOG_WARNING
@@ -799,6 +806,17 @@ typedef struct openos_gui_iconview_request {
     char items[256];
 } openos_gui_iconview_request_t;
 
+typedef struct openos_gui_toolbar_request {
+    unsigned int window_id;
+    unsigned int widget_id;
+    int x;
+    int y;
+    int w;
+    int h;
+    unsigned int flags;
+    char items[256];
+} openos_gui_toolbar_request_t;
+
 typedef struct openos_gui_text_request {
     unsigned int window_id;
     unsigned int widget_id;
@@ -1272,6 +1290,31 @@ static inline int openos_gui_get_iconview_selected(int window_id, int widget_id)
     rc = openos_syscall_result(openos_syscall1(SYS_GUI_GET_ICONVIEW_SELECTED, (int)&req));
     if (rc < 0) return rc;
     return req.selected_index;
+}
+
+static inline int openos_gui_add_toolbar(int window_id, int x, int y, int w, int h, const char *items, unsigned int flags)
+{
+    openos_gui_toolbar_request_t req;
+    req.window_id = (unsigned int)window_id;
+    req.widget_id = 0;
+    req.x = x;
+    req.y = y;
+    req.w = w;
+    req.h = h;
+    req.flags = flags;
+    openos_gui_copy_text256(req.items, items);
+    return openos_syscall_result(openos_syscall1(SYS_GUI_ADD_TOOLBAR, (int)&req));
+}
+
+static inline int openos_gui_set_toolbar_items(int window_id, int widget_id, const char *items)
+{
+    openos_gui_toolbar_request_t req;
+    req.window_id = (unsigned int)window_id;
+    req.widget_id = (unsigned int)widget_id;
+    req.x = req.y = req.w = req.h = 0;
+    req.flags = 0;
+    openos_gui_copy_text256(req.items, items);
+    return openos_syscall_result(openos_syscall1(SYS_GUI_SET_TOOLBAR_ITEMS, (int)&req));
 }
 
 static inline int openos_gui_add_textbox(int window_id, int x, int y, int w, int h, const char *text)

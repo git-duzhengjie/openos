@@ -1126,6 +1126,7 @@ int main(int argc, char **argv)
     int next_field_button;
     int submit_button;
     int close_button;
+    int toolbar;
     int rc = 0;
     int scroll_line = 0;
     static browser_load_context_t load;
@@ -1163,6 +1164,8 @@ int main(int argc, char **argv)
         return 1;
     }
 
+    toolbar = openos_gui_add_toolbar(win, 0, 0, 900, 54, "<|>|Reload|addr:Search OpenOS or type a URL|Close", OPENOS_GUI_TOOLBAR_SHOW_GRIP | OPENOS_GUI_TOOLBAR_GROUPED_BUTTONS | OPENOS_GUI_TOOLBAR_HAS_ADDRESS | OPENOS_GUI_TOOLBAR_BOTTOM_BORDER);
+    (void)toolbar;
     back_button = openos_gui_add_button(win, 16, 18, 40, 24, "<");
     forward_button = openos_gui_add_button(win, 60, 18, 40, 24, ">");
     load_button = openos_gui_add_button(win, 104, 18, 72, 24, "Reload");
