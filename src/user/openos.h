@@ -143,6 +143,103 @@
 #define SYS_GUI_GET_DISPLAY_INFO 346
 #define SYS_THREAD_CREATE_TLS 347
 #define SYS_NANOSLEEP 348
+#define SYS_GUI_GET_TEXT 349
+#define SYS_GUI_SET_TEXT_PLACEHOLDER 350
+#define SYS_GUI_SET_TEXT_FLAGS 351
+#define SYS_GUI_GET_TEXT_FLAGS 352
+#define SYS_GUI_SET_ICON 353
+#define SYS_GUI_SET_BUTTON_FLAGS 354
+#define SYS_GUI_GET_BUTTON_FLAGS 355
+#define SYS_GUI_SET_LABEL_OPTIONS 356
+#define SYS_GUI_GET_LABEL_OPTIONS 357
+#define SYS_GUI_ADD_PANEL 358
+#define SYS_GUI_SET_PANEL_OPTIONS 359
+#define SYS_GUI_ADD_SLIDER 360
+#define SYS_GUI_SET_SLIDER_VALUE 361
+#define SYS_GUI_GET_SLIDER_VALUE 362
+#define SYS_GUI_SET_SLIDER_STEP 363
+#define SYS_GUI_GET_SLIDER_STEP 364
+#define SYS_GUI_ADD_CANVAS 365
+#define SYS_GUI_ADD_ICON_BUTTON 366
+#define SYS_GUI_ADD_TOGGLE 367
+#define SYS_GUI_SET_TOGGLE_CHECKED 368
+#define SYS_GUI_GET_TOGGLE_CHECKED 369
+#define SYS_GUI_ADD_TEXTAREA 370
+#define SYS_GUI_SET_WIDGET_ENABLED 371
+#define SYS_GUI_GET_WIDGET_ENABLED 372
+#define SYS_GUI_MEASURE_LABEL 373
+#define SYS_GUI_ADD_SCROLLBAR 374
+#define SYS_GUI_SET_SCROLLBAR_VALUE 375
+#define SYS_GUI_GET_SCROLLBAR_VALUE 376
+#define SYS_GUI_SET_SCROLLBAR_STEP 377
+#define SYS_GUI_GET_SCROLLBAR_STEP 378
+#define SYS_GUI_ADD_SCROLLVIEW 379
+#define SYS_GUI_SET_SCROLLVIEW_OFFSET 380
+#define SYS_GUI_GET_SCROLLVIEW_OFFSET 381
+#define SYS_GUI_SET_SCROLLVIEW_CONTENT_SIZE 382
+#define SYS_GUI_GET_SCROLLVIEW_CONTENT_SIZE 383
+#define SYS_GUI_SET_WIDGET_PARENT 384
+#define SYS_GUI_ADD_CHECKBOX 385
+#define SYS_GUI_SET_CHECKBOX_CHECKED 386
+#define SYS_GUI_GET_CHECKBOX_CHECKED 387
+#define SYS_GUI_ADD_RADIOBUTTON 388
+#define SYS_GUI_SET_RADIOBUTTON_CHECKED 389
+#define SYS_GUI_GET_RADIOBUTTON_CHECKED 390
+#define SYS_GUI_ADD_SELECT 391
+#define SYS_GUI_ADD_COMBOBOX 392
+#define SYS_GUI_SET_SELECT_INDEX 393
+#define SYS_GUI_GET_SELECT_INDEX 394
+#define SYS_GUI_SET_SELECT_ITEMS 395
+#define SYS_GUI_ADD_LISTVIEW 396
+#define SYS_GUI_SET_LISTVIEW_INDEX 397
+#define SYS_GUI_GET_LISTVIEW_INDEX 398
+#define SYS_GUI_SET_LISTVIEW_ITEMS 399
+#define SYS_GUI_ADD_TABLEVIEW 400
+#define SYS_GUI_SET_TABLEVIEW_ROW 401
+#define SYS_GUI_GET_TABLEVIEW_ROW 402
+#define SYS_GUI_SET_TABLEVIEW_ROWS 403
+#define SYS_GUI_ADD_TREEVIEW 404
+#define SYS_GUI_SET_TREEVIEW_NODE 405
+#define SYS_GUI_GET_TREEVIEW_NODE 406
+#define SYS_GUI_SET_TREEVIEW_NODES 407
+#define SYS_GUI_ADD_MENUBAR 408
+#define SYS_GUI_SET_MENUBAR_ACTIVE 409
+#define SYS_GUI_GET_MENUBAR_ACTIVE 410
+#define SYS_GUI_SET_MENUBAR_MENUS 411
+
+#define OPENOS_GUI_TEXTBOX_READONLY  (1u << 0)
+#define OPENOS_GUI_TEXTBOX_DISABLED  (1u << 1)
+#define OPENOS_GUI_TEXTBOX_PASSWORD  (1u << 2)
+#define OPENOS_GUI_TEXTBOX_MULTILINE (1u << 3)
+
+#define OPENOS_GUI_LISTVIEW_MULTI_SELECT    (1u << 0)
+#define OPENOS_GUI_LISTVIEW_SHOW_CHECKBOXES (1u << 1)
+
+#define OPENOS_GUI_TABLEVIEW_SHOW_HEADER     (1u << 0)
+#define OPENOS_GUI_TABLEVIEW_GRID_LINES      (1u << 1)
+#define OPENOS_GUI_TABLEVIEW_ROW_SELECT      (1u << 2)
+#define OPENOS_GUI_TABLEVIEW_SORTABLE        (1u << 3)
+
+#define OPENOS_GUI_TREEVIEW_SHOW_LINES        (1u << 0)
+#define OPENOS_GUI_TREEVIEW_SHOW_ICONS        (1u << 1)
+
+#define OPENOS_GUI_BUTTON_DEFAULT    (1u << 0)
+#define OPENOS_GUI_BUTTON_DANGER     (1u << 1)
+
+#define OPENOS_GUI_TOGGLE_ON        (1u << 0)
+
+#define OPENOS_GUI_LABEL_ELLIPSIS    (1u << 0)
+#define OPENOS_GUI_LABEL_MULTILINE   (1u << 1)
+#define OPENOS_GUI_LABEL_SELECTABLE  (1u << 2)
+#define OPENOS_GUI_LABEL_COPYABLE    (1u << 3)
+
+#define OPENOS_GUI_LABEL_ALIGN_LEFT   0u
+#define OPENOS_GUI_LABEL_ALIGN_CENTER 1u
+#define OPENOS_GUI_LABEL_ALIGN_RIGHT  2u
+
+#define OPENOS_GUI_PANEL_BORDER      (1u << 0)
+#define OPENOS_GUI_PANEL_ROUNDED     (1u << 1)
+#define OPENOS_GUI_PANEL_SHADOW      (1u << 2)
 
 #define OPENOS_CHROMIUM_MEM_JITLESS_DEFAULT     (1u << 0)
 #define OPENOS_CHROMIUM_MEM_EXEC_PROT_RESERVED  (1u << 1)
@@ -558,6 +655,7 @@ typedef struct openos_pollfd {
 
 typedef struct openos_gui_draw_request {
     unsigned int window_id;
+    unsigned int widget_id;
     unsigned int op;
     int x;
     int y;
@@ -609,13 +707,142 @@ typedef struct openos_gui_widget_request {
     int y;
     int w;
     int h;
-    char text[64];
+    char text[256];
 } openos_gui_widget_request_t;
+
+typedef struct openos_gui_icon_button_request {
+    unsigned int window_id;
+    unsigned int icon;
+    int x;
+    int y;
+    int w;
+    int h;
+    char text[256];
+} openos_gui_icon_button_request_t;
+
+typedef struct openos_gui_text_request {
+    unsigned int window_id;
+    unsigned int widget_id;
+    int cursor;
+    int flags;
+    char text[256];
+} openos_gui_text_request_t;
+
+typedef struct openos_gui_panel_request {
+    unsigned int window_id;
+    unsigned int widget_id;
+    int x;
+    int y;
+    int w;
+    int h;
+    unsigned int bg_color;
+    unsigned int border_color;
+    unsigned int flags;
+    unsigned int border_width;
+    unsigned int padding;
+} openos_gui_panel_request_t;
+
+typedef struct openos_gui_slider_request {
+    unsigned int window_id;
+    unsigned int widget_id;
+    int x;
+    int y;
+    int w;
+    int h;
+    int min;
+    int max;
+    int value;
+    int step;
+} openos_gui_slider_request_t;
+
+typedef struct openos_gui_scrollbar_request {
+    unsigned int window_id;
+    unsigned int widget_id;
+    int x;
+    int y;
+    int w;
+    int h;
+    int min;
+    int max;
+    int value;
+    int step;
+} openos_gui_scrollbar_request_t;
+
+typedef struct openos_gui_radio_request {
+    unsigned int window_id;
+    unsigned int group_id;
+    unsigned int checked;
+    int x;
+    int y;
+    int w;
+    int h;
+    char text[256];
+} openos_gui_radio_request_t;
+
+typedef struct openos_gui_select_request {
+    unsigned int window_id;
+    unsigned int widget_id;
+    int x;
+    int y;
+    int w;
+    int h;
+    int selected_index;
+    char items[256];
+} openos_gui_select_request_t;
+
+typedef struct openos_gui_tableview_request {
+    unsigned int window_id;
+    unsigned int widget_id;
+    int x;
+    int y;
+    int w;
+    int h;
+    int selected_row;
+    unsigned int flags;
+    char columns[128];
+    char rows[256];
+} openos_gui_tableview_request_t;
+
+typedef struct openos_gui_menubar_request {
+    unsigned int window_id;
+    unsigned int widget_id;
+    int x;
+    int y;
+    int w;
+    int h;
+    int active_index;
+    char menus[256];
+} openos_gui_menubar_request_t;
+
+typedef struct openos_gui_treeview_request {
+    unsigned int window_id;
+    unsigned int widget_id;
+    int x;
+    int y;
+    int w;
+    int h;
+    int selected_node;
+    unsigned int flags;
+    char nodes[256];
+} openos_gui_treeview_request_t;
+
+typedef struct openos_gui_label_measure_request {
+    unsigned int window_id;
+    unsigned int widget_id;
+    int max_width;
+    int out_width;
+    int out_height;
+} openos_gui_label_measure_request_t;
 
 #define OPENOS_GUI_EVENT_NONE 0u
 #define OPENOS_GUI_EVENT_BUTTON_CLICK 1u
 #define OPENOS_GUI_EVENT_KEY_DOWN 2u
 #define OPENOS_GUI_EVENT_TEXT_INPUT 3u
+#define OPENOS_GUI_EVENT_TEXT_CHANGED 4u
+#define OPENOS_GUI_EVENT_TEXT_SUBMIT 5u
+#define OPENOS_GUI_EVENT_FOCUS 6u
+#define OPENOS_GUI_EVENT_BLUR 7u
+#define OPENOS_GUI_EVENT_VALUE_CHANGED 8u
 #define OPENOS_GUI_KEY_BACKSPACE 8u
 #define OPENOS_GUI_KEY_TAB 9u
 #define OPENOS_GUI_KEY_ENTER 13u
@@ -625,6 +852,19 @@ typedef struct openos_gui_widget_request {
 #define OPENOS_GUI_KEY_RIGHT 0x103u
 #define OPENOS_GUI_KEY_HOME 0x104u
 #define OPENOS_GUI_KEY_END 0x105u
+
+#define OPENOS_GUI_ICON_NONE 0u
+#define OPENOS_GUI_ICON_FOLDER 1u
+#define OPENOS_GUI_ICON_UPDIR 2u
+#define OPENOS_GUI_ICON_FILE_GENERIC 3u
+#define OPENOS_GUI_ICON_FILE_TEXT 4u
+#define OPENOS_GUI_ICON_FILE_CODE 5u
+#define OPENOS_GUI_ICON_FILE_CONFIG 6u
+#define OPENOS_GUI_ICON_FILE_SHELL 7u
+#define OPENOS_GUI_ICON_FILE_EXEC 8u
+#define OPENOS_GUI_ICON_FILE_IMAGE 9u
+#define OPENOS_GUI_ICON_FILE_ARCHIVE 10u
+#define OPENOS_GUI_ICON_FILE_MARKUP 11u
 
 static inline int openos_syscall3(int num, int a, int b, int c)
 {
@@ -761,7 +1001,7 @@ static inline int openos_gui_destroy_window(int window_id)
     return openos_syscall_result(openos_syscall1(SYS_GUI_DESTROY_WINDOW, window_id));
 }
 
-static inline void openos_gui_copy_text64(char out[64], const char *text)
+static inline void openos_gui_copy_text256(char out[256], const char *text)
 {
     int i = 0;
     if (!out) return;
@@ -769,7 +1009,28 @@ static inline void openos_gui_copy_text64(char out[64], const char *text)
         out[0] = 0;
         return;
     }
-    while (i < 63 && text[i]) {
+    while (i < 255 && text[i]) {
+        out[i] = text[i];
+        ++i;
+    }
+    out[i] = 0;
+}
+
+static inline void openos_gui_copy_text128(char *dst, const char *src)
+{
+    unsigned int i;
+    if (!dst) return;
+    if (!src) src = "";
+    for (i = 0; i < 127 && src[i]; ++i) dst[i] = src[i];
+    dst[i] = 0;
+}
+
+static inline void openos_gui_copy_text_sized(char *out, unsigned int out_size, const char *text)
+{
+    unsigned int i = 0;
+    if (!out || out_size == 0) return;
+    if (!text) text = "";
+    while (i + 1 < out_size && text[i]) {
         out[i] = text[i];
         ++i;
     }
@@ -785,7 +1046,7 @@ static inline int openos_gui_add_label(int window_id, int x, int y, int w, int h
     req.y = y;
     req.w = w;
     req.h = h;
-    openos_gui_copy_text64(req.text, text);
+    openos_gui_copy_text256(req.text, text);
     return openos_syscall_result(openos_syscall1(SYS_GUI_ADD_LABEL, (int)&req));
 }
 
@@ -798,8 +1059,21 @@ static inline int openos_gui_add_button(int window_id, int x, int y, int w, int 
     req.y = y;
     req.w = w;
     req.h = h;
-    openos_gui_copy_text64(req.text, text);
+    openos_gui_copy_text256(req.text, text);
     return openos_syscall_result(openos_syscall1(SYS_GUI_ADD_BUTTON, (int)&req));
+}
+
+static inline int openos_gui_add_icon_button(int window_id, int x, int y, int w, int h, const char *text, unsigned int icon)
+{
+    openos_gui_icon_button_request_t req;
+    req.window_id = (unsigned int)window_id;
+    req.icon = icon;
+    req.x = x;
+    req.y = y;
+    req.w = w;
+    req.h = h;
+    openos_gui_copy_text256(req.text, text);
+    return openos_syscall_result(openos_syscall1(SYS_GUI_ADD_ICON_BUTTON, (int)&req));
 }
 
 static inline int openos_gui_add_textbox(int window_id, int x, int y, int w, int h, const char *text)
@@ -811,8 +1085,398 @@ static inline int openos_gui_add_textbox(int window_id, int x, int y, int w, int
     req.y = y;
     req.w = w;
     req.h = h;
-    openos_gui_copy_text64(req.text, text);
+    openos_gui_copy_text256(req.text, text);
     return openos_syscall_result(openos_syscall1(SYS_GUI_ADD_TEXTBOX, (int)&req));
+}
+
+static inline int openos_gui_add_textarea(int window_id, int x, int y, int w, int h, const char *text)
+{
+    openos_gui_widget_request_t req;
+    req.window_id = (unsigned int)window_id;
+    req.widget_id = 0;
+    req.x = x;
+    req.y = y;
+    req.w = w;
+    req.h = h;
+    openos_gui_copy_text256(req.text, text);
+    return openos_syscall_result(openos_syscall1(SYS_GUI_ADD_TEXTAREA, (int)&req));
+}
+
+static inline int openos_gui_add_text_editor(int window_id, int x, int y, int w, int h, const char *text)
+{
+    int widget_id = openos_gui_add_textarea(window_id, x, y, w, h, text);
+    if (widget_id >= 0) {
+        openos_syscall_result(openos_syscall3(SYS_GUI_SET_TEXT_FLAGS, window_id, widget_id,
+                                             (int)OPENOS_GUI_TEXTBOX_MULTILINE));
+    }
+    return widget_id;
+}
+
+static inline int openos_gui_add_log_view(int window_id, int x, int y, int w, int h, const char *text)
+{
+    int widget_id = openos_gui_add_textarea(window_id, x, y, w, h, text);
+    if (widget_id >= 0) {
+        openos_syscall_result(openos_syscall3(SYS_GUI_SET_TEXT_FLAGS, window_id, widget_id,
+                                             (int)(OPENOS_GUI_TEXTBOX_MULTILINE | OPENOS_GUI_TEXTBOX_READONLY)));
+    }
+    return widget_id;
+}
+
+static inline int openos_gui_add_panel(int window_id, int x, int y, int w, int h, unsigned int color)
+{
+    openos_gui_panel_request_t req;
+    req.window_id = (unsigned int)window_id;
+    req.widget_id = 0;
+    req.x = x;
+    req.y = y;
+    req.w = w;
+    req.h = h;
+    req.bg_color = color;
+    req.border_color = 0;
+    req.flags = 0;
+    req.border_width = 0;
+    req.padding = 0;
+    return openos_syscall_result(openos_syscall1(SYS_GUI_ADD_PANEL, (int)&req));
+}
+
+static inline int openos_gui_add_canvas(int window_id, int x, int y, int w, int h, unsigned int color)
+{
+    openos_gui_panel_request_t req;
+    req.window_id = (unsigned int)window_id;
+    req.widget_id = 0;
+    req.x = x;
+    req.y = y;
+    req.w = w;
+    req.h = h;
+    req.bg_color = color;
+    req.border_color = 0;
+    req.flags = 0;
+    req.border_width = 0;
+    req.padding = 0;
+    return openos_syscall_result(openos_syscall1(SYS_GUI_ADD_CANVAS, (int)&req));
+}
+
+static inline int openos_gui_add_toggle(int window_id, int x, int y, int w, int h, const char *text, int checked)
+{
+    openos_gui_widget_request_t req;
+    req.window_id = (unsigned int)window_id;
+    req.widget_id = checked ? 1u : 0u;
+    req.x = x;
+    req.y = y;
+    req.w = w;
+    req.h = h;
+    openos_gui_copy_text256(req.text, text);
+    return openos_syscall_result(openos_syscall1(SYS_GUI_ADD_TOGGLE, (int)&req));
+}
+
+static inline int openos_gui_add_checkbox(int window_id, int x, int y, int w, int h, const char *text, int checked)
+{
+    openos_gui_widget_request_t req;
+    req.window_id = (unsigned int)window_id;
+    req.widget_id = checked ? 1u : 0u;
+    req.x = x;
+    req.y = y;
+    req.w = w;
+    req.h = h;
+    openos_gui_copy_text256(req.text, text);
+    return openos_syscall_result(openos_syscall1(SYS_GUI_ADD_CHECKBOX, (int)&req));
+}
+
+static inline int openos_gui_add_radiobutton(int window_id, int x, int y, int w, int h, const char *text, int group_id, int checked)
+{
+    openos_gui_radio_request_t req;
+    req.window_id = (unsigned int)window_id;
+    req.group_id = (unsigned int)group_id;
+    req.checked = checked ? 1u : 0u;
+    req.x = x;
+    req.y = y;
+    req.w = w;
+    req.h = h;
+    openos_gui_copy_text256(req.text, text);
+    return openos_syscall_result(openos_syscall1(SYS_GUI_ADD_RADIOBUTTON, (int)&req));
+}
+
+static inline int openos_gui_add_select(int window_id, int x, int y, int w, int h, const char *items, int selected_index)
+{
+    openos_gui_select_request_t req;
+    req.window_id = (unsigned int)window_id;
+    req.widget_id = 0;
+    req.x = x;
+    req.y = y;
+    req.w = w;
+    req.h = h;
+    req.selected_index = selected_index;
+    openos_gui_copy_text256(req.items, items);
+    return openos_syscall_result(openos_syscall1(SYS_GUI_ADD_SELECT, (int)&req));
+}
+
+static inline int openos_gui_add_combobox(int window_id, int x, int y, int w, int h, const char *items, int selected_index)
+{
+    openos_gui_select_request_t req;
+    req.window_id = (unsigned int)window_id;
+    req.widget_id = 0;
+    req.x = x;
+    req.y = y;
+    req.w = w;
+    req.h = h;
+    req.selected_index = selected_index;
+    openos_gui_copy_text256(req.items, items);
+    return openos_syscall_result(openos_syscall1(SYS_GUI_ADD_COMBOBOX, (int)&req));
+}
+
+static inline int openos_gui_add_tableview(int window_id, int x, int y, int w, int h, const char *columns, const char *rows, int selected_row, unsigned int flags)
+{
+    openos_gui_tableview_request_t req;
+    req.window_id = (unsigned int)window_id;
+    req.widget_id = 0;
+    req.x = x;
+    req.y = y;
+    req.w = w;
+    req.h = h;
+    req.selected_row = selected_row;
+    req.flags = flags;
+    openos_gui_copy_text128(req.columns, columns);
+    openos_gui_copy_text256(req.rows, rows);
+    return openos_syscall_result(openos_syscall1(SYS_GUI_ADD_TABLEVIEW, (int)&req));
+}
+
+static inline int openos_gui_add_menubar(int window_id, int x, int y, int w, int h, const char *menus, int active_index)
+{
+    openos_gui_menubar_request_t req;
+    req.window_id = (unsigned int)window_id;
+    req.widget_id = 0;
+    req.x = x;
+    req.y = y;
+    req.w = w;
+    req.h = h;
+    req.active_index = active_index;
+    openos_gui_copy_text256(req.menus, menus);
+    return openos_syscall_result(openos_syscall1(SYS_GUI_ADD_MENUBAR, (int)&req));
+}
+
+static inline int openos_gui_add_treeview(int window_id, int x, int y, int w, int h, const char *nodes, int selected_node, unsigned int flags)
+{
+    openos_gui_treeview_request_t req;
+    req.window_id = (unsigned int)window_id;
+    req.widget_id = 0;
+    req.x = x;
+    req.y = y;
+    req.w = w;
+    req.h = h;
+    req.selected_node = selected_node;
+    req.flags = flags;
+    openos_gui_copy_text256(req.nodes, nodes);
+    return openos_syscall_result(openos_syscall1(SYS_GUI_ADD_TREEVIEW, (int)&req));
+}
+
+static inline int openos_gui_add_slider(int window_id, int x, int y, int w, int h, int min, int max, int value, int step)
+{
+    openos_gui_slider_request_t req;
+    req.window_id = (unsigned int)window_id;
+    req.widget_id = 0;
+    req.x = x;
+    req.y = y;
+    req.w = w;
+    req.h = h;
+    req.min = min;
+    req.max = max;
+    req.value = value;
+    req.step = step;
+    return openos_syscall_result(openos_syscall1(SYS_GUI_ADD_SLIDER, (int)&req));
+}
+
+static inline int openos_gui_add_scrollbar(int window_id, int x, int y, int w, int h, int min, int max, int value, int step)
+{
+    openos_gui_scrollbar_request_t req;
+    req.window_id = (unsigned int)window_id;
+    req.widget_id = 0;
+    req.x = x;
+    req.y = y;
+    req.w = w;
+    req.h = h;
+    req.min = min;
+    req.max = max;
+    req.value = value;
+    req.step = step;
+    return openos_syscall_result(openos_syscall1(SYS_GUI_ADD_SCROLLBAR, (int)&req));
+}
+
+static inline int openos_gui_add_scrollview(int window_id, int x, int y, int w, int h, int content_w, int content_h)
+{
+    openos_gui_scrollbar_request_t req;
+    req.window_id = (unsigned int)window_id;
+    req.widget_id = 0;
+    req.x = x;
+    req.y = y;
+    req.w = w;
+    req.h = h;
+    req.min = 0;
+    req.max = content_w;
+    req.value = content_h;
+    req.step = 0;
+    return openos_syscall_result(openos_syscall1(SYS_GUI_ADD_SCROLLVIEW, (int)&req));
+}
+
+static inline int openos_gui_set_toggle_checked(int window_id, int widget_id, int checked)
+{
+    return openos_syscall_result(openos_syscall3(SYS_GUI_SET_TOGGLE_CHECKED, window_id, widget_id, checked ? 1 : 0));
+}
+
+static inline int openos_gui_get_toggle_checked(int window_id, int widget_id, int *out_checked)
+{
+    if (!out_checked) return -1;
+    return openos_syscall_result(openos_syscall3(SYS_GUI_GET_TOGGLE_CHECKED, window_id, widget_id, (int)out_checked));
+}
+
+static inline int openos_gui_set_checkbox_checked(int window_id, int widget_id, int checked)
+{
+    return openos_syscall_result(openos_syscall3(SYS_GUI_SET_CHECKBOX_CHECKED, window_id, widget_id, checked ? 1 : 0));
+}
+
+static inline int openos_gui_get_checkbox_checked(int window_id, int widget_id, int *out_checked)
+{
+    if (!out_checked) return -1;
+    return openos_syscall_result(openos_syscall3(SYS_GUI_GET_CHECKBOX_CHECKED, window_id, widget_id, (int)out_checked));
+}
+
+static inline int openos_gui_set_radiobutton_checked(int window_id, int widget_id, int checked)
+{
+    return openos_syscall_result(openos_syscall3(SYS_GUI_SET_RADIOBUTTON_CHECKED, window_id, widget_id, checked ? 1 : 0));
+}
+
+static inline int openos_gui_get_radiobutton_checked(int window_id, int widget_id, int *out_checked)
+{
+    if (!out_checked) return -1;
+    return openos_syscall_result(openos_syscall3(SYS_GUI_GET_RADIOBUTTON_CHECKED, window_id, widget_id, (int)out_checked));
+}
+
+static inline int openos_gui_set_select_index(int window_id, int widget_id, int selected_index)
+{
+    return openos_syscall_result(openos_syscall3(SYS_GUI_SET_SELECT_INDEX, window_id, widget_id, selected_index));
+}
+
+static inline int openos_gui_get_select_index(int window_id, int widget_id, int *out_selected_index)
+{
+    if (!out_selected_index) return -1;
+    return openos_syscall_result(openos_syscall3(SYS_GUI_GET_SELECT_INDEX, window_id, widget_id, (int)out_selected_index));
+}
+
+static inline int openos_gui_set_select_items(int window_id, int widget_id, const char *items)
+{
+    openos_gui_select_request_t req;
+    req.window_id = (unsigned int)window_id;
+    req.widget_id = (unsigned int)widget_id;
+    req.x = 0;
+    req.y = 0;
+    req.w = 0;
+    req.h = 0;
+    req.selected_index = 0;
+    openos_gui_copy_text256(req.items, items);
+    return openos_syscall_result(openos_syscall1(SYS_GUI_SET_SELECT_ITEMS, (int)&req));
+}
+
+
+static inline int openos_gui_set_listview_index(int window_id, int widget_id, int selected_index)
+{
+    return openos_syscall_result(openos_syscall3(SYS_GUI_SET_LISTVIEW_INDEX, window_id, widget_id, selected_index));
+}
+
+static inline int openos_gui_get_listview_index(int window_id, int widget_id, int *out_selected_index)
+{
+    if (!out_selected_index) return -1;
+    return openos_syscall_result(openos_syscall3(SYS_GUI_GET_LISTVIEW_INDEX, window_id, widget_id, (int)out_selected_index));
+}
+
+static inline int openos_gui_set_listview_items(int window_id, int widget_id, const char *items)
+{
+    openos_gui_select_request_t req;
+    req.window_id = (unsigned int)window_id;
+    req.widget_id = (unsigned int)widget_id;
+    req.x = 0;
+    req.y = 0;
+    req.w = 0;
+    req.h = 0;
+    req.selected_index = 0;
+    openos_gui_copy_text256(req.items, items);
+    return openos_syscall_result(openos_syscall1(SYS_GUI_SET_LISTVIEW_ITEMS, (int)&req));
+}
+
+static inline int openos_gui_set_tableview_row(int window_id, int widget_id, int selected_row)
+{
+    return openos_syscall_result(openos_syscall3(SYS_GUI_SET_TABLEVIEW_ROW, window_id, widget_id, selected_row));
+}
+
+static inline int openos_gui_get_tableview_row(int window_id, int widget_id, int *out_selected_row)
+{
+    if (!out_selected_row) return -1;
+    return openos_syscall_result(openos_syscall3(SYS_GUI_GET_TABLEVIEW_ROW, window_id, widget_id, (int)out_selected_row));
+}
+
+static inline int openos_gui_set_tableview_rows(int window_id, int widget_id, const char *rows)
+{
+    openos_gui_tableview_request_t req;
+    req.window_id = (unsigned int)window_id;
+    req.widget_id = (unsigned int)widget_id;
+    req.x = 0;
+    req.y = 0;
+    req.w = 0;
+    req.h = 0;
+    req.selected_row = 0;
+    req.flags = 0;
+    openos_gui_copy_text128(req.columns, "");
+    openos_gui_copy_text256(req.rows, rows);
+    return openos_syscall_result(openos_syscall1(SYS_GUI_SET_TABLEVIEW_ROWS, (int)&req));
+}
+
+static inline int openos_gui_set_menubar_active(int window_id, int widget_id, int active_index)
+{
+    return openos_syscall_result(openos_syscall3(SYS_GUI_SET_MENUBAR_ACTIVE, window_id, widget_id, active_index));
+}
+
+static inline int openos_gui_get_menubar_active(int window_id, int widget_id, int *out_active_index)
+{
+    if (!out_active_index) return -1;
+    return openos_syscall_result(openos_syscall3(SYS_GUI_GET_MENUBAR_ACTIVE, window_id, widget_id, (int)out_active_index));
+}
+
+static inline int openos_gui_set_menubar_menus(int window_id, int widget_id, const char *menus)
+{
+    openos_gui_menubar_request_t req;
+    req.window_id = (unsigned int)window_id;
+    req.widget_id = (unsigned int)widget_id;
+    req.x = 0;
+    req.y = 0;
+    req.w = 0;
+    req.h = 0;
+    req.active_index = 0;
+    openos_gui_copy_text256(req.menus, menus);
+    return openos_syscall_result(openos_syscall1(SYS_GUI_SET_MENUBAR_MENUS, (int)&req));
+}
+
+static inline int openos_gui_set_treeview_node(int window_id, int widget_id, int selected_node)
+{
+    return openos_syscall_result(openos_syscall3(SYS_GUI_SET_TREEVIEW_NODE, window_id, widget_id, selected_node));
+}
+
+static inline int openos_gui_get_treeview_node(int window_id, int widget_id, int *out_selected_node)
+{
+    if (!out_selected_node) return -1;
+    return openos_syscall_result(openos_syscall3(SYS_GUI_GET_TREEVIEW_NODE, window_id, widget_id, (int)out_selected_node));
+}
+
+static inline int openos_gui_set_treeview_nodes(int window_id, int widget_id, const char *nodes)
+{
+    openos_gui_treeview_request_t req;
+    req.window_id = (unsigned int)window_id;
+    req.widget_id = (unsigned int)widget_id;
+    req.x = 0;
+    req.y = 0;
+    req.w = 0;
+    req.h = 0;
+    req.selected_node = 0;
+    req.flags = 0;
+    openos_gui_copy_text256(req.nodes, nodes);
+    return openos_syscall_result(openos_syscall1(SYS_GUI_SET_TREEVIEW_NODES, (int)&req));
 }
 
 static inline int openos_gui_poll_event(openos_gui_event_t *event)
@@ -829,7 +1493,7 @@ static inline int openos_gui_set_text(int window_id, int widget_id, const char *
     req.y = 0;
     req.w = 0;
     req.h = 0;
-    openos_gui_copy_text64(req.text, text);
+    openos_gui_copy_text256(req.text, text);
     return openos_syscall_result(openos_syscall1(SYS_GUI_SET_TEXT, (int)&req));
 }
 
@@ -842,23 +1506,234 @@ static inline int openos_gui_set_text_cursor(int window_id, int widget_id, const
     req.y = 1;
     req.w = 0;
     req.h = 0;
-    openos_gui_copy_text64(req.text, text);
+    openos_gui_copy_text256(req.text, text);
     return openos_syscall_result(openos_syscall1(SYS_GUI_SET_TEXT, (int)&req));
 }
 
-static inline void openos_gui_copy_text128(char *dst, const char *src)
+static inline int openos_gui_get_text_with_cursor(int window_id, int widget_id, char *out_text, unsigned int out_size, int *out_cursor)
 {
-    unsigned int i;
-    if (!dst) return;
-    if (!src) src = "";
-    for (i = 0; i < 127 && src[i]; ++i) dst[i] = src[i];
-    dst[i] = 0;
+    openos_gui_text_request_t req;
+    int rc;
+    if (!out_text || out_size == 0)
+        return -1;
+    req.window_id = (unsigned int)window_id;
+    req.widget_id = (unsigned int)widget_id;
+    req.cursor = 0;
+    req.flags = 0;
+    req.text[0] = 0;
+    rc = openos_syscall_result(openos_syscall1(SYS_GUI_GET_TEXT, (int)&req));
+    if (rc < 0)
+        return rc;
+    openos_gui_copy_text_sized(out_text, out_size, req.text);
+    if (out_cursor)
+        *out_cursor = req.cursor;
+    return 0;
+}
+
+static inline int openos_gui_get_text(int window_id, int widget_id, char *out_text, unsigned int out_size)
+{
+    return openos_gui_get_text_with_cursor(window_id, widget_id, out_text, out_size, 0);
+}
+
+static inline int openos_gui_set_text_placeholder(int window_id, int widget_id, const char *placeholder)
+{
+    openos_gui_text_request_t req;
+    req.window_id = (unsigned int)window_id;
+    req.widget_id = (unsigned int)widget_id;
+    req.cursor = 0;
+    req.flags = 0;
+    openos_gui_copy_text256(req.text, placeholder);
+    return openos_syscall_result(openos_syscall1(SYS_GUI_SET_TEXT_PLACEHOLDER, (int)&req));
+}
+
+static inline int openos_gui_set_text_flags(int window_id, int widget_id, unsigned int flags)
+{
+    return openos_syscall_result(openos_syscall3(SYS_GUI_SET_TEXT_FLAGS, window_id, widget_id, (int)flags));
+}
+
+static inline int openos_gui_get_text_flags(int window_id, int widget_id, unsigned int *flags)
+{
+    if (!flags) return -1;
+    return openos_syscall_result(openos_syscall3(SYS_GUI_GET_TEXT_FLAGS, window_id, widget_id, (int)flags));
+}
+
+static inline int openos_gui_set_icon(int window_id, int widget_id, unsigned int icon)
+{
+    return openos_syscall_result(openos_syscall3(SYS_GUI_SET_ICON, window_id, widget_id, (int)icon));
+}
+
+static inline int openos_gui_set_button_flags(int window_id, int widget_id, unsigned int flags)
+{
+    return openos_syscall_result(openos_syscall3(SYS_GUI_SET_BUTTON_FLAGS, window_id, widget_id, (int)flags));
+}
+
+static inline int openos_gui_get_button_flags(int window_id, int widget_id, unsigned int *flags)
+{
+    if (!flags) return -1;
+    return openos_syscall_result(openos_syscall3(SYS_GUI_GET_BUTTON_FLAGS, window_id, widget_id, (int)flags));
+}
+
+static inline int openos_gui_set_widget_enabled(int window_id, int widget_id, int enabled)
+{
+    return openos_syscall_result(openos_syscall3(SYS_GUI_SET_WIDGET_ENABLED, window_id, widget_id, enabled ? 1 : 0));
+}
+
+static inline int openos_gui_get_widget_enabled(int window_id, int widget_id, int *enabled)
+{
+    if (!enabled) return -1;
+    return openos_syscall_result(openos_syscall3(SYS_GUI_GET_WIDGET_ENABLED, window_id, widget_id, (int)enabled));
+}
+
+static inline int openos_gui_set_label_options(int window_id, int widget_id, unsigned int flags, unsigned int align)
+{
+    return openos_syscall_result(openos_syscall4(SYS_GUI_SET_LABEL_OPTIONS, window_id, widget_id, (int)flags, (int)align));
+}
+
+static inline int openos_gui_get_label_options(int window_id, int widget_id, unsigned int *flags, unsigned int *align)
+{
+    unsigned int opts[2];
+    int rc;
+    if (!flags || !align) return -1;
+    rc = openos_syscall_result(openos_syscall3(SYS_GUI_GET_LABEL_OPTIONS, window_id, widget_id, (int)opts));
+    if (rc < 0) return rc;
+    *flags = opts[0];
+    *align = opts[1];
+    return 0;
+}
+
+static inline int openos_gui_measure_label(int window_id, int widget_id, int max_width, int *out_width, int *out_height)
+{
+    openos_gui_label_measure_request_t req;
+    int rc;
+    if (!out_width || !out_height) return -1;
+    req.window_id = (unsigned int)window_id;
+    req.widget_id = (unsigned int)widget_id;
+    req.max_width = max_width;
+    req.out_width = 0;
+    req.out_height = 0;
+    rc = openos_syscall_result(openos_syscall1(SYS_GUI_MEASURE_LABEL, (int)&req));
+    if (rc < 0) return rc;
+    *out_width = req.out_width;
+    *out_height = req.out_height;
+    return 0;
+}
+
+static inline int openos_gui_set_panel_options(int window_id, int widget_id, unsigned int bg_color, unsigned int border_color, unsigned int flags, unsigned int border_width, unsigned int padding)
+{
+    openos_gui_panel_request_t req;
+    req.window_id = (unsigned int)window_id;
+    req.widget_id = (unsigned int)widget_id;
+    req.x = 0;
+    req.y = 0;
+    req.w = 0;
+    req.h = 0;
+    req.bg_color = bg_color;
+    req.border_color = border_color;
+    req.flags = flags;
+    req.border_width = border_width;
+    req.padding = padding;
+    return openos_syscall_result(openos_syscall1(SYS_GUI_SET_PANEL_OPTIONS, (int)&req));
+}
+
+static inline int openos_gui_set_slider_value(int window_id, int widget_id, int value)
+{
+    return openos_syscall_result(openos_syscall3(SYS_GUI_SET_SLIDER_VALUE, window_id, widget_id, value));
+}
+
+static inline int openos_gui_get_slider_value(int window_id, int widget_id, int *value)
+{
+    return openos_syscall_result(openos_syscall3(SYS_GUI_GET_SLIDER_VALUE, window_id, widget_id, (int)value));
+}
+
+static inline int openos_gui_set_slider_step(int window_id, int widget_id, int step)
+{
+    return openos_syscall_result(openos_syscall3(SYS_GUI_SET_SLIDER_STEP, window_id, widget_id, step));
+}
+
+static inline int openos_gui_get_slider_step(int window_id, int widget_id, int *step)
+{
+    return openos_syscall_result(openos_syscall3(SYS_GUI_GET_SLIDER_STEP, window_id, widget_id, (int)step));
+}
+
+static inline int openos_gui_set_scrollbar_value(int window_id, int widget_id, int value)
+{
+    return openos_syscall_result(openos_syscall3(SYS_GUI_SET_SCROLLBAR_VALUE, window_id, widget_id, value));
+}
+
+static inline int openos_gui_get_scrollbar_value(int window_id, int widget_id, int *value)
+{
+    return openos_syscall_result(openos_syscall3(SYS_GUI_GET_SCROLLBAR_VALUE, window_id, widget_id, (int)value));
+}
+
+static inline int openos_gui_set_scrollbar_step(int window_id, int widget_id, int step)
+{
+    return openos_syscall_result(openos_syscall3(SYS_GUI_SET_SCROLLBAR_STEP, window_id, widget_id, step));
+}
+
+static inline int openos_gui_get_scrollbar_step(int window_id, int widget_id, int *step)
+{
+    return openos_syscall_result(openos_syscall3(SYS_GUI_GET_SCROLLBAR_STEP, window_id, widget_id, (int)step));
+}
+
+static inline int openos_gui_set_scrollview_offset(int window_id, int widget_id, int scroll_x, int scroll_y)
+{
+    return openos_syscall_result(openos_syscall4(SYS_GUI_SET_SCROLLVIEW_OFFSET, window_id, widget_id, scroll_x, scroll_y));
+}
+
+static inline int openos_gui_get_scrollview_offset(int window_id, int widget_id, int *scroll_x, int *scroll_y)
+{
+    int xy[2];
+    int ret;
+    if (!scroll_x || !scroll_y) return -1;
+    ret = openos_syscall_result(openos_syscall3(SYS_GUI_GET_SCROLLVIEW_OFFSET, window_id, widget_id, (int)xy));
+    if (ret < 0) return ret;
+    *scroll_x = xy[0];
+    *scroll_y = xy[1];
+    return 0;
+}
+
+static inline int openos_gui_set_scrollview_content_size(int window_id, int widget_id, int content_w, int content_h)
+{
+    return openos_syscall_result(openos_syscall4(SYS_GUI_SET_SCROLLVIEW_CONTENT_SIZE, window_id, widget_id, content_w, content_h));
+}
+
+static inline int openos_gui_get_scrollview_content_size(int window_id, int widget_id, int *content_w, int *content_h)
+{
+    int wh[2];
+    int ret;
+    if (!content_w || !content_h) return -1;
+    ret = openos_syscall_result(openos_syscall3(SYS_GUI_GET_SCROLLVIEW_CONTENT_SIZE, window_id, widget_id, (int)wh));
+    if (ret < 0) return ret;
+    *content_w = wh[0];
+    *content_h = wh[1];
+    return 0;
+}
+
+
+static inline int openos_gui_add_listview(int window_id, int x, int y, int w, int h, const char *items, int selected_index, unsigned int flags)
+{
+    openos_gui_select_request_t req;
+    req.window_id = (unsigned int)window_id;
+    req.widget_id = 0;
+    req.x = x;
+    req.y = y;
+    req.w = w;
+    req.h = h;
+    req.selected_index = selected_index;
+    openos_gui_copy_text256(req.items, items);
+    return openos_syscall_result(openos_syscall2(SYS_GUI_ADD_LISTVIEW, (int)&req, (int)flags));
+}
+
+static inline int openos_gui_set_widget_parent(int window_id, int widget_id, int parent_widget_id)
+{
+    return openos_syscall_result(openos_syscall3(SYS_GUI_SET_WIDGET_PARENT, window_id, widget_id, parent_widget_id));
 }
 
 static inline int openos_gui_fill_rect(int window_id, int x, int y, int w, int h, unsigned int color)
 {
     openos_gui_draw_request_t req;
     req.window_id = (unsigned int)window_id;
+    req.widget_id = 0;
     req.op = OPENOS_GUI_DRAW_FILL_RECT;
     req.x = x;
     req.y = y;
@@ -878,6 +1753,7 @@ static inline int openos_gui_draw_text(int window_id, int x, int y, const char *
 {
     openos_gui_draw_request_t req;
     req.window_id = (unsigned int)window_id;
+    req.widget_id = 0;
     req.op = OPENOS_GUI_DRAW_TEXT;
     req.x = x;
     req.y = y;
@@ -897,6 +1773,7 @@ static inline int openos_gui_blit_rgba32(int window_id, int x, int y, int w, int
 {
     openos_gui_draw_request_t req;
     req.window_id = (unsigned int)window_id;
+    req.widget_id = 0;
     req.op = OPENOS_GUI_DRAW_BLIT_RGBA32;
     req.x = x;
     req.y = y;
@@ -916,6 +1793,7 @@ static inline int openos_gui_scroll_rect(int window_id, int dst_x, int dst_y, in
 {
     openos_gui_draw_request_t req;
     req.window_id = (unsigned int)window_id;
+    req.widget_id = 0;
     req.op = OPENOS_GUI_DRAW_SCROLL;
     req.x = dst_x;
     req.y = dst_y;
@@ -935,6 +1813,107 @@ static inline int openos_gui_present(int window_id)
 {
     openos_gui_draw_request_t req;
     req.window_id = (unsigned int)window_id;
+    req.widget_id = 0;
+    req.op = OPENOS_GUI_DRAW_PRESENT;
+    req.x = 0;
+    req.y = 0;
+    req.w = 0;
+    req.h = 0;
+    req.fg_color = 0;
+    req.bg_color = 0;
+    req.pixels_user_ptr = 0;
+    req.src_stride = 0;
+    req.src_x = 0;
+    req.src_y = 0;
+    req.text[0] = 0;
+    return openos_syscall_result(openos_syscall1(SYS_GUI_DRAW, (int)&req));
+}
+
+static inline int openos_gui_canvas_fill_rect(int window_id, int canvas_id, int x, int y, int w, int h, unsigned int color)
+{
+    openos_gui_draw_request_t req;
+    req.window_id = (unsigned int)window_id;
+    req.widget_id = (unsigned int)canvas_id;
+    req.op = OPENOS_GUI_DRAW_FILL_RECT;
+    req.x = x;
+    req.y = y;
+    req.w = w;
+    req.h = h;
+    req.fg_color = 0;
+    req.bg_color = color;
+    req.pixels_user_ptr = 0;
+    req.src_stride = 0;
+    req.src_x = 0;
+    req.src_y = 0;
+    req.text[0] = 0;
+    return openos_syscall_result(openos_syscall1(SYS_GUI_DRAW, (int)&req));
+}
+
+static inline int openos_gui_canvas_draw_text(int window_id, int canvas_id, int x, int y, const char *text, unsigned int color)
+{
+    openos_gui_draw_request_t req;
+    req.window_id = (unsigned int)window_id;
+    req.widget_id = (unsigned int)canvas_id;
+    req.op = OPENOS_GUI_DRAW_TEXT;
+    req.x = x;
+    req.y = y;
+    req.w = 0;
+    req.h = 0;
+    req.fg_color = color;
+    req.bg_color = 0;
+    req.pixels_user_ptr = 0;
+    req.src_stride = 0;
+    req.src_x = 0;
+    req.src_y = 0;
+    openos_gui_copy_text128(req.text, text);
+    return openos_syscall_result(openos_syscall1(SYS_GUI_DRAW, (int)&req));
+}
+
+static inline int openos_gui_canvas_blit_rgba32(int window_id, int canvas_id, int x, int y, int w, int h, const unsigned int *pixels, unsigned int stride)
+{
+    openos_gui_draw_request_t req;
+    req.window_id = (unsigned int)window_id;
+    req.widget_id = (unsigned int)canvas_id;
+    req.op = OPENOS_GUI_DRAW_BLIT_RGBA32;
+    req.x = x;
+    req.y = y;
+    req.w = w;
+    req.h = h;
+    req.fg_color = 0;
+    req.bg_color = 0;
+    req.pixels_user_ptr = (unsigned int)pixels;
+    req.src_stride = stride;
+    req.src_x = 0;
+    req.src_y = 0;
+    req.text[0] = 0;
+    return openos_syscall_result(openos_syscall1(SYS_GUI_DRAW, (int)&req));
+}
+
+static inline int openos_gui_canvas_scroll_rect(int window_id, int canvas_id, int dst_x, int dst_y, int src_x, int src_y, int w, int h)
+{
+    openos_gui_draw_request_t req;
+    req.window_id = (unsigned int)window_id;
+    req.widget_id = (unsigned int)canvas_id;
+    req.op = OPENOS_GUI_DRAW_SCROLL;
+    req.x = dst_x;
+    req.y = dst_y;
+    req.w = w;
+    req.h = h;
+    req.fg_color = 0;
+    req.bg_color = 0;
+    req.pixels_user_ptr = 0;
+    req.src_stride = 0;
+    req.src_x = src_x;
+    req.src_y = src_y;
+    req.text[0] = 0;
+    return openos_syscall_result(openos_syscall1(SYS_GUI_DRAW, (int)&req));
+}
+
+static inline int openos_gui_canvas_present(int window_id, int canvas_id)
+{
+    openos_gui_draw_request_t req;
+    req.window_id = (unsigned int)window_id;
+    req.widget_id = (unsigned int)canvas_id;
     req.op = OPENOS_GUI_DRAW_PRESENT;
     req.x = 0;
     req.y = 0;

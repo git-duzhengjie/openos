@@ -516,73 +516,73 @@
 
 #### 17.0.1.1 当前已有但仍需组件化 / 用户态开放的控件
 
-- [ ] GUI TextInput 组件化：基于现有 `GUI_WIDGET_TEXTBOX` 封装完整单行输入组件
-  - [ ] 统一由组件维护文本、光标、可见滚动区和编辑状态
-  - [ ] 支持 Backspace / Delete / Left / Right / Home / End
-  - [ ] 支持鼠标点击定位光标
-  - [ ] 支持长文本水平滚动，避免应用自行截断显示
-  - [ ] 支持 placeholder、readonly、disabled、password 模式
-  - [ ] 支持 TextChanged / TextSubmit / Focus / Blur 事件
-  - [ ] 提供用户态 get/set text、get/set cursor API
-  - [ ] 浏览器地址栏改为复用 TextInput，不再自维护地址栏光标和删除逻辑
-- [ ] GUI Button 组件化增强：基于现有 `GUI_WIDGET_BUTTON` 补齐通用按钮状态
-  - [ ] 支持 hover / pressed / disabled / focused 状态
-  - [ ] 支持键盘触发 Space / Enter
-  - [ ] 支持图标 + 文本按钮
-  - [ ] 支持默认按钮 / 危险按钮样式
-- [ ] GUI Label 组件化增强：基于现有 `GUI_WIDGET_LABEL` 补齐文本组件能力
-  - [ ] 支持自动换行、省略号、对齐方式
-  - [ ] 支持多行文本和动态测量
-  - [ ] 支持 selectable/copyable 文本模式
-- [ ] GUI Panel 组件化并开放给用户态：基于现有 `GUI_WIDGET_PANEL` 作为容器/背景组件
-  - [ ] 提供用户态创建 Panel API
-  - [ ] 支持边框、背景色、padding、子控件布局边界
-- [ ] GUI Slider 组件化并开放给用户态：基于现有 `GUI_WIDGET_SLIDER` 做通用滑块组件
-  - [ ] 提供用户态创建 Slider API
-  - [ ] 支持 min/max/value/step
-  - [ ] 支持 ValueChanged 事件
-- [ ] GUI Canvas / 绘制区域组件化：把当前 fill/text/blit/scroll/present 低层绘制能力封装成可复用绘制组件
-  - [ ] 支持脏矩形提交、裁剪区域、局部重绘
-  - [ ] 支持应用自绘内容与 GUI 控件焦点/事件共存
-- [ ] 桌面图标组件化：把当前桌面内部图标抽成 IconView/IconButton
-  - [ ] 支持图标、标题、选中、高亮、双击打开
-  - [ ] 支持桌面、启动器、文件管理器复用
-- [ ] 内部菜单组件化：把当前开始菜单 / 右键菜单抽成通用 Menu / ContextMenu
-  - [ ] 支持菜单项、分隔线、禁用项、快捷键提示
-  - [ ] 支持子菜单和点击回调事件
-- [ ] 文件列表组件化：把当前 File Preview / 文件浏览列表抽成 ListView/TableView
-  - [ ] 支持行选择、列宽、列头排序、滚动、双击打开
-  - [ ] 支持文件管理器和搜索结果复用
-- [ ] 终端文本区组件化：把 GUI Terminal 内部文本显示/输入抽成 TextArea 或 TerminalView
-  - [ ] 支持多行文本、滚动、选中、复制、光标绘制
-  - [ ] 支持后续文本编辑器和日志窗口复用
-- [ ] 设置项组件化：把设置窗口里的开关、滑块、选项行抽成 SettingsRow / Toggle / Slider 组合组件
+- [√] GUI TextInput 组件化：基于现有 `GUI_WIDGET_TEXTBOX` 封装完整单行输入组件
+  - [√] 统一由组件维护文本、光标、可见滚动区和编辑状态
+  - [√] 支持 Backspace / Delete / Left / Right / Home / End
+  - [√] 支持鼠标点击定位光标
+  - [√] 支持长文本水平滚动，避免应用自行截断显示
+  - [√] 支持 placeholder、readonly、disabled、password 模式
+  - [√] 支持 TextChanged / TextSubmit / Focus / Blur 事件
+  - [√] 提供用户态 get/set text、get/set cursor API
+  - [√] 浏览器地址栏改为复用 TextInput，不再自维护地址栏光标和删除逻辑
+- [√] GUI Button 组件化增强：基于现有 `GUI_WIDGET_BUTTON` 补齐通用按钮状态
+  - [√] 支持 hover / pressed / disabled / focused 状态
+  - [√] 支持键盘触发 Space / Enter
+  - [√] 支持图标 + 文本按钮
+  - [√] 支持默认按钮 / 危险按钮样式
+- [√] GUI Label 组件化增强：基于现有 `GUI_WIDGET_LABEL` 补齐文本组件能力
+  - [√] 支持自动换行、省略号、对齐方式
+  - [√] 支持多行文本和动态测量
+  - [√] 支持 selectable/copyable 文本模式
+- [√] GUI Panel 组件化并开放给用户态：基于现有 `GUI_WIDGET_PANEL` 作为容器/背景组件
+  - [√] 提供用户态创建 Panel API
+  - [√] 支持边框、背景色、padding、子控件布局边界
+- [√] GUI Slider 组件化并开放给用户态：基于现有 `GUI_WIDGET_SLIDER` 做通用滑块组件
+  - [√] 提供用户态创建 Slider API
+  - [√] 支持 min/max/value/step
+  - [√] 支持 ValueChanged 事件
+- [√] GUI Canvas / 绘制区域组件化：把当前 fill/text/blit/scroll/present 低层绘制能力封装成可复用绘制组件
+  - [√] 支持脏矩形提交、裁剪区域、局部重绘
+  - [√] 支持应用自绘内容与 GUI 控件焦点/事件共存
+- [√] 桌面图标组件化：把当前桌面内部图标抽成 IconView/IconButton
+  - [√] 支持图标、标题、选中、高亮、双击打开
+  - [√] 支持桌面、启动器、文件管理器复用
+- [√] 内部菜单组件化：把当前开始菜单 / 右键菜单抽成通用 Menu / ContextMenu
+  - [√] 支持菜单项、分隔线、禁用项、快捷键提示
+  - [√] 支持子菜单和点击回调事件
+- [√] 文件列表组件化：把当前 File Preview / 文件浏览列表抽成 ListView/TableView
+  - [√] 支持行选择、列宽、列头排序、滚动、双击打开
+  - [√] 支持文件管理器和搜索结果复用
+- [√] 终端文本区组件化：把 GUI Terminal 内部文本显示/输入抽成 TextArea 或 TerminalView
+  - [√] 支持多行文本、滚动、选中、复制、光标绘制
+  - [√] 支持后续文本编辑器和日志窗口复用（TerminalView 提供 layout、坐标换算、选择、剪贴板、绘制 API）
+- [√] 设置项组件化：把设置窗口里的开关、滑块、选项行抽成 SettingsRow / Toggle / Slider 组合组件
 
 #### 17.0.1.2 当前缺失的新 GUI 组件
 
-- [ ] TextArea：多行文本输入组件
-  - [ ] 支持多行编辑、换行、滚动、选中、复制/粘贴
-  - [ ] 支持文本编辑器、日志窗口、表单 textarea 复用
-- [ ] ScrollBar：滚动条组件
-  - [ ] 支持垂直/水平滚动条、拖拽滑块、滚轮事件联动
-  - [ ] 支持浏览器页面、列表、文本区复用
-- [ ] ScrollView：可滚动容器组件
-  - [ ] 支持内容尺寸、视口尺寸、滚动位置和子控件裁剪
-- [ ] CheckBox：复选框组件
-  - [ ] 支持 checked / unchecked / disabled 状态
-  - [ ] 支持设置页和表单复用
-- [ ] RadioButton / RadioGroup：单选组件
-  - [ ] 支持分组互斥选择和值变化事件
-- [ ] Select / ComboBox：下拉选择组件
-  - [ ] 支持下拉列表、当前值、键盘选择和值变化事件
-- [ ] ListView：通用列表组件
-  - [ ] 支持单选/多选、键盘导航、滚动、item renderer
-- [ ] TableView：表格组件
-  - [ ] 支持列头、排序、列宽、行选择、滚动
-- [ ] TreeView：树形组件
-  - [ ] 支持展开/折叠、层级缩进、文件树/设置树复用
-- [ ] MenuBar：窗口顶部菜单栏组件
-  - [ ] 支持 File/Edit/View 等菜单入口和快捷键提示
+- [x] TextArea：多行文本输入组件
+  - [x] 支持多行编辑、换行、滚动；选中、复制/粘贴待补齐
+  - [√] 支持文本编辑器、日志窗口、表单 textarea 复用
+- [x] ScrollBar：滚动条组件
+  - [x] 支持垂直/水平滚动条、拖拽滑块、滚轮事件联动
+  - [x] 支持浏览器页面、列表、文本区复用
+- [x] ScrollView：可滚动容器组件
+  - [x] 支持内容尺寸、视口尺寸、滚动位置和子控件裁剪
+- [x] CheckBox：复选框组件
+  - [x] 支持 checked / unchecked / disabled 状态
+  - [x] 支持设置页和表单复用
+- [x] RadioButton / RadioGroup：单选组件
+  - [x] 支持分组互斥选择和值变化事件
+- [x] Select / ComboBox：下拉选择组件
+  - [x] 支持下拉列表、当前值、键盘选择和值变化事件
+- [x] ListView：通用列表组件
+  - [x] 支持单选/多选、键盘导航、滚动、item renderer
+- [x] TableView：表格组件
+  - [x] 支持列头、排序、列宽、行选择、滚动
+- [x] TreeView：树形组件
+  - [x] 支持展开/折叠、层级缩进、文件树/设置树复用
+- [x] MenuBar：窗口顶部菜单栏组件
+  - [x] 支持 File/Edit/View 等菜单入口和快捷键提示
 - [ ] ContextMenu：右键菜单组件
   - [ ] 支持鼠标位置弹出、点击外部关闭、禁用项
 - [ ] Dialog：通用弹窗组件

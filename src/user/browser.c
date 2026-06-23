@@ -49,10 +49,6 @@ typedef struct browser_load_context {
     int selected_link;
     int focus_mode;
     int address_label_id;
-    int address_editing;
-    int address_cursor;
-    int address_visible_start;
-    int address_visible_prefix;
     int home_visible;
     char address_text[BROWSER_ADDRESS_MAX];
     ob_dom_document_t dom;
@@ -380,120 +376,30 @@ static void browser_format_address(char *out, int out_size, const char *host, co
 static void browser_update_address_label(browser_load_context_t *ctx)
 {
     const char *text;
-    char visible[BROWSER_ADDRESS_MAX];
-    int len;
-    int start = 0;
-    int visible_cursor;
     if (!ctx || ctx->window_id <= 0 || ctx->address_label_id <= 0) return;
     text = ctx->address_text[0] ? ctx->address_text : "Search OpenOS or type a URL";
-    len = (int)strlen(text);
-    if (ctx->address_cursor < 0 || ctx->address_cursor > len) ctx->address_cursor = len;
-    ctx->address_visible_start = 0;
-    ctx->address_visible_prefix = 0;
-    if (ctx->address_text[0] && len > 60) {
-        start = ctx->address_cursor - 30;
-        if (start < 0) start = 0;
-        if (start > len - 60) start = len - 60;
-        ctx->address_visible_start = start;
-        ctx->address_visible_prefix = start > 0 ? 3 : 0;
-        snprintf(visible, sizeof(visible), "%s%.*s%s", ctx->address_visible_prefix ? "..." : "", 60, text + start, start + 60 < len ? "..." : "");
-        visible_cursor = ctx->address_cursor - start + ctx->address_visible_prefix;
-        if (visible_cursor < 0) visible_cursor = 0;
-        if (visible_cursor > (int)strlen(visible)) visible_cursor = (int)strlen(visible);
-        openos_gui_set_text_cursor(ctx->window_id, ctx->address_label_id, visible, visible_cursor);
-        return;
-    }
-    openos_gui_set_text_cursor(ctx->window_id, ctx->address_label_id, text, ctx->address_cursor);
+    openos_gui_set_text_cursor(ctx->window_id, ctx->address_label_id, text, (int)strlen(text));
 }
 
 static void browser_sync_address_from_target(browser_load_context_t *ctx, const char *host, const char *path, int is_file)
 {
     if (!ctx) return;
     browser_format_address(ctx->address_text, sizeof(ctx->address_text), host, path, is_file);
-    ctx->address_cursor = (int)strlen(ctx->address_text);
     browser_update_address_label(ctx);
 }
 
-static int browser_address_handle_key(browser_load_context_t *ctx, unsigned int key, char *host, int host_size, char *path, int path_size, int *is_file, char *error, int error_size)
+static int browser_address_submit_text(browser_load_context_t *ctx, const char *address, char *host, int host_size, char *path, int path_size, int *is_file, char *error, int error_size)
 {
-    int len;
-    int i;
     ob_url_parts_t parts;
-    if (!ctx) return 0;
-    if (!ctx->address_editing) ctx->address_editing = 1;
-    len = (int)strlen(ctx->address_text);
-    if (ctx->address_cursor < 0 || ctx->address_cursor > len) ctx->address_cursor = len;
-    if (key == OPENOS_GUI_KEY_ESCAPE) {
-        ctx->address_editing = 0;
-        ctx->address_cursor = (int)strlen(ctx->address_text);
-        browser_update_address_label(ctx);
-        return 0;
-    }
-    if (key == OPENOS_GUI_KEY_LEFT) {
-        if (ctx->address_cursor > 0) ctx->address_cursor--;
-        browser_update_address_label(ctx);
-        return 0;
-    }
-    if (key == OPENOS_GUI_KEY_RIGHT) {
-        if (ctx->address_cursor < len) ctx->address_cursor++;
-        browser_update_address_label(ctx);
-        return 0;
-    }
-    if (key == OPENOS_GUI_KEY_HOME) {
-        ctx->address_cursor = 0;
-        browser_update_address_label(ctx);
-        return 0;
-    }
-    if (key == OPENOS_GUI_KEY_END) {
-        ctx->address_cursor = len;
-        browser_update_address_label(ctx);
-        return 0;
-    }
-    if (key == OPENOS_GUI_KEY_BACKSPACE || key == 127u || key == '\b') {
-        ctx->address_editing = 2;
-        if (ctx->address_cursor > 0 && len > 0) {
-            memmove(ctx->address_text + ctx->address_cursor - 1,
-                    ctx->address_text + ctx->address_cursor,
-                    len - ctx->address_cursor + 1);
-            ctx->address_cursor--;
-        }
-        browser_update_address_label(ctx);
-        return 0;
-    }
-    if (key == OPENOS_GUI_KEY_DELETE) {
-        ctx->address_editing = 2;
-        if (ctx->address_cursor < len) {
-            memmove(ctx->address_text + ctx->address_cursor,
-                    ctx->address_text + ctx->address_cursor + 1,
-                    len - ctx->address_cursor);
-        }
-        browser_update_address_label(ctx);
-        return 0;
-    }
-    if (key == OPENOS_GUI_KEY_ENTER || key == '\n') {
-        if (ob_url_parse_address(ctx->address_text, host && host[0] ? host : BROWSER_DEFAULT_HOST, &parts, error, error_size) != 0) return -1;
-        if (host && host_size > 0) snprintf(host, host_size, "%s", parts.host);
-        if (path && path_size > 0) snprintf(path, path_size, "%s", parts.path);
-        if (is_file) *is_file = parts.is_file;
-        ctx->address_editing = 0;
-        browser_sync_address_from_target(ctx, parts.host, parts.path, parts.is_file);
-        return 1;
-    }
-    if (key >= 32u && key <= 126u) {
-        if (ctx->address_editing == 1) {
-            ctx->address_text[0] = 0;
-            ctx->address_cursor = 0;
-            ctx->address_editing = 2;
-            len = 0;
-        }
-        if (len < (int)sizeof(ctx->address_text) - 1) {
-            for (i = len; i >= ctx->address_cursor; --i)
-                ctx->address_text[i + 1] = ctx->address_text[i];
-            ctx->address_text[ctx->address_cursor++] = (char)key;
-        }
-        browser_update_address_label(ctx);
-    }
-    return 0;
+    const char *base_host;
+    if (!ctx || !address) return -1;
+    base_host = host && host[0] ? host : BROWSER_DEFAULT_HOST;
+    if (ob_url_parse_address(address, base_host, &parts, error, error_size) != 0) return -1;
+    if (host && host_size > 0) snprintf(host, host_size, "%s", parts.host);
+    if (path && path_size > 0) snprintf(path, path_size, "%s", parts.path);
+    if (is_file) *is_file = parts.is_file;
+    browser_sync_address_from_target(ctx, parts.host, parts.path, parts.is_file);
+    return 1;
 }
 
 static void browser_make_home_view(char *out, int out_size, const char *address)
@@ -1005,7 +911,6 @@ static void browser_update_form_status(int win, int status_label, const browser_
 static int browser_focus_next(browser_load_context_t *load, int win, int status_label, int body_label, int scroll_line)
 {
     if (!load) return -1;
-    load->address_editing = 0;
     if (load->focus_mode == BROWSER_FOCUS_LINK && load->form_state.count > 0) {
         load->focus_mode = BROWSER_FOCUS_FORM;
         if (load->form_state.focused < 0) ob_form_state_focus_next(&load->form_state);
@@ -1294,31 +1199,46 @@ int main(int argc, char **argv)
     for (;;) {
         openos_gui_event_t event;
         int ev = openos_gui_poll_event(&event);
-        if (ev == 0 && event.type != OPENOS_GUI_EVENT_NONE && event.window_id == (unsigned int)win) {
-            if (event.type == OPENOS_GUI_EVENT_KEY_DOWN || event.type == OPENOS_GUI_EVENT_TEXT_INPUT) {
-                int address_focused = (event.widget_id == (unsigned int)address_label) ||
-                                      (load.address_editing && event.widget_id == 0 &&
-                                       (event.key == OPENOS_GUI_KEY_BACKSPACE ||
-                                        event.key == OPENOS_GUI_KEY_DELETE ||
-                                        event.key == OPENOS_GUI_KEY_LEFT ||
-                                        event.key == OPENOS_GUI_KEY_RIGHT ||
-                                        event.key == OPENOS_GUI_KEY_HOME ||
-                                        event.key == OPENOS_GUI_KEY_END ||
-                                        event.key == OPENOS_GUI_KEY_ENTER ||
-                                        event.key == OPENOS_GUI_KEY_TAB ||
-                                        (event.key >= 32u && event.key <= 126u)));
-                if (address_focused) {
-                    load.address_editing = 1;
+        if (ev > 0 && event.type != OPENOS_GUI_EVENT_NONE && event.window_id == (unsigned int)win) {
+            if (event.type == OPENOS_GUI_EVENT_TEXT_CHANGED && event.widget_id == (unsigned int)address_label) {
+                openos_gui_get_text(win, address_label, load.address_text, sizeof(load.address_text));
+                openos_gui_set_text(win, status_label, "Address bar selected - type a URL, then press Enter");
+                continue;
+            }
+            if (event.type == OPENOS_GUI_EVENT_TEXT_SUBMIT && event.widget_id == (unsigned int)address_label) {
+                char next_host[BROWSER_HOST_MAX];
+                char next_path[BROWSER_PATH_MAX];
+                char address[BROWSER_ADDRESS_MAX];
+                char error[96];
+                int next_is_file = 0;
+                int submit_rc;
+                openos_gui_get_text(win, address_label, address, sizeof(address));
+                snprintf(next_host, sizeof(next_host), "%s", host ? host : "");
+                snprintf(next_path, sizeof(next_path), "%s", path ? path : "/");
+                error[0] = 0;
+                submit_rc = browser_address_submit_text(&load, address, next_host, sizeof(next_host), next_path, sizeof(next_path), &next_is_file, error, sizeof(error));
+                if (submit_rc < 0) {
+                    openos_gui_set_text(win, status_label, error[0] ? error : "Invalid address");
+                } else {
+                    snprintf(load.host, sizeof(load.host), "%s", next_host);
+                    snprintf(load.path, sizeof(load.path), "%s", next_path);
+                    host = next_is_file ? "" : load.host;
+                    path = load.path;
+                    browser_history_push(&history, next_host, next_path, next_is_file);
+                    scroll_line = 0;
+                    browser_start_load(&load, win, status_label, body_label, next_host, next_path, next_is_file);
                 }
+                continue;
+            }
+            if (event.type == OPENOS_GUI_EVENT_KEY_DOWN || event.type == OPENOS_GUI_EVENT_TEXT_INPUT) {
                 if (event.type == OPENOS_GUI_EVENT_KEY_DOWN && event.key == OPENOS_GUI_KEY_TAB) {
                     browser_focus_next(&load, win, status_label, body_label, scroll_line);
                     continue;
                 }
-                if (event.type == OPENOS_GUI_EVENT_KEY_DOWN && event.key == OPENOS_GUI_KEY_ENTER && !load.address_editing) {
+                if (event.type == OPENOS_GUI_EVENT_KEY_DOWN && event.key == OPENOS_GUI_KEY_ENTER) {
                     if (load.home_visible) {
-                        load.address_editing = 1;
                         snprintf(load.address_text, sizeof(load.address_text), "");
-                        browser_update_address_label(&load);
+                        openos_gui_set_text_cursor(win, address_label, "", 0);
                         openos_gui_set_text(win, status_label, "Type an address, then press Enter");
                     } else if (load.focus_mode == BROWSER_FOCUS_FORM) {
                         browser_submit_current_form(&load, &history, win, status_label, body_label, &scroll_line);
@@ -1327,28 +1247,7 @@ int main(int argc, char **argv)
                     }
                     continue;
                 }
-                char next_host[BROWSER_HOST_MAX];
-                char next_path[BROWSER_PATH_MAX];
-                char error[96];
-                int next_is_file = 0;
-                int key_rc;
-                snprintf(next_host, sizeof(next_host), "%s", host ? host : "");
-                snprintf(next_path, sizeof(next_path), "%s", path ? path : "/");
-                error[0] = 0;
-                if (load.address_editing || load.form_state.count <= 0) {
-                    key_rc = browser_address_handle_key(&load, event.key, next_host, sizeof(next_host), next_path, sizeof(next_path), &next_is_file, error, sizeof(error));
-                    if (key_rc < 0) {
-                        openos_gui_set_text(win, status_label, error[0] ? error : "Invalid address");
-                    } else if (key_rc > 0) {
-                        host = next_is_file ? "" : load.host;
-                        path = load.path;
-                        snprintf(load.host, sizeof(load.host), "%s", next_host);
-                        snprintf(load.path, sizeof(load.path), "%s", next_path);
-                        browser_history_push(&history, next_host, next_path, next_is_file);
-                        scroll_line = 0;
-                        browser_start_load(&load, win, status_label, body_label, next_host, next_path, next_is_file);
-                    }
-                } else if (ob_form_state_handle_key(&load.form_state, event.key)) {
+                if (ob_form_state_handle_key(&load.form_state, event.key)) {
                     load.focus_mode = BROWSER_FOCUS_FORM;
                     browser_refresh_form_body(&load, body_label, scroll_line);
                     browser_update_form_status(win, status_label, &load);
@@ -1358,26 +1257,16 @@ int main(int argc, char **argv)
             if (event.widget_id == (unsigned int)close_button)
                 break;
             if (event.widget_id == (unsigned int)address_label) {
-                int len;
-                int click_col;
-                load.address_editing = 1;
-                if (load.home_visible && strcmp(load.address_text, "Search OpenOS or type a URL") == 0)
-                    load.address_text[0] = 0;
-                len = (int)strlen(load.address_text);
-                click_col = (event.x - 4) / 8;
-                if (click_col < 0) click_col = 0;
-                click_col -= load.address_visible_prefix;
-                if (click_col < 0) click_col = 0;
-                load.address_cursor = load.address_visible_start + click_col;
-                if (load.address_cursor > len) load.address_cursor = len;
-                browser_update_address_label(&load);
+                if (load.home_visible) {
+                    snprintf(load.address_text, sizeof(load.address_text), "");
+                    openos_gui_set_text_cursor(win, address_label, "", 0);
+                }
                 openos_gui_set_text(win, status_label, "Address bar selected - type a URL, then press Enter");
             } else if (event.widget_id == (unsigned int)load_button) {
                 const browser_history_entry_t *cur = browser_history_current(&history);
                 if (load.home_visible) {
-                    load.address_editing = 1;
                     snprintf(load.address_text, sizeof(load.address_text), "");
-                    browser_update_address_label(&load);
+                    openos_gui_set_text_cursor(win, address_label, "", 0);
                     openos_gui_set_text(win, status_label, "Type an address, then press Enter");
                 } else if (cur) {
                     scroll_line = 0;
@@ -1413,7 +1302,6 @@ int main(int argc, char **argv)
                     browser_update_link_status(win, status_label, &load);
                 }
             } else if (event.widget_id == (unsigned int)next_field_button) {
-                load.address_editing = 0;
                 if (ob_form_state_focus_next(&load.form_state) >= 0) {
                     load.focus_mode = BROWSER_FOCUS_FORM;
                     browser_refresh_form_body(&load, body_label, scroll_line);

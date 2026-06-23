@@ -35,6 +35,41 @@
 #define GUI_LAUNCHER_ITEM_H      24
 #define GUI_TASKBAR_SEARCH_MAX_RESULTS 8u
 #define GUI_TASKBAR_SEARCH_PATH_LEN 128u
+#define GUI_WIDGET_TEXT_CAP      256u
+
+#define GUI_LABEL_FLAG_ELLIPSIS   0x00000001u
+#define GUI_LABEL_FLAG_MULTILINE  0x00000002u
+#define GUI_LABEL_FLAG_SELECTABLE 0x00000004u
+#define GUI_LABEL_FLAG_COPYABLE   0x00000008u
+#define GUI_LABEL_ALIGN_LEFT      0u
+#define GUI_LABEL_ALIGN_CENTER    1u
+#define GUI_LABEL_ALIGN_RIGHT     2u
+
+#define GUI_BUTTON_FLAG_DEFAULT   0x00000001u
+#define GUI_BUTTON_FLAG_DANGER    0x00000002u
+#define GUI_TOGGLE_FLAG_ON        0x00000004u
+#define GUI_CHECKBOX_FLAG_CHECKED 0x00000008u
+#define GUI_RADIOBUTTON_FLAG_CHECKED 0x00000010u
+
+#define GUI_TEXTBOX_FLAG_READONLY  0x00000001u
+#define GUI_TEXTBOX_FLAG_DISABLED  0x00000002u
+#define GUI_TEXTBOX_FLAG_PASSWORD  0x00000004u
+#define GUI_TEXTBOX_FLAG_MULTILINE 0x00000008u
+#define GUI_TEXTBOX_FLAG_WRAP      0x00000010u
+
+#define GUI_LISTVIEW_FLAG_MULTI_SELECT    0x00000001u
+#define GUI_LISTVIEW_FLAG_SHOW_CHECKBOXES 0x00000002u
+
+#define GUI_TABLEVIEW_FLAG_SHOW_HEADER     0x00000001u
+#define GUI_TABLEVIEW_FLAG_GRID_LINES      0x00000002u
+#define GUI_TABLEVIEW_FLAG_ROW_SELECT      0x00000004u
+#define GUI_TABLEVIEW_FLAG_SORTABLE        0x00000008u
+#define GUI_TREEVIEW_FLAG_SHOW_LINES        0x00000001u
+#define GUI_TREEVIEW_FLAG_SHOW_ICONS        0x00000002u
+
+#define GUI_PANEL_FLAG_BORDER      0x00000001u
+#define GUI_PANEL_FLAG_ROUNDED     0x00000002u
+#define GUI_PANEL_FLAG_SHADOW      0x00000004u
 
 #define GUI_WINDOW_FLAG_NONE      0x00000000u
 #define GUI_WINDOW_FLAG_CLOSABLE  0x00000001u
@@ -85,7 +120,21 @@ typedef enum gui_widget_type {
     GUI_WIDGET_BUTTON,
     GUI_WIDGET_PANEL,
     GUI_WIDGET_TEXTBOX,
-    GUI_WIDGET_SLIDER
+    GUI_WIDGET_SLIDER,
+    GUI_WIDGET_TEXTAREA,
+    GUI_WIDGET_CANVAS,
+    GUI_WIDGET_ICON_BUTTON,
+    GUI_WIDGET_TOGGLE,
+    GUI_WIDGET_CHECKBOX,
+    GUI_WIDGET_RADIOBUTTON,
+    GUI_WIDGET_SELECT,
+    GUI_WIDGET_COMBOBOX,
+    GUI_WIDGET_LISTVIEW,
+    GUI_WIDGET_TABLEVIEW,
+    GUI_WIDGET_MENUBAR,
+    GUI_WIDGET_TREEVIEW,
+    GUI_WIDGET_SCROLLBAR,
+    GUI_WIDGET_SCROLLVIEW
 } gui_widget_type_t;
 
 typedef enum gui_event_type {
@@ -99,7 +148,12 @@ typedef enum gui_event_type {
     GUI_EVENT_WINDOW_MINIMIZE,
     GUI_EVENT_WINDOW_DRAG,
     GUI_EVENT_KEY_DOWN,
-    GUI_EVENT_MOUSE_WHEEL
+    GUI_EVENT_MOUSE_WHEEL,
+    GUI_EVENT_FOCUS,
+    GUI_EVENT_BLUR,
+    GUI_EVENT_TEXT_CHANGED,
+    GUI_EVENT_TEXT_SUBMIT,
+    GUI_EVENT_VALUE_CHANGED
 } gui_event_type_t;
 
 typedef struct gui_window gui_window_t;
@@ -141,21 +195,40 @@ struct gui_widget {
     uint32_t id;
     gui_widget_type_t type;
     gui_rect_t rect;
-    char text[64];
+    char text[GUI_WIDGET_TEXT_CAP];
+    char placeholder[GUI_WIDGET_TEXT_CAP];
     uint32_t bg_color;
     uint32_t fg_color;
     gui_widget_callback_t on_click;
     void *user_data;
     gui_window_t *owner;
+    uint32_t parent_id;
     int visible;
     int enabled;
     int pressed;
     int hovered;
     int focused;
     uint32_t cursor;
+    uint32_t text_scroll;
+    uint32_t selection_anchor;
+    uint32_t selection_start;
+    uint32_t selection_end;
+    int text_selecting;
+    uint32_t textbox_flags;
+    uint32_t button_flags;
+    uint32_t label_flags;
+    uint32_t label_align;
+    uint32_t panel_flags;
+    uint32_t panel_border_color;
+    uint32_t panel_border_width;
+    uint32_t panel_padding;
     int min_value;
     int max_value;
     int value;
+    int step;
+    int group_id;
+    int table_sort_column;
+    int table_sort_ascending;
     gui_icon_id_t icon;
 };
 
@@ -198,18 +271,12 @@ struct gui_app {
     uint32_t window_count;
 };
 
-typedef struct gui_terminal {
-    gui_window_t *window;
+typedef struct gui_terminal_view {
     char cells[GUI_TERM_ROWS][GUI_TERM_COLS];
     uint32_t cols;
     uint32_t rows;
     uint32_t cursor_x;
     uint32_t cursor_y;
-    int enabled;
-    int input_focused;
-    int dirty;
-    int cursor_visible;
-    uint32_t cursor_blink_ticks;
     int selecting;
     int has_selection;
     uint32_t selection_anchor_x;
@@ -220,7 +287,39 @@ typedef struct gui_terminal {
     uint32_t selection_end_y;
     char clipboard[GUI_TERM_CLIPBOARD_SIZE];
     uint32_t clipboard_len;
+} gui_terminal_view_t;
+
+typedef struct gui_terminal_view_layout {
+    int x;
+    int y;
+    int cell_w;
+    int cell_h;
+    int char_h;
+    int cols;
+    int rows;
+    gui_rect_t clip_rect;
+} gui_terminal_view_layout_t;
+
+typedef struct gui_terminal {
+    gui_window_t *window;
+    gui_terminal_view_t view;
+    int enabled;
+    int input_focused;
+    int dirty;
+    int cursor_visible;
+    uint32_t cursor_blink_ticks;
 } gui_terminal_t;
+
+typedef struct gui_settings_row {
+    gui_window_t *window;
+    int x;
+    int y;
+    int width;
+    int label_h;
+    int button_h;
+    int button_w;
+    int gap;
+} gui_settings_row_t;
 
 typedef struct gui_compositor_info {
     int enabled;
@@ -311,8 +410,10 @@ typedef struct gui_system {
     gui_window_t *drag_window;
     gui_widget_t *pressed_widget;
     gui_widget_t *slider_widget;
+    gui_widget_t *scrollbar_widget;
     gui_widget_t *hovered_widget;
     gui_widget_t *focused_widget;
+    gui_widget_t *text_select_widget;
     uint32_t next_window_id;
     uint32_t next_widget_id;
     uint32_t next_app_id;
@@ -425,11 +526,76 @@ gui_widget_t *gui_add_label(gui_window_t *window, int x, int y, int w, int h, co
 gui_widget_t *gui_add_button(gui_window_t *window, int x, int y, int w, int h, const char *text, gui_widget_callback_t cb, void *user_data);
 gui_widget_t *gui_add_panel(gui_window_t *window, int x, int y, int w, int h, uint32_t color);
 gui_widget_t *gui_add_textbox(gui_window_t *window, int x, int y, int w, int h, const char *text);
+gui_widget_t *gui_add_textarea(gui_window_t *window, int x, int y, int w, int h, const char *text);
+gui_widget_t *gui_add_canvas(gui_window_t *window, int x, int y, int w, int h, uint32_t color);
+gui_widget_t *gui_add_icon_button(gui_window_t *window, int x, int y, int w, int h, const char *text, gui_icon_id_t icon, gui_widget_callback_t cb, void *user_data);
+gui_widget_t *gui_add_toggle(gui_window_t *window, int x, int y, int w, int h, const char *text, int checked, gui_widget_callback_t cb, void *user_data);
+gui_widget_t *gui_add_checkbox(gui_window_t *window, int x, int y, int w, int h, const char *text, int checked, gui_widget_callback_t cb, void *user_data);
+gui_widget_t *gui_add_radiobutton(gui_window_t *window, int x, int y, int w, int h, const char *text, int group_id, int checked, gui_widget_callback_t cb, void *user_data);
+gui_widget_t *gui_add_select(gui_window_t *window, int x, int y, int w, int h, const char *items, int selected_index, gui_widget_callback_t cb, void *user_data);
+gui_widget_t *gui_add_combobox(gui_window_t *window, int x, int y, int w, int h, const char *items, int selected_index, gui_widget_callback_t cb, void *user_data);
+gui_widget_t *gui_add_listview(gui_window_t *window, int x, int y, int w, int h, const char *items, int selected_index, uint32_t flags, gui_widget_callback_t cb, void *user_data);
+gui_widget_t *gui_add_tableview(gui_window_t *window, int x, int y, int w, int h, const char *columns, const char *rows, int selected_row, uint32_t flags, gui_widget_callback_t cb, void *user_data);
+gui_widget_t *gui_add_menubar(gui_window_t *window, int x, int y, int w, int h, const char *menus, int active_index, gui_widget_callback_t cb, void *user_data);
+int gui_menubar_set_menus(gui_widget_t *widget, const char *menus);
+int gui_menubar_set_active(gui_widget_t *widget, int active_index);
+int gui_menubar_get_active(gui_widget_t *widget, int *out_active_index);
+gui_widget_t *gui_add_treeview(gui_window_t *window, int x, int y, int w, int h, const char *nodes, int selected_node, uint32_t flags, gui_widget_callback_t cb, void *user_data);
+int gui_select_set_selected(gui_widget_t *widget, int selected_index);
+int gui_select_get_selected(gui_widget_t *widget, int *out_selected_index);
+int gui_select_set_items(gui_widget_t *widget, const char *items);
+int gui_listview_set_selected(gui_widget_t *widget, int selected_index);
+int gui_listview_get_selected(gui_widget_t *widget, int *out_selected_index);
+int gui_listview_set_items(gui_widget_t *widget, const char *items);
+gui_widget_t *gui_add_slider(gui_window_t *window, int x, int y, int w, int h, int min, int max, int value, int step, gui_widget_callback_t cb, void *user_data);
+gui_widget_t *gui_add_scrollbar(gui_window_t *window, int x, int y, int w, int h, int min, int max, int value, int step, gui_widget_callback_t cb, void *user_data);
+gui_widget_t *gui_add_scrollview(gui_window_t *window, int x, int y, int w, int h, int content_w, int content_h);
 gui_widget_t *gui_find_widget(gui_window_t *window, uint32_t id);
+int gui_widget_set_parent(gui_widget_t *widget, gui_widget_t *parent);
 void gui_widget_set_enabled(gui_widget_t *widget, int enabled);
 void gui_widget_set_visible(gui_widget_t *widget, int visible);
+int gui_widget_get_enabled(const gui_widget_t *widget);
 void gui_widget_set_text(gui_widget_t *widget, const char *text);
+void gui_widget_set_placeholder(gui_widget_t *widget, const char *placeholder);
+void gui_widget_set_textbox_flags(gui_widget_t *widget, uint32_t flags);
+uint32_t gui_widget_get_textbox_flags(const gui_widget_t *widget);
 const char *gui_widget_get_text(const gui_widget_t *widget);
+void gui_widget_set_button_flags(gui_widget_t *widget, uint32_t flags);
+uint32_t gui_widget_get_button_flags(const gui_widget_t *widget);
+void gui_widget_set_label_options(gui_widget_t *widget, uint32_t flags, uint32_t align);
+uint32_t gui_widget_get_label_flags(const gui_widget_t *widget);
+uint32_t gui_widget_get_label_align(const gui_widget_t *widget);
+int gui_widget_measure_label(const gui_widget_t *widget, int max_width, int *out_width, int *out_height);
+int gui_widget_fill_rect(gui_widget_t *widget, int x, int y, int w, int h, uint32_t color);
+int gui_widget_draw_text(gui_widget_t *widget, int x, int y, const char *text, uint32_t color);
+int gui_widget_blit_rgba32(gui_widget_t *widget, int x, int y, int w, int h, const uint32_t *pixels, uint32_t src_stride);
+int gui_widget_scroll_rect(gui_widget_t *widget, int dst_x, int dst_y, int src_x, int src_y, int w, int h);
+int gui_widget_present(gui_widget_t *widget);
+void gui_widget_set_panel_options(gui_widget_t *widget, uint32_t bg_color, uint32_t border_color, uint32_t flags, uint32_t border_width, uint32_t padding);
+int gui_toggle_set_checked(gui_widget_t *widget, int checked);
+int gui_toggle_get_checked(const gui_widget_t *widget);
+int gui_checkbox_set_checked(gui_widget_t *widget, int checked);
+int gui_checkbox_get_checked(const gui_widget_t *widget);
+int gui_radiobutton_set_checked(gui_widget_t *widget, int checked);
+int gui_radiobutton_get_checked(const gui_widget_t *widget);
+int gui_tableview_set_rows(gui_widget_t *widget, const char *rows);
+int gui_tableview_set_selected(gui_widget_t *widget, int selected_row);
+int gui_tableview_get_selected(gui_widget_t *widget, int *out_selected_row);
+int gui_treeview_set_nodes(gui_widget_t *widget, const char *nodes);
+int gui_treeview_set_selected(gui_widget_t *widget, int selected_node);
+int gui_treeview_get_selected(gui_widget_t *widget, int *out_selected_node);
+int gui_slider_set_value(gui_widget_t *widget, int value);
+int gui_slider_get_value(gui_widget_t *widget, int *out_value);
+int gui_slider_set_step(gui_widget_t *widget, int step);
+int gui_slider_get_step(gui_widget_t *widget, int *out_step);
+int gui_scrollbar_set_value(gui_widget_t *widget, int value);
+int gui_scrollbar_get_value(gui_widget_t *widget, int *out_value);
+int gui_scrollbar_set_step(gui_widget_t *widget, int step);
+int gui_scrollbar_get_step(gui_widget_t *widget, int *out_step);
+int gui_scrollview_set_offset(gui_widget_t *widget, int scroll_x, int scroll_y);
+int gui_scrollview_get_offset(gui_widget_t *widget, int *out_scroll_x, int *out_scroll_y);
+int gui_scrollview_set_content_size(gui_widget_t *widget, int content_w, int content_h);
+int gui_scrollview_get_content_size(gui_widget_t *widget, int *out_content_w, int *out_content_h);
 void gui_widget_set_colors(gui_widget_t *widget, uint32_t bg_color, uint32_t fg_color);
 void gui_widget_set_on_click(gui_widget_t *widget, gui_widget_callback_t cb, void *user_data);
 void gui_widget_set_icon(gui_widget_t *widget, gui_icon_id_t icon);

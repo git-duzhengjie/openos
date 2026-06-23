@@ -3028,6 +3028,28 @@ uint32_t syscall_dispatch(uint32_t num,
             return (uint32_t)gui_user_add_button(req.window_id, req.x, req.y, req.w, req.h, req.text);
         }
 
+    case SYS_GUI_ADD_ICON_BUTTON:
+        {
+            gui_user_icon_button_request_t req;
+            if (!a || !user_ptr_valid((void *)a, sizeof(req), USERMEM_READ))
+                return (uint32_t)-1;
+            if (copy_from_user(&req, (const void *)a, sizeof(req)) < 0)
+                return (uint32_t)-1;
+            req.text[sizeof(req.text) - 1] = 0;
+            return (uint32_t)gui_user_add_icon_button(req.window_id, req.x, req.y, req.w, req.h, req.text, req.icon);
+        }
+
+    case SYS_GUI_ADD_TOGGLE:
+        {
+            gui_user_widget_request_t req;
+            if (!a || !user_ptr_valid((void *)a, sizeof(req), USERMEM_READ))
+                return (uint32_t)-1;
+            if (copy_from_user(&req, (const void *)a, sizeof(req)) < 0)
+                return (uint32_t)-1;
+            req.text[sizeof(req.text) - 1] = 0;
+            return (uint32_t)gui_user_add_toggle(req.window_id, req.x, req.y, req.w, req.h, req.text, req.widget_id ? 1 : 0);
+        }
+
     case SYS_GUI_ADD_TEXTBOX:
         {
             gui_user_widget_request_t req;
@@ -3037,6 +3059,33 @@ uint32_t syscall_dispatch(uint32_t num,
                 return (uint32_t)-1;
             req.text[sizeof(req.text) - 1] = 0;
             return (uint32_t)gui_user_add_textbox(req.window_id, req.x, req.y, req.w, req.h, req.text);
+        }
+
+    case SYS_GUI_ADD_TEXTAREA:
+        {
+            gui_user_widget_request_t req;
+            if (!a || !user_ptr_valid((void *)a, sizeof(req), USERMEM_READ))
+                return (uint32_t)-1;
+            if (copy_from_user(&req, (const void *)a, sizeof(req)) < 0)
+                return (uint32_t)-1;
+            req.text[sizeof(req.text) - 1] = 0;
+            return (uint32_t)gui_user_add_textarea(req.window_id, req.x, req.y, req.w, req.h, req.text);
+        }
+
+    case SYS_GUI_ADD_PANEL:
+        {
+            gui_user_panel_request_t req;
+            int id;
+            if (!a || !user_ptr_valid((void *)a, sizeof(req), USERMEM_READ))
+                return (uint32_t)-1;
+            if (copy_from_user(&req, (const void *)a, sizeof(req)) < 0)
+                return (uint32_t)-1;
+            id = gui_user_add_panel(req.window_id, req.x, req.y, req.w, req.h, req.bg_color);
+            if (id < 0)
+                return (uint32_t)-1;
+            if (req.flags || req.border_color || req.border_width || req.padding)
+                gui_user_set_panel_options(req.window_id, (uint32_t)id, req.bg_color, req.border_color, req.flags, req.border_width, req.padding);
+            return (uint32_t)id;
         }
 
     case SYS_GUI_POLL_EVENT:
@@ -3050,7 +3099,7 @@ uint32_t syscall_dispatch(uint32_t num,
                 return (uint32_t)-1;
             if (copy_to_user((void *)a, &event, sizeof(event)) < 0)
                 return (uint32_t)-1;
-            return 0;
+            return (uint32_t)rc;
         }
 
     case SYS_GUI_SET_TEXT:
@@ -3065,6 +3114,494 @@ uint32_t syscall_dispatch(uint32_t num,
                 return (uint32_t)gui_user_set_text_cursor(req.window_id, req.widget_id, req.text, req.x);
             }
             return (uint32_t)gui_user_set_text(req.window_id, req.widget_id, req.text);
+        }
+
+    case SYS_GUI_GET_TEXT:
+        {
+            gui_user_text_request_t req;
+            if (!a || !user_ptr_valid((void *)a, sizeof(req), USERMEM_READ | USERMEM_WRITE))
+                return (uint32_t)-1;
+            if (copy_from_user(&req, (const void *)a, sizeof(req)) < 0)
+                return (uint32_t)-1;
+            req.text[sizeof(req.text) - 1] = 0;
+            if (gui_user_get_text_cursor(req.window_id, req.widget_id, req.text, sizeof(req.text), &req.cursor) < 0)
+                return (uint32_t)-1;
+            if (copy_to_user((void *)a, &req, sizeof(req)) < 0)
+                return (uint32_t)-1;
+            return 0;
+        }
+
+    case SYS_GUI_SET_TEXT_PLACEHOLDER:
+        {
+            gui_user_text_request_t req;
+            if (!a || !user_ptr_valid((void *)a, sizeof(req), USERMEM_READ))
+                return (uint32_t)-1;
+            if (copy_from_user(&req, (const void *)a, sizeof(req)) < 0)
+                return (uint32_t)-1;
+            req.text[sizeof(req.text) - 1] = 0;
+            return (uint32_t)gui_user_set_text_placeholder(req.window_id, req.widget_id, req.text);
+        }
+
+    case SYS_GUI_SET_TEXT_FLAGS:
+        return (uint32_t)gui_user_set_text_flags((uint32_t)a, (uint32_t)b, (uint32_t)c);
+
+    case SYS_GUI_GET_TEXT_FLAGS:
+        {
+            uint32_t flags = 0;
+            if (!c || !user_ptr_valid((void *)c, sizeof(flags), USERMEM_WRITE))
+                return (uint32_t)-1;
+            if (gui_user_get_text_flags((uint32_t)a, (uint32_t)b, &flags) < 0)
+                return (uint32_t)-1;
+            if (copy_to_user((void *)c, &flags, sizeof(flags)) < 0)
+                return (uint32_t)-1;
+            return 0;
+        }
+
+    case SYS_GUI_SET_ICON:
+        return (uint32_t)gui_user_set_icon((uint32_t)a, (uint32_t)b, (uint32_t)c);
+
+    case SYS_GUI_SET_BUTTON_FLAGS:
+        return (uint32_t)gui_user_set_button_flags((uint32_t)a, (uint32_t)b, (uint32_t)c);
+
+    case SYS_GUI_GET_BUTTON_FLAGS:
+        {
+            uint32_t flags = 0;
+            if (!c || !user_ptr_valid((void *)c, sizeof(flags), USERMEM_WRITE))
+                return (uint32_t)-1;
+            if (gui_user_get_button_flags((uint32_t)a, (uint32_t)b, &flags) < 0)
+                return (uint32_t)-1;
+            if (copy_to_user((void *)c, &flags, sizeof(flags)) < 0)
+                return (uint32_t)-1;
+            return 0;
+        }
+
+    case SYS_GUI_SET_LABEL_OPTIONS:
+        return (uint32_t)gui_user_set_label_options((uint32_t)a, (uint32_t)b, (uint32_t)c, (uint32_t)d);
+
+    case SYS_GUI_GET_LABEL_OPTIONS:
+        {
+            uint32_t opts[2] = {0, 0};
+            if (!c || !user_ptr_valid((void *)c, sizeof(opts), USERMEM_WRITE))
+                return (uint32_t)-1;
+            if (gui_user_get_label_options((uint32_t)a, (uint32_t)b, &opts[0], &opts[1]) < 0)
+                return (uint32_t)-1;
+            if (copy_to_user((void *)c, opts, sizeof(opts)) < 0)
+                return (uint32_t)-1;
+            return 0;
+        }
+
+    case SYS_GUI_SET_PANEL_OPTIONS:
+        {
+            gui_user_panel_request_t req;
+            if (!a || !user_ptr_valid((void *)a, sizeof(req), USERMEM_READ))
+                return (uint32_t)-1;
+            if (copy_from_user(&req, (const void *)a, sizeof(req)) < 0)
+                return (uint32_t)-1;
+            return (uint32_t)gui_user_set_panel_options(req.window_id, req.widget_id, req.bg_color, req.border_color, req.flags, req.border_width, req.padding);
+        }
+
+    case SYS_GUI_ADD_SLIDER:
+        {
+            gui_user_slider_request_t req;
+            int id;
+            if (!a || !user_ptr_valid((void *)a, sizeof(req), USERMEM_READ))
+                return (uint32_t)-1;
+            if (copy_from_user(&req, (const void *)a, sizeof(req)) < 0)
+                return (uint32_t)-1;
+            id = gui_user_add_slider(req.window_id, req.x, req.y, req.w, req.h, req.min, req.max, req.value, req.step);
+            if (id < 0)
+                return (uint32_t)-1;
+            return (uint32_t)id;
+        }
+
+    case SYS_GUI_SET_SLIDER_VALUE:
+        return (uint32_t)gui_user_set_slider_value((uint32_t)a, (uint32_t)b, (int)c);
+
+    case SYS_GUI_GET_SLIDER_VALUE:
+        {
+            int value = 0;
+            if (!c || !user_ptr_valid((void *)c, sizeof(value), USERMEM_WRITE))
+                return (uint32_t)-1;
+            if (gui_user_get_slider_value((uint32_t)a, (uint32_t)b, &value) < 0)
+                return (uint32_t)-1;
+            if (copy_to_user((void *)c, &value, sizeof(value)) < 0)
+                return (uint32_t)-1;
+            return 0;
+        }
+
+    case SYS_GUI_SET_SLIDER_STEP:
+        return (uint32_t)gui_user_set_slider_step((uint32_t)a, (uint32_t)b, (int)c);
+
+    case SYS_GUI_GET_SLIDER_STEP:
+        {
+            int step = 0;
+            if (!c || !user_ptr_valid((void *)c, sizeof(step), USERMEM_WRITE))
+                return (uint32_t)-1;
+            if (gui_user_get_slider_step((uint32_t)a, (uint32_t)b, &step) < 0)
+                return (uint32_t)-1;
+            if (copy_to_user((void *)c, &step, sizeof(step)) < 0)
+                return (uint32_t)-1;
+            return 0;
+        }
+
+    case SYS_GUI_ADD_SCROLLBAR:
+        {
+            gui_user_scrollbar_request_t req;
+            int id;
+            if (!a || !user_ptr_valid((void *)a, sizeof(req), USERMEM_READ))
+                return (uint32_t)-1;
+            if (copy_from_user(&req, (const void *)a, sizeof(req)) < 0)
+                return (uint32_t)-1;
+            id = gui_user_add_scrollbar(req.window_id, req.x, req.y, req.w, req.h, req.min, req.max, req.value, req.step);
+            if (id < 0)
+                return (uint32_t)-1;
+            return (uint32_t)id;
+        }
+
+    case SYS_GUI_SET_SCROLLBAR_VALUE:
+        return (uint32_t)gui_user_set_scrollbar_value((uint32_t)a, (uint32_t)b, (int)c);
+
+    case SYS_GUI_GET_SCROLLBAR_VALUE:
+        {
+            int value = 0;
+            if (!c || !user_ptr_valid((void *)c, sizeof(value), USERMEM_WRITE))
+                return (uint32_t)-1;
+            if (gui_user_get_scrollbar_value((uint32_t)a, (uint32_t)b, &value) < 0)
+                return (uint32_t)-1;
+            if (copy_to_user((void *)c, &value, sizeof(value)) < 0)
+                return (uint32_t)-1;
+            return 0;
+        }
+
+    case SYS_GUI_SET_SCROLLBAR_STEP:
+        return (uint32_t)gui_user_set_scrollbar_step((uint32_t)a, (uint32_t)b, (int)c);
+
+    case SYS_GUI_GET_SCROLLBAR_STEP:
+        {
+            int step = 0;
+            if (!c || !user_ptr_valid((void *)c, sizeof(step), USERMEM_WRITE))
+                return (uint32_t)-1;
+            if (gui_user_get_scrollbar_step((uint32_t)a, (uint32_t)b, &step) < 0)
+                return (uint32_t)-1;
+            if (copy_to_user((void *)c, &step, sizeof(step)) < 0)
+                return (uint32_t)-1;
+            return 0;
+        }
+
+    case SYS_GUI_ADD_SCROLLVIEW:
+        {
+            gui_user_scrollbar_request_t req;
+            int id;
+            if (!a || !user_ptr_valid((void *)a, sizeof(req), USERMEM_READ))
+                return (uint32_t)-1;
+            if (copy_from_user(&req, (const void *)a, sizeof(req)) < 0)
+                return (uint32_t)-1;
+            id = gui_user_add_scrollview(req.window_id, req.x, req.y, req.w, req.h, req.max, req.value);
+            if (id < 0)
+                return (uint32_t)-1;
+            return (uint32_t)id;
+        }
+
+    case SYS_GUI_SET_SCROLLVIEW_OFFSET:
+        return (uint32_t)gui_user_set_scrollview_offset((uint32_t)a, (uint32_t)b, (int)c, (int)d);
+
+    case SYS_GUI_GET_SCROLLVIEW_OFFSET:
+        {
+            int xy[2];
+            if (!c || !user_ptr_valid((void *)c, sizeof(xy), USERMEM_WRITE))
+                return (uint32_t)-1;
+            if (gui_user_get_scrollview_offset((uint32_t)a, (uint32_t)b, &xy[0], &xy[1]) < 0)
+                return (uint32_t)-1;
+            if (copy_to_user((void *)c, xy, sizeof(xy)) < 0)
+                return (uint32_t)-1;
+            return 0;
+        }
+
+    case SYS_GUI_SET_SCROLLVIEW_CONTENT_SIZE:
+        return (uint32_t)gui_user_set_scrollview_content_size((uint32_t)a, (uint32_t)b, (int)c, (int)d);
+
+    case SYS_GUI_GET_SCROLLVIEW_CONTENT_SIZE:
+        {
+            int wh[2];
+            if (!c || !user_ptr_valid((void *)c, sizeof(wh), USERMEM_WRITE))
+                return (uint32_t)-1;
+            if (gui_user_get_scrollview_content_size((uint32_t)a, (uint32_t)b, &wh[0], &wh[1]) < 0)
+                return (uint32_t)-1;
+            if (copy_to_user((void *)c, wh, sizeof(wh)) < 0)
+                return (uint32_t)-1;
+            return 0;
+        }
+
+    case SYS_GUI_SET_WIDGET_PARENT:
+        return (uint32_t)gui_user_set_widget_parent((uint32_t)a, (uint32_t)b, (uint32_t)c);
+
+    case SYS_GUI_SET_TOGGLE_CHECKED:
+        return (uint32_t)gui_user_set_toggle_checked((uint32_t)a, (uint32_t)b, (int)c);
+
+    case SYS_GUI_GET_TOGGLE_CHECKED:
+        {
+            int checked = 0;
+            if (!c || !user_ptr_valid((void *)c, sizeof(checked), USERMEM_WRITE))
+                return (uint32_t)-1;
+            if (gui_user_get_toggle_checked((uint32_t)a, (uint32_t)b, &checked) < 0)
+                return (uint32_t)-1;
+            if (copy_to_user((void *)c, &checked, sizeof(checked)) < 0)
+                return (uint32_t)-1;
+            return 0;
+        }
+
+    case SYS_GUI_ADD_CHECKBOX:
+        {
+            gui_user_widget_request_t req;
+            if (!a || !user_ptr_valid((void *)a, sizeof(req), USERMEM_READ))
+                return (uint32_t)-1;
+            if (copy_from_user(&req, (const void *)a, sizeof(req)) < 0)
+                return (uint32_t)-1;
+            req.text[sizeof(req.text) - 1] = 0;
+            return (uint32_t)gui_user_add_checkbox(req.window_id, req.x, req.y, req.w, req.h, req.text, req.widget_id ? 1 : 0);
+        }
+
+    case SYS_GUI_SET_CHECKBOX_CHECKED:
+        return (uint32_t)gui_user_set_checkbox_checked((uint32_t)a, (uint32_t)b, (int)c);
+
+    case SYS_GUI_GET_CHECKBOX_CHECKED:
+        {
+            int checked = 0;
+            if (!c || !user_ptr_valid((void *)c, sizeof(checked), USERMEM_WRITE))
+                return (uint32_t)-1;
+            if (gui_user_get_checkbox_checked((uint32_t)a, (uint32_t)b, &checked) < 0)
+                return (uint32_t)-1;
+            if (copy_to_user((void *)c, &checked, sizeof(checked)) < 0)
+                return (uint32_t)-1;
+            return 0;
+        }
+
+    case SYS_GUI_ADD_RADIOBUTTON:
+        {
+            gui_user_radio_request_t req;
+            if (!a || !user_ptr_valid((void *)a, sizeof(req), USERMEM_READ))
+                return (uint32_t)-1;
+            if (copy_from_user(&req, (const void *)a, sizeof(req)) < 0)
+                return (uint32_t)-1;
+            req.text[sizeof(req.text) - 1] = 0;
+            return (uint32_t)gui_user_add_radiobutton(req.window_id, req.x, req.y, req.w, req.h, req.text, (int)req.group_id, req.checked ? 1 : 0);
+        }
+
+    case SYS_GUI_SET_RADIOBUTTON_CHECKED:
+        return (uint32_t)gui_user_set_radiobutton_checked((uint32_t)a, (uint32_t)b, (int)c);
+
+    case SYS_GUI_GET_RADIOBUTTON_CHECKED:
+        {
+            int checked = 0;
+            if (!c || !user_ptr_valid((void *)c, sizeof(checked), USERMEM_WRITE))
+                return (uint32_t)-1;
+            if (gui_user_get_radiobutton_checked((uint32_t)a, (uint32_t)b, &checked) < 0)
+                return (uint32_t)-1;
+            if (copy_to_user((void *)c, &checked, sizeof(checked)) < 0)
+                return (uint32_t)-1;
+            return 0;
+        }
+
+    case SYS_GUI_ADD_SELECT:
+        {
+            gui_user_select_request_t req;
+            if (!a || !user_ptr_valid((void *)a, sizeof(req), USERMEM_READ)) return (uint32_t)-1;
+            if (copy_from_user(&req, (const void *)a, sizeof(req)) < 0) return (uint32_t)-1;
+            req.items[sizeof(req.items) - 1] = 0;
+            return (uint32_t)gui_user_add_select(req.window_id, req.x, req.y, req.w, req.h, req.items, req.selected_index);
+        }
+
+    case SYS_GUI_ADD_COMBOBOX:
+        {
+            gui_user_select_request_t req;
+            if (!a || !user_ptr_valid((void *)a, sizeof(req), USERMEM_READ)) return (uint32_t)-1;
+            if (copy_from_user(&req, (const void *)a, sizeof(req)) < 0) return (uint32_t)-1;
+            req.items[sizeof(req.items) - 1] = 0;
+            return (uint32_t)gui_user_add_combobox(req.window_id, req.x, req.y, req.w, req.h, req.items, req.selected_index);
+        }
+
+    case SYS_GUI_SET_SELECT_INDEX:
+        return (uint32_t)gui_user_set_select_index((uint32_t)a, (uint32_t)b, (int)c);
+
+    case SYS_GUI_GET_SELECT_INDEX:
+        {
+            int selected = 0;
+            if (!c || !user_ptr_valid((void *)c, sizeof(selected), USERMEM_WRITE)) return (uint32_t)-1;
+            if (gui_user_get_select_index((uint32_t)a, (uint32_t)b, &selected) < 0) return (uint32_t)-1;
+            if (copy_to_user((void *)c, &selected, sizeof(selected)) < 0) return (uint32_t)-1;
+            return 0;
+        }
+
+    case SYS_GUI_SET_SELECT_ITEMS:
+        {
+            gui_user_select_request_t req;
+            if (!a || !user_ptr_valid((void *)a, sizeof(req), USERMEM_READ)) return (uint32_t)-1;
+            if (copy_from_user(&req, (const void *)a, sizeof(req)) < 0) return (uint32_t)-1;
+            req.items[sizeof(req.items) - 1] = 0;
+            return (uint32_t)gui_user_set_select_items(req.window_id, req.widget_id, req.items);
+        }
+
+
+    case SYS_GUI_ADD_LISTVIEW:
+        {
+            gui_user_select_request_t req;
+            if (!a || !user_ptr_valid((void *)a, sizeof(req), USERMEM_READ)) return (uint32_t)-1;
+            if (copy_from_user(&req, (const void *)a, sizeof(req)) < 0) return (uint32_t)-1;
+            req.items[sizeof(req.items) - 1] = 0;
+            return (uint32_t)gui_user_add_listview(req.window_id, req.x, req.y, req.w, req.h, req.items, req.selected_index, (uint32_t)b);
+        }
+
+    case SYS_GUI_SET_LISTVIEW_INDEX:
+        return (uint32_t)gui_user_set_listview_index((uint32_t)a, (uint32_t)b, (int)c);
+
+    case SYS_GUI_GET_LISTVIEW_INDEX:
+        {
+            int selected = 0;
+            if (!c || !user_ptr_valid((void *)c, sizeof(selected), USERMEM_WRITE)) return (uint32_t)-1;
+            if (gui_user_get_listview_index((uint32_t)a, (uint32_t)b, &selected) < 0) return (uint32_t)-1;
+            if (copy_to_user((void *)c, &selected, sizeof(selected)) < 0) return (uint32_t)-1;
+            return 0;
+        }
+
+    case SYS_GUI_SET_LISTVIEW_ITEMS:
+        {
+            gui_user_select_request_t req;
+            if (!a || !user_ptr_valid((void *)a, sizeof(req), USERMEM_READ)) return (uint32_t)-1;
+            if (copy_from_user(&req, (const void *)a, sizeof(req)) < 0) return (uint32_t)-1;
+            req.items[sizeof(req.items) - 1] = 0;
+            return (uint32_t)gui_user_set_listview_items(req.window_id, req.widget_id, req.items);
+        }
+
+    case SYS_GUI_ADD_TABLEVIEW:
+        {
+            gui_user_tableview_request_t req;
+            if (!a || !user_ptr_valid((void *)a, sizeof(req), USERMEM_READ)) return (uint32_t)-1;
+            if (copy_from_user(&req, (const void *)a, sizeof(req)) < 0) return (uint32_t)-1;
+            req.columns[sizeof(req.columns) - 1] = 0;
+            req.rows[sizeof(req.rows) - 1] = 0;
+            return (uint32_t)gui_user_add_tableview(req.window_id, req.x, req.y, req.w, req.h, req.columns, req.rows, req.selected_row, (uint32_t)b);
+        }
+
+    case SYS_GUI_SET_TABLEVIEW_ROW:
+        return (uint32_t)gui_user_set_tableview_row((uint32_t)a, (uint32_t)b, (int)c);
+
+    case SYS_GUI_GET_TABLEVIEW_ROW:
+        {
+            int selected_row = 0;
+            if (!c || !user_ptr_valid((void *)c, sizeof(selected_row), USERMEM_WRITE)) return (uint32_t)-1;
+            if (gui_user_get_tableview_row((uint32_t)a, (uint32_t)b, &selected_row) < 0) return (uint32_t)-1;
+            if (copy_to_user((void *)c, &selected_row, sizeof(selected_row)) < 0) return (uint32_t)-1;
+            return 0;
+        }
+
+    case SYS_GUI_SET_TABLEVIEW_ROWS:
+        {
+            gui_user_tableview_request_t req;
+            if (!a || !user_ptr_valid((void *)a, sizeof(req), USERMEM_READ)) return (uint32_t)-1;
+            if (copy_from_user(&req, (const void *)a, sizeof(req)) < 0) return (uint32_t)-1;
+            req.rows[sizeof(req.rows) - 1] = 0;
+            return (uint32_t)gui_user_set_tableview_rows(req.window_id, req.widget_id, req.rows);
+        }
+
+    case SYS_GUI_ADD_TREEVIEW:
+        {
+            gui_user_treeview_request_t req;
+            if (!a || !user_ptr_valid((void *)a, sizeof(req), USERMEM_READ)) return (uint32_t)-1;
+            if (copy_from_user(&req, (const void *)a, sizeof(req)) < 0) return (uint32_t)-1;
+            req.nodes[sizeof(req.nodes) - 1] = 0;
+            return (uint32_t)gui_user_add_treeview(req.window_id, req.x, req.y, req.w, req.h, req.nodes, req.selected_node, req.flags);
+        }
+
+    case SYS_GUI_SET_TREEVIEW_NODE:
+        return (uint32_t)gui_user_set_treeview_node((uint32_t)a, (uint32_t)b, (int)c);
+
+    case SYS_GUI_GET_TREEVIEW_NODE:
+        {
+            int selected_node = 0;
+            if (!c || !user_ptr_valid((void *)c, sizeof(selected_node), USERMEM_WRITE)) return (uint32_t)-1;
+            if (gui_user_get_treeview_node((uint32_t)a, (uint32_t)b, &selected_node) < 0) return (uint32_t)-1;
+            if (copy_to_user((void *)c, &selected_node, sizeof(selected_node)) < 0) return (uint32_t)-1;
+            return 0;
+        }
+
+    case SYS_GUI_SET_TREEVIEW_NODES:
+        {
+            gui_user_treeview_request_t req;
+            if (!a || !user_ptr_valid((void *)a, sizeof(req), USERMEM_READ)) return (uint32_t)-1;
+            if (copy_from_user(&req, (const void *)a, sizeof(req)) < 0) return (uint32_t)-1;
+            req.nodes[sizeof(req.nodes) - 1] = 0;
+            return (uint32_t)gui_user_set_treeview_nodes(req.window_id, req.widget_id, req.nodes);
+        }
+
+
+    case SYS_GUI_ADD_MENUBAR:
+        {
+            gui_user_menubar_request_t req;
+            if (!a || !user_ptr_valid((void *)a, sizeof(req), USERMEM_READ)) return (uint32_t)-1;
+            if (copy_from_user(&req, (const void *)a, sizeof(req)) < 0) return (uint32_t)-1;
+            req.menus[sizeof(req.menus) - 1] = 0;
+            return (uint32_t)gui_user_add_menubar(req.window_id, req.x, req.y, req.w, req.h, req.menus, req.active_index);
+        }
+
+    case SYS_GUI_SET_MENUBAR_ACTIVE:
+        return (uint32_t)gui_user_set_menubar_active((uint32_t)a, (uint32_t)b, (int)c);
+
+    case SYS_GUI_GET_MENUBAR_ACTIVE:
+        {
+            int active_index = -1;
+            if (!c || !user_ptr_valid((void *)c, sizeof(active_index), USERMEM_WRITE)) return (uint32_t)-1;
+            if (gui_user_get_menubar_active((uint32_t)a, (uint32_t)b, &active_index) < 0) return (uint32_t)-1;
+            if (copy_to_user((void *)c, &active_index, sizeof(active_index)) < 0) return (uint32_t)-1;
+            return 0;
+        }
+
+    case SYS_GUI_SET_MENUBAR_MENUS:
+        {
+            gui_user_menubar_request_t req;
+            if (!a || !user_ptr_valid((void *)a, sizeof(req), USERMEM_READ)) return (uint32_t)-1;
+            if (copy_from_user(&req, (const void *)a, sizeof(req)) < 0) return (uint32_t)-1;
+            req.menus[sizeof(req.menus) - 1] = 0;
+            return (uint32_t)gui_user_set_menubar_menus(req.window_id, req.widget_id, req.menus);
+        }
+
+    case SYS_GUI_SET_WIDGET_ENABLED:
+        return (uint32_t)gui_user_set_widget_enabled((uint32_t)a, (uint32_t)b, (int)c);
+
+    case SYS_GUI_GET_WIDGET_ENABLED:
+        {
+            int enabled = 0;
+            if (!c || !user_ptr_valid((void *)c, sizeof(enabled), USERMEM_WRITE))
+                return (uint32_t)-1;
+            if (gui_user_get_widget_enabled((uint32_t)a, (uint32_t)b, &enabled) < 0)
+                return (uint32_t)-1;
+            if (copy_to_user((void *)c, &enabled, sizeof(enabled)) < 0)
+                return (uint32_t)-1;
+            return 0;
+        }
+
+    case SYS_GUI_MEASURE_LABEL:
+        {
+            gui_user_label_measure_request_t req;
+            if (!a || !user_ptr_valid((void *)a, sizeof(req), USERMEM_READ | USERMEM_WRITE))
+                return (uint32_t)-1;
+            if (copy_from_user(&req, (const void *)a, sizeof(req)) < 0)
+                return (uint32_t)-1;
+            if (gui_user_measure_label(req.window_id, req.widget_id, req.max_width,
+                                       &req.out_width, &req.out_height) < 0)
+                return (uint32_t)-1;
+            if (copy_to_user((void *)a, &req, sizeof(req)) < 0)
+                return (uint32_t)-1;
+            return 0;
+        }
+
+    case SYS_GUI_ADD_CANVAS:
+        {
+            gui_user_panel_request_t req;
+            if (!a || !user_ptr_valid((void *)a, sizeof(req), USERMEM_READ))
+                return (uint32_t)-1;
+            if (copy_from_user(&req, (const void *)a, sizeof(req)) < 0)
+                return (uint32_t)-1;
+            return (uint32_t)gui_user_add_canvas(req.window_id, req.x, req.y, req.w, req.h, req.bg_color);
         }
 
     case SYS_GUI_DRAW:

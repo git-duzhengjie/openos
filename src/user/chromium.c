@@ -542,7 +542,7 @@ int main(int argc, char **argv)
     for (;;) {
         openos_gui_event_t event;
         int ev = openos_gui_poll_event(&event);
-        if (ev == 0 && event.type != OPENOS_GUI_EVENT_NONE && event.window_id == (unsigned int)win) {
+        if (ev > 0 && event.type != OPENOS_GUI_EVENT_NONE && event.window_id == (unsigned int)win) {
             if (event.widget_id == (unsigned int)close_button) break;
             if (event.widget_id == (unsigned int)refresh_button || event.widget_id == (unsigned int)go_button) {
                 char reload_url[256];

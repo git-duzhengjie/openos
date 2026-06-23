@@ -1,8 +1,8 @@
 /* ============================================================
  * openos - Minimal GUI / Window System
  *
- * 鏀寔锛欸UI 缁堢銆丳S/2 榧犳爣鍏夋爣銆佷簨浠堕槦鍒椼€佹寜閽偣鍑伙拷?
- *       绐楀彛鎷栧姩/缃《/鍏抽棴/鏈€灏忓寲銆佸弻缂撳啿娓叉煋锟?
+ * 闁衡偓椤栨稑鐦柨娑欘儞UI 缂備礁鐗忛顒勫Υ娑撶爤/2 濮捬呭У閻栵綁宕楁径瀣灱闁靛棔妞掔花銊︾閸洘袝闁告帗銇滈埀顑跨劍鐎垫粓鏌﹂鎯т化闁告垳绱幏?
+ *       缂佹劖顨呰ぐ娑㈠箯閺嵮冿拷?缂傚喚鍣ｉ妴?闁稿繑濞婂Λ?闁哄牃鍋撻悘蹇撶箰鐎垫煡濡存担绋胯摕缂傚倹鎸搁崯鍨€掗崣澶屽帬锟?
  * ============================================================ */
 
 #include "gui.h"
@@ -63,6 +63,21 @@ static void gui_desktop_run_action(uint32_t action);
 static int  gui_taskbar_search_handle_key(int key);
 static int  gui_is_enter_key(int key);
 static int  browser_handle_address_enter(int key);
+static int  gui_select_dropdown_index_at(gui_widget_t *wg, int sx, int sy);
+static void gui_select_activate(gui_widget_t *wg);
+static void gui_select_commit(gui_widget_t *wg, int index);
+static void gui_select_handle_key(gui_widget_t *wg, int key);
+static void gui_listview_handle_key(gui_widget_t *wg, int key);
+static int gui_listview_scroll(gui_widget_t *wg, int delta_rows);
+static void gui_tableview_handle_key(gui_widget_t *wg, int key);
+static int gui_tableview_scroll(gui_widget_t *wg, int delta_rows);
+static void gui_treeview_handle_key(gui_widget_t *wg, int key);
+static int gui_treeview_scroll(gui_widget_t *wg, int delta_rows);
+static void gui_draw_select_dropdown(gui_widget_t *wg);
+static void gui_textbox_ensure_cursor_visible(gui_widget_t *wg);
+static void gui_textarea_ensure_cursor_visible(gui_widget_t *wg);
+static int  gui_scrollview_clamp_x(gui_widget_t *widget, int scroll_x);
+static int  gui_scrollview_clamp_y(gui_widget_t *widget, int scroll_y);
 static void browser_load_start(void);
 static void browser_load_tick(void);
 static void browser_load_finish(const char *status);
@@ -98,6 +113,9 @@ static void gui_format_ipv4_inline(uint32_t ip, char *buf, int cap);
 static void gui_format_mac_inline(const uint8_t mac[6], char *buf, int cap);
 static int gui_settings_append_field(char *dst, int pos, int cap, i18n_key_t key, const char *value);
 void gui_terminal_redraw(void);
+void gui_terminal_clear(void);
+void gui_terminal_clear_selection(void);
+int gui_terminal_copy_selection(void);
 
 static gui_system_t g_gui;
 static gui_accel_info_t g_gui_accel;
@@ -204,10 +222,25 @@ static char g_browser_line_links[GUI_BROWSER_LINKS_MAX][128];
 static gui_widget_t *g_browser_status_label = 0;
 static gui_window_t *g_browser_win = 0;
 static int gui_terminal_point_to_cell(int x, int y, uint32_t *col, uint32_t *row);
+void gui_terminal_view_init(gui_terminal_view_t *view, uint32_t cols, uint32_t rows);
+void gui_terminal_view_clear(gui_terminal_view_t *view);
+void gui_terminal_view_make_layout(gui_rect_t viewport, int padding_x, int padding_y, gui_terminal_view_layout_t *layout);
+int gui_terminal_view_point_to_cell(const gui_terminal_view_t *view, const gui_terminal_view_layout_t *layout, int x, int y, uint32_t *col, uint32_t *row);
+void gui_terminal_view_begin_selection(gui_terminal_view_t *view, uint32_t col, uint32_t row);
+void gui_terminal_view_update_selection(gui_terminal_view_t *view, uint32_t col, uint32_t row);
+void gui_terminal_view_end_selection(gui_terminal_view_t *view);
+int gui_terminal_view_cell_selected(const gui_terminal_view_t *view, uint32_t col, uint32_t row);
+int gui_terminal_view_copy_selection(gui_terminal_view_t *view);
+int gui_terminal_view_has_clipboard_text(const gui_terminal_view_t *view);
+int gui_terminal_view_set_clipboard_text(gui_terminal_view_t *view, const char *text);
+const char *gui_terminal_view_get_clipboard_text(const gui_terminal_view_t *view);
+void gui_terminal_view_draw(const gui_terminal_view_t *view, const gui_terminal_view_layout_t *layout, int draw_cursor, uint32_t fg, uint32_t selection_bg, uint32_t selection_fg, uint32_t cursor_color);
+void gui_terminal_view_scroll(gui_terminal_view_t *view);
 static void gui_terminal_update_selection(uint32_t col, uint32_t row);
-static int gui_terminal_cell_selected(uint32_t col, uint32_t row);
 void gui_terminal_set_input_focus(int focused);
 static void gui_raw_fill_rect(int x, int y, int w, int h, uint32_t color);
+static int gui_terminal_set_clipboard_text(const char *text);
+const char *gui_terminal_get_clipboard_text(void);
 
 static uint32_t gui_rgb(uint8_t r, uint8_t g, uint8_t b) {
     return ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
@@ -456,6 +489,7 @@ void gui_draw_text(int x, int y, const char *text, uint32_t color) {
 }
 
 static void gui_title_rect_px(int x, int y, int w, int h, uint32_t color, const gui_rect_t *clip);
+static void gui_menu_draw_item_fill(int x, int y, int w, int h, int selected, uint32_t bg, uint32_t selected_bg);
 static void gui_update_start_menu_layout(void);
 static void gui_start_menu_scroll_by(int delta_items);
 
@@ -592,6 +626,119 @@ static void gui_draw_text_clipped_direct(int x, int y, const char *text, uint32_
     }
 }
 
+static void gui_draw_window_title_text(int x, int y, const char *text, uint32_t color, const gui_rect_t *clip);
+static int gui_text_line_height_px(void);
+static int gui_text_center_y(int top, int height);
+static void gui_draw_file_icon(gui_icon_id_t id, int x, int y);
+static void gui_draw_icon_button_face(const gui_rect_t *rect, int selected,
+                                      int highlighted);
+static void gui_draw_icon_button_frame(const gui_rect_t *rect, const char *label,
+                                       int icon_w, int icon_h, int gap,
+                                       int selected, int highlighted,
+                                       uint32_t text_color,
+                                       int *icon_x, int *icon_y);
+static void gui_draw_file_icon_cell(const gui_rect_t *rect, const char *label,
+                                    gui_icon_id_t icon, int selected,
+                                    int highlighted, uint32_t text_color);
+
+static uint32_t gui_text_visible_len_for_width(const char *text, uint32_t max_chars) {
+    uint32_t n = 0;
+    if (!text || max_chars == 0) return 0;
+    while (text[n] && text[n] != '\n' && n < max_chars) n++;
+    return n;
+}
+
+static uint32_t gui_text_len_until_break(const char *text) {
+    uint32_t n = 0;
+    if (!text) return 0;
+    while (text[n] && text[n] != '\n') n++;
+    return n;
+}
+
+static void gui_make_ellipsis_line(char *dst, uint32_t dst_size, const char *src, uint32_t max_chars, int use_ellipsis) {
+    uint32_t i = 0;
+    if (!dst || dst_size == 0) return;
+    dst[0] = '\0';
+    if (!src || max_chars == 0) return;
+    if (max_chars + 1 > dst_size) max_chars = dst_size - 1;
+    while (src[i] && src[i] != '\n' && i < max_chars) {
+        dst[i] = src[i];
+        i++;
+    }
+    dst[i] = '\0';
+    if (use_ellipsis && src[i] && max_chars >= 3) {
+        dst[max_chars - 3] = '.';
+        dst[max_chars - 2] = '.';
+        dst[max_chars - 1] = '.';
+        dst[max_chars] = '\0';
+    }
+}
+
+static int gui_draw_inline_icon(gui_icon_id_t icon, int x, int top, int height) {
+    if (icon == GUI_ICON_NONE) return 0;
+    gui_draw_file_icon(icon, x, top + (height - 14) / 2);
+    return 14 + 4;
+}
+
+static int gui_label_aligned_x(const gui_widget_t *wg, int left, int width, uint32_t chars, int icon_offset) {
+    int text_w = (int)chars * GUI_CHAR_W;
+    int area_w = width - icon_offset;
+    if (!wg || area_w <= text_w) return left + icon_offset;
+    if (wg->label_align == GUI_LABEL_ALIGN_RIGHT) return left + icon_offset + area_w - text_w;
+    if (wg->label_align == GUI_LABEL_ALIGN_CENTER) return left + icon_offset + (area_w - text_w) / 2;
+    return left + icon_offset;
+}
+
+static void gui_draw_label_widget(gui_widget_t *wg, int ax, int ay) {
+    int text_off = 0;
+    uint32_t color;
+    gui_rect_t clip;
+    uint32_t max_chars;
+    uint32_t line_height;
+    uint32_t line_cap;
+    uint32_t line;
+    const char *p;
+    if (!wg) return;
+    text_off = gui_draw_inline_icon(wg->icon, ax, ay, wg->rect.h);
+    clip.x = ax + text_off;
+    clip.y = ay;
+    clip.w = wg->rect.w - text_off;
+    clip.h = wg->rect.h;
+    if (clip.w <= 0 || clip.h <= 0) return;
+    color = wg->fg_color ? wg->fg_color : g_gui.colors.text_fg;
+    max_chars = (uint32_t)(clip.w / GUI_CHAR_W);
+    if (max_chars == 0) return;
+    line_height = (uint32_t)gui_text_line_height_px();
+    if (line_height == 0) line_height = 10;
+    line_cap = (wg->label_flags & GUI_LABEL_FLAG_MULTILINE) ? (uint32_t)(clip.h / (int)line_height) : 1u;
+    if (line_cap == 0) line_cap = 1;
+    if (line_cap > 8) line_cap = 8;
+    p = wg->text;
+    for (line = 0; line < line_cap && p && *p; line++) {
+        char line_buf[256];
+        uint32_t src_len = gui_text_len_until_break(p);
+        uint32_t consume_len = src_len;
+        uint32_t draw_len;
+        int multiline = (wg->label_flags & GUI_LABEL_FLAG_MULTILINE) != 0;
+        int hard_wrap = multiline && src_len > max_chars;
+        int truncated = src_len > max_chars;
+        int y = ay + (int)(line * line_height);
+        if (!multiline) y = gui_text_center_y(ay, wg->rect.h);
+        if (y > ay + wg->rect.h - 1) break;
+        if (hard_wrap) {
+            consume_len = max_chars;
+            truncated = 0;
+        }
+        gui_make_ellipsis_line(line_buf, sizeof(line_buf), p, max_chars,
+                               truncated && (wg->label_flags & GUI_LABEL_FLAG_ELLIPSIS));
+        draw_len = gui_text_visible_len_for_width(line_buf, max_chars);
+        gui_draw_window_title_text(gui_label_aligned_x(wg, ax, wg->rect.w, draw_len, text_off), y, line_buf, color, &clip);
+        p += consume_len;
+        if (!hard_wrap && *p == '\n') p++;
+        if (!multiline) break;
+    }
+}
+
 static void gui_title_rect_px(int x, int y, int w, int h, uint32_t color, const gui_rect_t *clip) {
     int x2;
     int y2;
@@ -650,8 +797,7 @@ static gui_widget_t *g_network_gateway_box = 0;
 static gui_widget_t *g_network_dns_box = 0;
 static int g_settings_language_dropdown_open = 0;
 static void network_refresh(gui_widget_t *w, void *ud);
-static void network_up(gui_widget_t *w, void *ud);
-static void network_down(gui_widget_t *w, void *ud);
+static void network_toggle_admin(gui_widget_t *w, void *ud);
 static void network_dhcp(gui_widget_t *w, void *ud);
 static void network_apply_static(gui_widget_t *w, void *ud);
 static void network_on_close(gui_window_t *win, void *ud) {
@@ -798,9 +944,11 @@ static void gui_network_build(int show_notice) {
         y += row_h;
 
         gui_add_button(g_network_win, x, y, button_w, button_h, i18n_t(I18N_KEY_BTN_REFRESH), network_refresh, 0);
-        gui_add_button(g_network_win, x + button_w + gap, y, button_w, button_h, i18n_t(I18N_KEY_SETTINGS_NETWORK_UP), network_up, 0);
-        gui_add_button(g_network_win, x + (button_w + gap) * 2, y, button_w, button_h, i18n_t(I18N_KEY_SETTINGS_NETWORK_DOWN), network_down, 0);
-        gui_add_button(g_network_win, x + (button_w + gap) * 3, y, button_w, button_h, i18n_t(I18N_KEY_SETTINGS_NETWORK_DHCP), network_dhcp, 0);
+        gui_add_toggle(g_network_win, x + button_w + gap, y, button_w * 2, button_h,
+                       i18n_t(I18N_KEY_SETTINGS_NETWORK_UP),
+                       (net_info.flags & NET_DEVICE_FLAG_UP) ? 1 : 0,
+                       network_toggle_admin, 0);
+        gui_add_button(g_network_win, x + button_w * 3 + gap * 2, y, button_w, button_h, i18n_t(I18N_KEY_SETTINGS_NETWORK_DHCP), network_dhcp, 0);
         y += row_h;
 
         gui_add_label(g_network_win, x, y + (button_h - line_h) / 2, label_w, line_h + 4, i18n_t(I18N_KEY_SETTINGS_NETWORK_IP));
@@ -936,29 +1084,130 @@ void gui_cycle_windows(void) {
     }
 }
 
+static gui_widget_t *gui_widget_parent(gui_widget_t *wg) {
+    gui_widget_t *parent;
+    if (!wg || !wg->owner || wg->parent_id == 0) return 0;
+    parent = gui_find_widget(wg->owner, wg->parent_id);
+    if (!parent || parent == wg || !parent->visible || parent->type != GUI_WIDGET_SCROLLVIEW) return 0;
+    return parent;
+}
+
+static int gui_widget_absolute_origin_depth(gui_widget_t *wg, int *out_x, int *out_y, uint32_t depth) {
+    gui_widget_t *parent;
+    int px;
+    int py;
+    if (!wg || !wg->owner || !out_x || !out_y || depth > GUI_MAX_WIDGETS_PER_WIN) return 0;
+    parent = gui_widget_parent(wg);
+    if (!parent) {
+        *out_x = wg->owner->rect.x + GUI_BORDER_SIZE + wg->rect.x;
+        *out_y = wg->owner->rect.y + GUI_TITLE_HEIGHT + wg->rect.y;
+        return 1;
+    }
+    if (!gui_widget_absolute_origin_depth(parent, &px, &py, depth + 1)) return 0;
+    *out_x = px + wg->rect.x - parent->value;
+    *out_y = py + wg->rect.y - parent->step;
+    return 1;
+}
+
+static int gui_widget_absolute_origin(gui_widget_t *wg, int *out_x, int *out_y) {
+    return gui_widget_absolute_origin_depth(wg, out_x, out_y, 0);
+}
+
+static int gui_widget_local_from_screen(gui_widget_t *wg, int x, int y, int *out_x, int *out_y) {
+    int ax;
+    int ay;
+    if (!gui_widget_absolute_origin(wg, &ax, &ay)) return 0;
+    if (out_x) *out_x = x - ax;
+    if (out_y) *out_y = y - ay;
+    return 1;
+}
+
+static int gui_widget_is_child_of(gui_widget_t *wg, gui_widget_t *parent) {
+    gui_widget_t *p;
+    uint32_t guard = 0;
+    if (!wg || !parent || wg->owner != parent->owner) return 0;
+    p = gui_widget_parent(wg);
+    while (p && guard++ < GUI_MAX_WIDGETS_PER_WIN) {
+        if (p == parent) return 1;
+        p = gui_widget_parent(p);
+    }
+    return 0;
+}
+
 static gui_widget_t *gui_widget_at(gui_window_t *w, int sx, int sy) {
-    uint32_t i;
+    int i;
     if (!w) return 0;
-    for (i = 0; i < w->widget_count; i++) {
+    for (i = (int)w->widget_count - 1; i >= 0; i--) {
         gui_widget_t *wg = &w->widgets[i];
-        if (!wg->visible || !wg->enabled) continue;
-        if (gui_rect_contains(&wg->rect, sx, sy)) return wg;
+        int ax;
+        int ay;
+        if (!wg->visible || !wg->enabled || wg->parent_id != 0) continue;
+        if (!gui_widget_absolute_origin(wg, &ax, &ay)) continue;
+        if (sx + w->rect.x + GUI_BORDER_SIZE < ax || sy + w->rect.y + GUI_TITLE_HEIGHT < ay ||
+            sx + w->rect.x + GUI_BORDER_SIZE >= ax + wg->rect.w || sy + w->rect.y + GUI_TITLE_HEIGHT >= ay + wg->rect.h) continue;
+        if (wg->type == GUI_WIDGET_SCROLLVIEW) {
+            int j;
+            int screen_x = sx + w->rect.x + GUI_BORDER_SIZE;
+            int screen_y = sy + w->rect.y + GUI_TITLE_HEIGHT;
+            int content_w = wg->min_value > wg->rect.w ? wg->min_value : wg->rect.w;
+            int content_h = wg->max_value > wg->rect.h ? wg->max_value : wg->rect.h;
+            int show_v = content_h > wg->rect.h;
+            int show_h = content_w > wg->rect.w;
+            int view_x = ax + 1;
+            int view_y = ay + 1;
+            int view_w = wg->rect.w - 2 - (show_v ? 10 : 0);
+            int view_h = wg->rect.h - 2 - (show_h ? 10 : 0);
+            if (view_w > 0 && view_h > 0 &&
+                screen_x >= view_x && screen_y >= view_y &&
+                screen_x < view_x + view_w && screen_y < view_y + view_h) {
+                for (j = (int)w->widget_count - 1; j >= 0; j--) {
+                    gui_widget_t *child = &w->widgets[j];
+                    int cx;
+                    int cy;
+                    if (!child->visible || !child->enabled || !gui_widget_is_child_of(child, wg)) continue;
+                    if (!gui_widget_absolute_origin(child, &cx, &cy)) continue;
+                    if (screen_x >= cx && screen_y >= cy &&
+                        screen_x < cx + child->rect.w && screen_y < cy + child->rect.h) return child;
+                }
+            }
+        }
+        return wg;
     }
     return 0;
 }
 
 static int gui_widget_can_focus(gui_widget_t *wg) {
-    return wg && wg->visible && wg->enabled &&
-           (wg->type == GUI_WIDGET_TEXTBOX || wg->type == GUI_WIDGET_BUTTON);
+    if (!wg || !wg->visible || !wg->enabled) return 0;
+    if ((wg->type == GUI_WIDGET_TEXTBOX || wg->type == GUI_WIDGET_TEXTAREA) &&
+        (wg->textbox_flags & GUI_TEXTBOX_FLAG_DISABLED)) return 0;
+    return (wg->type == GUI_WIDGET_TEXTBOX || wg->type == GUI_WIDGET_TEXTAREA || wg->type == GUI_WIDGET_BUTTON ||
+            wg->type == GUI_WIDGET_ICON_BUTTON || wg->type == GUI_WIDGET_TOGGLE ||
+            wg->type == GUI_WIDGET_CHECKBOX || wg->type == GUI_WIDGET_RADIOBUTTON ||
+            wg->type == GUI_WIDGET_SELECT || wg->type == GUI_WIDGET_COMBOBOX || wg->type == GUI_WIDGET_LISTVIEW ||
+            wg->type == GUI_WIDGET_TABLEVIEW || wg->type == GUI_WIDGET_MENUBAR ||
+            (wg->type == GUI_WIDGET_LABEL &&
+             (wg->label_flags & (GUI_LABEL_FLAG_SELECTABLE | GUI_LABEL_FLAG_COPYABLE)) != 0));
 }
 
 static int gui_widget_is_clickable(gui_widget_t *wg) {
-    return wg && wg->visible && wg->enabled && wg->type == GUI_WIDGET_BUTTON;
+    return wg && wg->visible && wg->enabled &&
+           (wg->type == GUI_WIDGET_BUTTON || wg->type == GUI_WIDGET_ICON_BUTTON ||
+            wg->type == GUI_WIDGET_TOGGLE || wg->type == GUI_WIDGET_CHECKBOX ||
+            wg->type == GUI_WIDGET_RADIOBUTTON || wg->type == GUI_WIDGET_SELECT ||
+            wg->type == GUI_WIDGET_COMBOBOX ||
+            wg->type == GUI_WIDGET_LISTVIEW || wg->type == GUI_WIDGET_TABLEVIEW ||
+            wg->type == GUI_WIDGET_MENUBAR || wg->type == GUI_WIDGET_TREEVIEW ||
+            (wg->type == GUI_WIDGET_LABEL && (wg->label_flags & GUI_LABEL_FLAG_COPYABLE)));
 }
 
 static int gui_widget_is_hoverable(gui_widget_t *wg) {
     return wg && wg->visible && wg->enabled &&
-           (wg->type == GUI_WIDGET_BUTTON || wg->type == GUI_WIDGET_SLIDER);
+           (wg->type == GUI_WIDGET_BUTTON || wg->type == GUI_WIDGET_ICON_BUTTON ||
+            wg->type == GUI_WIDGET_TOGGLE || wg->type == GUI_WIDGET_CHECKBOX ||
+            wg->type == GUI_WIDGET_RADIOBUTTON || wg->type == GUI_WIDGET_SELECT ||
+            wg->type == GUI_WIDGET_COMBOBOX ||
+            wg->type == GUI_WIDGET_LISTVIEW || wg->type == GUI_WIDGET_TABLEVIEW ||
+            wg->type == GUI_WIDGET_MENUBAR || wg->type == GUI_WIDGET_SLIDER || wg->type == GUI_WIDGET_SCROLLBAR);
 }
 
 static void gui_button_activate(gui_widget_t *wg) {
@@ -971,23 +1220,153 @@ static void gui_button_activate(gui_widget_t *wg) {
     gui_event_push(ev);
 }
 
+int gui_toggle_set_checked(gui_widget_t *widget, int checked) {
+    if (!widget || widget->type != GUI_WIDGET_TOGGLE) return -1;
+    widget->value = checked ? 1 : 0;
+    if (widget->value) widget->button_flags |= GUI_TOGGLE_FLAG_ON;
+    else widget->button_flags &= ~GUI_TOGGLE_FLAG_ON;
+    return 0;
+}
+
+int gui_toggle_get_checked(const gui_widget_t *widget) {
+    if (!widget || widget->type != GUI_WIDGET_TOGGLE) return 0;
+    return widget->value ? 1 : 0;
+}
+
+static void gui_toggle_activate(gui_widget_t *wg) {
+    int old_value;
+    if (!wg || wg->type != GUI_WIDGET_TOGGLE || !wg->enabled) return;
+    old_value = wg->value;
+    gui_toggle_set_checked(wg, !wg->value);
+    if (wg->value != old_value) {
+        if (wg->on_click) wg->on_click(wg, wg->user_data);
+        if (wg->owner && wg->owner->user_owner_pid != 0) {
+            gui_user_post_value_event(wg);
+        }
+        gui_invalidate_all();
+    }
+}
+
+int gui_checkbox_set_checked(gui_widget_t *widget, int checked) {
+    if (!widget || widget->type != GUI_WIDGET_CHECKBOX) return -1;
+    widget->value = checked ? 1 : 0;
+    if (widget->value) widget->button_flags |= GUI_CHECKBOX_FLAG_CHECKED;
+    else widget->button_flags &= ~GUI_CHECKBOX_FLAG_CHECKED;
+    return 0;
+}
+
+int gui_checkbox_get_checked(const gui_widget_t *widget) {
+    if (!widget || widget->type != GUI_WIDGET_CHECKBOX) return 0;
+    return widget->value ? 1 : 0;
+}
+
+static void gui_checkbox_activate(gui_widget_t *wg) {
+    int old_value;
+    if (!wg || wg->type != GUI_WIDGET_CHECKBOX || !wg->enabled) return;
+    old_value = wg->value;
+    gui_checkbox_set_checked(wg, !wg->value);
+    if (wg->value != old_value) {
+        if (wg->on_click) wg->on_click(wg, wg->user_data);
+        if (wg->owner && wg->owner->user_owner_pid != 0) {
+            gui_user_post_value_event(wg);
+        }
+        gui_invalidate_all();
+    }
+}
+
+static void gui_radiobutton_uncheck_group(gui_widget_t *widget) {
+    uint32_t i;
+    gui_window_t *win;
+    if (!widget || widget->type != GUI_WIDGET_RADIOBUTTON || !widget->owner) return;
+    win = widget->owner;
+    for (i = 0; i < win->widget_count; i++) {
+        gui_widget_t *other = &win->widgets[i];
+        if (other == widget || other->type != GUI_WIDGET_RADIOBUTTON) continue;
+        if (other->group_id != widget->group_id) continue;
+        if (!other->value) continue;
+        other->value = 0;
+        other->button_flags &= ~GUI_RADIOBUTTON_FLAG_CHECKED;
+        if (other->owner && other->owner->user_owner_pid != 0) {
+            gui_user_post_value_event(other);
+        }
+    }
+}
+
+int gui_radiobutton_set_checked(gui_widget_t *widget, int checked) {
+    if (!widget || widget->type != GUI_WIDGET_RADIOBUTTON) return -1;
+    if (checked) gui_radiobutton_uncheck_group(widget);
+    widget->value = checked ? 1 : 0;
+    if (widget->value) widget->button_flags |= GUI_RADIOBUTTON_FLAG_CHECKED;
+    else widget->button_flags &= ~GUI_RADIOBUTTON_FLAG_CHECKED;
+    return 0;
+}
+
+int gui_radiobutton_get_checked(const gui_widget_t *widget) {
+    if (!widget || widget->type != GUI_WIDGET_RADIOBUTTON) return 0;
+    return widget->value ? 1 : 0;
+}
+
+static void gui_radiobutton_activate(gui_widget_t *wg) {
+    int old_value;
+    if (!wg || wg->type != GUI_WIDGET_RADIOBUTTON || !wg->enabled) return;
+    old_value = wg->value;
+    gui_radiobutton_set_checked(wg, 1);
+    if (wg->value != old_value) {
+        if (wg->on_click) wg->on_click(wg, wg->user_data);
+        if (wg->owner && wg->owner->user_owner_pid != 0) {
+            gui_user_post_value_event(wg);
+        }
+        gui_invalidate_all();
+    }
+}
+
+static int gui_slider_normalize_step(gui_widget_t *wg) {
+    int range;
+    if (!wg || wg->type != GUI_WIDGET_SLIDER) return 1;
+    range = wg->max_value - wg->min_value;
+    if (range <= 0) return 1;
+    if (wg->step <= 0) wg->step = 1;
+    if (wg->step > range) wg->step = range;
+    return wg->step;
+}
+
+static int gui_slider_snap_value(gui_widget_t *wg, int value) {
+    int step;
+    int offset;
+    int snapped;
+    if (!wg || wg->type != GUI_WIDGET_SLIDER) return value;
+    if (wg->max_value <= wg->min_value) wg->max_value = wg->min_value + 1;
+    if (value < wg->min_value) value = wg->min_value;
+    if (value > wg->max_value) value = wg->max_value;
+    step = gui_slider_normalize_step(wg);
+    if (step <= 1) return value;
+    offset = value - wg->min_value;
+    snapped = wg->min_value + ((offset + step / 2) / step) * step;
+    if (snapped < wg->min_value) snapped = wg->min_value;
+    if (snapped > wg->max_value) snapped = wg->max_value;
+    return snapped;
+}
+
 static int gui_slider_value_from_screen_x(gui_widget_t *wg, int screen_x) {
     int min;
     int max;
     int track_x;
     int track_w;
     int rel;
+    int value;
     if (!wg || wg->type != GUI_WIDGET_SLIDER || !wg->owner) return 0;
     min = wg->min_value;
     max = wg->max_value;
     if (max <= min) max = min + 1;
-    track_x = wg->owner->rect.x + GUI_BORDER_SIZE + wg->rect.x + 8;
+    if (!gui_widget_absolute_origin(wg, &track_x, &rel)) return gui_slider_snap_value(wg, min);
+    track_x += 8;
     track_w = wg->rect.w - 16;
     if (track_w <= 0) track_w = 1;
     rel = screen_x - track_x;
     if (rel < 0) rel = 0;
     if (rel > track_w) rel = track_w;
-    return min + (rel * (max - min) + track_w / 2) / track_w;
+    value = min + (rel * (max - min) + track_w / 2) / track_w;
+    return gui_slider_snap_value(wg, value);
 }
 
 static void gui_slider_apply_screen_x(gui_widget_t *wg, int screen_x) {
@@ -997,8 +1376,68 @@ static void gui_slider_apply_screen_x(gui_widget_t *wg, int screen_x) {
     if (value != wg->value) {
         wg->value = value;
         if (wg->on_click) wg->on_click(wg, wg->user_data);
+        if (wg->owner && wg->owner->user_owner_pid != 0) {
+            gui_user_post_value_event(wg);
+        }
         gui_invalidate_all();
     }
+}
+
+static int gui_scrollbar_is_horizontal(gui_widget_t *wg) {
+    return wg && wg->rect.w > wg->rect.h;
+}
+
+static int gui_scrollbar_value_from_screen(gui_widget_t *wg, int screen_x, int screen_y) {
+    int min;
+    int max;
+    int track_pos;
+    int track_len;
+    int rel;
+    int value;
+    if (!wg || wg->type != GUI_WIDGET_SCROLLBAR || !wg->owner) return 0;
+    min = wg->min_value;
+    max = wg->max_value;
+    if (max <= min) max = min + 1;
+    if (!gui_widget_absolute_origin(wg, &track_pos, &rel)) return gui_slider_snap_value(wg, min);
+    if (gui_scrollbar_is_horizontal(wg)) {
+        track_pos += 8;
+        track_len = wg->rect.w - 16;
+        rel = screen_x - track_pos;
+    } else {
+        track_pos = rel + 8;
+        track_len = wg->rect.h - 16;
+        rel = screen_y - track_pos;
+    }
+    if (track_len <= 0) track_len = 1;
+    if (rel < 0) rel = 0;
+    if (rel > track_len) rel = track_len;
+    value = min + (rel * (max - min) + track_len / 2) / track_len;
+    return gui_slider_snap_value(wg, value);
+}
+
+static void gui_scrollbar_apply_value(gui_widget_t *wg, int value) {
+    if (!wg || wg->type != GUI_WIDGET_SCROLLBAR || !wg->enabled) return;
+    value = gui_slider_snap_value(wg, value);
+    if (value != wg->value) {
+        wg->value = value;
+        if (wg->on_click) wg->on_click(wg, wg->user_data);
+        if (wg->owner && wg->owner->user_owner_pid != 0) {
+            gui_user_post_value_event(wg);
+        }
+        gui_invalidate_all();
+    }
+}
+
+static void gui_scrollbar_apply_screen(gui_widget_t *wg, int screen_x, int screen_y) {
+    if (!wg || wg->type != GUI_WIDGET_SCROLLBAR || !wg->enabled) return;
+    gui_scrollbar_apply_value(wg, gui_scrollbar_value_from_screen(wg, screen_x, screen_y));
+}
+
+static void gui_scrollbar_scroll_steps(gui_widget_t *wg, int steps) {
+    int step;
+    if (!wg || wg->type != GUI_WIDGET_SCROLLBAR || !wg->enabled || steps == 0) return;
+    step = gui_slider_normalize_step(wg);
+    gui_scrollbar_apply_value(wg, wg->value + steps * step);
 }
 
 static void gui_set_hovered_widget(gui_widget_t *wg) {
@@ -1012,21 +1451,40 @@ static void gui_set_hovered_widget(gui_widget_t *wg) {
 
 static gui_widget_t *gui_widget_at_screen(int x, int y) {
     gui_window_t *w = gui_window_at(x, y);
+    uint32_t i;
+    int sx;
+    int sy;
     if (!w) return 0;
-    return gui_widget_at(w, x - w->rect.x - GUI_BORDER_SIZE, y - w->rect.y - GUI_TITLE_HEIGHT);
+    sx = x - w->rect.x - GUI_BORDER_SIZE;
+    sy = y - w->rect.y - GUI_TITLE_HEIGHT;
+    for (i = w->widget_count; i > 0; --i) {
+        gui_widget_t *sw = &w->widgets[i - 1];
+        if ((sw->type == GUI_WIDGET_SELECT || sw->type == GUI_WIDGET_COMBOBOX) &&
+            gui_select_dropdown_index_at(sw, x, y) >= 0) {
+            return sw;
+        }
+    }
+    return gui_widget_at(w, sx, sy);
 }
 
 static void gui_set_focused_widget(gui_widget_t *wg) {
+    gui_widget_t *old_widget;
     if (g_gui.focused_widget == wg) return;
-    if (g_gui.focused_widget) g_gui.focused_widget->focused = 0;
+    old_widget = g_gui.focused_widget;
+    if (old_widget) {
+        old_widget->focused = 0;
+        gui_user_post_text_event(old_widget, GUI_EVENT_BLUR);
+    }
     g_gui.focused_widget = 0;
     if (gui_widget_can_focus(wg)) {
         if (wg->type == GUI_WIDGET_TEXTBOX) {
-            uint32_t len = (uint32_t)strlen(wg->text);
-            if (wg->cursor > len) wg->cursor = len;
+            gui_textbox_ensure_cursor_visible(wg);
+        } else if (wg->type == GUI_WIDGET_TEXTAREA) {
+            gui_textarea_ensure_cursor_visible(wg);
         }
         wg->focused = 1;
         g_gui.focused_widget = wg;
+        gui_user_post_text_event(wg, GUI_EVENT_FOCUS);
         gui_terminal_set_input_focus(0);
     }
     gui_invalidate_all();
@@ -1081,46 +1539,461 @@ static void gui_focus_next_widget(void) {
     }
 }
 
-static void gui_textbox_on_key(gui_widget_t *wg, int key) {
+static uint32_t gui_textbox_visible_chars(const gui_widget_t *wg) {
+    int text_w;
+    if (!wg || GUI_CHAR_W <= 0) return 0;
+    text_w = wg->rect.w - 8;
+    if (text_w <= 0) return 0;
+    return (uint32_t)(text_w / GUI_CHAR_W);
+}
+
+static void gui_textbox_ensure_cursor_visible(gui_widget_t *wg) {
     uint32_t len;
-    uint32_t i;
-    int changed = 1;
-    if (!gui_widget_can_focus(wg)) return;
+    uint32_t visible;
+    if (!wg || wg->type != GUI_WIDGET_TEXTBOX) return;
     len = (uint32_t)strlen(wg->text);
     if (wg->cursor > len) wg->cursor = len;
+    if (wg->text_scroll > len) wg->text_scroll = len;
+    visible = gui_textbox_visible_chars(wg);
+    if (visible == 0 || len <= visible) {
+        wg->text_scroll = 0;
+        return;
+    }
+    if (wg->cursor < wg->text_scroll) {
+        wg->text_scroll = wg->cursor;
+    } else if (wg->cursor > wg->text_scroll + visible) {
+        wg->text_scroll = wg->cursor - visible;
+    }
+    if (wg->text_scroll > len) wg->text_scroll = len;
+}
 
-    if (key == GUI_KEY_BACKSPACE) {
-        if (wg->cursor == 0 || len == 0) changed = 0;
-        else {
+static void gui_textbox_set_cursor_from_local_x(gui_widget_t *wg, int local_x) {
+    uint32_t len;
+    int text_x;
+    int rel_x;
+    uint32_t cursor;
+    if (!wg || wg->type != GUI_WIDGET_TEXTBOX) return;
+    len = (uint32_t)strlen(wg->text);
+    text_x = local_x - 4;
+    if (text_x <= 0 || GUI_CHAR_W <= 0) cursor = wg->text_scroll;
+    else {
+        rel_x = text_x + (GUI_CHAR_W / 2);
+        cursor = wg->text_scroll + (uint32_t)(rel_x / GUI_CHAR_W);
+        if (cursor > len) cursor = len;
+    }
+    if (wg->cursor != cursor) {
+        wg->cursor = cursor;
+        gui_textbox_ensure_cursor_visible(wg);
+        if (wg->owner) {
+            gui_invalidate_rect(wg->owner->rect.x, wg->owner->rect.y,
+                                wg->owner->rect.w, wg->owner->rect.h);
+        }
+    }
+}
+
+static uint32_t gui_textarea_line_height(void) {
+    return (uint32_t)(GUI_CHAR_H + 2);
+}
+
+static uint32_t gui_textarea_visible_lines(const gui_widget_t *wg) {
+    int text_h;
+    uint32_t line_h = gui_textarea_line_height();
+    if (!wg || line_h == 0) return 0;
+    text_h = wg->rect.h - 8;
+    if (text_h <= 0) return 0;
+    return (uint32_t)text_h / line_h;
+}
+
+static void gui_textarea_cursor_line_col(const gui_widget_t *wg, uint32_t *out_line, uint32_t *out_col) {
+    uint32_t i;
+    uint32_t line = 0;
+    uint32_t col = 0;
+    uint32_t len;
+    if (!wg) {
+        if (out_line) *out_line = 0;
+        if (out_col) *out_col = 0;
+        return;
+    }
+    len = (uint32_t)strlen(wg->text);
+    for (i = 0; i < wg->cursor && i < len; i++) {
+        if (wg->text[i] == '\n') {
+            line++;
+            col = 0;
+        } else {
+            col++;
+        }
+    }
+    if (out_line) *out_line = line;
+    if (out_col) *out_col = col;
+}
+
+static void gui_textarea_ensure_cursor_visible(gui_widget_t *wg) {
+    uint32_t len;
+    uint32_t line = 0;
+    uint32_t col = 0;
+    uint32_t visible;
+    if (!wg || wg->type != GUI_WIDGET_TEXTAREA) return;
+    len = (uint32_t)strlen(wg->text);
+    if (wg->cursor > len) wg->cursor = len;
+    gui_textarea_cursor_line_col(wg, &line, &col);
+    (void)col;
+    visible = gui_textarea_visible_lines(wg);
+    if (visible == 0) {
+        wg->text_scroll = 0;
+        return;
+    }
+    if (line < wg->text_scroll) wg->text_scroll = line;
+    else if (line >= wg->text_scroll + visible) wg->text_scroll = line - visible + 1;
+}
+
+static uint32_t gui_textarea_count_lines(const gui_widget_t *wg) {
+    uint32_t i;
+    uint32_t lines = 1;
+    if (!wg || wg->type != GUI_WIDGET_TEXTAREA) return 0;
+    for (i = 0; wg->text[i] != '\0'; i++) {
+        if (wg->text[i] == '\n') lines++;
+    }
+    return lines;
+}
+
+static uint32_t gui_textarea_index_for_line_col(const gui_widget_t *wg, uint32_t target_line, uint32_t target_col) {
+    uint32_t line = 0;
+    uint32_t col = 0;
+    uint32_t i = 0;
+    uint32_t len;
+    if (!wg || wg->type != GUI_WIDGET_TEXTAREA) return 0;
+    len = (uint32_t)strlen(wg->text);
+    while (i < len) {
+        if (line == target_line && col >= target_col) break;
+        if (wg->text[i] == '\n') {
+            if (line == target_line) break;
+            line++;
+            col = 0;
+            i++;
+            continue;
+        }
+        col++;
+        i++;
+    }
+    return i;
+}
+
+static uint32_t gui_textarea_current_line_start(const gui_widget_t *wg) {
+    uint32_t pos;
+    if (!wg || wg->type != GUI_WIDGET_TEXTAREA) return 0;
+    pos = wg->cursor;
+    while (pos > 0 && wg->text[pos - 1] != '\n') pos--;
+    return pos;
+}
+
+static uint32_t gui_textarea_current_line_end(const gui_widget_t *wg) {
+    uint32_t pos;
+    uint32_t len;
+    if (!wg || wg->type != GUI_WIDGET_TEXTAREA) return 0;
+    len = (uint32_t)strlen(wg->text);
+    pos = wg->cursor;
+    if (pos > len) pos = len;
+    while (pos < len && wg->text[pos] != '\n') pos++;
+    return pos;
+}
+
+static void gui_textarea_set_cursor_from_local_xy(gui_widget_t *wg, int local_x, int local_y) {
+    uint32_t target_line;
+    uint32_t target_col;
+    int text_x;
+    int text_y;
+    uint32_t line_h;
+    if (!wg || wg->type != GUI_WIDGET_TEXTAREA) return;
+    line_h = gui_textarea_line_height();
+    text_x = local_x - 4;
+    text_y = local_y - 4;
+    target_line = wg->text_scroll;
+    if (text_y > 0 && line_h > 0) target_line += (uint32_t)(text_y / (int)line_h);
+    target_col = 0;
+    if (text_x > 0 && GUI_CHAR_W > 0) target_col = (uint32_t)((text_x + (GUI_CHAR_W / 2)) / GUI_CHAR_W);
+
+    wg->cursor = gui_textarea_index_for_line_col(wg, target_line, target_col);
+    gui_textarea_ensure_cursor_visible(wg);
+    if (wg->owner) {
+        gui_invalidate_rect(wg->owner->rect.x, wg->owner->rect.y,
+                            wg->owner->rect.w, wg->owner->rect.h);
+    }
+}
+
+static int gui_textarea_scroll_lines(gui_widget_t *wg, int delta_lines) {
+    uint32_t total;
+    uint32_t visible;
+    uint32_t max_scroll;
+    uint32_t old_scroll;
+    int next;
+    if (!wg || wg->type != GUI_WIDGET_TEXTAREA) return 0;
+    total = gui_textarea_count_lines(wg);
+    visible = gui_textarea_visible_lines(wg);
+    if (visible == 0) visible = 1;
+    max_scroll = total > visible ? total - visible : 0;
+    old_scroll = wg->text_scroll;
+    next = (int)wg->text_scroll + delta_lines;
+    if (next < 0) next = 0;
+    if ((uint32_t)next > max_scroll) next = (int)max_scroll;
+    wg->text_scroll = (uint32_t)next;
+    if (wg->text_scroll != old_scroll && wg->owner) {
+        gui_invalidate_rect(wg->owner->rect.x, wg->owner->rect.y,
+                            wg->owner->rect.w, wg->owner->rect.h);
+        return 1;
+    }
+    return 0;
+}
+
+static void gui_textarea_line_col_for_index(const gui_widget_t *wg, uint32_t index, uint32_t *out_line, uint32_t *out_col) {
+    uint32_t i;
+    uint32_t line = 0;
+    uint32_t col = 0;
+    uint32_t len;
+    if (!wg || wg->type != GUI_WIDGET_TEXTAREA) {
+        if (out_line) *out_line = 0;
+        if (out_col) *out_col = 0;
+        return;
+    }
+    len = (uint32_t)strlen(wg->text);
+    if (index > len) index = len;
+    for (i = 0; i < index; i++) {
+        if (wg->text[i] == '\n') {
+            line++;
+            col = 0;
+        } else {
+            col++;
+        }
+    }
+    if (out_line) *out_line = line;
+    if (out_col) *out_col = col;
+}
+
+static int gui_text_widget_has_selection(const gui_widget_t *wg) {
+    if (!wg || (wg->type != GUI_WIDGET_TEXTBOX && wg->type != GUI_WIDGET_TEXTAREA)) return 0;
+    return wg->selection_start != wg->selection_end;
+}
+
+static void gui_text_widget_selection_bounds(const gui_widget_t *wg, uint32_t *start, uint32_t *end) {
+    uint32_t len = wg ? (uint32_t)strlen(wg->text) : 0;
+    uint32_t a = wg ? wg->selection_start : 0;
+    uint32_t b = wg ? wg->selection_end : 0;
+    if (a > len) a = len;
+    if (b > len) b = len;
+    if (a <= b) {
+        if (start) *start = a;
+        if (end) *end = b;
+    } else {
+        if (start) *start = b;
+        if (end) *end = a;
+    }
+}
+
+static void gui_text_widget_clear_selection(gui_widget_t *wg) {
+    if (!wg) return;
+    wg->selection_anchor = wg->cursor;
+    wg->selection_start = wg->cursor;
+    wg->selection_end = wg->cursor;
+    if (g_gui.text_select_widget == wg) g_gui.text_select_widget = 0;
+}
+
+static void gui_text_widget_set_selection(gui_widget_t *wg, uint32_t anchor, uint32_t cursor) {
+    uint32_t len;
+    if (!wg) return;
+    len = (uint32_t)strlen(wg->text);
+    if (anchor > len) anchor = len;
+    if (cursor > len) cursor = len;
+    wg->selection_anchor = anchor;
+    wg->selection_start = anchor;
+    wg->selection_end = cursor;
+    wg->cursor = cursor;
+}
+
+static int gui_text_widget_delete_selection(gui_widget_t *wg) {
+    uint32_t start;
+    uint32_t end;
+    uint32_t len;
+    if (!gui_text_widget_has_selection(wg)) return 0;
+    gui_text_widget_selection_bounds(wg, &start, &end);
+    if (start == end) {
+        gui_text_widget_clear_selection(wg);
+        return 0;
+    }
+    len = (uint32_t)strlen(wg->text);
+    if (end > len) end = len;
+    memmove(wg->text + start, wg->text + end, len - end + 1);
+    wg->cursor = start;
+    gui_text_widget_clear_selection(wg);
+    return 1;
+}
+
+static int gui_text_widget_copy_selection(gui_widget_t *wg) {
+    char buf[256];
+    uint32_t start;
+    uint32_t end;
+    uint32_t n;
+    if (!gui_text_widget_has_selection(wg)) return 0;
+    if (wg->type == GUI_WIDGET_TEXTBOX && (wg->textbox_flags & GUI_TEXTBOX_FLAG_PASSWORD)) return 0;
+    gui_text_widget_selection_bounds(wg, &start, &end);
+    if (end <= start) return 0;
+    n = end - start;
+    if (n >= sizeof(buf)) n = sizeof(buf) - 1;
+    memcpy(buf, wg->text + start, n);
+    buf[n] = '\0';
+    return gui_terminal_set_clipboard_text(buf);
+}
+
+static int gui_text_widget_insert_text(gui_widget_t *wg, const char *text) {
+    uint32_t len;
+    uint32_t ins_len;
+    uint32_t max_ins;
+    if (!wg || !text || text[0] == '\0') return 0;
+    if (wg->textbox_flags & GUI_TEXTBOX_FLAG_READONLY) return 0;
+    if (gui_text_widget_has_selection(wg)) gui_text_widget_delete_selection(wg);
+    len = (uint32_t)strlen(wg->text);
+    if (wg->cursor > len) wg->cursor = len;
+    max_ins = (uint32_t)sizeof(wg->text) - 1 - len;
+    ins_len = (uint32_t)strlen(text);
+    if (ins_len > max_ins) ins_len = max_ins;
+    if (ins_len == 0) return 0;
+    memmove(wg->text + wg->cursor + ins_len, wg->text + wg->cursor, len - wg->cursor + 1);
+    memcpy(wg->text + wg->cursor, text, ins_len);
+    wg->cursor += ins_len;
+    gui_text_widget_clear_selection(wg);
+    return 1;
+}
+
+static int gui_text_widget_paste_clipboard(gui_widget_t *wg) {
+    const char *clip = gui_terminal_get_clipboard_text();
+    return gui_text_widget_insert_text(wg, clip ? clip : "");
+}
+
+static void gui_text_widget_draw_selection(gui_widget_t *wg, int ax, int ay, const gui_rect_t *clip) {
+    uint32_t start;
+    uint32_t end;
+    uint32_t color = gui_rgb(96, 150, 232);
+    if (!gui_text_widget_has_selection(wg) || !clip) return;
+    gui_text_widget_selection_bounds(wg, &start, &end);
+    if (start == end) return;
+    if (wg->type == GUI_WIDGET_TEXTBOX) {
+        uint32_t vis_start = wg->text_scroll;
+        uint32_t vis_end = vis_start + (uint32_t)(clip->w / GUI_CHAR_W) + 1;
+        uint32_t a = start > vis_start ? start : vis_start;
+        uint32_t b = end < vis_end ? end : vis_end;
+        if (b > a) {
+            int sx = ax + 4 + (int)((a - vis_start) * GUI_CHAR_W);
+            int sw = (int)((b - a) * GUI_CHAR_W);
+            gui_raw_fill_rect(sx, ay + 4, sw, wg->rect.h - 8, color);
+        }
+    } else if (wg->type == GUI_WIDGET_TEXTAREA) {
+        uint32_t i = start;
+        uint32_t line_h = gui_textarea_line_height();
+        while (i < end) {
+            uint32_t line = 0;
+            uint32_t col = 0;
+            uint32_t line_end;
+            uint32_t seg_end;
+            gui_textarea_line_col_for_index(wg, i, &line, &col);
+            line_end = gui_textarea_index_for_line_col(wg, line, 0x7fffffffU);
+            if (line_end < i) line_end = i;
+            seg_end = end < line_end ? end : line_end;
+            if (seg_end == i && i < end) seg_end = i + 1;
+            if (line >= wg->text_scroll && line - wg->text_scroll < gui_textarea_visible_lines(wg)) {
+                int sx = ax + 4 + (int)(col * GUI_CHAR_W);
+                int sy = ay + 4 + (int)((line - wg->text_scroll) * line_h);
+                int sw = (int)((seg_end - i) * GUI_CHAR_W);
+                if (sw <= 0) sw = (int)GUI_CHAR_W;
+                gui_raw_fill_rect(sx, sy, sw, (int)GUI_CHAR_H + 1, color);
+            }
+            if (seg_end <= i) break;
+            i = seg_end;
+            if (i < end && wg->text[i] == '\n') i++;
+        }
+    }
+}
+
+static int gui_textbox_on_key(gui_widget_t *wg, int key) {
+    uint32_t len;
+    uint32_t i;
+    uint32_t old_cursor;
+    int text_changed = 0;
+    int cursor_changed = 0;
+    if (!gui_widget_can_focus(wg)) return 0;
+    len = (uint32_t)strlen(wg->text);
+    if (wg->cursor > len) wg->cursor = len;
+    old_cursor = wg->cursor;
+
+    if (key == 3) {
+        return gui_text_widget_copy_selection(wg);
+    } else if (key == 22) {
+        if (wg->textbox_flags & GUI_TEXTBOX_FLAG_READONLY) return 0;
+        text_changed = gui_text_widget_paste_clipboard(wg);
+    } else if (wg->textbox_flags & GUI_TEXTBOX_FLAG_READONLY) {
+        return 0;
+    } else if (key == GUI_KEY_BACKSPACE) {
+        if (gui_text_widget_has_selection(wg)) {
+            text_changed = gui_text_widget_delete_selection(wg);
+        } else if (wg->cursor > 0 && len > 0) {
             for (i = wg->cursor - 1; i < len; i++) wg->text[i] = wg->text[i + 1];
             wg->cursor--;
+            text_changed = 1;
         }
     } else if (key == GUI_KEY_DELETE) {
-        if (wg->cursor >= len) changed = 0;
-        else {
+        if (gui_text_widget_has_selection(wg)) {
+            text_changed = gui_text_widget_delete_selection(wg);
+        } else if (wg->cursor < len) {
             for (i = wg->cursor; i < len; i++) wg->text[i] = wg->text[i + 1];
+            text_changed = 1;
         }
     } else if (key == GUI_KEY_LEFT) {
         if (wg->cursor > 0) wg->cursor--;
-        else changed = 0;
+        gui_text_widget_clear_selection(wg);
     } else if (key == GUI_KEY_RIGHT) {
         if (wg->cursor < len) wg->cursor++;
-        else changed = 0;
+        gui_text_widget_clear_selection(wg);
+    } else if (key == GUI_KEY_UP && wg->type == GUI_WIDGET_TEXTAREA) {
+        uint32_t line = 0;
+        uint32_t col = 0;
+        gui_textarea_cursor_line_col(wg, &line, &col);
+        if (line > 0) wg->cursor = gui_textarea_index_for_line_col(wg, line - 1, col);
+        gui_text_widget_clear_selection(wg);
+    } else if (key == GUI_KEY_DOWN && wg->type == GUI_WIDGET_TEXTAREA) {
+        uint32_t line = 0;
+        uint32_t col = 0;
+        uint32_t total = gui_textarea_count_lines(wg);
+        gui_textarea_cursor_line_col(wg, &line, &col);
+        if (line + 1 < total) wg->cursor = gui_textarea_index_for_line_col(wg, line + 1, col);
+        gui_text_widget_clear_selection(wg);
     } else if (key == GUI_KEY_HOME) {
-        if (wg->cursor != 0) wg->cursor = 0;
-        else changed = 0;
+        uint32_t target = (wg->type == GUI_WIDGET_TEXTAREA) ? gui_textarea_current_line_start(wg) : 0;
+        wg->cursor = target;
+        gui_text_widget_clear_selection(wg);
     } else if (key == GUI_KEY_END) {
-        if (wg->cursor != len) wg->cursor = len;
-        else changed = 0;
-    } else if (key == GUI_KEY_ENTER || key == GUI_KEY_TAB) {
-        changed = 0;
-    } else if (key >= 32 && key <= 126 && len + 1 < sizeof(wg->text)) {
-        for (i = len + 1; i > wg->cursor; i--) wg->text[i] = wg->text[i - 1];
-        wg->text[wg->cursor++] = (char)key;
-    } else {
-        changed = 0;
+        uint32_t target = (wg->type == GUI_WIDGET_TEXTAREA) ? gui_textarea_current_line_end(wg) : len;
+        wg->cursor = target;
+        gui_text_widget_clear_selection(wg);
+    } else if (key == GUI_KEY_ENTER) {
+        if (wg->type == GUI_WIDGET_TEXTAREA) {
+            text_changed = gui_text_widget_insert_text(wg, "\n");
+        } else {
+            if (wg->owner && wg->owner->user_owner_pid != 0) gui_user_post_text_event(wg, GUI_EVENT_TEXT_SUBMIT);
+        }
+    } else if (key == GUI_KEY_TAB) {
+        /* Tab changes focus at the event dispatcher level. */
+    } else if (key >= 32 && key <= 126) {
+        char ch[2];
+        ch[0] = (char)key;
+        ch[1] = '\0';
+        text_changed = gui_text_widget_insert_text(wg, ch);
     }
-    if (changed && wg->owner) gui_invalidate_rect(wg->owner->rect.x, wg->owner->rect.y, wg->owner->rect.w, wg->owner->rect.h);
+
+    cursor_changed = (wg->cursor != old_cursor) || gui_text_widget_has_selection(wg);
+    if (wg->type == GUI_WIDGET_TEXTAREA) gui_textarea_ensure_cursor_visible(wg);
+    else gui_textbox_ensure_cursor_visible(wg);
+    if ((text_changed || cursor_changed) && wg->owner) {
+        gui_invalidate_rect(wg->owner->rect.x, wg->owner->rect.y, wg->owner->rect.w, wg->owner->rect.h);
+        if (text_changed && wg->owner->user_owner_pid != 0) gui_user_post_text_event(wg, GUI_EVENT_TEXT_CHANGED);
+    }
+    return text_changed || cursor_changed;
 }
 
 static void gui_cursor_restore_fb(void) {
@@ -1459,22 +2332,964 @@ static void gui_draw_file_icon(gui_icon_id_t id, int x, int y) {
     (void)i;
 }
 
+static int gui_select_is_separator(char ch) {
+    return ch == '\n' || ch == '\r';
+}
+
+static const char *gui_select_skip_separators(const char *p) {
+    while (p && gui_select_is_separator(*p)) p++;
+    return p;
+}
+
+static int gui_select_item_count(const gui_widget_t *wg) {
+    const char *p;
+    int count = 0;
+    if (!wg || !wg->placeholder[0]) return 0;
+    p = wg->placeholder;
+    while (*p) {
+        p = gui_select_skip_separators(p);
+        if (!*p) break;
+        count++;
+        while (*p && !gui_select_is_separator(*p)) p++;
+    }
+    return count;
+}
+
+static int gui_select_item_text(const gui_widget_t *wg, int index, char *out, int out_size) {
+    const char *p;
+    int cur = 0;
+    int n = 0;
+    if (!wg || !out || out_size <= 0 || index < 0) return -1;
+    out[0] = 0;
+    p = wg->placeholder;
+    while (*p) {
+        p = gui_select_skip_separators(p);
+        if (!*p) break;
+        if (cur == index) {
+            while (*p && !gui_select_is_separator(*p) && n + 1 < out_size) out[n++] = *p++;
+            out[n] = 0;
+            return n > 0 ? 0 : -1;
+        }
+        while (*p && !gui_select_is_separator(*p)) p++;
+        cur++;
+    }
+    return -1;
+}
+
+static void gui_select_close_others(gui_window_t *win, gui_widget_t *except) {
+    uint32_t i;
+    if (!win) return;
+    for (i = 0; i < win->widget_count; ++i) {
+        gui_widget_t *w = &win->widgets[i];
+        if (w != except && (w->type == GUI_WIDGET_SELECT || w->type == GUI_WIDGET_COMBOBOX)) {
+            w->step = 0;
+            w->pressed = 0;
+        }
+    }
+}
+
+int gui_select_set_items(gui_widget_t *widget, const char *items) {
+    int count;
+    if (!widget || (widget->type != GUI_WIDGET_SELECT && widget->type != GUI_WIDGET_COMBOBOX)) return -1;
+    gui_widget_set_placeholder(widget, items ? items : "");
+    count = gui_select_item_count(widget);
+    widget->max_value = count - 1;
+    if (count <= 0) {
+        widget->value = -1;
+        widget->min_value = -1;
+    } else {
+        if (widget->value < 0) widget->value = 0;
+        if (widget->value >= count) widget->value = count - 1;
+        widget->min_value = widget->value;
+    }
+    return 0;
+}
+
+int gui_select_set_selected(gui_widget_t *widget, int selected_index) {
+    int count;
+    if (!widget || (widget->type != GUI_WIDGET_SELECT && widget->type != GUI_WIDGET_COMBOBOX)) return -1;
+    count = gui_select_item_count(widget);
+    if (count <= 0) {
+        widget->value = -1;
+        widget->min_value = -1;
+        return selected_index < 0 ? 0 : -1;
+    }
+    if (selected_index < 0 || selected_index >= count) return -1;
+    widget->value = selected_index;
+    widget->min_value = selected_index;
+    return 0;
+}
+
+int gui_select_get_selected(gui_widget_t *widget, int *out_selected_index) {
+    if (!widget || !out_selected_index || (widget->type != GUI_WIDGET_SELECT && widget->type != GUI_WIDGET_COMBOBOX)) return -1;
+    *out_selected_index = widget->value;
+    return 0;
+}
+
+static void gui_select_activate(gui_widget_t *wg) {
+    if (!wg || !wg->enabled || (wg->type != GUI_WIDGET_SELECT && wg->type != GUI_WIDGET_COMBOBOX)) return;
+    if (wg->owner) gui_select_close_others(wg->owner, wg);
+    wg->step = !wg->step;
+    if (wg->min_value < 0) wg->min_value = wg->value;
+    gui_invalidate_all();
+}
+
+static void gui_select_commit(gui_widget_t *wg, int index) {
+    int old_value;
+    if (!wg || !wg->enabled) return;
+    old_value = wg->value;
+    if (gui_select_set_selected(wg, index) == 0) {
+        wg->step = 0;
+        wg->pressed = 0;
+        if (wg->value != old_value) gui_user_post_value_event(wg);
+        gui_invalidate_all();
+    }
+}
+
+static int gui_select_dropdown_index_at(gui_widget_t *wg, int sx, int sy) {
+    int ax, ay;
+    int idx;
+    int count;
+    if (!wg || !wg->step) return -1;
+    if (!gui_widget_absolute_origin(wg, &ax, &ay)) return -1;
+    count = gui_select_item_count(wg);
+    if (count <= 0) return -1;
+    if (sx < ax || sx >= ax + wg->rect.w) return -1;
+    if (sy < ay + wg->rect.h || sy >= ay + wg->rect.h + count * 20) return -1;
+    idx = (sy - (ay + wg->rect.h)) / 20;
+    return (idx >= 0 && idx < count) ? idx : -1;
+}
+
+static void gui_select_handle_key(gui_widget_t *wg, int key) {
+    int count;
+    if (!wg || !wg->enabled) return;
+    count = gui_select_item_count(wg);
+    if (count <= 0) return;
+    if (key == GUI_KEY_SPACE || key == GUI_KEY_ENTER) {
+        if (wg->step) gui_select_commit(wg, wg->min_value >= 0 ? wg->min_value : wg->value);
+        else gui_select_activate(wg);
+    } else if (key == GUI_KEY_DOWN) {
+        if (!wg->step) wg->step = 1;
+        if (wg->min_value < 0) wg->min_value = wg->value;
+        if (wg->min_value < count - 1) wg->min_value++;
+        gui_invalidate_all();
+    } else if (key == GUI_KEY_UP) {
+        if (!wg->step) wg->step = 1;
+        if (wg->min_value < 0) wg->min_value = wg->value;
+        if (wg->min_value > 0) wg->min_value--;
+        gui_invalidate_all();
+    } else if (key == 27) {
+        wg->step = 0;
+        gui_invalidate_all();
+    }
+}
+
+
+static int gui_listview_item_height(void) { return (int)GUI_CHAR_H + 8; }
+
+static int gui_listview_visible_rows(const gui_widget_t *wg) {
+    int rows;
+    if (!wg) return 1;
+    rows = (wg->rect.h - 4) / gui_listview_item_height();
+    return rows > 0 ? rows : 1;
+}
+
+static int gui_listview_item_selected(const gui_widget_t *wg, int index) {
+    unsigned bit;
+    if (!wg || index < 0) return 0;
+    if ((wg->label_flags & GUI_LISTVIEW_FLAG_MULTI_SELECT) == 0) return wg->value == index;
+    if (index >= 32) return 0;
+    bit = 1u << (unsigned)index;
+    return (wg->selection_anchor & bit) != 0;
+}
+
+static void gui_listview_ensure_visible(gui_widget_t *wg) {
+    int count, rows, max_scroll;
+    if (!wg || wg->type != GUI_WIDGET_LISTVIEW) return;
+    count = gui_select_item_count(wg);
+    rows = gui_listview_visible_rows(wg);
+    max_scroll = count > rows ? count - rows : 0;
+    if (wg->min_value < 0) wg->min_value = 0;
+    if (wg->min_value > max_scroll) wg->min_value = max_scroll;
+    if (wg->value < 0 && count > 0) wg->value = 0;
+    if (wg->value >= count) wg->value = count - 1;
+    if (wg->value < wg->min_value) wg->min_value = wg->value;
+    if (wg->value >= wg->min_value + rows) wg->min_value = wg->value - rows + 1;
+    if (wg->min_value < 0) wg->min_value = 0;
+    if (wg->min_value > max_scroll) wg->min_value = max_scroll;
+}
+
+int gui_listview_set_items(gui_widget_t *widget, const char *items) {
+    int count;
+    if (!widget || widget->type != GUI_WIDGET_LISTVIEW) return -1;
+    gui_widget_set_placeholder(widget, items ? items : "");
+    count = gui_select_item_count(widget);
+    widget->max_value = count - 1;
+    if (count <= 0) {
+        widget->value = -1;
+        widget->min_value = 0;
+        widget->selection_anchor = 0;
+    } else {
+        if (widget->value < 0) widget->value = 0;
+        if (widget->value >= count) widget->value = count - 1;
+        if ((widget->label_flags & GUI_LISTVIEW_FLAG_MULTI_SELECT) == 0) widget->selection_anchor = 0;
+        gui_listview_ensure_visible(widget);
+    }
+    return 0;
+}
+
+int gui_listview_set_selected(gui_widget_t *widget, int selected_index) {
+    int count;
+    if (!widget || widget->type != GUI_WIDGET_LISTVIEW) return -1;
+    count = gui_select_item_count(widget);
+    if (count <= 0) {
+        widget->value = -1;
+        widget->selection_anchor = 0;
+        return selected_index < 0 ? 0 : -1;
+    }
+    if (selected_index < 0 || selected_index >= count) return -1;
+    widget->value = selected_index;
+    if ((widget->label_flags & GUI_LISTVIEW_FLAG_MULTI_SELECT) != 0 && selected_index < 32) widget->selection_anchor |= (1u << (unsigned)selected_index);
+    else widget->selection_anchor = 0;
+    gui_listview_ensure_visible(widget);
+    return 0;
+}
+
+int gui_listview_get_selected(gui_widget_t *widget, int *out_selected_index) {
+    if (!widget || !out_selected_index || widget->type != GUI_WIDGET_LISTVIEW) return -1;
+    *out_selected_index = widget->value;
+    return 0;
+}
+
+static int gui_listview_index_at(gui_widget_t *wg, int sx, int sy) {
+    int ax, ay, local_y, idx, count;
+    if (!wg || wg->type != GUI_WIDGET_LISTVIEW) return -1;
+    if (!gui_widget_absolute_origin(wg, &ax, &ay)) return -1;
+    if (sx < ax || sx >= ax + wg->rect.w || sy < ay || sy >= ay + wg->rect.h) return -1;
+    local_y = sy - ay - 2;
+    if (local_y < 0) return -1;
+    idx = wg->min_value + local_y / gui_listview_item_height();
+    count = gui_select_item_count(wg);
+    return (idx >= 0 && idx < count) ? idx : -1;
+}
+
+static void gui_listview_select(gui_widget_t *wg, int index, int toggle) {
+    int old_value, old_mask, count;
+    if (!wg || wg->type != GUI_WIDGET_LISTVIEW || !wg->enabled) return;
+    count = gui_select_item_count(wg);
+    if (index < 0 || index >= count) return;
+    old_value = wg->value;
+    old_mask = (int)wg->selection_anchor;
+    wg->value = index;
+    if ((wg->label_flags & GUI_LISTVIEW_FLAG_MULTI_SELECT) != 0 && index < 32) {
+        unsigned bit = 1u << (unsigned)index;
+        if (toggle) wg->selection_anchor ^= bit;
+        else wg->selection_anchor |= bit;
+    } else {
+        wg->selection_anchor = 0;
+    }
+    gui_listview_ensure_visible(wg);
+    if (wg->value != old_value || (int)wg->selection_anchor != old_mask) gui_user_post_value_event(wg);
+    gui_invalidate_all();
+}
+
+static int gui_listview_scroll(gui_widget_t *wg, int delta_rows) {
+    int count, rows, max_scroll, next;
+    if (!wg || wg->type != GUI_WIDGET_LISTVIEW || delta_rows == 0) return 0;
+    count = gui_select_item_count(wg);
+    rows = gui_listview_visible_rows(wg);
+    max_scroll = count > rows ? count - rows : 0;
+    next = wg->min_value + delta_rows;
+    if (next < 0) next = 0;
+    if (next > max_scroll) next = max_scroll;
+    if (next == wg->min_value) return 0;
+    wg->min_value = next;
+    gui_invalidate_all();
+    return 1;
+}
+
+static void gui_listview_handle_key(gui_widget_t *wg, int key) {
+    int count, rows, next;
+    if (!wg || wg->type != GUI_WIDGET_LISTVIEW || !wg->enabled) return;
+    count = gui_select_item_count(wg);
+    if (count <= 0) return;
+    rows = gui_listview_visible_rows(wg);
+    next = wg->value < 0 ? 0 : wg->value;
+    if (key == GUI_KEY_UP) next--;
+    else if (key == GUI_KEY_DOWN) next++;
+    else if (key == GUI_KEY_HOME) next = 0;
+    else if (key == GUI_KEY_END) next = count - 1;
+    else if (key == GUI_KEY_SPACE || key == GUI_KEY_ENTER) { gui_listview_select(wg, next, (wg->label_flags & GUI_LISTVIEW_FLAG_MULTI_SELECT) != 0); return; }
+    else if (key == GUI_KEY_LEFT) next -= rows;
+    else if (key == GUI_KEY_RIGHT) next += rows;
+    else return;
+    if (next < 0) next = 0;
+    if (next >= count) next = count - 1;
+    gui_listview_select(wg, next, 0);
+}
+
+static int gui_tableview_row_height(void) { return (int)GUI_CHAR_H + 8; }
+static int gui_tableview_header_height(const gui_widget_t *wg) { return (wg && (wg->label_flags & GUI_TABLEVIEW_FLAG_SHOW_HEADER)) ? gui_tableview_row_height() : 0; }
+
+static int gui_tableview_count_lines(const char *text) {
+    int count = 0;
+    int has = 0;
+    const char *p = text;
+    if (!p || !*p) return 0;
+    while (*p) {
+        if (*p == '\r') { p++; continue; }
+        if (*p == '\n') { if (has) count++; has = 0; p++; continue; }
+        has = 1;
+        p++;
+    }
+    if (has) count++;
+    return count;
+}
+
+static int gui_tableview_is_separator(char ch) { return ch == '|' || ch == ','; }
+
+static int gui_tableview_col_count(const gui_widget_t *wg) {
+    const char *ptext;
+    int count = 1;
+    if (!wg || !wg->text[0]) return 1;
+    for (ptext = wg->text; *ptext; ++ptext) if (gui_tableview_is_separator(*ptext)) count++;
+    if (count < 1) count = 1;
+    if (count > 8) count = 8;
+    return count;
+}
+
+static int gui_tableview_row_count(const gui_widget_t *wg) {
+    if (!wg) return 0;
+    return gui_tableview_count_lines(wg->placeholder);
+}
+
+static int gui_tableview_visible_rows(const gui_widget_t *wg) {
+    int rows;
+    int header = gui_tableview_header_height(wg);
+    if (!wg) return 1;
+    rows = (wg->rect.h - header - 4) / gui_tableview_row_height();
+    return rows > 0 ? rows : 1;
+}
+
+static void gui_tableview_ensure_visible(gui_widget_t *wg) {
+    int rows, vis;
+    if (!wg || wg->type != GUI_WIDGET_TABLEVIEW) return;
+    rows = gui_tableview_row_count(wg);
+    vis = gui_tableview_visible_rows(wg);
+    if (wg->min_value < 0) wg->min_value = 0;
+    if (wg->value >= 0) {
+        if (wg->value < wg->min_value) wg->min_value = wg->value;
+        if (wg->value >= wg->min_value + vis) wg->min_value = wg->value - vis + 1;
+    }
+    if (rows > vis && wg->min_value > rows - vis) wg->min_value = rows - vis;
+    if (wg->min_value < 0) wg->min_value = 0;
+}
+
+static void gui_tableview_copy_line(const char *text, int row, char *out, uint32_t out_size) {
+    const char *ptext = text;
+    uint32_t len = 0;
+    int cur = 0;
+    if (!out || out_size == 0) return;
+    out[0] = 0;
+    if (!ptext || row < 0) return;
+    while (*ptext && cur < row) { if (*ptext == '\n') cur++; ptext++; }
+    if (cur != row) return;
+    while (*ptext && *ptext != '\n' && len + 1 < out_size) {
+        if (*ptext != '\r') out[len++] = *ptext;
+        ptext++;
+    }
+    out[len] = 0;
+}
+
+static void gui_tableview_cell_text_ex(const char *line, int col, char *out, uint32_t out_size, int strip_width) {
+    const char *ptext = line;
+    uint32_t len = 0;
+    int cur = 0;
+    if (!out || out_size == 0) return;
+    out[0] = 0;
+    if (!ptext || col < 0) return;
+    while (*ptext && cur < col) { if (gui_tableview_is_separator(*ptext)) cur++; ptext++; }
+    if (cur != col) return;
+    while (*ptext && !gui_tableview_is_separator(*ptext) && len + 1 < out_size) out[len++] = *ptext++;
+    out[len] = 0;
+    if (strip_width) {
+        int i = (int)len - 1;
+        while (i >= 0 && out[i] >= '0' && out[i] <= '9') i--;
+        if (i >= 0 && out[i] == ':' && i + 1 < (int)len) out[i] = 0;
+    }
+}
+
+static void gui_tableview_cell_text(const char *line, int col, char *out, uint32_t out_size) {
+    gui_tableview_cell_text_ex(line, col, out, out_size, 0);
+}
+
+static int gui_tableview_column_width(const gui_widget_t *wg, int col, int fallback) {
+    char cell[64];
+    int len, i, width = 0, mul = 1;
+    if (!wg || col < 0) return fallback;
+    gui_tableview_cell_text_ex(wg->text, col, cell, sizeof(cell), 0);
+    len = (int)strlen(cell);
+    i = len - 1;
+    while (i >= 0 && cell[i] >= '0' && cell[i] <= '9') i--;
+    if (i < 0 || cell[i] != ':' || i + 1 >= len) return fallback;
+    for (i = len - 1; i >= 0 && cell[i] >= '0' && cell[i] <= '9'; --i) {
+        width += (cell[i] - '0') * mul;
+        mul *= 10;
+    }
+    if (width < 24) width = 24;
+    if (width > wg->rect.w - 12) width = wg->rect.w - 12;
+    return width;
+}
+
+static int gui_tableview_column_at(gui_widget_t *wg, int sx, int sy) {
+    int ax, ay, cols, c, x, fallback;
+    if (!wg || wg->type != GUI_WIDGET_TABLEVIEW) return -1;
+    if (!(wg->label_flags & GUI_TABLEVIEW_FLAG_SHOW_HEADER)) return -1;
+    if (!gui_widget_absolute_origin(wg, &ax, &ay)) return -1;
+    if (sy < ay + 1 || sy >= ay + gui_tableview_header_height(wg)) return -1;
+    if (sx < ax || sx >= ax + wg->rect.w) return -1;
+    cols = gui_tableview_col_count(wg);
+    fallback = cols > 0 ? (wg->rect.w - 8) / cols : wg->rect.w - 8;
+    if (fallback < 24) fallback = 24;
+    x = ax + 3;
+    for (c = 0; c < cols; ++c) {
+        int cw = gui_tableview_column_width(wg, c, fallback);
+        if (sx >= x && sx < x + cw) return c;
+        x += cw;
+    }
+    return -1;
+}
+
+static int gui_tableview_cmp_column(const char *a, const char *b, int col, int ascending) {
+    char ca[64], cb[64];
+    int r;
+    gui_tableview_cell_text(a, col, ca, sizeof(ca));
+    gui_tableview_cell_text(b, col, cb, sizeof(cb));
+    r = strcmp(ca, cb);
+    return ascending ? r : -r;
+}
+
+static void gui_tableview_append(char *out, uint32_t out_size, const char *text) {
+    uint32_t len;
+    uint32_t i = 0;
+    if (!out || out_size == 0 || !text) return;
+    len = (uint32_t)strlen(out);
+    while (len + 1 < out_size && text[i]) out[len++] = text[i++];
+    out[len] = 0;
+}
+
+static void gui_tableview_sort(gui_widget_t *wg, int col) {
+    char rows[32][128];
+    char out[GUI_WIDGET_TEXT_CAP];
+    int count, i, j;
+    if (!wg || wg->type != GUI_WIDGET_TABLEVIEW || col < 0) return;
+    count = gui_tableview_row_count(wg);
+    if (count <= 1) return;
+    if (count > 32) count = 32;
+    if (wg->table_sort_column == col) wg->table_sort_ascending = !wg->table_sort_ascending;
+    else { wg->table_sort_column = col; wg->table_sort_ascending = 1; }
+    for (i = 0; i < count; ++i) gui_tableview_copy_line(wg->placeholder, i, rows[i], sizeof(rows[i]));
+    for (i = 0; i < count - 1; ++i) {
+        for (j = i + 1; j < count; ++j) {
+            if (gui_tableview_cmp_column(rows[i], rows[j], col, wg->table_sort_ascending) > 0) {
+                char tmp[128];
+                strcpy(tmp, rows[i]);
+                strcpy(rows[i], rows[j]);
+                strcpy(rows[j], tmp);
+            }
+        }
+    }
+    out[0] = 0;
+    for (i = 0; i < count; ++i) {
+        if (i > 0) gui_tableview_append(out, sizeof(out), "\n");
+        gui_tableview_append(out, sizeof(out), rows[i]);
+    }
+    gui_widget_set_placeholder(wg, out);
+    wg->value = count > 0 ? 0 : -1;
+    wg->min_value = 0;
+    gui_invalidate_all();
+}
+
+static int gui_tableview_index_at(gui_widget_t *wg, int sx, int sy) {
+    int ax, ay, header, row, count;
+    if (!wg || wg->type != GUI_WIDGET_TABLEVIEW) return -1;
+    if (!gui_widget_absolute_origin(wg, &ax, &ay)) return -1;
+    header = gui_tableview_header_height(wg);
+    if (sx < ax || sx >= ax + wg->rect.w) return -1;
+    if (sy < ay + header + 2 || sy >= ay + wg->rect.h - 2) return -1;
+    row = (sy - (ay + header + 2)) / gui_tableview_row_height() + wg->min_value;
+    count = gui_tableview_row_count(wg);
+    return (row >= 0 && row < count) ? row : -1;
+}
+
+static void gui_tableview_select(gui_widget_t *wg, int row) {
+    int old_value, count;
+    if (!wg || wg->type != GUI_WIDGET_TABLEVIEW || !wg->enabled) return;
+    count = gui_tableview_row_count(wg);
+    if (row < 0 || row >= count) return;
+    old_value = wg->value;
+    wg->value = row;
+    gui_tableview_ensure_visible(wg);
+    if (old_value != wg->value) gui_user_post_value_event(wg);
+    gui_invalidate_all();
+}
+
+static int gui_tableview_scroll(gui_widget_t *wg, int delta_rows) {
+    int rows, vis, max_first, next;
+    if (!wg || wg->type != GUI_WIDGET_TABLEVIEW || delta_rows == 0) return 0;
+    rows = gui_tableview_row_count(wg);
+    vis = gui_tableview_visible_rows(wg);
+    max_first = rows > vis ? rows - vis : 0;
+    next = wg->min_value + delta_rows;
+    if (next < 0) next = 0;
+    if (next > max_first) next = max_first;
+    if (next == wg->min_value) return 0;
+    wg->min_value = next;
+    gui_invalidate_all();
+    return 1;
+}
+
+static void gui_tableview_handle_key(gui_widget_t *wg, int key) {
+    int count, rows, next;
+    if (!wg || wg->type != GUI_WIDGET_TABLEVIEW || !wg->enabled) return;
+    count = gui_tableview_row_count(wg);
+    if (count <= 0) return;
+    rows = gui_tableview_visible_rows(wg);
+    next = wg->value < 0 ? 0 : wg->value;
+    if (key == GUI_KEY_UP) next--;
+    else if (key == GUI_KEY_DOWN) next++;
+    else if (key == GUI_KEY_HOME) next = 0;
+    else if (key == GUI_KEY_END) next = count - 1;
+    else if (key == GUI_KEY_LEFT) next -= rows;
+    else if (key == GUI_KEY_RIGHT) next += rows;
+    else return;
+    if (next < 0) next = 0;
+    if (next >= count) next = count - 1;
+    gui_tableview_select(wg, next);
+}
+
+int gui_tableview_set_rows(gui_widget_t *widget, const char *rows) {
+    int count;
+    if (!widget || widget->type != GUI_WIDGET_TABLEVIEW) return -1;
+    gui_widget_set_placeholder(widget, rows ? rows : "");
+    count = gui_tableview_row_count(widget);
+    widget->max_value = count - 1;
+    if (count <= 0) { widget->value = -1; widget->min_value = 0; }
+    else {
+        if (widget->value < 0) widget->value = 0;
+        if (widget->value >= count) widget->value = count - 1;
+        gui_tableview_ensure_visible(widget);
+    }
+    return 0;
+}
+
+int gui_tableview_set_selected(gui_widget_t *widget, int selected_row) {
+    int count;
+    if (!widget || widget->type != GUI_WIDGET_TABLEVIEW) return -1;
+    count = gui_tableview_row_count(widget);
+    if (count <= 0) { widget->value = -1; return selected_row < 0 ? 0 : -1; }
+    if (selected_row < 0 || selected_row >= count) return -1;
+    widget->value = selected_row;
+    gui_tableview_ensure_visible(widget);
+    return 0;
+}
+
+int gui_tableview_get_selected(gui_widget_t *widget, int *out_selected_row) {
+    if (!widget || !out_selected_row || widget->type != GUI_WIDGET_TABLEVIEW) return -1;
+    *out_selected_row = widget->value;
+    return 0;
+}
+
+
+
+static int gui_menubar_item_count(const gui_widget_t *wg) {
+    int count = 0;
+    int has = 0;
+    const char *ptext;
+    if (!wg || !wg->text[0]) return 0;
+    for (ptext = wg->text; *ptext; ++ptext) {
+        if (*ptext == '|' || *ptext == '\n') {
+            if (has) count++;
+            has = 0;
+        } else if (*ptext != '\r') {
+            has = 1;
+        }
+    }
+    if (has) count++;
+    return count;
+}
+
+static void gui_menubar_item_text(const gui_widget_t *wg, int index, char *label, uint32_t label_size, char *shortcut, uint32_t shortcut_size) {
+    const char *ptext;
+    uint32_t len = 0;
+    int cur = 0;
+    int in_shortcut = 0;
+    char *out = label;
+    uint32_t out_size = label_size;
+    if (label && label_size) label[0] = 0;
+    if (shortcut && shortcut_size) shortcut[0] = 0;
+    if (!wg || index < 0 || !label || label_size == 0) return;
+    ptext = wg->text;
+    while (*ptext && cur < index) {
+        if (*ptext == '|' || *ptext == '\n') cur++;
+        ptext++;
+    }
+    if (cur != index) return;
+    while (*ptext == ' ' || *ptext == '\t') ptext++;
+    while (*ptext && *ptext != '|' && *ptext != '\n' && *ptext != '\r') {
+        if (*ptext == ':' && shortcut && shortcut_size) {
+            if (out && out_size) out[len] = 0;
+            out = shortcut;
+            out_size = shortcut_size;
+            len = 0;
+            in_shortcut = 1;
+            ptext++;
+            while (*ptext == ' ' || *ptext == '\t') ptext++;
+            continue;
+        }
+        if (len + 1 < out_size) out[len++] = *ptext;
+        ptext++;
+    }
+    if (out && out_size) out[len] = 0;
+    if (!in_shortcut && shortcut && shortcut_size) shortcut[0] = 0;
+}
+
+static int gui_menubar_item_width(const gui_widget_t *wg, int index) {
+    char label[64];
+    char shortcut[64];
+    int width;
+    gui_menubar_item_text(wg, index, label, sizeof(label), shortcut, sizeof(shortcut));
+    width = 18 + (int)strlen(label) * (int)GUI_CHAR_W;
+    if (shortcut[0]) width += 10 + (int)strlen(shortcut) * (int)GUI_CHAR_W;
+    if (width < 48) width = 48;
+    return width;
+}
+
+static int gui_menubar_index_at(gui_widget_t *wg, int sx, int sy) {
+    int ax, ay, count, i, x;
+    if (!wg || wg->type != GUI_WIDGET_MENUBAR) return -1;
+    if (!gui_widget_absolute_origin(wg, &ax, &ay)) return -1;
+    if (sx < ax || sx >= ax + wg->rect.w || sy < ay || sy >= ay + wg->rect.h) return -1;
+    count = gui_menubar_item_count(wg);
+    x = ax + 4;
+    for (i = 0; i < count; ++i) {
+        int iw = gui_menubar_item_width(wg, i);
+        if (sx >= x && sx < x + iw) return i;
+        x += iw;
+    }
+    return -1;
+}
+
+static void gui_menubar_activate(gui_widget_t *wg, int index) {
+    int old_value, count;
+    if (!wg || wg->type != GUI_WIDGET_MENUBAR || !wg->enabled) return;
+    count = gui_menubar_item_count(wg);
+    if (count <= 0 || index < 0 || index >= count) return;
+    old_value = wg->value;
+    wg->value = index;
+    wg->pressed = 0;
+    if (old_value != wg->value) gui_user_post_value_event(wg);
+    if (wg->on_click) wg->on_click(wg, wg->user_data);
+    gui_invalidate_all();
+}
+
+static void gui_menubar_handle_key(gui_widget_t *wg, int key) {
+    int count, next;
+    if (!wg || wg->type != GUI_WIDGET_MENUBAR || !wg->enabled) return;
+    count = gui_menubar_item_count(wg);
+    if (count <= 0) return;
+    next = wg->value < 0 ? 0 : wg->value;
+    if (key == GUI_KEY_LEFT) next--;
+    else if (key == GUI_KEY_RIGHT || key == GUI_KEY_TAB) next++;
+    else if (key == GUI_KEY_HOME) next = 0;
+    else if (key == GUI_KEY_END) next = count - 1;
+    else if (key == GUI_KEY_ENTER || key == GUI_KEY_SPACE) { gui_menubar_activate(wg, next); return; }
+    else return;
+    if (next < 0) next = count - 1;
+    if (next >= count) next = 0;
+    gui_menubar_activate(wg, next);
+}
+
+int gui_menubar_set_menus(gui_widget_t *widget, const char *menus) {
+    int count;
+    if (!widget || widget->type != GUI_WIDGET_MENUBAR) return -1;
+    gui_widget_set_text(widget, menus ? menus : "");
+    count = gui_menubar_item_count(widget);
+    widget->max_value = count - 1;
+    if (count <= 0) widget->value = -1;
+    else if (widget->value < 0 || widget->value >= count) widget->value = 0;
+    gui_invalidate_all();
+    return 0;
+}
+
+int gui_menubar_set_active(gui_widget_t *widget, int active_index) {
+    int count;
+    if (!widget || widget->type != GUI_WIDGET_MENUBAR) return -1;
+    count = gui_menubar_item_count(widget);
+    if (count <= 0) { widget->value = -1; return active_index < 0 ? 0 : -1; }
+    if (active_index < 0 || active_index >= count) return -1;
+    widget->value = active_index;
+    gui_invalidate_all();
+    return 0;
+}
+
+int gui_menubar_get_active(gui_widget_t *widget, int *out_active_index) {
+    if (!widget || !out_active_index || widget->type != GUI_WIDGET_MENUBAR) return -1;
+    *out_active_index = widget->value;
+    return 0;
+}
+
+static int gui_treeview_row_height(void) { return (int)GUI_CHAR_H + 8; }
+static int gui_treeview_node_count(const gui_widget_t *wg) { return wg ? gui_tableview_count_lines(wg->placeholder) : 0; }
+static int gui_treeview_visible_rows(const gui_widget_t *wg) {
+    int rows;
+    if (!wg) return 1;
+    rows = (wg->rect.h - 4) / gui_treeview_row_height();
+    return rows > 0 ? rows : 1;
+}
+static void gui_treeview_copy_line(const char *text, int row, char *out, uint32_t out_size) { gui_tableview_copy_line(text, row, out, out_size); }
+
+static int gui_treeview_parse_node(const char *line, int *out_level, int *out_folder, int *out_expanded, const char **out_label) {
+    const char *ptext = line ? line : "";
+    int level = 0, folder = 0, expanded = 0;
+    while (*ptext == '>' || *ptext == ' ' || *ptext == '\t') { if (*ptext == '>' || *ptext == '\t') level++; ptext++; }
+    if (*ptext == '-') { folder = 1; expanded = 1; ptext++; }
+    else if (*ptext == '+') { folder = 1; expanded = 0; ptext++; }
+    if (*ptext == 'F' && ptext[1] == ':') { folder = 1; ptext += 2; }
+    else if (*ptext == 'L' && ptext[1] == ':') { folder = 0; ptext += 2; }
+    while (*ptext == ' ') ptext++;
+    if (out_level) *out_level = level;
+    if (out_folder) *out_folder = folder;
+    if (out_expanded) *out_expanded = expanded;
+    if (out_label) *out_label = ptext;
+    return 0;
+}
+
+static int gui_treeview_node_level(gui_widget_t *wg, int row) {
+    char line[GUI_WIDGET_TEXT_CAP];
+    int level = 0;
+    gui_treeview_copy_line(wg ? wg->placeholder : "", row, line, sizeof(line));
+    gui_treeview_parse_node(line, &level, NULL, NULL, NULL);
+    return level;
+}
+
+static int gui_treeview_line_is_visible(gui_widget_t *wg, int row) {
+    int i, level;
+    if (!wg || row < 0) return 0;
+    level = gui_treeview_node_level(wg, row);
+    for (i = row - 1; i >= 0; --i) {
+        char line[GUI_WIDGET_TEXT_CAP];
+        int parent_level, folder, expanded;
+        gui_treeview_copy_line(wg->placeholder, i, line, sizeof(line));
+        gui_treeview_parse_node(line, &parent_level, &folder, &expanded, NULL);
+        if (parent_level < level) {
+            if (folder && !expanded) return 0;
+            level = parent_level;
+        }
+    }
+    return 1;
+}
+
+static int gui_treeview_visible_count(gui_widget_t *wg) {
+    int count, i, vis = 0;
+    if (!wg) return 0;
+    count = gui_treeview_node_count(wg);
+    for (i = 0; i < count; ++i) if (gui_treeview_line_is_visible(wg, i)) vis++;
+    return vis;
+}
+
+static int gui_treeview_nth_visible(gui_widget_t *wg, int nth) {
+    int count, i, vis = 0;
+    if (!wg || nth < 0) return -1;
+    count = gui_treeview_node_count(wg);
+    for (i = 0; i < count; ++i) {
+        if (!gui_treeview_line_is_visible(wg, i)) continue;
+        if (vis == nth) return i;
+        vis++;
+    }
+    return -1;
+}
+
+static int gui_treeview_visible_position(gui_widget_t *wg, int row) {
+    int count, i, vis = 0;
+    if (!wg || row < 0) return -1;
+    count = gui_treeview_node_count(wg);
+    for (i = 0; i < count; ++i) {
+        if (!gui_treeview_line_is_visible(wg, i)) continue;
+        if (i == row) return vis;
+        vis++;
+    }
+    return -1;
+}
+
+static void gui_treeview_ensure_visible(gui_widget_t *wg) {
+    int pos, rows, total;
+    if (!wg || wg->type != GUI_WIDGET_TREEVIEW) return;
+    rows = gui_treeview_visible_rows(wg);
+    total = gui_treeview_visible_count(wg);
+    pos = gui_treeview_visible_position(wg, wg->value);
+    if (wg->min_value < 0) wg->min_value = 0;
+    if (pos >= 0) {
+        if (pos < wg->min_value) wg->min_value = pos;
+        if (pos >= wg->min_value + rows) wg->min_value = pos - rows + 1;
+    }
+    if (total > rows && wg->min_value > total - rows) wg->min_value = total - rows;
+    if (wg->min_value < 0) wg->min_value = 0;
+}
+
+static int gui_treeview_index_at(gui_widget_t *wg, int sx, int sy) {
+    int ax, ay, row_pos;
+    if (!wg || wg->type != GUI_WIDGET_TREEVIEW) return -1;
+    if (!gui_widget_absolute_origin(wg, &ax, &ay)) return -1;
+    if (sx < ax || sx >= ax + wg->rect.w || sy < ay + 2 || sy >= ay + wg->rect.h - 2) return -1;
+    row_pos = (sy - (ay + 2)) / gui_treeview_row_height() + wg->min_value;
+    return gui_treeview_nth_visible(wg, row_pos);
+}
+
+static void gui_treeview_set_line_expanded(gui_widget_t *wg, int row, int expanded) {
+    char out[GUI_WIDGET_TEXT_CAP];
+    int count, i;
+    if (!wg || row < 0) return;
+    count = gui_treeview_node_count(wg);
+    out[0] = 0;
+    for (i = 0; i < count; ++i) {
+        char line[GUI_WIDGET_TEXT_CAP];
+        gui_treeview_copy_line(wg->placeholder, i, line, sizeof(line));
+        if (i == row) {
+            uint32_t j = 0;
+            while (line[j] == '>' || line[j] == ' ' || line[j] == '\t') j++;
+            if (line[j] == '+' || line[j] == '-') line[j] = expanded ? '-' : '+';
+            else continue;
+        }
+        if (i > 0) gui_tableview_append(out, sizeof(out), "\n");
+        gui_tableview_append(out, sizeof(out), line);
+    }
+    gui_widget_set_placeholder(wg, out);
+}
+
+static void gui_treeview_select(gui_widget_t *wg, int row) {
+    int old_value;
+    if (!wg || wg->type != GUI_WIDGET_TREEVIEW || !wg->enabled) return;
+    if (row < 0 || row >= gui_treeview_node_count(wg) || !gui_treeview_line_is_visible(wg, row)) return;
+    old_value = wg->value;
+    wg->value = row;
+    gui_treeview_ensure_visible(wg);
+    if (old_value != wg->value) gui_user_post_value_event(wg);
+    gui_invalidate_all();
+}
+
+static void gui_treeview_toggle(gui_widget_t *wg, int row) {
+    char line[GUI_WIDGET_TEXT_CAP];
+    int folder = 0, expanded = 0;
+    if (!wg || row < 0) return;
+    gui_treeview_copy_line(wg->placeholder, row, line, sizeof(line));
+    gui_treeview_parse_node(line, NULL, &folder, &expanded, NULL);
+    if (!folder) return;
+    gui_treeview_set_line_expanded(wg, row, !expanded);
+    gui_treeview_ensure_visible(wg);
+    gui_invalidate_all();
+}
+
+static int gui_treeview_scroll(gui_widget_t *wg, int delta_rows) {
+    int total, rows, max_first, next;
+    if (!wg || wg->type != GUI_WIDGET_TREEVIEW || delta_rows == 0) return 0;
+    total = gui_treeview_visible_count(wg);
+    rows = gui_treeview_visible_rows(wg);
+    max_first = total > rows ? total - rows : 0;
+    next = wg->min_value + delta_rows;
+    if (next < 0) next = 0;
+    if (next > max_first) next = max_first;
+    if (next == wg->min_value) return 0;
+    wg->min_value = next;
+    gui_invalidate_all();
+    return 1;
+}
+
+static void gui_treeview_handle_key(gui_widget_t *wg, int key) {
+    int pos, total, next_pos, next_row;
+    if (!wg || wg->type != GUI_WIDGET_TREEVIEW || !wg->enabled) return;
+    total = gui_treeview_visible_count(wg);
+    if (total <= 0) return;
+    pos = gui_treeview_visible_position(wg, wg->value);
+    if (pos < 0) pos = 0;
+    next_pos = pos;
+    if (key == GUI_KEY_UP) next_pos--;
+    else if (key == GUI_KEY_DOWN) next_pos++;
+    else if (key == GUI_KEY_HOME) next_pos = 0;
+    else if (key == GUI_KEY_END) next_pos = total - 1;
+    else if (key == GUI_KEY_LEFT || key == GUI_KEY_RIGHT || key == GUI_KEY_ENTER || key == GUI_KEY_SPACE) { gui_treeview_toggle(wg, wg->value); return; }
+    else return;
+    if (next_pos < 0) next_pos = 0;
+    if (next_pos >= total) next_pos = total - 1;
+    next_row = gui_treeview_nth_visible(wg, next_pos);
+    gui_treeview_select(wg, next_row);
+}
+
+int gui_treeview_set_nodes(gui_widget_t *widget, const char *nodes) {
+    int count;
+    if (!widget || widget->type != GUI_WIDGET_TREEVIEW) return -1;
+    gui_widget_set_placeholder(widget, nodes ? nodes : "");
+    count = gui_treeview_node_count(widget);
+    widget->max_value = count - 1;
+    if (count <= 0) { widget->value = -1; widget->min_value = 0; }
+    else {
+        if (widget->value < 0) widget->value = 0;
+        if (widget->value >= count) widget->value = count - 1;
+        if (!gui_treeview_line_is_visible(widget, widget->value)) widget->value = gui_treeview_nth_visible(widget, 0);
+        gui_treeview_ensure_visible(widget);
+    }
+    return 0;
+}
+
+int gui_treeview_set_selected(gui_widget_t *widget, int selected_node) {
+    if (!widget || widget->type != GUI_WIDGET_TREEVIEW) return -1;
+    if (gui_treeview_node_count(widget) <= 0) { widget->value = -1; return selected_node < 0 ? 0 : -1; }
+    if (selected_node < 0 || selected_node >= gui_treeview_node_count(widget) || !gui_treeview_line_is_visible(widget, selected_node)) return -1;
+    widget->value = selected_node;
+    gui_treeview_ensure_visible(widget);
+    return 0;
+}
+
+int gui_treeview_get_selected(gui_widget_t *widget, int *out_selected_node) {
+    if (!widget || !out_selected_node || widget->type != GUI_WIDGET_TREEVIEW) return -1;
+    *out_selected_node = widget->value;
+    return 0;
+}
+
+static void gui_draw_select_dropdown(gui_widget_t *wg) {
+    int ax, ay, i, count;
+    char item[GUI_WIDGET_TEXT_CAP];
+    if (!wg || !wg->step) return;
+    if (!gui_widget_absolute_origin(wg, &ax, &ay)) return;
+    count = gui_select_item_count(wg);
+    if (count <= 0) return;
+    gui_raw_fill_rect(ax, ay + wg->rect.h, wg->rect.w, count * 20, gui_rgb(255, 255, 255));
+    for (i = 0; i < count; ++i) {
+        int iy = ay + wg->rect.h + i * 20;
+        uint32_t bg = (i == wg->min_value) ? gui_rgb(222, 236, 255) : gui_rgb(255, 255, 255);
+        gui_rect_t clip = { ax + 6, iy, wg->rect.w - 12, 20 };
+        gui_raw_fill_rect(ax + 1, iy, wg->rect.w - 2, 20, bg);
+        gui_raw_line(ax + 1, iy + 19, ax + wg->rect.w - 2, iy + 19, gui_rgb(230, 234, 242));
+        if (gui_select_item_text(wg, i, item, sizeof(item)) == 0) {
+            gui_draw_window_title_text(ax + 6, gui_text_center_y(iy, 20), item, g_gui.colors.text_fg, &clip);
+        }
+    }
+    gui_raw_line(ax, ay + wg->rect.h, ax + wg->rect.w - 1, ay + wg->rect.h, g_gui.colors.button_border);
+    gui_raw_line(ax, ay + wg->rect.h + count * 20 - 1, ax + wg->rect.w - 1, ay + wg->rect.h + count * 20 - 1, g_gui.colors.button_border);
+    gui_raw_line(ax, ay + wg->rect.h, ax, ay + wg->rect.h + count * 20 - 1, g_gui.colors.button_border);
+    gui_raw_line(ax + wg->rect.w - 1, ay + wg->rect.h, ax + wg->rect.w - 1, ay + wg->rect.h + count * 20 - 1, g_gui.colors.button_border);
+}
+
 static void gui_draw_widget(gui_widget_t *wg) {
     uint32_t bg, fg;
+    int ax;
+    int ay;
     if (!wg || !wg->visible || !wg->owner) return;
-    int ax = wg->owner->rect.x + GUI_BORDER_SIZE + wg->rect.x;
-    int ay = wg->owner->rect.y + GUI_TITLE_HEIGHT + wg->rect.y;
+    if (!gui_widget_absolute_origin(wg, &ax, &ay)) return;
 
     if (wg->type == GUI_WIDGET_LABEL) {
-        int text_off = 0;
-        if (wg->icon != GUI_ICON_NONE) {
-            gui_draw_file_icon(wg->icon, ax, ay + (wg->rect.h - 14) / 2);
-            text_off = 14 + 4;
-        }
-        gui_rect_t clip = { ax + text_off, ay, wg->rect.w - text_off, wg->rect.h };
-        gui_draw_window_title_text(ax + text_off, gui_text_center_y(ay, wg->rect.h), wg->text,
-                                   wg->fg_color ? wg->fg_color : g_gui.colors.text_fg, &clip);
-    } else if (wg->type == GUI_WIDGET_BUTTON) {
+        gui_draw_label_widget(wg, ax, ay);
+    } else if (wg->type == GUI_WIDGET_BUTTON || wg->type == GUI_WIDGET_ICON_BUTTON) {
         uint32_t light = g_gui.colors.button_border;
         uint32_t shadow = gui_rgb(20, 20, 20);
         int text_dx = wg->pressed ? 9 : 8;
@@ -1489,6 +3304,16 @@ static void gui_draw_widget(gui_widget_t *wg) {
             fg = gui_rgb(255, 255, 255);
             light = gui_rgb(20, 20, 20);
             shadow = g_gui.colors.button_border;
+        } else if (wg->button_flags & GUI_BUTTON_FLAG_DANGER) {
+            bg = wg->pressed ? gui_rgb(176, 32, 32) : (wg->hovered ? gui_rgb(220, 64, 64) : gui_rgb(202, 48, 48));
+            fg = gui_rgb(255, 255, 255);
+            light = gui_rgb(244, 138, 138);
+            shadow = gui_rgb(126, 22, 22);
+        } else if (wg->button_flags & GUI_BUTTON_FLAG_DEFAULT) {
+            bg = wg->pressed ? gui_rgb(35, 96, 190) : (wg->hovered ? gui_rgb(74, 138, 238) : g_gui.colors.accent);
+            fg = gui_rgb(255, 255, 255);
+            light = gui_rgb(156, 196, 255);
+            shadow = gui_rgb(30, 72, 142);
         } else if (wg->hovered) {
             bg = gui_rgb(235, 240, 250);
             fg = wg->fg_color ? wg->fg_color : g_gui.colors.button_fg;
@@ -1508,34 +3333,125 @@ static void gui_draw_widget(gui_widget_t *wg) {
             gui_raw_line(ax + 3, ay + 3, ax + 3, ay + wg->rect.h - 4, focus);
             gui_raw_line(ax + wg->rect.w - 4, ay + 3, ax + wg->rect.w - 4, ay + wg->rect.h - 4, focus);
         }
-        if (wg->icon != GUI_ICON_NONE) {
-            gui_draw_file_icon(wg->icon, ax + text_dx, ay + (wg->rect.h - 14) / 2 + text_dy);
-            text_dx += 14 + 4;
-        }
-        {
-            gui_rect_t clip = { ax + text_dx, ay + 2, wg->rect.w - text_dx - 3, wg->rect.h - 4 };
-            gui_draw_window_title_text(ax + text_dx, gui_text_center_y(ay, wg->rect.h) + text_dy,
-                                       wg->text, fg, &clip);
+        if (wg->type == GUI_WIDGET_ICON_BUTTON && wg->rect.h >= 44) {
+            gui_rect_t icon_rect = { ax, ay, wg->rect.w, wg->rect.h };
+            int icon_x = 0;
+            int icon_y = 0;
+            gui_draw_icon_button_frame(&icon_rect, wg->text, 14, 14, 4,
+                                       wg->focused && wg->enabled,
+                                       wg->hovered && wg->enabled,
+                                       fg, &icon_x, &icon_y);
+            if (wg->icon != GUI_ICON_NONE) {
+                gui_draw_file_icon(wg->icon, icon_x, icon_y + text_dy);
+            }
+        } else {
+            text_dx += gui_draw_inline_icon(wg->icon, ax + text_dx,
+                                            ay + text_dy, wg->rect.h);
+            {
+                gui_rect_t clip = { ax + text_dx, ay + 2, wg->rect.w - text_dx - 3, wg->rect.h - 4 };
+                gui_draw_window_title_text(ax + text_dx, gui_text_center_y(ay, wg->rect.h) + text_dy,
+                                           wg->text, fg, &clip);
+            }
         }
     } else if (wg->type == GUI_WIDGET_PANEL) {
-        gui_raw_fill_rect(ax, ay, wg->rect.w, wg->rect.h, wg->bg_color);
-    } else if (wg->type == GUI_WIDGET_TEXTBOX) {
+        uint32_t bg = wg->bg_color ? wg->bg_color : g_gui.colors.window_bg;
+        uint32_t border = wg->panel_border_color ? wg->panel_border_color : g_gui.colors.button_border;
+        uint32_t bw = wg->panel_border_width;
+        if (bw > 8) bw = 8;
+        gui_raw_fill_rect(ax, ay, wg->rect.w, wg->rect.h, bg);
+        if ((wg->panel_flags & GUI_PANEL_FLAG_SHADOW) && wg->rect.w > 2 && wg->rect.h > 2) {
+            uint32_t shadow = gui_rgb(170, 174, 184);
+            gui_raw_line(ax + 2, ay + wg->rect.h, ax + wg->rect.w, ay + wg->rect.h, shadow);
+            gui_raw_line(ax + wg->rect.w, ay + 2, ax + wg->rect.w, ay + wg->rect.h, shadow);
+        }
+        if ((wg->panel_flags & GUI_PANEL_FLAG_BORDER) && bw > 0) {
+            uint32_t i;
+            for (i = 0; i < bw; i++) {
+                gui_raw_line(ax + (int)i, ay + (int)i, ax + wg->rect.w - 1 - (int)i, ay + (int)i, border);
+                gui_raw_line(ax + (int)i, ay + wg->rect.h - 1 - (int)i, ax + wg->rect.w - 1 - (int)i, ay + wg->rect.h - 1 - (int)i, border);
+                gui_raw_line(ax + (int)i, ay + (int)i, ax + (int)i, ay + wg->rect.h - 1 - (int)i, border);
+                gui_raw_line(ax + wg->rect.w - 1 - (int)i, ay + (int)i, ax + wg->rect.w - 1 - (int)i, ay + wg->rect.h - 1 - (int)i, border);
+            }
+        }
+    } else if (wg->type == GUI_WIDGET_TEXTBOX || wg->type == GUI_WIDGET_TEXTAREA) {
         uint32_t border = wg->focused ? g_gui.colors.accent : g_gui.colors.button_border;
         uint32_t text_x = (uint32_t)(ax + 4);
-        uint32_t text_y = (uint32_t)gui_text_center_y(ay, wg->rect.h);
-        gui_raw_fill_rect(ax, ay, wg->rect.w, wg->rect.h, wg->bg_color ? wg->bg_color : gui_rgb(250, 250, 250));
+        uint32_t text_y = (uint32_t)(wg->type == GUI_WIDGET_TEXTAREA ? ay + 4 : gui_text_center_y(ay, wg->rect.h));
+        uint32_t box_bg = wg->bg_color ? wg->bg_color : gui_rgb(250, 250, 250);
+        if (wg->textbox_flags & GUI_TEXTBOX_FLAG_DISABLED) box_bg = gui_rgb(232, 234, 238);
+        gui_raw_fill_rect(ax, ay, wg->rect.w, wg->rect.h, box_bg);
         gui_raw_line(ax, ay, ax + wg->rect.w - 1, ay, border);
         gui_raw_line(ax, ay, ax, ay + wg->rect.h - 1, border);
         gui_raw_line(ax + wg->rect.w - 1, ay, ax + wg->rect.w - 1, ay + wg->rect.h - 1, border);
         gui_raw_line(ax, ay + wg->rect.h - 1, ax + wg->rect.w - 1, ay + wg->rect.h - 1, border);
+        if (wg->type == GUI_WIDGET_TEXTAREA) gui_textarea_ensure_cursor_visible(wg);
+        else gui_textbox_ensure_cursor_visible(wg);
         {
             gui_rect_t clip = { ax + 4, ay + 2, wg->rect.w - 8, wg->rect.h - 4 };
-            gui_draw_window_title_text((int)text_x, (int)text_y, wg->text,
-                                       wg->fg_color ? wg->fg_color : gui_rgb(20, 20, 20), &clip);
+            uint32_t draw_color = wg->fg_color ? wg->fg_color : gui_rgb(20, 20, 20);
+            char password_buf[256];
+            if (wg->textbox_flags & GUI_TEXTBOX_FLAG_DISABLED) draw_color = gui_rgb(116, 122, 132);
+            gui_text_widget_draw_selection(wg, ax, ay, &clip);
+            if (wg->type == GUI_WIDGET_TEXTAREA) {
+                uint32_t i;
+                uint32_t line = 0;
+                uint32_t visible_lines = gui_textarea_visible_lines(wg);
+                uint32_t line_h = gui_textarea_line_height();
+                uint32_t start = 0;
+                if (visible_lines == 0) visible_lines = 1;
+                if (wg->text[0] == '\0' && wg->placeholder[0] != '\0' && !wg->focused) {
+                    gui_draw_window_title_text((int)text_x, (int)text_y, wg->placeholder, gui_rgb(128, 136, 148), &clip);
+                } else {
+                    for (i = 0; wg->text[i] != '\0'; i++) {
+                        if (line == wg->text_scroll) { start = i; break; }
+                        if (wg->text[i] == '\n') line++;
+                    }
+                    if (line < wg->text_scroll) start = i;
+                    i = start;
+                    for (line = 0; line < visible_lines && wg->text[i] != '\0'; line++) {
+                        char line_buf[256];
+                        uint32_t j = 0;
+                        while (wg->text[i] != '\0' && wg->text[i] != '\n' && j < sizeof(line_buf) - 1) {
+                            line_buf[j++] = wg->text[i++];
+                        }
+                        line_buf[j] = '\0';
+                        if (wg->text[i] == '\n') i++;
+                        gui_draw_window_title_text((int)text_x, (int)(text_y + line * line_h), line_buf, draw_color, &clip);
+                    }
+                }
+            } else {
+                const char *visible_text = wg->text + wg->text_scroll;
+                if (wg->text[0] == '\0' && wg->placeholder[0] != '\0' && !wg->focused) {
+                    visible_text = wg->placeholder;
+                    draw_color = gui_rgb(128, 136, 148);
+                } else if ((wg->textbox_flags & GUI_TEXTBOX_FLAG_PASSWORD) && wg->text[0] != '\0') {
+                    uint32_t i;
+                    uint32_t len = (uint32_t)strlen(wg->text);
+                    if (wg->text_scroll > len) wg->text_scroll = len;
+                    for (i = wg->text_scroll; i < len && (i - wg->text_scroll) < sizeof(password_buf) - 1; i++) password_buf[i - wg->text_scroll] = '*';
+                    password_buf[i - wg->text_scroll] = '\0';
+                    visible_text = password_buf;
+                }
+                gui_draw_window_title_text((int)text_x, (int)text_y, visible_text, draw_color, &clip);
+            }
         }
         if (wg->focused) {
-            int cx = ax + 4 + (int)(wg->cursor * GUI_CHAR_W);
-            if (cx < ax + wg->rect.w - 3) gui_raw_line(cx, ay + 4, cx, ay + wg->rect.h - 5, gui_rgb(20, 20, 20));
+            if (wg->type == GUI_WIDGET_TEXTAREA) {
+                uint32_t line = 0;
+                uint32_t col = 0;
+                uint32_t line_h = gui_textarea_line_height();
+                gui_textarea_cursor_line_col(wg, &line, &col);
+                if (line >= wg->text_scroll) {
+                    int cx = ax + 4 + (int)(col * GUI_CHAR_W);
+                    int cy = ay + 4 + (int)((line - wg->text_scroll) * line_h);
+                    if (cx >= ax + 4 && cx < ax + wg->rect.w - 3 && cy >= ay + 4 && cy < ay + wg->rect.h - 4) {
+                        gui_raw_line(cx, cy, cx, cy + (int)GUI_CHAR_H, gui_rgb(20, 20, 20));
+                    }
+                }
+            } else {
+                int cx = ax + 4 + (int)((wg->cursor - wg->text_scroll) * GUI_CHAR_W);
+                if (cx >= ax + 4 && cx < ax + wg->rect.w - 3) gui_raw_line(cx, ay + 4, cx, ay + wg->rect.h - 5, gui_rgb(20, 20, 20));
+            }
         }
     } else if (wg->type == GUI_WIDGET_SLIDER) {
         int min = wg->min_value;
@@ -1560,6 +3476,442 @@ static void gui_draw_widget(gui_widget_t *wg) {
         gui_raw_line(knob_x - 5, track_y + 8, knob_x + 5, track_y + 8, border);
         gui_raw_line(knob_x - 5, track_y - 8, knob_x - 5, track_y + 8, border);
         gui_raw_line(knob_x + 5, track_y - 8, knob_x + 5, track_y + 8, border);
+    } else if (wg->type == GUI_WIDGET_SELECT || wg->type == GUI_WIDGET_COMBOBOX) {
+        uint32_t box_bg = wg->enabled ? gui_rgb(255, 255, 255) : gui_rgb(236, 238, 243);
+        uint32_t border = wg->focused ? g_gui.colors.accent : (wg->hovered ? gui_rgb(120, 150, 210) : g_gui.colors.button_border);
+        uint32_t text_color = wg->enabled ? g_gui.colors.text_fg : gui_rgb(145, 150, 160);
+        char selected[GUI_WIDGET_TEXT_CAP];
+        gui_rect_t clip = { ax + 6, ay, wg->rect.w - 28, wg->rect.h };
+        int arrow_x = ax + wg->rect.w - 18;
+        gui_raw_fill_rect(ax, ay, wg->rect.w, wg->rect.h, box_bg);
+        gui_raw_line(ax, ay, ax + wg->rect.w - 1, ay, border);
+        gui_raw_line(ax, ay + wg->rect.h - 1, ax + wg->rect.w - 1, ay + wg->rect.h - 1, border);
+        gui_raw_line(ax, ay, ax, ay + wg->rect.h - 1, border);
+        gui_raw_line(ax + wg->rect.w - 1, ay, ax + wg->rect.w - 1, ay + wg->rect.h - 1, border);
+        gui_raw_line(arrow_x, ay + 4, arrow_x, ay + wg->rect.h - 5, gui_rgb(220, 224, 232));
+        gui_raw_line(arrow_x + 5, ay + wg->rect.h / 2 - 2, arrow_x + 9, ay + wg->rect.h / 2 + 2, text_color);
+        gui_raw_line(arrow_x + 13, ay + wg->rect.h / 2 - 2, arrow_x + 9, ay + wg->rect.h / 2 + 2, text_color);
+        if (gui_select_item_text(wg, wg->value, selected, sizeof(selected)) == 0) {
+            gui_draw_window_title_text(clip.x, gui_text_center_y(ay, wg->rect.h), selected, text_color, &clip);
+        } else if (wg->text[0]) {
+            gui_draw_window_title_text(clip.x, gui_text_center_y(ay, wg->rect.h), wg->text, gui_rgb(128, 136, 148), &clip);
+        }
+    } else if (wg->type == GUI_WIDGET_LISTVIEW) {
+        int count = gui_select_item_count(wg);
+        int row_h = gui_listview_item_height();
+        int rows = gui_listview_visible_rows(wg);
+        int i;
+        uint32_t box_bg = wg->enabled ? gui_rgb(255, 255, 255) : gui_rgb(236, 238, 243);
+        uint32_t border = wg->focused ? g_gui.colors.accent : (wg->hovered ? gui_rgb(120, 150, 210) : g_gui.colors.button_border);
+        gui_rect_t clip = { ax + 2, ay + 2, wg->rect.w - 4, wg->rect.h - 4 };
+        gui_raw_fill_rect(ax, ay, wg->rect.w, wg->rect.h, box_bg);
+        gui_raw_line(ax, ay, ax + wg->rect.w - 1, ay, border);
+        gui_raw_line(ax, ay + wg->rect.h - 1, ax + wg->rect.w - 1, ay + wg->rect.h - 1, border);
+        gui_raw_line(ax, ay, ax, ay + wg->rect.h - 1, border);
+        gui_raw_line(ax + wg->rect.w - 1, ay, ax + wg->rect.w - 1, ay + wg->rect.h - 1, border);
+        gui_listview_ensure_visible(wg);
+        for (i = 0; i < rows && wg->min_value + i < count; ++i) {
+            int item_index = wg->min_value + i;
+            int iy = ay + 2 + i * row_h;
+            int selected = gui_listview_item_selected(wg, item_index);
+            int active = (item_index == wg->value);
+            char item[GUI_WIDGET_TEXT_CAP];
+            uint32_t bgc = selected ? gui_rgb(78, 132, 220) : (active && wg->focused ? gui_rgb(224, 236, 255) : box_bg);
+            uint32_t fgc = selected ? gui_rgb(255, 255, 255) : (wg->enabled ? g_gui.colors.text_fg : gui_rgb(145, 150, 160));
+            gui_raw_fill_rect(ax + 2, iy, wg->rect.w - 4, row_h, bgc);
+            if ((wg->label_flags & GUI_LISTVIEW_FLAG_SHOW_CHECKBOXES) != 0) {
+                int cy = iy + row_h / 2 - 5;
+                gui_raw_fill_rect(ax + 7, cy, 10, 10, gui_rgb(255, 255, 255));
+                gui_raw_line(ax + 7, cy, ax + 16, cy, border);
+                gui_raw_line(ax + 7, cy + 9, ax + 16, cy + 9, border);
+                gui_raw_line(ax + 7, cy, ax + 7, cy + 9, border);
+                gui_raw_line(ax + 16, cy, ax + 16, cy + 9, border);
+                if (selected) {
+                    gui_raw_line(ax + 9, cy + 5, ax + 12, cy + 8, g_gui.colors.accent);
+                    gui_raw_line(ax + 12, cy + 8, ax + 16, cy + 2, g_gui.colors.accent);
+                }
+            }
+            if (gui_select_item_text(wg, item_index, item, sizeof(item)) == 0) {
+                int tx = ax + ((wg->label_flags & GUI_LISTVIEW_FLAG_SHOW_CHECKBOXES) ? 22 : 6);
+                gui_draw_window_title_text(tx, gui_text_center_y(iy, row_h), item, fgc, &clip);
+            }
+            if (active && wg->focused) {
+                gui_raw_line(ax + 3, iy + 1, ax + wg->rect.w - 4, iy + 1, g_gui.colors.accent);
+                gui_raw_line(ax + 3, iy + row_h - 1, ax + wg->rect.w - 4, iy + row_h - 1, g_gui.colors.accent);
+            }
+        }
+        if (count > rows) {
+            int track_h = wg->rect.h - 4;
+            int thumb_h = (rows * track_h) / count;
+            int max_scroll = count - rows;
+            int thumb_y;
+            if (thumb_h < 12) thumb_h = 12;
+            if (thumb_h > track_h) thumb_h = track_h;
+            thumb_y = ay + 2 + (max_scroll > 0 ? (wg->min_value * (track_h - thumb_h)) / max_scroll : 0);
+            gui_raw_fill_rect(ax + wg->rect.w - 6, ay + 2, 4, track_h, gui_rgb(226, 230, 238));
+            gui_raw_fill_rect(ax + wg->rect.w - 6, thumb_y, 4, thumb_h, gui_rgb(150, 162, 182));
+        }
+    } else if (wg->type == GUI_WIDGET_TABLEVIEW) {
+        int cols = gui_tableview_col_count(wg);
+        int rows = gui_tableview_row_count(wg);
+        int row_h = gui_tableview_row_height();
+        int header_h = gui_tableview_header_height(wg);
+        int visible = gui_tableview_visible_rows(wg);
+        int col_w = cols > 0 ? (wg->rect.w - 8) / cols : wg->rect.w - 8;
+        int i;
+        uint32_t box_bg = wg->enabled ? gui_rgb(255, 255, 255) : gui_rgb(236, 238, 243);
+        uint32_t border = wg->focused ? g_gui.colors.accent : (wg->hovered ? gui_rgb(120, 150, 210) : g_gui.colors.button_border);
+        gui_rect_t clip = { ax + 3, ay + 3, wg->rect.w - 8, wg->rect.h - 6 };
+        if (col_w < 24) col_w = 24;
+        gui_raw_fill_rect(ax, ay, wg->rect.w, wg->rect.h, box_bg);
+        gui_raw_line(ax, ay, ax + wg->rect.w - 1, ay, border);
+        gui_raw_line(ax, ay + wg->rect.h - 1, ax + wg->rect.w - 1, ay + wg->rect.h - 1, border);
+        gui_raw_line(ax, ay, ax, ay + wg->rect.h - 1, border);
+        gui_raw_line(ax + wg->rect.w - 1, ay, ax + wg->rect.w - 1, ay + wg->rect.h - 1, border);
+        gui_tableview_ensure_visible(wg);
+        if (header_h > 0) {
+            int c;
+            gui_raw_fill_rect(ax + 1, ay + 1, wg->rect.w - 2, header_h, gui_rgb(232, 236, 242));
+            int cx = ax + 3;
+            for (c = 0; c < cols; ++c) {
+                char cell[64];
+                int cw = gui_tableview_column_width(wg, c, col_w);
+                gui_tableview_cell_text_ex(wg->text, c, cell, sizeof(cell), 1);
+                if ((wg->label_flags & GUI_TABLEVIEW_FLAG_SORTABLE) && wg->table_sort_column == c) {
+                    gui_tableview_append(cell, sizeof(cell), wg->table_sort_ascending ? " ^" : " v");
+                }
+                gui_draw_window_title_text(cx + 3, gui_text_center_y(ay + 1, header_h), cell, gui_rgb(45, 55, 70), &clip);
+                if ((wg->label_flags & GUI_TABLEVIEW_FLAG_GRID_LINES) && c > 0) gui_raw_line(cx, ay + 1, cx, ay + wg->rect.h - 2, gui_rgb(218, 224, 232));
+                cx += cw;
+            }
+            gui_raw_line(ax + 1, ay + header_h, ax + wg->rect.w - 2, ay + header_h, gui_rgb(200, 208, 218));
+        }
+        for (i = 0; i < visible && wg->min_value + i < rows; ++i) {
+            int row = wg->min_value + i;
+            int iy = ay + header_h + 2 + i * row_h;
+            int c;
+            char line[GUI_WIDGET_TEXT_CAP];
+            uint32_t row_bg = (row == wg->value) ? gui_rgb(210, 228, 255) : ((row & 1) ? gui_rgb(248, 250, 252) : box_bg);
+            gui_raw_fill_rect(ax + 2, iy, wg->rect.w - 4, row_h, row_bg);
+            gui_tableview_copy_line(wg->placeholder, row, line, sizeof(line));
+            int cx = ax + 3;
+            for (c = 0; c < cols; ++c) {
+                char cell[64];
+                int cw = gui_tableview_column_width(wg, c, col_w);
+                gui_tableview_cell_text(line, c, cell, sizeof(cell));
+                gui_draw_window_title_text(cx + 3, gui_text_center_y(iy, row_h), cell, wg->enabled ? g_gui.colors.text_fg : gui_rgb(145, 150, 160), &clip);
+                cx += cw;
+            }
+            if (wg->label_flags & GUI_TABLEVIEW_FLAG_GRID_LINES) gui_raw_line(ax + 2, iy + row_h - 1, ax + wg->rect.w - 3, iy + row_h - 1, gui_rgb(226, 231, 238));
+        }
+        if (rows > visible) {
+            int track_h = wg->rect.h - header_h - 4;
+            int thumb_h = (visible * track_h) / rows;
+            int max_scroll = rows - visible;
+            int thumb_y;
+            if (thumb_h < 12) thumb_h = 12;
+            if (thumb_h > track_h) thumb_h = track_h;
+            thumb_y = ay + header_h + 2 + (max_scroll > 0 ? (wg->min_value * (track_h - thumb_h)) / max_scroll : 0);
+            gui_raw_fill_rect(ax + wg->rect.w - 6, ay + header_h + 2, 4, track_h, gui_rgb(226, 230, 238));
+            gui_raw_fill_rect(ax + wg->rect.w - 6, thumb_y, 4, thumb_h, gui_rgb(150, 162, 182));
+        }
+    } else if (wg->type == GUI_WIDGET_MENUBAR) {
+        int count = gui_menubar_item_count(wg);
+        int i;
+        int cx = ax + 4;
+        uint32_t bg = wg->enabled ? gui_rgb(245, 247, 251) : gui_rgb(235, 237, 242);
+        uint32_t border = wg->focused ? g_gui.colors.accent : g_gui.colors.button_border;
+        gui_rect_t clip = { ax + 2, ay + 1, wg->rect.w - 4, wg->rect.h - 2 };
+        gui_raw_fill_rect(ax, ay, wg->rect.w, wg->rect.h, bg);
+        gui_raw_line(ax, ay + wg->rect.h - 1, ax + wg->rect.w - 1, ay + wg->rect.h - 1, border);
+        for (i = 0; i < count && cx < ax + wg->rect.w - 4; ++i) {
+            char label[64];
+            char shortcut[64];
+            int iw = gui_menubar_item_width(wg, i);
+            int active = (i == wg->value);
+            uint32_t item_bg = active ? gui_rgb(216, 232, 255) : (wg->hovered ? gui_rgb(238, 243, 252) : bg);
+            if (cx + iw > ax + wg->rect.w - 2) iw = ax + wg->rect.w - 2 - cx;
+            gui_menubar_item_text(wg, i, label, sizeof(label), shortcut, sizeof(shortcut));
+            gui_raw_fill_rect(cx, ay + 2, iw, wg->rect.h - 4, item_bg);
+            if (active) {
+                gui_raw_line(cx, ay + 2, cx + iw - 1, ay + 2, g_gui.colors.accent);
+                gui_raw_line(cx, ay + wg->rect.h - 3, cx + iw - 1, ay + wg->rect.h - 3, g_gui.colors.accent);
+            }
+            gui_draw_window_title_text(cx + 8, gui_text_center_y(ay, wg->rect.h), label, wg->enabled ? g_gui.colors.text_fg : gui_rgb(145, 150, 160), &clip);
+            if (shortcut[0]) {
+                int sx = cx + iw - 8 - (int)strlen(shortcut) * (int)GUI_CHAR_W;
+                if (sx > cx + 8) gui_draw_window_title_text(sx, gui_text_center_y(ay, wg->rect.h), shortcut, gui_rgb(100, 110, 128), &clip);
+            }
+            cx += iw;
+        }
+    } else if (wg->type == GUI_WIDGET_TREEVIEW) {
+        int total = gui_treeview_visible_count(wg);
+        int row_h = gui_treeview_row_height();
+        int visible = gui_treeview_visible_rows(wg);
+        int i;
+        uint32_t box_bg = wg->enabled ? gui_rgb(255, 255, 255) : gui_rgb(236, 238, 243);
+        uint32_t border = wg->focused ? g_gui.colors.accent : (wg->hovered ? gui_rgb(120, 150, 210) : g_gui.colors.button_border);
+        gui_rect_t clip = { ax + 3, ay + 3, wg->rect.w - 10, wg->rect.h - 6 };
+        gui_raw_fill_rect(ax, ay, wg->rect.w, wg->rect.h, box_bg);
+        gui_raw_line(ax, ay, ax + wg->rect.w - 1, ay, border);
+        gui_raw_line(ax, ay + wg->rect.h - 1, ax + wg->rect.w - 1, ay + wg->rect.h - 1, border);
+        gui_raw_line(ax, ay, ax, ay + wg->rect.h - 1, border);
+        gui_raw_line(ax + wg->rect.w - 1, ay, ax + wg->rect.w - 1, ay + wg->rect.h - 1, border);
+        gui_treeview_ensure_visible(wg);
+        for (i = 0; i < visible && wg->min_value + i < total; ++i) {
+            int row = gui_treeview_nth_visible(wg, wg->min_value + i);
+            int iy = ay + 2 + i * row_h;
+            int level = 0, folder = 0, expanded = 0;
+            const char *label = "";
+            char line[GUI_WIDGET_TEXT_CAP];
+            char text[GUI_WIDGET_TEXT_CAP];
+            int tx;
+            uint32_t row_bg = (row == wg->value) ? gui_rgb(210, 228, 255) : box_bg;
+            if (row < 0) continue;
+            gui_treeview_copy_line(wg->placeholder, row, line, sizeof(line));
+            gui_treeview_parse_node(line, &level, &folder, &expanded, &label);
+            gui_raw_fill_rect(ax + 2, iy, wg->rect.w - 4, row_h, row_bg);
+            tx = ax + 6 + level * 14;
+            if (wg->label_flags & GUI_TREEVIEW_FLAG_SHOW_LINES) {
+                gui_raw_line(tx - 7, iy, tx - 7, iy + row_h - 1, gui_rgb(220, 226, 235));
+                gui_raw_line(tx - 7, iy + row_h / 2, tx - 1, iy + row_h / 2, gui_rgb(220, 226, 235));
+            }
+            if (folder) {
+                gui_raw_fill_rect(tx, iy + row_h / 2 - 5, 10, 10, gui_rgb(245, 248, 252));
+                gui_raw_line(tx, iy + row_h / 2 - 5, tx + 9, iy + row_h / 2 - 5, border);
+                gui_raw_line(tx, iy + row_h / 2 + 4, tx + 9, iy + row_h / 2 + 4, border);
+                gui_raw_line(tx, iy + row_h / 2 - 5, tx, iy + row_h / 2 + 4, border);
+                gui_raw_line(tx + 9, iy + row_h / 2 - 5, tx + 9, iy + row_h / 2 + 4, border);
+                gui_raw_line(tx + 2, iy + row_h / 2, tx + 7, iy + row_h / 2, g_gui.colors.accent);
+                if (!expanded) gui_raw_line(tx + 4, iy + row_h / 2 - 3, tx + 4, iy + row_h / 2 + 3, g_gui.colors.accent);
+            }
+            text[0] = 0;
+            if ((wg->label_flags & GUI_TREEVIEW_FLAG_SHOW_ICONS) && folder) gui_tableview_append(text, sizeof(text), expanded ? "[v] " : "[>] ");
+            else if (wg->label_flags & GUI_TREEVIEW_FLAG_SHOW_ICONS) gui_tableview_append(text, sizeof(text), "[-] ");
+            gui_tableview_append(text, sizeof(text), label);
+            gui_draw_window_title_text(tx + 14, gui_text_center_y(iy, row_h), text, wg->enabled ? g_gui.colors.text_fg : gui_rgb(145, 150, 160), &clip);
+        }
+        if (total > visible) {
+            int track_h = wg->rect.h - 4;
+            int thumb_h = (visible * track_h) / total;
+            int max_scroll = total - visible;
+            int thumb_y;
+            if (thumb_h < 12) thumb_h = 12;
+            if (thumb_h > track_h) thumb_h = track_h;
+            thumb_y = ay + 2 + (max_scroll > 0 ? (wg->min_value * (track_h - thumb_h)) / max_scroll : 0);
+            gui_raw_fill_rect(ax + wg->rect.w - 6, ay + 2, 4, track_h, gui_rgb(226, 230, 238));
+            gui_raw_fill_rect(ax + wg->rect.w - 6, thumb_y, 4, thumb_h, gui_rgb(150, 162, 182));
+        }
+    } else if (wg->type == GUI_WIDGET_SCROLLBAR) {
+        int min = wg->min_value;
+        int max = wg->max_value;
+        int value = wg->value;
+        int horizontal = gui_scrollbar_is_horizontal(wg);
+        int track_x = horizontal ? ax + 8 : ax + wg->rect.w / 2;
+        int track_y = horizontal ? ay + wg->rect.h / 2 : ay + 8;
+        int track_len = (horizontal ? wg->rect.w : wg->rect.h) - 16;
+        int knob_pos;
+        uint32_t track_bg = wg->bg_color ? wg->bg_color : gui_rgb(214, 219, 229);
+        uint32_t fill = wg->fg_color ? wg->fg_color : g_gui.colors.accent;
+        uint32_t knob = wg->pressed ? gui_rgb(220, 236, 255) : gui_rgb(255, 255, 255);
+        uint32_t border = (wg->hovered || wg->focused) ? g_gui.colors.accent : g_gui.colors.button_border;
+        if (max <= min) max = min + 1;
+        if (value < min) value = min;
+        if (value > max) value = max;
+        if (track_len <= 0) track_len = 1;
+        knob_pos = ((value - min) * track_len) / (max - min);
+        if (!wg->enabled) {
+            fill = gui_rgb(150, 154, 162);
+            knob = gui_rgb(232, 234, 238);
+        }
+        if (horizontal) {
+            int knob_x = track_x + knob_pos;
+            gui_raw_fill_rect(track_x, track_y - 2, track_len, 4, track_bg);
+            gui_raw_fill_rect(track_x, track_y - 2, knob_x - track_x, 4, fill);
+            gui_raw_fill_rect(knob_x - 5, track_y - 7, 11, 14, knob);
+            gui_raw_line(knob_x - 5, track_y - 7, knob_x + 5, track_y - 7, border);
+            gui_raw_line(knob_x - 5, track_y + 6, knob_x + 5, track_y + 6, border);
+            gui_raw_line(knob_x - 5, track_y - 7, knob_x - 5, track_y + 6, border);
+            gui_raw_line(knob_x + 5, track_y - 7, knob_x + 5, track_y + 6, border);
+        } else {
+            int knob_y = track_y + knob_pos;
+            gui_raw_fill_rect(track_x - 2, track_y, 4, track_len, track_bg);
+            gui_raw_fill_rect(track_x - 2, track_y, 4, knob_y - track_y, fill);
+            gui_raw_fill_rect(track_x - 7, knob_y - 5, 14, 11, knob);
+            gui_raw_line(track_x - 7, knob_y - 5, track_x + 6, knob_y - 5, border);
+            gui_raw_line(track_x - 7, knob_y + 5, track_x + 6, knob_y + 5, border);
+            gui_raw_line(track_x - 7, knob_y - 5, track_x - 7, knob_y + 5, border);
+            gui_raw_line(track_x + 6, knob_y - 5, track_x + 6, knob_y + 5, border);
+        }
+    } else if (wg->type == GUI_WIDGET_SCROLLVIEW) {
+        int content_w = wg->min_value > wg->rect.w ? wg->min_value : wg->rect.w;
+        int content_h = wg->max_value > wg->rect.h ? wg->max_value : wg->rect.h;
+        int scroll_x = gui_scrollview_clamp_x(wg, wg->value);
+        int scroll_y = gui_scrollview_clamp_y(wg, wg->step);
+        int show_v = content_h > wg->rect.h;
+        int show_h = content_w > wg->rect.w;
+        uint32_t bg = wg->bg_color ? wg->bg_color : gui_rgb(248, 250, 252);
+        uint32_t border = (wg->hovered || wg->focused) ? g_gui.colors.accent : (wg->panel_border_color ? wg->panel_border_color : g_gui.colors.button_border);
+        gui_raw_fill_rect(ax, ay, wg->rect.w, wg->rect.h, bg);
+        gui_raw_line(ax, ay, ax + wg->rect.w - 1, ay, border);
+        gui_raw_line(ax, ay + wg->rect.h - 1, ax + wg->rect.w - 1, ay + wg->rect.h - 1, border);
+        gui_raw_line(ax, ay, ax, ay + wg->rect.h - 1, border);
+        gui_raw_line(ax + wg->rect.w - 1, ay, ax + wg->rect.w - 1, ay + wg->rect.h - 1, border);
+        {
+            gui_rect_t old_clip = g_gui.clip_rect;
+            int old_clip_enabled = g_gui.clip_enabled;
+            gui_rect_t child_clip;
+            uint32_t i;
+            child_clip.x = ax + 1;
+            child_clip.y = ay + 1;
+            child_clip.w = wg->rect.w - 2 - (show_v ? 10 : 0);
+            child_clip.h = wg->rect.h - 2 - (show_h ? 10 : 0);
+            if (child_clip.w > 0 && child_clip.h > 0) {
+                gui_set_clip_rect(&child_clip);
+                for (i = 0; i < wg->owner->widget_count; i++) {
+                    gui_widget_t *child = &wg->owner->widgets[i];
+                    if (child == wg || !child->visible || !gui_widget_is_child_of(child, wg)) continue;
+                    gui_draw_widget(child);
+                }
+            }
+            if (old_clip_enabled) gui_set_clip_rect(&old_clip);
+            else gui_clear_clip_rect();
+        }
+        if (show_v) {
+            int track_h = wg->rect.h - (show_h ? 12 : 4) - 4;
+            int track_x = ax + wg->rect.w - 8;
+            int track_y = ay + 2;
+            int thumb_h = (wg->rect.h * track_h) / content_h;
+            int thumb_y;
+            if (track_h < 1) track_h = 1;
+            if (thumb_h < 10) thumb_h = 10;
+            if (thumb_h > track_h) thumb_h = track_h;
+            thumb_y = track_y + (scroll_y * (track_h - thumb_h)) / (content_h - wg->rect.h);
+            gui_raw_fill_rect(track_x, track_y, 4, track_h, gui_rgb(222, 226, 236));
+            gui_raw_fill_rect(track_x - 1, thumb_y, 6, thumb_h, g_gui.colors.accent);
+        }
+        if (show_h) {
+            int track_w = wg->rect.w - (show_v ? 12 : 4) - 4;
+            int track_x = ax + 2;
+            int track_y = ay + wg->rect.h - 8;
+            int thumb_w = (wg->rect.w * track_w) / content_w;
+            int thumb_x;
+            if (track_w < 1) track_w = 1;
+            if (thumb_w < 10) thumb_w = 10;
+            if (thumb_w > track_w) thumb_w = track_w;
+            thumb_x = track_x + (scroll_x * (track_w - thumb_w)) / (content_w - wg->rect.w);
+            gui_raw_fill_rect(track_x, track_y, track_w, 4, gui_rgb(222, 226, 236));
+            gui_raw_fill_rect(thumb_x, track_y - 1, thumb_w, 6, g_gui.colors.accent);
+        }
+    } else if (wg->type == GUI_WIDGET_TOGGLE) {
+        int on = gui_toggle_get_checked(wg);
+        int sw = wg->rect.w < 44 ? wg->rect.w : 44;
+        int sh = wg->rect.h < 22 ? wg->rect.h : 22;
+        int sx = ax + wg->rect.w - sw;
+        int sy = ay + (wg->rect.h - sh) / 2;
+        int knob_size = sh - 6;
+        int knob_x = on ? sx + sw - knob_size - 3 : sx + 3;
+        uint32_t track = on ? g_gui.colors.accent : gui_rgb(176, 182, 194);
+        uint32_t border = (wg->hovered || wg->focused) ? g_gui.colors.accent : g_gui.colors.button_border;
+        uint32_t text_color = wg->fg_color ? wg->fg_color : g_gui.colors.text_fg;
+        if (sw < 18) sw = 18;
+        if (sh < 14) sh = 14;
+        knob_size = sh - 6;
+        knob_x = on ? sx + sw - knob_size - 3 : sx + 3;
+        if (!wg->enabled) {
+            track = gui_rgb(140, 144, 152);
+            text_color = gui_rgb(116, 122, 132);
+        }
+        if (wg->text[0]) {
+            gui_rect_t clip = { ax, ay, wg->rect.w - sw - 8, wg->rect.h };
+            gui_draw_window_title_text(ax, gui_text_center_y(ay, wg->rect.h), wg->text, text_color, &clip);
+        }
+        gui_raw_fill_rect(sx, sy, sw, sh, track);
+        gui_raw_line(sx, sy, sx + sw - 1, sy, border);
+        gui_raw_line(sx, sy + sh - 1, sx + sw - 1, sy + sh - 1, border);
+        gui_raw_line(sx, sy, sx, sy + sh - 1, border);
+        gui_raw_line(sx + sw - 1, sy, sx + sw - 1, sy + sh - 1, border);
+        gui_raw_fill_rect(knob_x, sy + 3, knob_size, knob_size, gui_rgb(255, 255, 255));
+    } else if (wg->type == GUI_WIDGET_CHECKBOX) {
+        int checked = gui_checkbox_get_checked(wg);
+        int box = wg->rect.h - 8;
+        int bx;
+        int by;
+        uint32_t border = (wg->hovered || wg->focused) ? g_gui.colors.accent : g_gui.colors.button_border;
+        uint32_t fill = checked ? g_gui.colors.accent : gui_rgb(250, 250, 250);
+        uint32_t text_color = wg->fg_color ? wg->fg_color : g_gui.colors.text_fg;
+        if (box > 18) box = 18;
+        if (box < 10) box = 10;
+        bx = ax + 2;
+        by = ay + (wg->rect.h - box) / 2;
+        if (!wg->enabled) {
+            fill = checked ? gui_rgb(140, 144, 152) : gui_rgb(226, 229, 236);
+            border = gui_rgb(150, 156, 168);
+            text_color = gui_rgb(116, 122, 132);
+        }
+        gui_raw_fill_rect(bx, by, box, box, fill);
+        gui_raw_line(bx, by, bx + box - 1, by, border);
+        gui_raw_line(bx, by + box - 1, bx + box - 1, by + box - 1, border);
+        gui_raw_line(bx, by, bx, by + box - 1, border);
+        gui_raw_line(bx + box - 1, by, bx + box - 1, by + box - 1, border);
+        if (checked) {
+            uint32_t mark = gui_rgb(255, 255, 255);
+            gui_raw_line(bx + 3, by + box / 2, bx + box / 2 - 1, by + box - 4, mark);
+            gui_raw_line(bx + box / 2 - 1, by + box - 4, bx + box - 3, by + 3, mark);
+        }
+        if (wg->text[0]) {
+            gui_rect_t clip = { bx + box + 6, ay, wg->rect.w - box - 8, wg->rect.h };
+            gui_draw_window_title_text(clip.x, gui_text_center_y(ay, wg->rect.h), wg->text, text_color, &clip);
+        }
+    } else if (wg->type == GUI_WIDGET_RADIOBUTTON) {
+        int checked = gui_radiobutton_get_checked(wg);
+        int box = wg->rect.h - 8;
+        int bx;
+        int by;
+        int r;
+        int cx;
+        int cy;
+        int dy;
+        uint32_t border = (wg->hovered || wg->focused) ? g_gui.colors.accent : g_gui.colors.button_border;
+        uint32_t fill = gui_rgb(250, 250, 250);
+        uint32_t dot = g_gui.colors.accent;
+        uint32_t text_color = wg->fg_color ? wg->fg_color : g_gui.colors.text_fg;
+        if (box > 18) box = 18;
+        if (box < 10) box = 10;
+        bx = ax + 2;
+        by = ay + (wg->rect.h - box) / 2;
+        r = box / 2;
+        cx = bx + r;
+        cy = by + r;
+        if (!wg->enabled) {
+            fill = gui_rgb(226, 229, 236);
+            border = gui_rgb(150, 156, 168);
+            dot = gui_rgb(140, 144, 152);
+            text_color = gui_rgb(116, 122, 132);
+        }
+        for (dy = -r; dy <= r; dy++) {
+            int ad = dy < 0 ? -dy : dy;
+            int half = r - 1;
+            if (ad >= r) half = 0;
+            else if (ad == r - 1) half = r / 2;
+            gui_raw_line(cx - half, cy + dy, cx + half, cy + dy, fill);
+            gui_raw_line(cx - half, cy + dy, cx - half, cy + dy, border);
+            gui_raw_line(cx + half, cy + dy, cx + half, cy + dy, border);
+        }
+        gui_raw_line(cx - r / 2, cy - r + 1, cx + r / 2, cy - r + 1, border);
+        gui_raw_line(cx - r / 2, cy + r - 1, cx + r / 2, cy + r - 1, border);
+        if (checked) {
+            int ir = r / 2;
+            for (dy = -ir; dy <= ir; dy++) {
+                int ad = dy < 0 ? -dy : dy;
+                int half = ir - ad;
+                gui_raw_line(cx - half, cy + dy, cx + half, cy + dy, dot);
+            }
+        }
+        if (wg->text[0]) {
+            gui_rect_t clip = { bx + box + 6, ay, wg->rect.w - box - 8, wg->rect.h };
+            gui_draw_window_title_text(clip.x, gui_text_center_y(ay, wg->rect.h), wg->text, text_color, &clip);
+        }
     }
 }
 
@@ -1659,9 +4011,16 @@ static void gui_draw_window(gui_window_t *w) {
         client.h = w->rect.h - GUI_TITLE_HEIGHT - GUI_BORDER_SIZE;
         gui_set_clip_rect(&client);
         for (i = 0; i < w->widget_count; i++) {
+            if (w->widgets[i].parent_id != 0) continue;
             gui_draw_widget(&w->widgets[i]);
         }
         gui_clear_clip_rect();
+        for (i = 0; i < w->widget_count; i++) {
+            if (w->widgets[i].parent_id != 0) continue;
+            if (w->widgets[i].type == GUI_WIDGET_SELECT || w->widgets[i].type == GUI_WIDGET_COMBOBOX) {
+                gui_draw_select_dropdown(&w->widgets[i]);
+            }
+        }
     }
 
     if (w->flags & GUI_WINDOW_FLAG_TERMINAL) {
@@ -1683,14 +4042,14 @@ void gui_event_push(gui_event_t event) {
     if (event.type == GUI_EVENT_MOUSE_MOVE && g_gui.event_count > 0) {
         uint32_t last = (g_gui.event_tail + GUI_EVENT_QUEUE_SIZE - 1) % GUI_EVENT_QUEUE_SIZE;
         if (g_gui.events[last].type == GUI_EVENT_MOUSE_MOVE) {
-            /* 鍚堝苟杩炵画 MOVE锛岄伩鍏嶇Щ鍔ㄤ簨浠跺埛婊￠槦鍒楀鑷寸偣鍑?鎷栧姩浜嬩欢涓㈠け銆?*/
+            /* 闁告艾鐗嗛懟鐔告交閻愮數锟?MOVE闁挎稑鐭傛导鈺呭礂瀹ュ泦鈺呭礉閵娿倗鐨戝ù鐘烘硾閸╂稑顭ㄩ敓鐘承曢柛鎺擃殔椤曢亶鎳涚€电浠柛?闁归攱鐗曟慨鈺傜鐎ｂ晜顐藉☉鎾卞灩閵囨垿锟?*/
             g_gui.events[last] = event;
             return;
         }
     }
 
     if (g_gui.event_count >= GUI_EVENT_QUEUE_SIZE) {
-        /* 闃熷垪婊℃椂涓㈠純鏈€鑰佷簨浠讹紝淇濊瘉 DOWN/UP 绛夊叧閿簨浠跺彲浠ュ叆闃熴€?*/
+        /* 闂傚啰鍠庨崹顏勵煥閳╁啯顦у☉鎾卞灩缁辨棃寮甸埀顒勬嚀娴ｉ鐨戝ù鐘侯啇缁辨繃绌卞┑濠勬 DOWN/UP 缂佹稑顦崣褔鏌ㄩ鑽ょ殤濞寸姾娉涜ぐ鍙夌閵夈儱寮抽梻鍐枂锟?*/
         if (event.type == GUI_EVENT_MOUSE_MOVE) {
             return;
         }
@@ -2135,6 +4494,46 @@ static void gui_taskbar_invalidate_hover_changes(int old_x, int old_y, int new_x
     }
 }
 
+static int      g_desktop_selected_icon = -1;
+static int      g_desktop_last_click_icon = -1;
+static uint32_t g_desktop_last_click_frame = 0;
+
+static int gui_desktop_icon_selected(gui_desktop_icon_t *icon) {
+    return icon &&
+           g_desktop_selected_icon >= 0 &&
+           g_desktop_selected_icon < (int)GUI_DESKTOP_MAX_ICONS &&
+           icon == &g_gui.desktop_icons[g_desktop_selected_icon];
+}
+
+static int gui_desktop_icon_highlighted_at(gui_desktop_icon_t *icon, int x, int y) {
+    return icon && icon->used &&
+           !gui_desktop_icon_selected(icon) &&
+           !g_gui.desktop_start_menu_open &&
+           gui_rect_contains(&icon->rect, x, y) &&
+           gui_window_at(x, y) == 0;
+}
+
+static void gui_desktop_invalidate_icon_hover_change(gui_desktop_icon_t *icon,
+                                                     int old_x,
+                                                     int old_y,
+                                                     int new_x,
+                                                     int new_y) {
+    if (!icon || !icon->used || icon->rect.w <= 0 || icon->rect.h <= 0) return;
+    if (gui_desktop_icon_highlighted_at(icon, old_x, old_y) !=
+        gui_desktop_icon_highlighted_at(icon, new_x, new_y)) {
+        gui_invalidate_rect(icon->rect.x - 3, icon->rect.y - 3,
+                            icon->rect.w + 6, icon->rect.h + 6);
+    }
+}
+
+static void gui_desktop_invalidate_hover_changes(int old_x, int old_y, int new_x, int new_y) {
+    uint32_t i;
+    if (g_gui.desktop_start_menu_open) return;
+    for (i = 0; i < GUI_DESKTOP_MAX_ICONS; i++) {
+        gui_desktop_invalidate_icon_hover_change(&g_gui.desktop_icons[i], old_x, old_y, new_x, new_y);
+    }
+}
+
 void gui_post_key_code(int key) {
     gui_event_t ev;
     if (!g_gui.initialized || !key) return;
@@ -2168,7 +4567,7 @@ static void gui_terminal_invalidate_cell(uint32_t col, uint32_t row) {
         !w->visible || (w->flags & GUI_WINDOW_FLAG_MINIMIZED)) {
         return;
     }
-    if (col >= g_gui.terminal.cols || row >= g_gui.terminal.rows) return;
+    if (col >= g_gui.terminal.view.cols || row >= g_gui.terminal.view.rows) return;
     x = w->rect.x + 6 + (int)col * GUI_CHAR_W;
     y = w->rect.y + GUI_TITLE_HEIGHT + 5 + (int)row * (GUI_CHAR_H + 1);
     gui_invalidate_rect(x - 1, y - 1, GUI_CHAR_W + 2, GUI_CHAR_H + 3);
@@ -2181,108 +4580,194 @@ static void gui_terminal_invalidate_cursor_at(uint32_t col, uint32_t row) {
         !w->visible || (w->flags & GUI_WINDOW_FLAG_MINIMIZED)) {
         return;
     }
-    if (row >= g_gui.terminal.rows) return;
-    if (col >= g_gui.terminal.cols) col = g_gui.terminal.cols - 1;
+    if (row >= g_gui.terminal.view.rows) return;
+    if (col >= g_gui.terminal.view.cols) col = g_gui.terminal.view.cols - 1;
     x = w->rect.x + 6 + (int)col * GUI_CHAR_W;
     y = w->rect.y + GUI_TITLE_HEIGHT + 5 + (int)row * (GUI_CHAR_H + 1) + GUI_CHAR_H;
     gui_invalidate_rect(x - 1, y - 1, GUI_CHAR_W + 2, 3);
 }
 
-static int gui_terminal_point_to_cell(int x, int y, uint32_t *col, uint32_t *row) {
-    gui_window_t *w = g_gui.terminal.window;
-    int ox, oy;
-    int rel_x, rel_y;
-    uint32_t c, r;
-    if (!w || !g_gui.terminal.enabled || !col || !row) return 0;
-    if (!w->visible || (w->flags & GUI_WINDOW_FLAG_MINIMIZED)) return 0;
-    ox = w->rect.x + 6;
-    oy = w->rect.y + GUI_TITLE_HEIGHT + 5;
-    rel_x = x - ox;
-    rel_y = y - oy;
-    if (rel_x < 0 || rel_y < 0) return 0;
-    c = (uint32_t)(rel_x / GUI_CHAR_W);
-    r = (uint32_t)(rel_y / (GUI_CHAR_H + 1));
-    if (c >= g_gui.terminal.cols || r >= g_gui.terminal.rows) return 0;
+void gui_terminal_view_make_layout(gui_rect_t viewport, int padding_x, int padding_y, gui_terminal_view_layout_t *layout) {
+    if (!layout) return;
+    layout->x = viewport.x + padding_x;
+    layout->y = viewport.y + padding_y;
+    layout->cell_w = GUI_CHAR_W;
+    layout->cell_h = GUI_CHAR_H + 1;
+    layout->char_h = GUI_CHAR_H;
+    layout->clip_rect = viewport;
+}
+
+int gui_terminal_view_point_to_cell(const gui_terminal_view_t *view, const gui_terminal_view_layout_t *layout, int x, int y, uint32_t *col, uint32_t *row) {
+    int rel_x;
+    int rel_y;
+    uint32_t c;
+    uint32_t r;
+    if (!view || !layout || !col || !row || view->cols == 0 || view->rows == 0) return 0;
+    if (layout->cell_w <= 0 || layout->cell_h <= 0) return 0;
+    if (x < layout->x || y < layout->y) return 0;
+    rel_x = x - layout->x;
+    rel_y = y - layout->y;
+    c = (uint32_t)(rel_x / layout->cell_w);
+    r = (uint32_t)(rel_y / layout->cell_h);
+    if (c >= view->cols || r >= view->rows) return 0;
     *col = c;
     *row = r;
     return 1;
 }
 
-static void gui_terminal_update_selection(uint32_t col, uint32_t row) {
-    uint32_t a = g_gui.terminal.selection_anchor_y * g_gui.terminal.cols + g_gui.terminal.selection_anchor_x;
-    uint32_t b = row * g_gui.terminal.cols + col;
+static int gui_terminal_point_to_cell(int x, int y, uint32_t *col, uint32_t *row) {
+    gui_window_t *w = g_gui.terminal.window;
+    gui_rect_t viewport;
+    gui_terminal_view_layout_t layout;
+    if (!w || !g_gui.terminal.enabled || !col || !row) return 0;
+    if (!w->visible || (w->flags & GUI_WINDOW_FLAG_MINIMIZED)) return 0;
+    viewport.x = w->rect.x;
+    viewport.y = w->rect.y + GUI_TITLE_HEIGHT;
+    viewport.w = w->rect.w;
+    viewport.h = w->rect.h - GUI_TITLE_HEIGHT;
+    gui_terminal_view_make_layout(viewport, 6, 5, &layout);
+    return gui_terminal_view_point_to_cell(&g_gui.terminal.view, &layout, x, y, col, row);
+}
+
+void gui_terminal_view_begin_selection(gui_terminal_view_t *view, uint32_t col, uint32_t row) {
+    if (!view || view->cols == 0 || view->rows == 0) return;
+    if (col >= view->cols) col = view->cols - 1;
+    if (row >= view->rows) row = view->rows - 1;
+    view->selecting = 1;
+    view->has_selection = 0;
+    view->selection_anchor_x = col;
+    view->selection_anchor_y = row;
+    view->selection_start_x = col;
+    view->selection_start_y = row;
+    view->selection_end_x = col;
+    view->selection_end_y = row;
+}
+
+void gui_terminal_view_update_selection(gui_terminal_view_t *view, uint32_t col, uint32_t row) {
+    uint32_t a;
+    uint32_t b;
+    if (!view || view->cols == 0 || view->rows == 0) return;
+    if (col >= view->cols) col = view->cols - 1;
+    if (row >= view->rows) row = view->rows - 1;
+    a = view->selection_anchor_y * view->cols + view->selection_anchor_x;
+    b = row * view->cols + col;
     if (b < a) {
-        g_gui.terminal.selection_start_x = col;
-        g_gui.terminal.selection_start_y = row;
-        g_gui.terminal.selection_end_x = g_gui.terminal.selection_anchor_x;
-        g_gui.terminal.selection_end_y = g_gui.terminal.selection_anchor_y;
+        view->selection_start_x = col;
+        view->selection_start_y = row;
+        view->selection_end_x = view->selection_anchor_x;
+        view->selection_end_y = view->selection_anchor_y;
     } else {
-        g_gui.terminal.selection_start_x = g_gui.terminal.selection_anchor_x;
-        g_gui.terminal.selection_start_y = g_gui.terminal.selection_anchor_y;
-        g_gui.terminal.selection_end_x = col;
-        g_gui.terminal.selection_end_y = row;
+        view->selection_start_x = view->selection_anchor_x;
+        view->selection_start_y = view->selection_anchor_y;
+        view->selection_end_x = col;
+        view->selection_end_y = row;
     }
-    g_gui.terminal.has_selection = (a != b) ? 1 : 0;
+    view->has_selection = (a != b) ? 1 : 0;
+}
+
+void gui_terminal_view_end_selection(gui_terminal_view_t *view) {
+    if (!view) return;
+    view->selecting = 0;
+}
+
+static void gui_terminal_update_selection(uint32_t col, uint32_t row) {
+    gui_terminal_view_update_selection(&g_gui.terminal.view, col, row);
     gui_terminal_invalidate_body();
 }
 
-static int gui_terminal_cell_selected(uint32_t col, uint32_t row) {
+int gui_terminal_view_cell_selected(const gui_terminal_view_t *view, uint32_t col, uint32_t row) {
     uint32_t p, s, e;
-    if (!g_gui.terminal.has_selection || g_gui.terminal.cols == 0) return 0;
-    p = row * g_gui.terminal.cols + col;
-    s = g_gui.terminal.selection_start_y * g_gui.terminal.cols + g_gui.terminal.selection_start_x;
-    e = g_gui.terminal.selection_end_y * g_gui.terminal.cols + g_gui.terminal.selection_end_x;
+    if (!view || !view->has_selection || view->cols == 0) return 0;
+    p = row * view->cols + col;
+    s = view->selection_start_y * view->cols + view->selection_start_x;
+    e = view->selection_end_y * view->cols + view->selection_end_x;
     return (p >= s && p <= e) ? 1 : 0;
 }
 
+void gui_terminal_view_clear_selection(gui_terminal_view_t *view) {
+    if (!view || (!view->has_selection && !view->selecting)) return;
+    view->selecting = 0;
+    view->has_selection = 0;
+}
+
 void gui_terminal_clear_selection(void) {
-    if (!g_gui.terminal.has_selection && !g_gui.terminal.selecting) return;
-    g_gui.terminal.selecting = 0;
-    g_gui.terminal.has_selection = 0;
+    gui_terminal_view_t *view = &g_gui.terminal.view;
+    if (!view->has_selection && !view->selecting) return;
+    gui_terminal_view_clear_selection(view);
     gui_terminal_invalidate_body();
 }
 
-int gui_terminal_copy_selection(void) {
+int gui_terminal_view_copy_selection(gui_terminal_view_t *view) {
     uint32_t r, c;
     uint32_t len = 0;
     uint32_t copied = 0;
-    if (!g_gui.initialized || !g_gui.terminal.has_selection || g_gui.terminal.cols == 0) return 0;
-    for (r = g_gui.terminal.selection_start_y; r <= g_gui.terminal.selection_end_y && r < g_gui.terminal.rows; r++) {
+    if (!view || !view->has_selection || view->cols == 0) return 0;
+    for (r = view->selection_start_y; r <= view->selection_end_y && r < view->rows; r++) {
         uint32_t start_c = 0;
-        uint32_t end_c = g_gui.terminal.cols - 1;
+        uint32_t end_c = view->cols - 1;
         int last_non_space = -1;
-        if (r == g_gui.terminal.selection_start_y) start_c = g_gui.terminal.selection_start_x;
-        if (r == g_gui.terminal.selection_end_y) end_c = g_gui.terminal.selection_end_x;
-        for (c = start_c; c <= end_c && c < g_gui.terminal.cols; c++) {
-            if (g_gui.terminal.cells[r][c] != ' ') last_non_space = (int)c;
+        if (r == view->selection_start_y) start_c = view->selection_start_x;
+        if (r == view->selection_end_y) end_c = view->selection_end_x;
+        for (c = start_c; c <= end_c && c < view->cols; c++) {
+            if (view->cells[r][c] != ' ') last_non_space = (int)c;
         }
-        if (last_non_space < (int)start_c && r != g_gui.terminal.selection_end_y) {
-            if (len + 1 < GUI_TERM_CLIPBOARD_SIZE) g_gui.terminal.clipboard[len++] = '\n';
+        if (last_non_space < (int)start_c && r != view->selection_end_y) {
+            if (len + 1 < GUI_TERM_CLIPBOARD_SIZE) view->clipboard[len++] = '\n';
             continue;
         }
         if (last_non_space >= (int)start_c) {
-            for (c = start_c; c <= (uint32_t)last_non_space && c < g_gui.terminal.cols; c++) {
+            for (c = start_c; c <= (uint32_t)last_non_space && c < view->cols; c++) {
                 if (len + 1 >= GUI_TERM_CLIPBOARD_SIZE) break;
-                g_gui.terminal.clipboard[len++] = g_gui.terminal.cells[r][c];
+                view->clipboard[len++] = view->cells[r][c];
                 copied = 1;
             }
         }
-        if (r != g_gui.terminal.selection_end_y && len + 1 < GUI_TERM_CLIPBOARD_SIZE) {
-            g_gui.terminal.clipboard[len++] = '\n';
+        if (r != view->selection_end_y && len + 1 < GUI_TERM_CLIPBOARD_SIZE) {
+            view->clipboard[len++] = '\n';
         }
         if (len + 1 >= GUI_TERM_CLIPBOARD_SIZE) break;
     }
-    g_gui.terminal.clipboard[len] = '\0';
-    g_gui.terminal.clipboard_len = len;
+    view->clipboard[len] = '\0';
+    view->clipboard_len = len;
     return copied || len > 0;
 }
 
+int gui_terminal_copy_selection(void) {
+    if (!g_gui.initialized) return 0;
+    return gui_terminal_view_copy_selection(&g_gui.terminal.view);
+}
+
+int gui_terminal_view_has_clipboard_text(const gui_terminal_view_t *view) {
+    return (view && view->clipboard_len > 0 && view->clipboard[0] != '\0') ? 1 : 0;
+}
+
+int gui_terminal_view_set_clipboard_text(gui_terminal_view_t *view, const char *text) {
+    uint32_t len = 0;
+    if (!view) return 0;
+    if (!text) text = "";
+    while (text[len] && len + 1 < GUI_TERM_CLIPBOARD_SIZE) {
+        view->clipboard[len] = text[len];
+        len++;
+    }
+    view->clipboard[len] = '\0';
+    view->clipboard_len = len;
+    return len > 0;
+}
+
+const char *gui_terminal_view_get_clipboard_text(const gui_terminal_view_t *view) {
+    return gui_terminal_view_has_clipboard_text(view) ? view->clipboard : "";
+}
+
 int gui_terminal_has_clipboard_text(void) {
-    return g_gui.terminal.clipboard_len > 0 && g_gui.terminal.clipboard[0] != '\0';
+    return gui_terminal_view_has_clipboard_text(&g_gui.terminal.view);
+}
+
+static int gui_terminal_set_clipboard_text(const char *text) {
+    return gui_terminal_view_set_clipboard_text(&g_gui.terminal.view, text);
 }
 
 const char *gui_terminal_get_clipboard_text(void) {
-    return gui_terminal_has_clipboard_text() ? g_gui.terminal.clipboard : "";
+    return gui_terminal_view_get_clipboard_text(&g_gui.terminal.view);
 }
 
 __attribute__((optimize("no-jump-tables")))
@@ -2347,14 +4832,7 @@ static void gui_handle_mouse_down(int x, int y) {
             gui_set_focused_widget(0);
             gui_terminal_set_input_focus(1);
             if (gui_terminal_point_to_cell(x, y, &tc, &trc)) {
-                g_gui.terminal.selecting = 1;
-                g_gui.terminal.selection_anchor_x = tc;
-                g_gui.terminal.selection_anchor_y = trc;
-                g_gui.terminal.selection_start_x = tc;
-                g_gui.terminal.selection_start_y = trc;
-                g_gui.terminal.selection_end_x = tc;
-                g_gui.terminal.selection_end_y = trc;
-                g_gui.terminal.has_selection = 0;
+                gui_terminal_view_begin_selection(&g_gui.terminal.view, tc, trc);
                 gui_terminal_invalidate_body();
             } else {
                 gui_terminal_clear_selection();
@@ -2425,24 +4903,79 @@ static void gui_handle_mouse_down(int x, int y) {
             return;
         }
 
-        int sx = x - w->rect.x - GUI_BORDER_SIZE;
-        int sy = y - w->rect.y - GUI_TITLE_HEIGHT;
-        gui_widget_t *wg = gui_widget_at(w, sx, sy);
+        gui_widget_t *wg = gui_widget_at_screen(x, y);
         if (wg && wg->type == GUI_WIDGET_SLIDER && wg->enabled) {
             gui_set_focused_widget(0);
             wg->pressed = 1;
             g_gui.slider_widget = wg;
             gui_slider_apply_screen_x(wg, x);
             gui_invalidate_all();
+        } else if (wg && wg->type == GUI_WIDGET_SCROLLBAR && wg->enabled) {
+            gui_set_focused_widget(0);
+            wg->pressed = 1;
+            g_gui.scrollbar_widget = wg;
+            gui_scrollbar_apply_screen(wg, x, y);
+            gui_invalidate_all();
         } else if (gui_widget_is_clickable(wg)) {
+            int select_index = -1;
+            if (wg->type == GUI_WIDGET_SELECT || wg->type == GUI_WIDGET_COMBOBOX) {
+                select_index = gui_select_dropdown_index_at(wg, x, y);
+                if (select_index >= 0) {
+                    gui_set_focused_widget(wg);
+                    gui_select_commit(wg, select_index);
+                    return;
+                }
+            } else if (wg->type == GUI_WIDGET_LISTVIEW) {
+                int list_index = gui_listview_index_at(wg, x, y);
+                gui_set_focused_widget(wg);
+                if (list_index >= 0) gui_listview_select(wg, list_index, (wg->label_flags & GUI_LISTVIEW_FLAG_MULTI_SELECT) != 0);
+                return;
+            } else if (wg->type == GUI_WIDGET_TABLEVIEW) {
+                int col_index = gui_tableview_column_at(wg, x, y);
+                int row_index = gui_tableview_index_at(wg, x, y);
+                gui_set_focused_widget(wg);
+                if (col_index >= 0 && (wg->label_flags & GUI_TABLEVIEW_FLAG_SORTABLE)) gui_tableview_sort(wg, col_index);
+                else if (row_index >= 0) gui_tableview_select(wg, row_index);
+                return;
+            } else if (wg->type == GUI_WIDGET_MENUBAR) {
+                int menu_index = gui_menubar_index_at(wg, x, y);
+                gui_set_focused_widget(wg);
+                if (menu_index >= 0) gui_menubar_activate(wg, menu_index);
+                return;
+            } else if (wg->type == GUI_WIDGET_TREEVIEW) {
+                int tree_index = gui_treeview_index_at(wg, x, y);
+                gui_set_focused_widget(wg);
+                if (tree_index >= 0) { gui_treeview_select(wg, tree_index); gui_treeview_toggle(wg, tree_index); }
+                return;
+            }
             gui_set_focused_widget(wg);
             wg->pressed = 1;
             g_gui.pressed_widget = wg;
             gui_invalidate_all();
         } else if (gui_widget_can_focus(wg)) {
             gui_set_focused_widget(wg);
-            if (wg && wg->type == GUI_WIDGET_TEXTBOX && wg->owner && wg->owner->user_owner_pid != 0) {
-                gui_user_widget_click_at(wg, sx - wg->rect.x, sy - wg->rect.y);
+            if (wg && wg->type == GUI_WIDGET_TEXTBOX) {
+                int lx = 0;
+                int ly = 0;
+                gui_widget_local_from_screen(wg, x, y, &lx, &ly);
+                gui_textbox_set_cursor_from_local_x(wg, lx);
+                gui_text_widget_clear_selection(wg);
+                wg->selection_anchor = wg->cursor;
+                g_gui.text_select_widget = wg;
+                if (wg->owner && wg->owner->user_owner_pid != 0) {
+                    gui_user_widget_click_at(wg, lx, ly);
+                }
+            } else if (wg && wg->type == GUI_WIDGET_TEXTAREA) {
+                int lx = 0;
+                int ly = 0;
+                gui_widget_local_from_screen(wg, x, y, &lx, &ly);
+                gui_textarea_set_cursor_from_local_xy(wg, lx, ly);
+                gui_text_widget_clear_selection(wg);
+                wg->selection_anchor = wg->cursor;
+                g_gui.text_select_widget = wg;
+                if (wg->owner && wg->owner->user_owner_pid != 0) {
+                    gui_user_widget_click_at(wg, lx, ly);
+                }
             }
         } else {
             gui_set_focused_widget(0);
@@ -2456,17 +4989,20 @@ static void gui_handle_mouse_down(int x, int y) {
 
 __attribute__((optimize("no-jump-tables")))
 static void gui_handle_mouse_up(int x, int y) {
-    if (g_gui.terminal.selecting) {
+    if (g_gui.terminal.view.selecting) {
         uint32_t tc, trc;
         if (gui_terminal_point_to_cell(x, y, &tc, &trc)) {
             gui_terminal_update_selection(tc, trc);
         }
-        g_gui.terminal.selecting = 0;
+        gui_terminal_view_end_selection(&g_gui.terminal.view);
     }
     if (g_gui.drag_window) {
         g_gui.drag_window->dragging = 0;
         g_gui.drag_window->resizing = 0;
         g_gui.drag_window = 0;
+    }
+    if (g_gui.text_select_widget) {
+        g_gui.text_select_widget = 0;
     }
     if (g_gui.slider_widget) {
         int rebuild_settings = (g_gui.slider_widget->owner == g_settings_win);
@@ -2474,6 +5010,11 @@ static void gui_handle_mouse_up(int x, int y) {
         g_gui.slider_widget = 0;
         if (rebuild_settings) gui_settings_build(0);
         else gui_invalidate_all();
+    }
+    if (g_gui.scrollbar_widget) {
+        g_gui.scrollbar_widget->pressed = 0;
+        g_gui.scrollbar_widget = 0;
+        gui_invalidate_all();
     }
     if (g_gui.pressed_widget) {
         gui_widget_t *wg = g_gui.pressed_widget;
@@ -2484,7 +5025,20 @@ static void gui_handle_mouse_up(int x, int y) {
         still_inside = (under == wg && gui_widget_is_clickable(wg));
         gui_invalidate_all();
         if (still_inside) {
-            gui_button_activate(wg);
+            if (wg->type == GUI_WIDGET_TOGGLE) {
+                gui_toggle_activate(wg);
+            } else if (wg->type == GUI_WIDGET_CHECKBOX) {
+                gui_checkbox_activate(wg);
+            } else if (wg->type == GUI_WIDGET_RADIOBUTTON) {
+                gui_radiobutton_activate(wg);
+            } else if (wg->type == GUI_WIDGET_SELECT || wg->type == GUI_WIDGET_COMBOBOX) {
+                gui_select_activate(wg);
+            } else if (wg->type == GUI_WIDGET_LABEL) {
+                gui_terminal_set_clipboard_text(wg->text);
+                gui_invalidate_all();
+            } else {
+                gui_button_activate(wg);
+            }
         }
     }
 }
@@ -2492,9 +5046,29 @@ static void gui_handle_mouse_up(int x, int y) {
 __attribute__((optimize("no-jump-tables")))
 static void gui_handle_mouse_move(int x, int y) {
     int search_idx;
+    if (g_gui.text_select_widget) {
+        gui_widget_t *tw = g_gui.text_select_widget;
+        if (tw->owner) {
+            int lx = 0;
+            int ly = 0;
+            gui_widget_local_from_screen(tw, x, y, &lx, &ly);
+            if (tw->type == GUI_WIDGET_TEXTAREA) gui_textarea_set_cursor_from_local_xy(tw, lx, ly);
+            else gui_textbox_set_cursor_from_local_x(tw, lx);
+            gui_text_widget_set_selection(tw, tw->selection_anchor, tw->cursor);
+            if (tw->type == GUI_WIDGET_TEXTAREA) gui_textarea_ensure_cursor_visible(tw);
+            else gui_textbox_ensure_cursor_visible(tw);
+            gui_invalidate_all();
+        }
+        return;
+    }
     if (g_gui.slider_widget) {
         gui_set_hovered_widget(g_gui.slider_widget);
         gui_slider_apply_screen_x(g_gui.slider_widget, x);
+        return;
+    }
+    if (g_gui.scrollbar_widget) {
+        gui_set_hovered_widget(g_gui.scrollbar_widget);
+        gui_scrollbar_apply_screen(g_gui.scrollbar_widget, x, y);
         return;
     }
     search_idx = gui_taskbar_search_result_index_at(x, y);
@@ -2506,7 +5080,7 @@ static void gui_handle_mouse_move(int x, int y) {
                             g_gui.taskbar_search_results_rect.h);
     }
     gui_set_hovered_widget(gui_widget_at_screen(x, y));
-    if (g_gui.terminal.selecting) {
+    if (g_gui.terminal.view.selecting) {
         uint32_t tc, trc;
         if (gui_terminal_point_to_cell(x, y, &tc, &trc)) {
             gui_terminal_update_selection(tc, trc);
@@ -2544,7 +5118,6 @@ void gui_process_events(void) {
     gui_event_t ev;
     while (gui_event_pop(&ev)) {
         if (ev.type == GUI_EVENT_KEY_DOWN) {
-            gui_user_post_key_event(g_gui.active_window, ev.key);
             if (g_gui.taskbar_search_focused && gui_taskbar_search_handle_key(ev.key)) {
                 /* taskbar search consumed the key */
             } else if (ev.key == GUI_KEY_ALT_TAB) {
@@ -2553,16 +5126,46 @@ void gui_process_events(void) {
                 gui_toggle_start_menu();
             } else if (ev.key == GUI_KEY_TAB) {
                 gui_focus_next_widget();
+            } else if (g_gui.focused_widget && g_gui.focused_widget->focused &&
+                       (g_gui.focused_widget->type == GUI_WIDGET_TEXTBOX ||
+                        g_gui.focused_widget->type == GUI_WIDGET_TEXTAREA)) {
+                gui_textbox_on_key(g_gui.focused_widget, ev.key);
             } else if (browser_handle_address_enter(ev.key)) {
                 /* Browser address bar consumed Enter. */
             } else if (g_gui.focused_widget && g_gui.focused_widget->focused &&
-                       g_gui.focused_widget->type == GUI_WIDGET_TEXTBOX &&
-                       (!g_gui.focused_widget->owner || g_gui.focused_widget->owner->user_owner_pid == 0)) {
-                gui_textbox_on_key(g_gui.focused_widget, ev.key);
+                       (g_gui.focused_widget->type == GUI_WIDGET_SELECT ||
+                        g_gui.focused_widget->type == GUI_WIDGET_COMBOBOX) &&
+                       (ev.key == GUI_KEY_ENTER || ev.key == GUI_KEY_SPACE || ev.key == GUI_KEY_UP || ev.key == GUI_KEY_DOWN || ev.key == 27)) {
+                gui_select_handle_key(g_gui.focused_widget, ev.key);
             } else if (g_gui.focused_widget && g_gui.focused_widget->focused &&
-                       g_gui.focused_widget->type == GUI_WIDGET_BUTTON &&
+                       g_gui.focused_widget->type == GUI_WIDGET_LISTVIEW) {
+                gui_listview_handle_key(g_gui.focused_widget, ev.key);
+            } else if (g_gui.focused_widget && g_gui.focused_widget->focused &&
+                       g_gui.focused_widget->type == GUI_WIDGET_TABLEVIEW) {
+                gui_tableview_handle_key(g_gui.focused_widget, ev.key);
+            } else if (g_gui.focused_widget && g_gui.focused_widget->focused &&
+                       g_gui.focused_widget->type == GUI_WIDGET_MENUBAR) {
+                gui_menubar_handle_key(g_gui.focused_widget, ev.key);
+            } else if (g_gui.focused_widget && g_gui.focused_widget->focused &&
+                       g_gui.focused_widget->type == GUI_WIDGET_TREEVIEW) {
+                gui_treeview_handle_key(g_gui.focused_widget, ev.key);
+            } else if (g_gui.focused_widget && g_gui.focused_widget->focused &&
+                       gui_widget_is_clickable(g_gui.focused_widget) &&
                        (ev.key == GUI_KEY_ENTER || ev.key == GUI_KEY_SPACE)) {
-                gui_button_activate(g_gui.focused_widget);
+                if (g_gui.focused_widget->type == GUI_WIDGET_TOGGLE) {
+                    gui_toggle_activate(g_gui.focused_widget);
+                } else if (g_gui.focused_widget->type == GUI_WIDGET_CHECKBOX) {
+                    gui_checkbox_activate(g_gui.focused_widget);
+                } else if (g_gui.focused_widget->type == GUI_WIDGET_RADIOBUTTON) {
+                    gui_radiobutton_activate(g_gui.focused_widget);
+                } else if (g_gui.focused_widget->type == GUI_WIDGET_LABEL) {
+                    gui_terminal_set_clipboard_text(g_gui.focused_widget->text);
+                    gui_invalidate_all();
+                } else {
+                    gui_button_activate(g_gui.focused_widget);
+                }
+            } else if (g_gui.active_window && g_gui.active_window->user_owner_pid != 0) {
+                gui_user_post_key_event(g_gui.active_window, ev.key);
             } else if (g_gui.focused_widget && g_gui.focused_widget->focused) {
                 /* Focused widgets consume keys that they do not handle. */
             } else {
@@ -2576,7 +5179,22 @@ void gui_process_events(void) {
         } else if (ev.type == GUI_EVENT_MOUSE_MOVE) {
             gui_handle_mouse_move(ev.x, ev.y);
         } else if (ev.type == GUI_EVENT_MOUSE_WHEEL) {
-            if (g_gui.desktop_start_menu_open && gui_rect_contains(&g_gui.desktop_start_menu_rect, ev.x, ev.y)) {
+            gui_widget_t *wheel_widget = gui_widget_at_screen(ev.x, ev.y);
+            if (wheel_widget && wheel_widget->type == GUI_WIDGET_TEXTAREA) {
+                gui_textarea_scroll_lines(wheel_widget, ev.dy > 0 ? -1 : 1);
+            } else if (wheel_widget && wheel_widget->type == GUI_WIDGET_SCROLLBAR) {
+                gui_scrollbar_scroll_steps(wheel_widget, ev.dy > 0 ? -1 : 1);
+            } else if (wheel_widget && wheel_widget->type == GUI_WIDGET_SCROLLVIEW) {
+                int delta = ev.dy > 0 ? -24 : 24;
+                gui_scrollview_set_offset(wheel_widget, wheel_widget->value, wheel_widget->step + delta);
+                gui_invalidate_all();
+            } else if (wheel_widget && wheel_widget->type == GUI_WIDGET_LISTVIEW) {
+                gui_listview_scroll(wheel_widget, ev.dy > 0 ? -1 : 1);
+            } else if (wheel_widget && wheel_widget->type == GUI_WIDGET_TABLEVIEW) {
+                gui_tableview_scroll(wheel_widget, ev.dy > 0 ? -1 : 1);
+            } else if (wheel_widget && wheel_widget->type == GUI_WIDGET_TREEVIEW) {
+                gui_treeview_scroll(wheel_widget, ev.dy > 0 ? -1 : 1);
+            } else if (g_gui.desktop_start_menu_open && gui_rect_contains(&g_gui.desktop_start_menu_rect, ev.x, ev.y)) {
                 gui_start_menu_scroll_by(ev.dy > 0 ? 1 : -1);
             }
         } else if (ev.type == GUI_EVENT_BUTTON_CLICK) {
@@ -2655,7 +5273,8 @@ static void gui_poll_mouse(void) {
     if (ms.x != g_gui.mouse_x || ms.y != g_gui.mouse_y) {
         int complex_move;
         gui_taskbar_invalidate_hover_changes(g_gui.mouse_x, g_gui.mouse_y, ms.x, ms.y);
-        complex_move = (g_gui.drag_window != 0) || g_gui.terminal.selecting ||
+        gui_desktop_invalidate_hover_changes(g_gui.mouse_x, g_gui.mouse_y, ms.x, ms.y);
+        complex_move = (g_gui.drag_window != 0) || g_gui.terminal.view.selecting ||
                        ((ms.buttons & 1u) != 0) || ((g_gui.last_mouse_buttons & 1u) != 0);
         if (complex_move) {
             gui_event_t ev;
@@ -2725,15 +5344,15 @@ int gui_start(uint32_t width, uint32_t height) {
     g_gui.width = info->width;
     g_gui.height = info->height;
 
-    /* 鍏堣缃紶鏍囪竟鐣屼负鐪熷疄鍒嗚鲸鐜?*/
+    /* 闁稿繐鐗愰鏇犵磾椤曗偓缁卞爼寮介崶顏嗙彾闁伙絽濂旂拹鐔兼儑閻旈鏉介柛鎺戞妞存悂锟?*/
     mouse_set_bounds((int)g_gui.width, (int)g_gui.height);
 
     g_gui.initialized = 1;
 
-    /* 浠庨紶鏍囬┍鍔ㄨ幏鍙栧綋鍓嶅潗鏍?*/
+    /* 濞寸姴閰ｇ槐鍫曞冀閸ヮ兘鏀抽柛鏂诲姀楠炲繘宕ｉ弽褏绉奸柛鎾崇Т濞兼锟?*/
     mouse_snapshot_and_clear_delta(&ms);
 
-    /* 濡傛灉榧犳爣杩樻病鏀跺埌涓柇鍖咃紝浣跨敤灞忓箷涓績 */
+    /* 濠碘€冲€归悘澶嬑楅悩宕囧灱閺夆晜蓱閻ュ懘寮ㄧ捄鍝勭厒濞戞搩鍘介弻鍥礌閸滃啰绀夊ù锝堟硶閺併倗浠﹁箛鎾额啂濞戞搩鍘肩缓?*/
     if (ms.packet_count == 0) {
         g_gui.mouse_x = (int)(g_gui.width / 2);
         g_gui.mouse_y = (int)(g_gui.height / 2);
@@ -2743,7 +5362,7 @@ int gui_start(uint32_t width, uint32_t height) {
         g_gui.mouse_y = ms.y;
     }
 
-    /* 鍧愭爣杈圭晫鏈€缁堟鏌?*/
+    /* 闁秆勫姈閻栵絾娼忛崷顓熸珪闁哄牃鍋撶紓浣哥墛椤ュ懘锟?*/
     if (g_gui.mouse_x < 0) g_gui.mouse_x = 0;
     if (g_gui.mouse_y < 0) g_gui.mouse_y = 0;
     if (g_gui.mouse_x >= (int)g_gui.width) g_gui.mouse_x = (int)g_gui.width - 1;
@@ -2889,10 +5508,6 @@ static void gui_launcher_init(void) {
     /* programs under /bin appear after the 2 built-ins; scan happens lazily */
 }
 
-static int      g_desktop_selected_icon = -1;
-static int      g_desktop_last_click_icon = -1;
-static uint32_t g_desktop_last_click_frame = 0;
-
 static void gui_desktop_clear_icon_click_state(void) {
     g_desktop_selected_icon = -1;
     g_desktop_last_click_icon = -1;
@@ -2959,7 +5574,7 @@ static void gui_desktop_init(void) {
 
     memset(g_gui.desktop_icons, 0, sizeof(g_gui.desktop_icons));
     gui_desktop_clear_icon_click_state();
-    /* 桌面保留常用入口：文件、回收站、浏览器。 */
+    /* 濡楀矂娼版穱婵堟殌鐢摜鏁ら崗銉ュ經閿涙碍鏋冩禒韬测偓浣告礀閺€鍓佺彲閵嗕焦绁荤憴鍫濇珤锟?*/
     gui_desktop_add_icon(0, 32, 72,  i18n_t(I18N_KEY_ICON_FILES),       gui_rgb(242, 194, 74),  GUI_DESKTOP_ACTION_FILES);
     gui_desktop_add_icon(1, 32, 160, i18n_t(I18N_KEY_ICON_RECYCLE_BIN), gui_rgb(168, 178, 198), GUI_DESKTOP_ACTION_RECYCLE);
     gui_desktop_add_icon(2, 32, 248, i18n_t(I18N_KEY_ICON_BROWSER),     gui_rgb(74, 158, 245),  GUI_DESKTOP_ACTION_BROWSER);
@@ -3004,41 +5619,135 @@ static void gui_draw_browser_icon_art(int x, int y, uint32_t color) {
     gui_raw_fill_rect(x + 23, y + 13, 2, 4, green);
 }
 
-static void gui_desktop_draw_icon(gui_desktop_icon_t *icon) {
-    int cx;
-    int iy;
+static void gui_draw_icon_button_face(const gui_rect_t *rect, int selected,
+                                      int highlighted) {
+    if (!rect || rect->w <= 4 || rect->h <= 4) return;
+    if (selected || highlighted) {
+        uint32_t fill = selected ? gui_rgb(42, 84, 144) : gui_rgb(54, 73, 106);
+        uint32_t top = selected ? gui_rgb(126, 166, 226) : gui_rgb(98, 126, 172);
+        uint32_t bottom = selected ? gui_rgb(20, 42, 80) : gui_rgb(28, 42, 66);
+        gui_raw_fill_rect(rect->x + 2, rect->y + 2,
+                          rect->w - 4, rect->h - 4, fill);
+        gui_raw_line(rect->x + 2, rect->y + 2,
+                     rect->x + rect->w - 3, rect->y + 2, top);
+        gui_raw_line(rect->x + 2, rect->y + rect->h - 3,
+                     rect->x + rect->w - 3, rect->y + rect->h - 3, bottom);
+    }
+}
+
+static void gui_draw_icon_button_frame(const gui_rect_t *rect, const char *label,
+                                       int icon_w, int icon_h, int gap,
+                                       int selected, int highlighted,
+                                       uint32_t text_color,
+                                       int *icon_x, int *icon_y) {
+    int top_pad;
     int text_w;
     int text_x;
     int text_y;
-    /* layout:
-     *   icon art   : 28x28
-     *   gap        : 6 px
-     *   label      : 8 px (single line, GUI_CHAR_H)
-     * total content height = 28 + 6 + 8 = 42, vertically centered in rect.h (64).
-     */
+
+    if (!rect) return;
+    gui_draw_icon_button_face(rect, selected, highlighted);
+    if (icon_w < 0) icon_w = 0;
+    if (icon_h < 0) icon_h = 0;
+    if (gap < 0) gap = 0;
+    top_pad = (rect->h - (icon_h + gap + GUI_CHAR_H)) / 2;
+    if (top_pad < 0) top_pad = 0;
+    if (icon_x) *icon_x = rect->x + (rect->w - icon_w) / 2;
+    if (icon_y) *icon_y = rect->y + top_pad;
+    if (label && label[0]) {
+        text_w = (int)font_measure_text_width(font_get_default(), label);
+        text_x = rect->x + (rect->w - text_w) / 2;
+        if (text_x < rect->x) text_x = rect->x;
+        text_y = rect->y + top_pad + icon_h + gap;
+        gui_draw_text(text_x, text_y, label, text_color);
+    }
+}
+
+static void gui_draw_file_icon_cell(const gui_rect_t *rect, const char *label,
+                                    gui_icon_id_t icon, int selected,
+                                    int highlighted, uint32_t text_color) {
+    gui_rect_t face;
+    int icon_x;
+    int icon_y;
+    const int icon_w = 18;
+    const int icon_h = 18;
+    const int gap = font_scale_value(4);
+    int text_x;
+    int text_y;
+
+    if (!rect || rect->w <= 0 || rect->h <= 0) return;
+
+    face = *rect;
+    if (face.h < icon_h + 4) face.h = icon_h + 4;
+    if (face.w < icon_w + gap + 16) face.w = icon_w + gap + 16;
+
+    gui_draw_icon_button_face(&face, selected, highlighted);
+    icon_x = face.x + 4;
+    icon_y = face.y + (face.h - icon_h) / 2;
+    if (icon_y < face.y + 1) icon_y = face.y + 1;
+    gui_draw_file_icon(icon, icon_x, icon_y);
+
+    text_x = icon_x + icon_w + gap;
+    text_y = gui_text_center_y(face.y, face.h);
+    if (text_y < face.y + 1) text_y = face.y + 1;
+    gui_draw_text(text_x, text_y, label ? label : "", text_color);
+}
+
+
+typedef struct gui_list_view {
+    gui_rect_t rect;
+    int row_h;
+    int selected_row;
+    uint32_t bg;
+    uint32_t alt_bg;
+    uint32_t selected_bg;
+    uint32_t border;
+    uint32_t selected_border;
+} gui_list_view_t;
+
+static gui_rect_t gui_list_view_row_rect(const gui_list_view_t *list, int row) {
+    gui_rect_t r;
+    r.x = 0;
+    r.y = 0;
+    r.w = 0;
+    r.h = 0;
+    if (!list || list->row_h <= 0) return r;
+    r.x = list->rect.x;
+    r.y = list->rect.y + row * list->row_h;
+    r.w = list->rect.w;
+    r.h = list->row_h;
+    return r;
+}
+
+static void gui_list_view_draw_row(const gui_list_view_t *list, int row) {
+    gui_rect_t r;
+    uint32_t bg;
+    uint32_t border;
+    if (!list || list->row_h <= 0) return;
+    r = gui_list_view_row_rect(list, row);
+    if (r.w <= 0 || r.h <= 0) return;
+    bg = (row == list->selected_row) ? list->selected_bg :
+         ((row & 1) ? list->alt_bg : list->bg);
+    border = (row == list->selected_row) ? list->selected_border : list->border;
+    gui_raw_fill_rect(r.x, r.y, r.w, r.h - 1, bg);
+    gui_raw_line(r.x, r.y + r.h - 1, r.x + r.w - 1, r.y + r.h - 1, border);
+}
+
+static void gui_desktop_draw_icon(gui_desktop_icon_t *icon) {
+    int cx;
+    int iy;
     const int art_h = 28;
     const int gap   = 6;
-    int top_pad;
+    int selected;
+    int highlighted;
 
     if (!icon || !icon->used) return;
-    if (g_desktop_selected_icon >= 0 &&
-        g_desktop_selected_icon < (int)GUI_DESKTOP_MAX_ICONS &&
-        icon == &g_gui.desktop_icons[g_desktop_selected_icon]) {
-        gui_raw_fill_rect(icon->rect.x + 2, icon->rect.y + 2,
-                          icon->rect.w - 4, icon->rect.h - 4,
-                          gui_rgb(42, 84, 144));
-        gui_raw_line(icon->rect.x + 2, icon->rect.y + 2,
-                     icon->rect.x + icon->rect.w - 3, icon->rect.y + 2,
-                     gui_rgb(126, 166, 226));
-        gui_raw_line(icon->rect.x + 2, icon->rect.y + icon->rect.h - 3,
-                     icon->rect.x + icon->rect.w - 3, icon->rect.y + icon->rect.h - 3,
-                     gui_rgb(20, 42, 80));
-    }
-    /* no background plate / border — let the icon art sit directly on wallpaper */
-    cx = icon->rect.x + (icon->rect.w - 28) / 2;
-    top_pad = (icon->rect.h - (art_h + gap + GUI_CHAR_H)) / 2;
-    if (top_pad < 0) top_pad = 0;
-    iy = icon->rect.y + top_pad;
+    selected = gui_desktop_icon_selected(icon);
+    highlighted = gui_desktop_icon_highlighted_at(icon, g_gui.mouse_x, g_gui.mouse_y);
+    gui_draw_icon_button_frame(&icon->rect, icon->label, 28, art_h, gap,
+                               selected, highlighted, gui_rgb(232, 240, 255),
+                               &cx, &iy);
+    /* no background plate / border 锟?let the icon art sit directly on wallpaper */
     if (icon->action == GUI_DESKTOP_ACTION_FILES) {
         gui_draw_folder_icon_art(cx, iy, icon->color);
     } else if (icon->action == GUI_DESKTOP_ACTION_BROWSER) {
@@ -3077,11 +5786,6 @@ static void gui_desktop_draw_icon(gui_desktop_icon_t *icon) {
         gui_raw_line(cx + 27, iy, cx + 27, iy + 27, gui_rgb(18, 25, 38));
         gui_raw_line(cx, iy + 27, cx + 27, iy + 27, gui_rgb(18, 25, 38));
     }
-    text_w = (int)font_measure_text_width(font_get_default(), icon->label);
-    text_x = icon->rect.x + (icon->rect.w - text_w) / 2;
-    if (text_x < icon->rect.x) text_x = icon->rect.x;
-    text_y = iy + art_h + gap;
-    gui_draw_text(text_x, text_y, icon->label, gui_rgb(232, 240, 255));
 }
 
 static int gui_start_menu_item_height(void) {
@@ -3171,6 +5875,56 @@ static void gui_update_start_menu_layout(void) {
     gui_start_menu_clamp_scroll();
 }
 
+static int gui_start_menu_item_rect(uint32_t index, gui_rect_t *item) {
+    int item_h;
+    int header_h;
+    int visible;
+    int start;
+    int end;
+    int scrollbar_w;
+    int item_w;
+    if (!item || !g_gui.desktop_start_menu_open) return 0;
+    if (index >= g_gui.launcher_app_count || index >= GUI_LAUNCHER_MAX_APPS) return 0;
+    item_h = gui_start_menu_item_height();
+    header_h = gui_start_menu_header_height();
+    visible = gui_start_menu_visible_count();
+    start = g_gui.desktop_start_menu_scroll;
+    end = start + visible;
+    if ((int)index < start || (int)index >= end) return 0;
+    scrollbar_w = gui_start_menu_has_scrollbar() ? 10 : 0;
+    item_w = g_gui.desktop_start_menu_rect.w - 20 - scrollbar_w;
+    if (item_w < 32) item_w = 32;
+    item->x = g_gui.desktop_start_menu_rect.x + 10;
+    item->y = g_gui.desktop_start_menu_rect.y + header_h + ((int)index - start) * item_h;
+    item->w = item_w;
+    item->h = item_h - 2;
+    return 1;
+}
+
+static int gui_start_menu_item_at(int x, int y, uint32_t *index_out) {
+    uint32_t i;
+    int start;
+    int end;
+    int visible;
+    if (!g_gui.desktop_start_menu_open ||
+        !gui_rect_contains(&g_gui.desktop_start_menu_rect, x, y)) return 0;
+    gui_update_start_menu_layout();
+    visible = gui_start_menu_visible_count();
+    start = g_gui.desktop_start_menu_scroll;
+    end = start + visible;
+    for (i = (uint32_t)start; i < (uint32_t)end &&
+         i < g_gui.launcher_app_count && i < GUI_LAUNCHER_MAX_APPS; i++) {
+        gui_rect_t item;
+        gui_launcher_entry_t *entry = &g_gui.launcher_entries[i];
+        if (!entry->used) continue;
+        if (gui_start_menu_item_rect(i, &item) && gui_rect_contains(&item, x, y)) {
+            if (index_out) *index_out = i;
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static void gui_start_menu_scroll_by(int delta_items) {
     if (delta_items == 0) return;
     g_gui.desktop_start_menu_scroll += delta_items;
@@ -3242,27 +5996,48 @@ static void gui_draw_launcher_icon(const gui_launcher_entry_t *entry, int x, int
     g_gui_accel.icon_quality_passes++;
 }
 
+static void gui_draw_launcher_item(const gui_launcher_entry_t *entry,
+                                   const gui_rect_t *rect,
+                                   int selected, int highlighted) {
+    int icon_y;
+    int text_y;
+    font_rect_t clip;
+    gui_text_soften_ctx_t soft;
+    uint32_t fg = gui_rgb(232, 240, 255);
+    if (!entry || !rect || rect->w <= 0 || rect->h <= 0) return;
+    gui_draw_icon_button_face(rect, selected, highlighted);
+    icon_y = rect->y + (rect->h - 16) / 2;
+    if (icon_y < rect->y + 2) icon_y = rect->y + 2;
+    gui_draw_launcher_icon(entry, rect->x + 3, icon_y);
+    text_y = rect->y + (rect->h - font_get_line_height(font_get_default())) / 2;
+    if (text_y < rect->y + 2) text_y = rect->y + 2;
+    clip.x = rect->x + 24;
+    clip.y = rect->y;
+    clip.w = rect->w - 28;
+    clip.h = rect->h;
+    if (clip.w <= 0 || clip.h <= 0) return;
+    soft.color = fg;
+    soft.alpha = 58u;
+    font_draw_text_clipped(font_get_default(), gui_font_put_pixel_soft, &soft,
+                           &clip, rect->x + 25, text_y, entry->title, fg);
+    font_draw_text_clipped(font_get_default(), gui_font_put_pixel, 0,
+                           &clip, rect->x + 24, text_y, entry->title, fg);
+}
+
 static void gui_desktop_draw_start_menu(void) {
     gui_rect_t *r = &g_gui.desktop_start_menu_rect;
     uint32_t i;
-    int item_h;
     int header_h;
     int visible;
     int start;
     int end;
-    int scrollbar_w;
-    int item_w;
     if (!g_gui.desktop_start_menu_open) return;
 
     gui_update_start_menu_layout();
-    item_h = gui_start_menu_item_height();
     header_h = gui_start_menu_header_height();
     visible = gui_start_menu_visible_count();
     start = g_gui.desktop_start_menu_scroll;
     end = start + visible;
-    scrollbar_w = gui_start_menu_has_scrollbar() ? 10 : 0;
-    item_w = r->w - 20 - scrollbar_w;
-    if (item_w < 32) item_w = 32;
 
     gui_raw_fill_rect(r->x, r->y, r->w, r->h, gui_rgb(28, 36, 54));
     gui_raw_line(r->x, r->y, r->x + r->w - 1, r->y, gui_rgb(112, 146, 198));
@@ -3273,33 +6048,11 @@ static void gui_desktop_draw_start_menu(void) {
 
     for (i = (uint32_t)start; i < (uint32_t)end && i < g_gui.launcher_app_count && i < GUI_LAUNCHER_MAX_APPS; i++) {
         gui_launcher_entry_t *entry = &g_gui.launcher_entries[i];
-        int visible_index = (int)i - start;
-        int iy = r->y + header_h + visible_index * item_h;
-        int icon_y;
-        int text_y;
+        gui_rect_t item;
         if (!entry->used) continue;
-        gui_raw_fill_rect(r->x + 10, iy, item_w, item_h - 2, gui_rgb(46, 64, 92));
-        icon_y = iy + (item_h - 16) / 2;
-        if (icon_y < iy + 2) icon_y = iy + 2;
-        gui_draw_launcher_icon(entry, r->x + 13, icon_y);
-        text_y = iy + (item_h - font_get_line_height(font_get_default())) / 2;
-        if (text_y < iy + 2) text_y = iy + 2;
-        {
-            font_rect_t clip;
-            clip.x = r->x + 34;
-            clip.y = iy;
-            clip.w = item_w - 28;
-            clip.h = item_h - 2;
-            if (clip.w > 0 && clip.h > 0) {
-                gui_text_soften_ctx_t soft;
-                soft.color = gui_rgb(232, 240, 255);
-                soft.alpha = 58u;
-                font_draw_text_clipped(font_get_default(), gui_font_put_pixel_soft, &soft,
-                                       &clip, r->x + 35, text_y, entry->title, gui_rgb(232, 240, 255));
-                font_draw_text_clipped(font_get_default(), gui_font_put_pixel, 0,
-                                       &clip, r->x + 34, text_y, entry->title, gui_rgb(232, 240, 255));
-            }
-        }
+        if (!gui_start_menu_item_rect(i, &item)) continue;
+        gui_draw_launcher_item(entry, &item, 0,
+                               gui_rect_contains(&item, g_gui.mouse_x, g_gui.mouse_y));
     }
 
     if (gui_start_menu_has_scrollbar()) {
@@ -3640,6 +6393,11 @@ static int gui_taskbar_search_handle_key(int key) {
     return 1;
 }
 
+static void gui_set_wallpaper_theme(uint32_t theme) {
+    g_gui.wallpaper_theme = theme % 3u;
+    gui_invalidate_all();
+}
+
 static void gui_desktop_run_action(uint32_t action) {
     if (action == GUI_DESKTOP_ACTION_TERMINAL) {
         gui_terminal_open();
@@ -3669,8 +6427,7 @@ static void gui_desktop_run_action(uint32_t action) {
         return;
     }
     if (action == GUI_DESKTOP_ACTION_THEME) {
-        g_gui.wallpaper_theme = (g_gui.wallpaper_theme + 1u) % 3u;
-        gui_invalidate_all();
+        gui_set_wallpaper_theme(g_gui.wallpaper_theme + 1u);
         return;
     }
     if (action == GUI_DESKTOP_ACTION_NOTIF) {
@@ -3717,7 +6474,6 @@ static uint32_t   g_notif_count; /* tentative def; real def + initial value live
 
 static int gui_desktop_handle_click(int x, int y) {
     uint32_t i;
-    gui_rect_t item;
 
     if (!g_gui.desktop_enabled) return 0;
     if (g_taskbar_search_rect.w > 0 && g_taskbar_search_rect.h > 0 &&
@@ -3754,33 +6510,12 @@ static int gui_desktop_handle_click(int x, int y) {
         return 1;
     }
     if (g_gui.desktop_start_menu_open && gui_rect_contains(&g_gui.desktop_start_menu_rect, x, y)) {
-        int item_h;
-        int header_h;
-        int visible;
-        int start;
-        int end;
-        int scrollbar_w;
-        int item_w;
-        gui_update_start_menu_layout();
-        item_h = gui_start_menu_item_height();
-        header_h = gui_start_menu_header_height();
-        visible = gui_start_menu_visible_count();
-        start = g_gui.desktop_start_menu_scroll;
-        end = start + visible;
-        scrollbar_w = gui_start_menu_has_scrollbar() ? 10 : 0;
-        item_w = g_gui.desktop_start_menu_rect.w - 20 - scrollbar_w;
-        if (item_w < 32) item_w = 32;
-        for (i = (uint32_t)start; i < (uint32_t)end && i < g_gui.launcher_app_count && i < GUI_LAUNCHER_MAX_APPS; i++) {
-            item.x = g_gui.desktop_start_menu_rect.x + 10;
-            item.y = g_gui.desktop_start_menu_rect.y + header_h + ((int)i - start) * item_h;
-            item.w = item_w;
-            item.h = item_h - 2;
-            if (gui_rect_contains(&item, x, y)) {
-                g_gui.desktop_start_menu_open = 0;
-                gui_launcher_launch(i);
-                gui_invalidate_all();
-                return 1;
-            }
+        uint32_t launcher_index;
+        if (gui_start_menu_item_at(x, y, &launcher_index)) {
+            g_gui.desktop_start_menu_open = 0;
+            gui_launcher_launch(launcher_index);
+            gui_invalidate_all();
+            return 1;
         }
         return 1;
     }
@@ -3815,30 +6550,178 @@ static int gui_desktop_handle_click(int x, int y) {
 }
 
 /* ============================================================
- * Context Menu (right-click menu)
+ * Menu / Context Menu
  * ============================================================ */
-#define GUI_CTXMENU_MAX_ITEMS 8
+#define GUI_CTXMENU_MAX_ITEMS 10
 #define GUI_CTXMENU_ITEM_H    22
-#define GUI_CTXMENU_W         170
+#define GUI_CTXMENU_W         190
 #define GUI_CTXMENU_PADDING   6
+#define GUI_MENU_LABEL_LEN    40
+#define GUI_MENU_SHORTCUT_LEN 16
 
-typedef void (*gui_ctxmenu_handler_t)(int item_id, void *user);
+typedef void (*gui_menu_handler_t)(int item_id, void *user);
 
 typedef struct {
-    char label[40];
+    char label[GUI_MENU_LABEL_LEN];
+    char shortcut[GUI_MENU_SHORTCUT_LEN];
     int  id;
     int  enabled;
-} gui_ctxmenu_item_t;
+    int  separator;
+    int  has_submenu;
+} gui_menu_item_t;
 
-static struct {
+typedef struct {
     int open;
     int x;
     int y;
+    int w;
+    int item_h;
+    int padding;
     int item_count;
-    gui_ctxmenu_item_t items[GUI_CTXMENU_MAX_ITEMS];
-    gui_ctxmenu_handler_t handler;
+    gui_menu_item_t items[GUI_CTXMENU_MAX_ITEMS];
+    gui_menu_handler_t handler;
     void *user;
-} g_ctxmenu;
+} gui_menu_t;
+
+static gui_menu_t g_ctxmenu;
+
+static void gui_menu_copy_text(char *dst, int cap, const char *src) {
+    int i;
+    if (!dst || cap <= 0) return;
+    if (!src) src = "";
+    for (i = 0; i < cap - 1 && src[i]; i++) dst[i] = src[i];
+    dst[i] = 0;
+}
+
+static int gui_menu_height(const gui_menu_t *menu) {
+    int i;
+    int h;
+    if (!menu) return 0;
+    h = menu->padding * 2;
+    for (i = 0; i < menu->item_count; i++) {
+        h += menu->items[i].separator ? (menu->item_h / 2) : menu->item_h;
+    }
+    return h;
+}
+
+static void gui_menu_reset(gui_menu_t *menu) {
+    if (!menu) return;
+    menu->item_count = 0;
+    menu->w = GUI_CTXMENU_W;
+    menu->item_h = GUI_CTXMENU_ITEM_H;
+    menu->padding = GUI_CTXMENU_PADDING;
+}
+
+static void gui_menu_add_ex(gui_menu_t *menu, const char *label, const char *shortcut,
+                            int id, int enabled, int has_submenu) {
+    int n;
+    if (!menu) return;
+    n = menu->item_count;
+    if (n >= GUI_CTXMENU_MAX_ITEMS) return;
+    gui_menu_copy_text(menu->items[n].label, GUI_MENU_LABEL_LEN, label);
+    gui_menu_copy_text(menu->items[n].shortcut, GUI_MENU_SHORTCUT_LEN, shortcut);
+    menu->items[n].id = id;
+    menu->items[n].enabled = enabled ? 1 : 0;
+    menu->items[n].separator = 0;
+    menu->items[n].has_submenu = has_submenu ? 1 : 0;
+    menu->item_count = n + 1;
+}
+
+static void gui_menu_add_separator(gui_menu_t *menu) {
+    int n;
+    if (!menu) return;
+    n = menu->item_count;
+    if (n >= GUI_CTXMENU_MAX_ITEMS) return;
+    menu->items[n].label[0] = 0;
+    menu->items[n].shortcut[0] = 0;
+    menu->items[n].id = 0;
+    menu->items[n].enabled = 0;
+    menu->items[n].separator = 1;
+    menu->items[n].has_submenu = 0;
+    menu->item_count = n + 1;
+}
+
+static void gui_menu_open_at(gui_menu_t *menu, int x, int y, gui_menu_handler_t h, void *user) {
+    int menu_h;
+    if (!menu) return;
+    menu->open = 1;
+    menu->handler = h;
+    menu->user = user;
+    menu->x = x;
+    menu->y = y;
+    menu_h = gui_menu_height(menu);
+    if (menu->x + menu->w > (int)g_gui.width) {
+        menu->x = (int)g_gui.width - menu->w - 2;
+    }
+    if (menu->y + menu_h > (int)g_gui.height - GUI_TASKBAR_HEIGHT) {
+        menu->y = (int)g_gui.height - GUI_TASKBAR_HEIGHT - menu_h - 2;
+    }
+    if (menu->x < 0) menu->x = 0;
+    if (menu->y < 0) menu->y = 0;
+    gui_invalidate_all();
+}
+
+static int gui_menu_item_at(const gui_menu_t *menu, int x, int y) {
+    int i;
+    int item_y;
+    int menu_h;
+    if (!menu || !menu->open) return -1;
+    menu_h = gui_menu_height(menu);
+    if (x < menu->x || x >= menu->x + menu->w || y < menu->y || y >= menu->y + menu_h) return -2;
+    item_y = menu->y + menu->padding;
+    for (i = 0; i < menu->item_count; i++) {
+        int h = menu->items[i].separator ? (menu->item_h / 2) : menu->item_h;
+        if (y >= item_y && y < item_y + h) return i;
+        item_y += h;
+    }
+    return -1;
+}
+
+static void gui_menu_draw_item_fill(int x, int y, int w, int h, int selected, uint32_t bg, uint32_t selected_bg) {
+    gui_raw_fill_rect(x, y, w, h, selected ? selected_bg : bg);
+}
+
+static void gui_menu_draw(const gui_menu_t *menu) {
+    int i;
+    int item_y;
+    int menu_h;
+    uint32_t bg, border, fg, dim, hint, selected_bg;
+    if (!menu || !menu->open) return;
+    bg          = gui_rgb(245, 246, 248);
+    border      = gui_rgb(120, 130, 145);
+    fg          = gui_rgb(30, 36, 48);
+    dim         = gui_rgb(160, 165, 175);
+    hint        = gui_rgb(95, 105, 120);
+    selected_bg = gui_rgb(220, 232, 248);
+    menu_h = gui_menu_height(menu);
+    gui_raw_fill_rect(menu->x + 3, menu->y + 3, menu->w, menu_h, gui_rgb(0, 0, 0));
+    gui_raw_fill_rect(menu->x, menu->y, menu->w, menu_h, bg);
+    gui_raw_line(menu->x, menu->y, menu->x + menu->w - 1, menu->y, border);
+    gui_raw_line(menu->x, menu->y + menu_h - 1, menu->x + menu->w - 1, menu->y + menu_h - 1, border);
+    gui_raw_line(menu->x, menu->y, menu->x, menu->y + menu_h - 1, border);
+    gui_raw_line(menu->x + menu->w - 1, menu->y, menu->x + menu->w - 1, menu->y + menu_h - 1, border);
+    item_y = menu->y + menu->padding;
+    for (i = 0; i < menu->item_count; i++) {
+        const gui_menu_item_t *item = &menu->items[i];
+        if (item->separator) {
+            int sy = item_y + (menu->item_h / 4);
+            gui_raw_line(menu->x + 8, sy, menu->x + menu->w - 9, sy, gui_rgb(208, 214, 224));
+            item_y += menu->item_h / 2;
+            continue;
+        }
+        int hovered = (i == gui_menu_item_at(menu, g_gui.mouse_x, g_gui.mouse_y)) && item->enabled;
+        gui_menu_draw_item_fill(menu->x + 3, item_y, menu->w - 6, menu->item_h, hovered, bg, selected_bg);
+        gui_draw_text(menu->x + 12, item_y + 5, item->label, item->enabled ? fg : dim);
+        if (item->shortcut[0]) {
+            int sx = menu->x + menu->w - 12 - (int)font_measure_text_width(font_get_default(), item->shortcut);
+            gui_draw_text(sx, item_y + 5, item->shortcut, item->enabled ? hint : dim);
+        }
+        if (item->has_submenu) {
+            gui_draw_text(menu->x + menu->w - 16, item_y + 5, ">", item->enabled ? hint : dim);
+        }
+        item_y += menu->item_h;
+    }
+}
 
 static int gui_ctxmenu_is_open(void) {
     return g_ctxmenu.open;
@@ -3851,92 +6734,48 @@ static void gui_ctxmenu_close(void) {
     }
 }
 
-static void gui_ctxmenu_open_at(int x, int y, gui_ctxmenu_handler_t h, void *user) {
-    int menu_h;
-    g_ctxmenu.open = 1;
-    g_ctxmenu.handler = h;
-    g_ctxmenu.user = user;
-    g_ctxmenu.x = x;
-    g_ctxmenu.y = y;
-    menu_h = g_ctxmenu.item_count * GUI_CTXMENU_ITEM_H + GUI_CTXMENU_PADDING * 2;
-    if (g_ctxmenu.x + GUI_CTXMENU_W > (int)g_gui.width) {
-        g_ctxmenu.x = (int)g_gui.width - GUI_CTXMENU_W - 2;
-    }
-    if (g_ctxmenu.y + menu_h > (int)g_gui.height - GUI_TASKBAR_HEIGHT) {
-        g_ctxmenu.y = (int)g_gui.height - GUI_TASKBAR_HEIGHT - menu_h - 2;
-    }
-    if (g_ctxmenu.x < 0) g_ctxmenu.x = 0;
-    if (g_ctxmenu.y < 0) g_ctxmenu.y = 0;
-    gui_invalidate_all();
+static void gui_ctxmenu_open_at(int x, int y, gui_menu_handler_t h, void *user) {
+    gui_menu_open_at(&g_ctxmenu, x, y, h, user);
 }
 
 static void gui_ctxmenu_reset(void) {
-    g_ctxmenu.item_count = 0;
+    gui_menu_reset(&g_ctxmenu);
+}
+
+static void gui_ctxmenu_add_ex(const char *label, const char *shortcut, int id, int enabled, int has_submenu) {
+    gui_menu_add_ex(&g_ctxmenu, label, shortcut, id, enabled, has_submenu);
 }
 
 static void gui_ctxmenu_add(const char *label, int id, int enabled) {
-    int i;
-    int n = g_ctxmenu.item_count;
-    if (n >= GUI_CTXMENU_MAX_ITEMS) return;
-    g_ctxmenu.items[n].id = id;
-    g_ctxmenu.items[n].enabled = enabled;
-    for (i = 0; i < 39 && label[i]; i++) g_ctxmenu.items[n].label[i] = label[i];
-    g_ctxmenu.items[n].label[i] = 0;
-    g_ctxmenu.item_count = n + 1;
+    gui_ctxmenu_add_ex(label, "", id, enabled, 0);
+}
+
+static void gui_ctxmenu_add_separator(void) {
+    gui_menu_add_separator(&g_ctxmenu);
 }
 
 static int gui_ctxmenu_handle_click(int x, int y) {
-    int i;
-    int menu_h;
+    int index;
+    gui_menu_item_t item;
+    gui_menu_handler_t h;
+    void *u;
     if (!g_ctxmenu.open) return 0;
-    menu_h = g_ctxmenu.item_count * GUI_CTXMENU_ITEM_H + GUI_CTXMENU_PADDING * 2;
-    if (x < g_ctxmenu.x || x >= g_ctxmenu.x + GUI_CTXMENU_W ||
-        y < g_ctxmenu.y || y >= g_ctxmenu.y + menu_h) {
+    index = gui_menu_item_at(&g_ctxmenu, x, y);
+    if (index == -2) {
         gui_ctxmenu_close();
-        return 0; /* allow click-through cancel */
+        return 0;
     }
-    for (i = 0; i < g_ctxmenu.item_count; i++) {
-        int item_y = g_ctxmenu.y + GUI_CTXMENU_PADDING + i * GUI_CTXMENU_ITEM_H;
-        if (y >= item_y && y < item_y + GUI_CTXMENU_ITEM_H) {
-            int id = g_ctxmenu.items[i].id;
-            int en = g_ctxmenu.items[i].enabled;
-            gui_ctxmenu_handler_t h = g_ctxmenu.handler;
-            void *u = g_ctxmenu.user;
-            gui_ctxmenu_close();
-            if (en && h) h(id, u);
-            return 1;
-        }
-    }
+    if (index < 0 || index >= g_ctxmenu.item_count) return 1;
+    item = g_ctxmenu.items[index];
+    h = g_ctxmenu.handler;
+    u = g_ctxmenu.user;
+    gui_ctxmenu_close();
+    if (!item.separator && item.enabled && h) h(item.id, u);
     return 1;
 }
 
 static void gui_ctxmenu_draw(void) {
-    int i;
-    int menu_h;
-    uint32_t bg, border, fg, dim, hl;
-    if (!g_ctxmenu.open) return;
-    bg     = gui_rgb(245, 246, 248);
-    border = gui_rgb(120, 130, 145);
-    fg     = gui_rgb(30, 36, 48);
-    dim    = gui_rgb(160, 165, 175);
-    hl     = gui_rgb(64, 110, 175);
-    (void)hl;
-    menu_h = g_ctxmenu.item_count * GUI_CTXMENU_ITEM_H + GUI_CTXMENU_PADDING * 2;
-    /* drop shadow */
-    gui_raw_fill_rect(g_ctxmenu.x + 3, g_ctxmenu.y + 3, GUI_CTXMENU_W, menu_h, gui_rgb(0, 0, 0));
-    /* body */
-    gui_raw_fill_rect(g_ctxmenu.x, g_ctxmenu.y, GUI_CTXMENU_W, menu_h, bg);
-    /* border */
-    gui_raw_line(g_ctxmenu.x, g_ctxmenu.y, g_ctxmenu.x + GUI_CTXMENU_W - 1, g_ctxmenu.y, border);
-    gui_raw_line(g_ctxmenu.x, g_ctxmenu.y + menu_h - 1, g_ctxmenu.x + GUI_CTXMENU_W - 1, g_ctxmenu.y + menu_h - 1, border);
-    gui_raw_line(g_ctxmenu.x, g_ctxmenu.y, g_ctxmenu.x, g_ctxmenu.y + menu_h - 1, border);
-    gui_raw_line(g_ctxmenu.x + GUI_CTXMENU_W - 1, g_ctxmenu.y, g_ctxmenu.x + GUI_CTXMENU_W - 1, g_ctxmenu.y + menu_h - 1, border);
-    for (i = 0; i < g_ctxmenu.item_count; i++) {
-        int item_y = g_ctxmenu.y + GUI_CTXMENU_PADDING + i * GUI_CTXMENU_ITEM_H;
-        uint32_t color = g_ctxmenu.items[i].enabled ? fg : dim;
-        gui_draw_text(g_ctxmenu.x + 12, item_y + 5, g_ctxmenu.items[i].label, color);
-        (void)bg;
-    }
+    gui_menu_draw(&g_ctxmenu);
 }
 
 /* Handlers for taskbar window right-click menu */
@@ -3951,13 +6790,47 @@ static void gui_ctxmenu_taskbar_window_action(int id, void *user) {
     gui_destroy_window(w);
 }
 
+static void gui_ctxmenu_terminal_action(int id, void *user) {
+    (void)user;
+    switch (id) {
+        case 1:
+            if (gui_terminal_copy_selection()) {
+                gui_notify("Terminal selection copied");
+            } else {
+                gui_notify("No terminal selection");
+            }
+            break;
+        case 2:
+            gui_terminal_clear_selection();
+            break;
+        case 3:
+            gui_terminal_clear();
+            break;
+    }
+}
+
+static void gui_ctxmenu_wallpaper_action(int id, void *user) {
+    (void)user;
+    if (id >= 0 && id <= 2) {
+        gui_set_wallpaper_theme((uint32_t)id);
+    }
+}
+
+static void gui_ctxmenu_open_wallpaper_submenu(int x, int y) {
+    gui_ctxmenu_reset();
+    gui_ctxmenu_add_ex("Default", "", 0, 1, 0);
+    gui_ctxmenu_add_ex("Day",     "", 1, 1, 0);
+    gui_ctxmenu_add_ex("Solid",   "", 2, 1, 0);
+    gui_ctxmenu_open_at(x, y, gui_ctxmenu_wallpaper_action, 0);
+}
+
 /* Handlers for desktop right-click menu */
 static void gui_ctxmenu_desktop_action(int id, void *user) {
     (void)user;
     switch (id) {
         case 1: gui_file_preview_open(); break;        /* Open Files */
         case 2: gui_desktop_run_action(GUI_DESKTOP_ACTION_TERMINAL); break;
-        case 3: gui_desktop_run_action(GUI_DESKTOP_ACTION_THEME); break;
+        case 3: gui_ctxmenu_open_wallpaper_submenu(g_ctxmenu.x + g_ctxmenu.w - 8, g_ctxmenu.y + 58); break;
         case 4: gui_notify(i18n_t(I18N_KEY_NOTIFY_DESKTOP_REFRESHED)); gui_invalidate_all(); break;
         case 5: gui_about_open(); break;
         case 6: gui_desktop_run_action(GUI_DESKTOP_ACTION_SETTINGS); break;
@@ -3977,22 +6850,39 @@ static void gui_handle_mouse_right_down(int x, int y) {
     if (tw) {
         gui_set_focused_widget(0);
         gui_ctxmenu_reset();
-        gui_ctxmenu_add(i18n_t(I18N_KEY_BTN_CLOSE), 1,
-                        (tw->flags & GUI_WINDOW_FLAG_CLOSABLE) ? 1 : 0);
+        gui_ctxmenu_add_ex(i18n_t(I18N_KEY_BTN_CLOSE), "Alt+F4", 1,
+                           (tw->flags & GUI_WINDOW_FLAG_CLOSABLE) ? 1 : 0, 0);
         gui_ctxmenu_open_at(x, y, gui_ctxmenu_taskbar_window_action, tw);
         return;
     }
 
+    tw = gui_window_at(x, y);
+    if (tw == g_gui.terminal.window || (tw && (tw->flags & GUI_WINDOW_FLAG_TERMINAL))) {
+        int has_selection = g_gui.terminal.view.has_selection ? 1 : 0;
+        gui_set_active_window(tw);
+        gui_set_focused_widget(0);
+        gui_terminal_set_input_focus(1);
+        gui_ctxmenu_reset();
+        gui_ctxmenu_add_ex("Copy selection", "Ctrl+C", 1, has_selection, 0);
+        gui_ctxmenu_add_ex("Clear selection", "Esc", 2, has_selection, 0);
+        gui_ctxmenu_add_separator();
+        gui_ctxmenu_add_ex("Clear terminal", "", 3, g_gui.terminal.enabled ? 1 : 0, 0);
+        gui_ctxmenu_open_at(x, y, gui_ctxmenu_terminal_action, 0);
+        return;
+    }
+
     /* desktop-area right-click menu (not on taskbar / window) */
-    if (gui_window_at(x, y) != 0) return;
+    if (tw != 0) return;
     if (y >= (int)g_gui.height - GUI_TASKBAR_HEIGHT) return;
     gui_ctxmenu_reset();
-    gui_ctxmenu_add(i18n_t(I18N_KEY_CTXMENU_OPEN_FILES),       1, 1);
-    gui_ctxmenu_add(i18n_t(I18N_KEY_CTXMENU_OPEN_TERMINAL),    2, 1);
-    gui_ctxmenu_add(i18n_t(I18N_KEY_CTXMENU_CHANGE_WALLPAPER), 3, 1);
-    gui_ctxmenu_add(i18n_t(I18N_KEY_CTXMENU_REFRESH),          4, 1);
-    gui_ctxmenu_add(i18n_t(I18N_KEY_CTXMENU_ABOUT),            5, 1);
-    gui_ctxmenu_add(i18n_t(I18N_KEY_CTXMENU_SETTINGS),         6, 1);
+    gui_ctxmenu_add_ex(i18n_t(I18N_KEY_CTXMENU_OPEN_FILES),       "",      1, 1, 0);
+    gui_ctxmenu_add_ex(i18n_t(I18N_KEY_CTXMENU_OPEN_TERMINAL),    "Ctrl+T", 2, 1, 0);
+    gui_ctxmenu_add_separator();
+    gui_ctxmenu_add_ex(i18n_t(I18N_KEY_CTXMENU_CHANGE_WALLPAPER), "",      3, 1, 1);
+    gui_ctxmenu_add_ex(i18n_t(I18N_KEY_CTXMENU_REFRESH),          "F5",    4, 1, 0);
+    gui_ctxmenu_add_separator();
+    gui_ctxmenu_add_ex(i18n_t(I18N_KEY_CTXMENU_ABOUT),            "",      5, 1, 0);
+    gui_ctxmenu_add_ex(i18n_t(I18N_KEY_CTXMENU_SETTINGS),         "",      6, 1, 0);
     gui_ctxmenu_open_at(x, y, gui_ctxmenu_desktop_action, 0);
 }
 
@@ -4064,6 +6954,8 @@ int gui_should_capture_key_code(int key) {
     if (!wg->visible || !wg->enabled) return 0;
 
     if (key == GUI_KEY_TAB) return 1;
+
+    if (wg->type == GUI_WIDGET_LISTVIEW || wg->type == GUI_WIDGET_TABLEVIEW || wg->type == GUI_WIDGET_MENUBAR || wg->type == GUI_WIDGET_TREEVIEW) return 1;
 
     if (key == GUI_KEY_UP || key == GUI_KEY_DOWN) return 0;
 
@@ -4261,6 +7153,66 @@ int gui_window_present_client(gui_window_t *win) {
     return 0;
 }
 
+static int gui_widget_client_clip(gui_widget_t *widget, gui_rect_t *clip) {
+    gui_rect_t win_clip;
+    gui_rect_t widget_clip;
+    if (!widget || !widget->owner || !widget->owner->used || !clip) return 0;
+    if (widget->type != GUI_WIDGET_CANVAS) return 0;
+    if (!gui_window_client_clip(widget->owner, &win_clip)) return 0;
+    widget_clip.x = win_clip.x + widget->rect.x;
+    widget_clip.y = win_clip.y + widget->rect.y;
+    widget_clip.w = widget->rect.w;
+    widget_clip.h = widget->rect.h;
+    return gui_rect_intersect(&widget_clip, &win_clip, clip);
+}
+
+int gui_widget_fill_rect(gui_widget_t *widget, int x, int y, int w, int h, uint32_t color) {
+    gui_rect_t clip;
+    if (!gui_widget_client_clip(widget, &clip) || w <= 0 || h <= 0) return -1;
+    gui_set_clip_rect(&clip);
+    gui_raw_fill_rect(clip.x + x, clip.y + y, w, h, color);
+    gui_clear_clip_rect();
+    gui_invalidate_rect(clip.x + x, clip.y + y, w, h);
+    return 0;
+}
+
+int gui_widget_draw_text(gui_widget_t *widget, int x, int y, const char *text, uint32_t color) {
+    gui_rect_t clip;
+    if (!gui_widget_client_clip(widget, &clip) || !text) return -1;
+    gui_set_clip_rect(&clip);
+    gui_draw_text(clip.x + x, clip.y + y, text, color);
+    gui_clear_clip_rect();
+    gui_invalidate_rect(clip.x, clip.y, clip.w, clip.h);
+    return 0;
+}
+
+int gui_widget_blit_rgba32(gui_widget_t *widget, int x, int y, int w, int h, const uint32_t *pixels, uint32_t src_stride) {
+    gui_rect_t clip;
+    int rc;
+    if (!gui_widget_client_clip(widget, &clip) || !pixels || w <= 0 || h <= 0) return -1;
+    gui_set_clip_rect(&clip);
+    rc = gui_blit_rgba32(clip.x + x, clip.y + y, w, h, pixels, src_stride);
+    gui_clear_clip_rect();
+    return rc;
+}
+
+int gui_widget_scroll_rect(gui_widget_t *widget, int dst_x, int dst_y, int src_x, int src_y, int w, int h) {
+    gui_rect_t clip;
+    int rc;
+    if (!gui_widget_client_clip(widget, &clip) || w <= 0 || h <= 0) return -1;
+    gui_set_clip_rect(&clip);
+    rc = gui_copy_rect(clip.x + dst_x, clip.y + dst_y, clip.x + src_x, clip.y + src_y, w, h);
+    gui_clear_clip_rect();
+    return rc;
+}
+
+int gui_widget_present(gui_widget_t *widget) {
+    gui_rect_t clip;
+    if (!gui_widget_client_clip(widget, &clip)) return -1;
+    gui_invalidate_rect(clip.x, clip.y, clip.w, clip.h);
+    return 0;
+}
+
 gui_app_t *gui_get_active_app(void) { return g_gui.active_app; }
 
 gui_app_t *gui_get_window_app(gui_window_t *window) { return gui_app_for_window(window); }
@@ -4355,15 +7307,85 @@ gui_widget_t *gui_add_button(gui_window_t *window, int x, int y, int w, int h, c
     return wg;
 }
 
-static gui_widget_t *gui_add_slider(gui_window_t *window, int x, int y, int w, int h, int min, int max, int value, gui_widget_callback_t cb, void *user_data) {
+gui_widget_t *gui_add_icon_button(gui_window_t *window, int x, int y, int w, int h, const char *text, gui_icon_id_t icon, gui_widget_callback_t cb, void *user_data) {
+    gui_widget_t *wg = gui_alloc_widget(window, GUI_WIDGET_ICON_BUTTON, x, y, w, h, text);
+    if (wg) {
+        wg->icon = icon;
+        wg->on_click = cb;
+        wg->user_data = user_data;
+    }
+    return wg;
+}
+
+gui_widget_t *gui_add_toggle(gui_window_t *window, int x, int y, int w, int h, const char *text, int checked, gui_widget_callback_t cb, void *user_data) {
+    gui_widget_t *wg = gui_alloc_widget(window, GUI_WIDGET_TOGGLE, x, y, w, h, text);
+    if (wg) {
+        wg->min_value = 0;
+        wg->max_value = 1;
+        wg->on_click = cb;
+        wg->user_data = user_data;
+        gui_toggle_set_checked(wg, checked);
+    }
+    return wg;
+}
+
+gui_widget_t *gui_add_checkbox(gui_window_t *window, int x, int y, int w, int h, const char *text, int checked, gui_widget_callback_t cb, void *user_data) {
+    gui_widget_t *wg = gui_alloc_widget(window, GUI_WIDGET_CHECKBOX, x, y, w, h, text);
+    if (wg) {
+        wg->min_value = 0;
+        wg->max_value = 1;
+        wg->on_click = cb;
+        wg->user_data = user_data;
+        gui_checkbox_set_checked(wg, checked);
+    }
+    return wg;
+}
+
+gui_widget_t *gui_add_radiobutton(gui_window_t *window, int x, int y, int w, int h, const char *text, int group_id, int checked, gui_widget_callback_t cb, void *user_data) {
+    gui_widget_t *wg = gui_alloc_widget(window, GUI_WIDGET_RADIOBUTTON, x, y, w, h, text);
+    if (wg) {
+        wg->min_value = 0;
+        wg->max_value = 1;
+        wg->group_id = group_id;
+        wg->on_click = cb;
+        wg->user_data = user_data;
+        gui_radiobutton_set_checked(wg, checked);
+    }
+    return wg;
+}
+
+gui_widget_t *gui_add_select(gui_window_t *window, int x, int y, int w, int h, const char *items, int selected_index, gui_widget_callback_t cb, void *user_data) {
+    gui_widget_t *wg = gui_alloc_widget(window, GUI_WIDGET_SELECT, x, y, w, h, "Select");
+    if (wg) {
+        wg->on_click = cb;
+        wg->user_data = user_data;
+        gui_select_set_items(wg, items ? items : "");
+        if (selected_index >= 0) gui_select_set_selected(wg, selected_index);
+        wg->step = 0;
+    }
+    return wg;
+}
+
+gui_widget_t *gui_add_combobox(gui_window_t *window, int x, int y, int w, int h, const char *items, int selected_index, gui_widget_callback_t cb, void *user_data) {
+    gui_widget_t *wg = gui_alloc_widget(window, GUI_WIDGET_COMBOBOX, x, y, w, h, "ComboBox");
+    if (wg) {
+        wg->on_click = cb;
+        wg->user_data = user_data;
+        gui_select_set_items(wg, items ? items : "");
+        if (selected_index >= 0) gui_select_set_selected(wg, selected_index);
+        wg->step = 0;
+    }
+    return wg;
+}
+
+gui_widget_t *gui_add_slider(gui_window_t *window, int x, int y, int w, int h, int min, int max, int value, int step, gui_widget_callback_t cb, void *user_data) {
     gui_widget_t *wg = gui_alloc_widget(window, GUI_WIDGET_SLIDER, x, y, w, h, "");
     if (wg) {
         if (max <= min) max = min + 1;
-        if (value < min) value = min;
-        if (value > max) value = max;
         wg->min_value = min;
         wg->max_value = max;
-        wg->value = value;
+        wg->step = step;
+        wg->value = gui_slider_snap_value(wg, value);
         wg->on_click = cb;
         wg->user_data = user_data;
         wg->bg_color = 0;
@@ -4371,9 +7393,222 @@ static gui_widget_t *gui_add_slider(gui_window_t *window, int x, int y, int w, i
     return wg;
 }
 
+int gui_slider_set_value(gui_widget_t *widget, int value) {
+    if (!widget || widget->type != GUI_WIDGET_SLIDER) return -1;
+    widget->value = gui_slider_snap_value(widget, value);
+    return 0;
+}
+
+int gui_slider_get_value(gui_widget_t *widget, int *out_value) {
+    if (!widget || widget->type != GUI_WIDGET_SLIDER || !out_value) return -1;
+    *out_value = widget->value;
+    return 0;
+}
+
+int gui_slider_set_step(gui_widget_t *widget, int step) {
+    if (!widget || widget->type != GUI_WIDGET_SLIDER) return -1;
+    widget->step = step;
+    widget->value = gui_slider_snap_value(widget, widget->value);
+    return 0;
+}
+
+int gui_slider_get_step(gui_widget_t *widget, int *out_step) {
+    if (!widget || widget->type != GUI_WIDGET_SLIDER || !out_step) return -1;
+    *out_step = gui_slider_normalize_step(widget);
+    return 0;
+}
+
+gui_widget_t *gui_add_listview(gui_window_t *window, int x, int y, int w, int h, const char *items, int selected_index, uint32_t flags, gui_widget_callback_t cb, void *user_data) {
+    gui_widget_t *wg = gui_alloc_widget(window, GUI_WIDGET_LISTVIEW, x, y, w, h, "ListView");
+    if (wg) {
+        wg->on_click = cb;
+        wg->user_data = user_data;
+        wg->label_flags = flags & (GUI_LISTVIEW_FLAG_MULTI_SELECT | GUI_LISTVIEW_FLAG_SHOW_CHECKBOXES);
+        wg->min_value = 0;
+        wg->selection_anchor = 0;
+        gui_listview_set_items(wg, items ? items : "");
+        if (selected_index >= 0) gui_listview_set_selected(wg, selected_index);
+    }
+    return wg;
+}
+
+gui_widget_t *gui_add_tableview(gui_window_t *window, int x, int y, int w, int h, const char *columns, const char *rows, int selected_row, uint32_t flags, gui_widget_callback_t cb, void *user_data) {
+    gui_widget_t *wg = gui_alloc_widget(window, GUI_WIDGET_TABLEVIEW, x, y, w, h, "TableView");
+    if (wg) {
+        wg->on_click = cb;
+        wg->user_data = user_data;
+        wg->label_flags = flags & (GUI_TABLEVIEW_FLAG_SHOW_HEADER | GUI_TABLEVIEW_FLAG_GRID_LINES | GUI_TABLEVIEW_FLAG_ROW_SELECT | GUI_TABLEVIEW_FLAG_SORTABLE);
+        if ((wg->label_flags & GUI_TABLEVIEW_FLAG_SHOW_HEADER) == 0) wg->label_flags |= GUI_TABLEVIEW_FLAG_SHOW_HEADER;
+        if ((wg->label_flags & GUI_TABLEVIEW_FLAG_ROW_SELECT) == 0) wg->label_flags |= GUI_TABLEVIEW_FLAG_ROW_SELECT;
+        wg->min_value = 0;
+        wg->table_sort_column = -1;
+        wg->table_sort_ascending = 1;
+        gui_widget_set_text(wg, columns ? columns : "");
+        gui_tableview_set_rows(wg, rows ? rows : "");
+        if (selected_row >= 0) gui_tableview_set_selected(wg, selected_row);
+    }
+    return wg;
+}
+
+
+gui_widget_t *gui_add_menubar(gui_window_t *window, int x, int y, int w, int h, const char *menus, int active_index, gui_widget_callback_t cb, void *user_data) {
+    gui_widget_t *wg = gui_alloc_widget(window, GUI_WIDGET_MENUBAR, x, y, w, h, "MenuBar");
+    if (wg) {
+        wg->on_click = cb;
+        wg->user_data = user_data;
+        wg->min_value = 0;
+        wg->max_value = -1;
+        wg->value = active_index;
+        gui_menubar_set_menus(wg, menus ? menus : "");
+        if (active_index >= 0) gui_menubar_set_active(wg, active_index);
+    }
+    return wg;
+}
+
+gui_widget_t *gui_add_treeview(gui_window_t *window, int x, int y, int w, int h, const char *nodes, int selected_node, uint32_t flags, gui_widget_callback_t cb, void *user_data) {
+    gui_widget_t *wg = gui_alloc_widget(window, GUI_WIDGET_TREEVIEW, x, y, w, h, "TreeView");
+    if (wg) {
+        wg->on_click = cb;
+        wg->user_data = user_data;
+        wg->label_flags = flags & (GUI_TREEVIEW_FLAG_SHOW_LINES | GUI_TREEVIEW_FLAG_SHOW_ICONS);
+        wg->min_value = 0;
+        gui_treeview_set_nodes(wg, nodes ? nodes : "");
+        if (selected_node >= 0) gui_treeview_set_selected(wg, selected_node);
+    }
+    return wg;
+}
+
+gui_widget_t *gui_add_scrollbar(gui_window_t *window, int x, int y, int w, int h, int min, int max, int value, int step, gui_widget_callback_t cb, void *user_data) {
+    gui_widget_t *wg = gui_alloc_widget(window, GUI_WIDGET_SCROLLBAR, x, y, w, h, "");
+    if (wg) {
+        if (max <= min) max = min + 1;
+        wg->min_value = min;
+        wg->max_value = max;
+        wg->step = step;
+        wg->value = gui_slider_snap_value(wg, value);
+        wg->on_click = cb;
+        wg->user_data = user_data;
+        wg->bg_color = 0;
+    }
+    return wg;
+}
+
+int gui_scrollbar_set_value(gui_widget_t *widget, int value) {
+    if (!widget || widget->type != GUI_WIDGET_SCROLLBAR) return -1;
+    widget->value = gui_slider_snap_value(widget, value);
+    return 0;
+}
+
+int gui_scrollbar_get_value(gui_widget_t *widget, int *out_value) {
+    if (!widget || widget->type != GUI_WIDGET_SCROLLBAR || !out_value) return -1;
+    *out_value = widget->value;
+    return 0;
+}
+
+int gui_scrollbar_set_step(gui_widget_t *widget, int step) {
+    if (!widget || widget->type != GUI_WIDGET_SCROLLBAR) return -1;
+    widget->step = step;
+    widget->value = gui_slider_snap_value(widget, widget->value);
+    return 0;
+}
+
+int gui_scrollbar_get_step(gui_widget_t *widget, int *out_step) {
+    if (!widget || widget->type != GUI_WIDGET_SCROLLBAR || !out_step) return -1;
+    *out_step = gui_slider_normalize_step(widget);
+    return 0;
+}
+
+static int gui_scrollview_clamp_x(gui_widget_t *widget, int scroll_x) {
+    int max_scroll;
+    if (!widget) return 0;
+    max_scroll = widget->min_value - widget->rect.w;
+    if (max_scroll < 0) max_scroll = 0;
+    if (scroll_x < 0) scroll_x = 0;
+    if (scroll_x > max_scroll) scroll_x = max_scroll;
+    return scroll_x;
+}
+
+static int gui_scrollview_clamp_y(gui_widget_t *widget, int scroll_y) {
+    int max_scroll;
+    if (!widget) return 0;
+    max_scroll = widget->max_value - widget->rect.h;
+    if (max_scroll < 0) max_scroll = 0;
+    if (scroll_y < 0) scroll_y = 0;
+    if (scroll_y > max_scroll) scroll_y = max_scroll;
+    return scroll_y;
+}
+
+gui_widget_t *gui_add_scrollview(gui_window_t *window, int x, int y, int w, int h, int content_w, int content_h) {
+    gui_widget_t *wg = gui_alloc_widget(window, GUI_WIDGET_SCROLLVIEW, x, y, w, h, "");
+    if (wg) {
+        if (content_w < w) content_w = w;
+        if (content_h < h) content_h = h;
+        wg->min_value = content_w;
+        wg->max_value = content_h;
+        wg->value = 0;
+        wg->step = 0;
+        wg->bg_color = gui_rgb(248, 250, 252);
+        wg->fg_color = g_gui.colors.button_border;
+        wg->panel_border_color = g_gui.colors.button_border;
+        wg->panel_border_width = 1;
+        wg->panel_padding = 0;
+    }
+    return wg;
+}
+
+int gui_scrollview_set_offset(gui_widget_t *widget, int scroll_x, int scroll_y) {
+    if (!widget || widget->type != GUI_WIDGET_SCROLLVIEW) return -1;
+    widget->value = gui_scrollview_clamp_x(widget, scroll_x);
+    widget->step = gui_scrollview_clamp_y(widget, scroll_y);
+    return 0;
+}
+
+int gui_scrollview_get_offset(gui_widget_t *widget, int *out_scroll_x, int *out_scroll_y) {
+    if (!widget || widget->type != GUI_WIDGET_SCROLLVIEW || !out_scroll_x || !out_scroll_y) return -1;
+    *out_scroll_x = widget->value;
+    *out_scroll_y = widget->step;
+    return 0;
+}
+
+int gui_scrollview_set_content_size(gui_widget_t *widget, int content_w, int content_h) {
+    if (!widget || widget->type != GUI_WIDGET_SCROLLVIEW) return -1;
+    if (content_w < widget->rect.w) content_w = widget->rect.w;
+    if (content_h < widget->rect.h) content_h = widget->rect.h;
+    widget->min_value = content_w;
+    widget->max_value = content_h;
+    widget->value = gui_scrollview_clamp_x(widget, widget->value);
+    widget->step = gui_scrollview_clamp_y(widget, widget->step);
+    return 0;
+}
+
+int gui_scrollview_get_content_size(gui_widget_t *widget, int *out_content_w, int *out_content_h) {
+    if (!widget || widget->type != GUI_WIDGET_SCROLLVIEW || !out_content_w || !out_content_h) return -1;
+    *out_content_w = widget->min_value;
+    *out_content_h = widget->max_value;
+    return 0;
+}
+
 gui_widget_t *gui_add_panel(gui_window_t *window, int x, int y, int w, int h, uint32_t color) {
     gui_widget_t *wg = gui_alloc_widget(window, GUI_WIDGET_PANEL, x, y, w, h, "");
-    if (wg) wg->bg_color = color;
+    if (wg) {
+        wg->bg_color = color;
+        wg->panel_border_color = g_gui.colors.button_border;
+        wg->panel_border_width = 0;
+        wg->panel_padding = 0;
+        wg->panel_flags = 0;
+    }
+    return wg;
+}
+
+gui_widget_t *gui_add_canvas(gui_window_t *window, int x, int y, int w, int h, uint32_t color) {
+    gui_widget_t *wg = gui_alloc_widget(window, GUI_WIDGET_CANVAS, x, y, w, h, "");
+    if (wg) {
+        wg->bg_color = color;
+        wg->panel_border_color = 0;
+        wg->panel_border_width = 0;
+        wg->panel_padding = 0;
+        wg->panel_flags = 0;
+    }
     return wg;
 }
 
@@ -4383,6 +7618,18 @@ gui_widget_t *gui_add_textbox(gui_window_t *window, int x, int y, int w, int h, 
         wg->fg_color = gui_rgb(20, 20, 20);
         wg->bg_color = gui_rgb(250, 250, 250);
         wg->cursor = (uint32_t)strlen(wg->text);
+    }
+    return wg;
+}
+
+gui_widget_t *gui_add_textarea(gui_window_t *window, int x, int y, int w, int h, const char *text) {
+    gui_widget_t *wg = gui_alloc_widget(window, GUI_WIDGET_TEXTAREA, x, y, w, h, text);
+    if (wg) {
+        wg->fg_color = gui_rgb(20, 20, 20);
+        wg->bg_color = gui_rgb(250, 250, 250);
+        wg->textbox_flags = GUI_TEXTBOX_FLAG_MULTILINE;
+        wg->cursor = (uint32_t)strlen(wg->text);
+        wg->text_scroll = 0;
     }
     return wg;
 }
@@ -4402,6 +7649,26 @@ gui_widget_t *gui_find_widget(gui_window_t *window, uint32_t id) {
     return 0;
 }
 
+int gui_widget_set_parent(gui_widget_t *widget, gui_widget_t *parent) {
+    gui_widget_t *p;
+    uint32_t guard = 0;
+    if (!widget || !widget->owner) return -1;
+    if (!parent) {
+        widget->parent_id = 0;
+        gui_invalidate_all();
+        return 0;
+    }
+    if (parent == widget || parent->owner != widget->owner || parent->type != GUI_WIDGET_SCROLLVIEW) return -1;
+    p = parent;
+    while (p && guard++ < GUI_MAX_WIDGETS_PER_WIN) {
+        if (p == widget) return -1;
+        p = gui_widget_parent(p);
+    }
+    widget->parent_id = parent->id;
+    gui_invalidate_all();
+    return 0;
+}
+
 void gui_widget_set_enabled(gui_widget_t *widget, int enabled) {
     if (!widget) return;
     widget->enabled = enabled ? 1 : 0;
@@ -4413,6 +7680,10 @@ void gui_widget_set_enabled(gui_widget_t *widget, int enabled) {
         if (g_gui.focused_widget == widget) gui_set_focused_widget(0);
     }
     gui_widget_invalidate(widget);
+}
+
+int gui_widget_get_enabled(const gui_widget_t *widget) {
+    return widget ? widget->enabled : 0;
 }
 
 void gui_widget_set_visible(gui_widget_t *widget, int visible) {
@@ -4433,8 +7704,34 @@ void gui_widget_set_text(gui_widget_t *widget, const char *text) {
     if (!widget) return;
     gui_copy_text(widget->text, text ? text : "", sizeof(widget->text));
     len = (uint32_t)strlen(widget->text);
-    if (widget->type == GUI_WIDGET_TEXTBOX || widget->cursor > len) widget->cursor = len;
+    if (widget->type == GUI_WIDGET_TEXTBOX || widget->type == GUI_WIDGET_TEXTAREA || widget->cursor > len) widget->cursor = len;
+    if (widget->type == GUI_WIDGET_TEXTBOX || widget->type == GUI_WIDGET_TEXTAREA) gui_text_widget_clear_selection(widget);
+    if (widget->type == GUI_WIDGET_TEXTBOX) gui_textbox_ensure_cursor_visible(widget);
+    else if (widget->type == GUI_WIDGET_TEXTAREA) gui_textarea_ensure_cursor_visible(widget);
     gui_widget_invalidate(widget);
+}
+
+void gui_widget_set_placeholder(gui_widget_t *widget, const char *placeholder) {
+    if (!widget || (widget->type != GUI_WIDGET_TEXTBOX && widget->type != GUI_WIDGET_TEXTAREA)) return;
+    gui_copy_text(widget->placeholder, placeholder ? placeholder : "", sizeof(widget->placeholder));
+    gui_widget_invalidate(widget);
+}
+
+void gui_widget_set_textbox_flags(gui_widget_t *widget, uint32_t flags) {
+    if (!widget || (widget->type != GUI_WIDGET_TEXTBOX && widget->type != GUI_WIDGET_TEXTAREA)) return;
+    widget->textbox_flags = flags & (GUI_TEXTBOX_FLAG_READONLY | GUI_TEXTBOX_FLAG_DISABLED | GUI_TEXTBOX_FLAG_PASSWORD | GUI_TEXTBOX_FLAG_MULTILINE | GUI_TEXTBOX_FLAG_WRAP);
+    if (widget->type == GUI_WIDGET_TEXTAREA) widget->textbox_flags |= GUI_TEXTBOX_FLAG_MULTILINE;
+    if (widget->textbox_flags & GUI_TEXTBOX_FLAG_DISABLED) {
+        widget->enabled = 0;
+        if (g_gui.focused_widget == widget) gui_set_focused_widget(0);
+    } else {
+        widget->enabled = 1;
+    }
+    gui_widget_invalidate(widget);
+}
+
+uint32_t gui_widget_get_textbox_flags(const gui_widget_t *widget) {
+    return (widget && (widget->type == GUI_WIDGET_TEXTBOX || widget->type == GUI_WIDGET_TEXTAREA)) ? widget->textbox_flags : 0;
 }
 
 const char *gui_widget_get_text(const gui_widget_t *widget) {
@@ -4457,123 +7754,242 @@ void gui_widget_set_on_click(gui_widget_t *widget, gui_widget_callback_t cb, voi
 void gui_widget_set_icon(gui_widget_t *widget, gui_icon_id_t icon) {
     if (!widget) return;
     widget->icon = icon;
+    gui_widget_invalidate(widget);
+}
+
+void gui_widget_set_button_flags(gui_widget_t *widget, uint32_t flags) {
+    if (!widget || (widget->type != GUI_WIDGET_BUTTON && widget->type != GUI_WIDGET_ICON_BUTTON)) return;
+    widget->button_flags = flags & (GUI_BUTTON_FLAG_DEFAULT | GUI_BUTTON_FLAG_DANGER);
+    if ((widget->button_flags & GUI_BUTTON_FLAG_DEFAULT) && (widget->button_flags & GUI_BUTTON_FLAG_DANGER)) {
+        widget->button_flags &= ~GUI_BUTTON_FLAG_DEFAULT;
+    }
+    gui_widget_invalidate(widget);
+}
+
+uint32_t gui_widget_get_button_flags(const gui_widget_t *widget) {
+    return (widget && (widget->type == GUI_WIDGET_BUTTON || widget->type == GUI_WIDGET_ICON_BUTTON)) ? widget->button_flags : 0;
+}
+
+void gui_widget_set_label_options(gui_widget_t *widget, uint32_t flags, uint32_t align) {
+    if (!widget || widget->type != GUI_WIDGET_LABEL) return;
+    widget->label_flags = flags & (GUI_LABEL_FLAG_ELLIPSIS | GUI_LABEL_FLAG_MULTILINE | GUI_LABEL_FLAG_SELECTABLE | GUI_LABEL_FLAG_COPYABLE);
+    if (align > GUI_LABEL_ALIGN_RIGHT) align = GUI_LABEL_ALIGN_LEFT;
+    widget->label_align = align;
+    gui_widget_invalidate(widget);
+}
+
+uint32_t gui_widget_get_label_flags(const gui_widget_t *widget) {
+    return (widget && widget->type == GUI_WIDGET_LABEL) ? widget->label_flags : 0;
+}
+
+uint32_t gui_widget_get_label_align(const gui_widget_t *widget) {
+    return (widget && widget->type == GUI_WIDGET_LABEL) ? widget->label_align : GUI_LABEL_ALIGN_LEFT;
+}
+
+int gui_widget_measure_label(const gui_widget_t *widget, int max_width, int *out_width, int *out_height) {
+    const char *p;
+    int char_w = GUI_CHAR_W;
+    int line_h = gui_text_line_height_px();
+    int max_chars;
+    int lines = 0;
+    int width_chars = 0;
+    if (!widget || widget->type != GUI_WIDGET_LABEL || !out_width || !out_height || max_width <= 0) return -1;
+    if (char_w <= 0) char_w = GUI_CHAR_W;
+    max_chars = max_width / char_w;
+    if (max_chars < 1) max_chars = 1;
+    p = widget->text;
+    if (!p || !*p) {
+        *out_width = 0;
+        *out_height = line_h;
+        return 0;
+    }
+    while (*p) {
+        uint32_t src_len = gui_text_len_until_break(p);
+        int multiline = (widget->label_flags & GUI_LABEL_FLAG_MULTILINE) != 0;
+        if (multiline) {
+            while (src_len > (uint32_t)max_chars) {
+                if (width_chars < max_chars) width_chars = max_chars;
+                lines++;
+                p += max_chars;
+                src_len -= (uint32_t)max_chars;
+            }
+        }
+        if ((int)src_len > width_chars) width_chars = (int)src_len;
+        lines++;
+        p += src_len;
+        if (*p == '\n') p++;
+        if (!multiline) break;
+    }
+    if (width_chars > max_chars) width_chars = max_chars;
+    *out_width = width_chars * char_w;
+    *out_height = (lines > 0 ? lines : 1) * line_h;
+    return 0;
+}
+
+void gui_widget_set_panel_options(gui_widget_t *widget, uint32_t bg_color, uint32_t border_color, uint32_t flags, uint32_t border_width, uint32_t padding) {
+    if (!widget || widget->type != GUI_WIDGET_PANEL) return;
+    widget->bg_color = bg_color;
+    widget->panel_border_color = border_color;
+    widget->panel_flags = flags & (GUI_PANEL_FLAG_BORDER | GUI_PANEL_FLAG_ROUNDED | GUI_PANEL_FLAG_SHADOW);
+    if (border_width > 8) border_width = 8;
+    if (padding > 64) padding = 64;
+    widget->panel_border_width = border_width;
+    widget->panel_padding = padding;
+    gui_widget_invalidate(widget);
 }
 
 void gui_widget_focus(gui_widget_t *widget) {
     gui_set_focused_widget(widget);
 }
 
-void gui_terminal_clear(void) {
+void gui_terminal_view_clear(gui_terminal_view_t *view) {
     uint32_t r, c;
-    if (!g_gui.initialized || !g_gui.terminal.enabled) return;
-
+    if (!view) return;
     for (r = 0; r < GUI_TERM_ROWS; r++) {
         for (c = 0; c < GUI_TERM_COLS; c++) {
-            g_gui.terminal.cells[r][c] = ' ';
+            view->cells[r][c] = ' ';
         }
     }
+    view->cursor_x = 0;
+    view->cursor_y = 0;
+    view->selecting = 0;
+    view->has_selection = 0;
+}
 
-    g_gui.terminal.cursor_x = 0;
-    g_gui.terminal.cursor_y = 0;
-    g_gui.terminal.selecting = 0;
-    g_gui.terminal.has_selection = 0;
+void gui_terminal_view_init(gui_terminal_view_t *view, uint32_t cols, uint32_t rows) {
+    if (!view) return;
+    view->cols = cols;
+    view->rows = rows;
+    if (view->cols > GUI_TERM_COLS) view->cols = GUI_TERM_COLS;
+    if (view->rows > GUI_TERM_ROWS) view->rows = GUI_TERM_ROWS;
+    view->clipboard_len = 0;
+    view->clipboard[0] = '\0';
+    gui_terminal_view_clear(view);
+}
+
+void gui_terminal_clear(void) {
+    if (!g_gui.initialized || !g_gui.terminal.enabled) return;
+    gui_terminal_view_clear(&g_gui.terminal.view);
     g_gui.terminal.dirty = 1;
     gui_terminal_invalidate_body();
 }
 
 void gui_terminal_init(void) {
     gui_window_t *term;
+    uint32_t cols;
+    uint32_t rows;
     if (g_gui.terminal.window) return;
     term = gui_create_window(24, 420, (int)g_gui.width - 48, (int)g_gui.height - 448, i18n_t(I18N_KEY_WIN_TERMINAL));
     if (!term) return;
     term->flags |= GUI_WINDOW_FLAG_TERMINAL;
     term->bg_color = gui_rgb(10, 14, 22);
     g_gui.terminal.window = term;
-    g_gui.terminal.cols = (uint32_t)((term->rect.w - 12) / GUI_CHAR_W);
-    g_gui.terminal.rows = (uint32_t)((term->rect.h - GUI_TITLE_HEIGHT - 10) / (GUI_CHAR_H + 1));
-    if (g_gui.terminal.cols > GUI_TERM_COLS) g_gui.terminal.cols = GUI_TERM_COLS;
-    if (g_gui.terminal.rows > GUI_TERM_ROWS) g_gui.terminal.rows = GUI_TERM_ROWS;
+    cols = (uint32_t)((term->rect.w - 12) / GUI_CHAR_W);
+    rows = (uint32_t)((term->rect.h - GUI_TITLE_HEIGHT - 10) / (GUI_CHAR_H + 1));
+    gui_terminal_view_init(&g_gui.terminal.view, cols, rows);
     g_gui.terminal.enabled = 1;
     g_gui.terminal.input_focused = 1;
     g_gui.terminal.cursor_visible = 1;
     g_gui.terminal.cursor_blink_ticks = 0;
-    g_gui.terminal.selecting = 0;
-    g_gui.terminal.has_selection = 0;
-    g_gui.terminal.clipboard_len = 0;
-    g_gui.terminal.clipboard[0] = '\0';
     gui_terminal_clear();
     gui_terminal_write("TERMINAL ready. Keyboard input is routed here.\n> ");
 }
 
-static void gui_terminal_scroll(void) {
+void gui_terminal_view_scroll(gui_terminal_view_t *view) {
     uint32_t r;
-    if (g_gui.terminal.rows == 0 || g_gui.terminal.cols == 0) return;
-    for (r = 1; r < g_gui.terminal.rows; r++) {
-        memcpy(g_gui.terminal.cells[r - 1], g_gui.terminal.cells[r], g_gui.terminal.cols);
+    if (!view || view->rows == 0 || view->cols == 0) return;
+    for (r = 1; r < view->rows; r++) {
+        memcpy(view->cells[r - 1], view->cells[r], view->cols);
     }
-    memset(g_gui.terminal.cells[g_gui.terminal.rows - 1], ' ', g_gui.terminal.cols);
-    if (g_gui.terminal.cursor_y > 0) g_gui.terminal.cursor_y--;
+    memset(view->cells[view->rows - 1], ' ', view->cols);
+    if (view->cursor_y > 0) view->cursor_y--;
+}
+
+static void gui_terminal_scroll(void) {
+    gui_terminal_view_scroll(&g_gui.terminal.view);
     gui_terminal_invalidate_body();
 }
 
-static void gui_terminal_handle_carriage_return(void) {
+static void gui_terminal_view_handle_carriage_return(gui_terminal_view_t *view) {
+    if (!view) return;
     /* CR returns to the beginning of the current line. It must not scroll or move down. */
-    g_gui.terminal.cursor_x = 0;
+    view->cursor_x = 0;
 }
 
-static void gui_terminal_handle_line_feed(int *body_dirty) {
+static void gui_terminal_view_handle_line_feed(gui_terminal_view_t *view, int *body_dirty) {
+    if (!view || !body_dirty) return;
     /* LF advances to the next display line. Keep the existing console convention of column 0. */
-    g_gui.terminal.cursor_x = 0;
-    g_gui.terminal.cursor_y++;
-    if (g_gui.terminal.cursor_y >= g_gui.terminal.rows) {
-        gui_terminal_scroll();
+    view->cursor_x = 0;
+    view->cursor_y++;
+    if (view->cursor_y >= view->rows) {
+        gui_terminal_view_scroll(view);
         *body_dirty = 1;
     }
 }
 
-static void gui_terminal_handle_backspace(void) {
-    if (g_gui.terminal.cursor_x > 0) {
-        g_gui.terminal.cursor_x--;
-    } else if (g_gui.terminal.cursor_y > 0) {
-        g_gui.terminal.cursor_y--;
-        g_gui.terminal.cursor_x = g_gui.terminal.cols - 1;
+static void gui_terminal_view_handle_backspace(gui_terminal_view_t *view) {
+    if (!view || view->cols == 0) return;
+    if (view->cursor_x > 0) {
+        view->cursor_x--;
+    } else if (view->cursor_y > 0) {
+        view->cursor_y--;
+        view->cursor_x = view->cols - 1;
+    }
+}
+
+int gui_terminal_view_putc(gui_terminal_view_t *view, char ch, int *body_dirty) {
+    int dirty = 0;
+    if (!view || view->cols == 0 || view->rows == 0) return 0;
+    if (ch == '\n') {
+        gui_terminal_view_handle_line_feed(view, &dirty);
+    } else if (ch == '\r') {
+        gui_terminal_view_handle_carriage_return(view);
+    } else if (ch == '\b') {
+        gui_terminal_view_handle_backspace(view);
+    } else {
+        if (view->cursor_x >= view->cols) {
+            gui_terminal_view_handle_line_feed(view, &dirty);
+        }
+        if (view->cursor_y >= view->rows) {
+            gui_terminal_view_scroll(view);
+            dirty = 1;
+        }
+        view->cells[view->cursor_y][view->cursor_x] = ch;
+        view->cursor_x++;
+    }
+    if (view->cursor_y >= view->rows) {
+        gui_terminal_view_scroll(view);
+        dirty = 1;
+    }
+    if (body_dirty) *body_dirty = dirty;
+    return 1;
+}
+
+void gui_terminal_view_write(gui_terminal_view_t *view, const char *text) {
+    if (!text) return;
+    while (*text) {
+        gui_terminal_view_putc(view, *text++, 0);
     }
 }
 
 void gui_terminal_putc(char ch) {
+    gui_terminal_view_t *view = &g_gui.terminal.view;
     uint32_t old_x, old_y;
     int body_dirty = 0;
     if (!g_gui.initialized || !g_gui.terminal.enabled) return;
-    if (g_gui.terminal.cols == 0 || g_gui.terminal.rows == 0) return;
-    if (g_gui.terminal.has_selection && ch != 0x03 && ch != 0x16) gui_terminal_clear_selection();
+    if (view->cols == 0 || view->rows == 0) return;
+    if (view->has_selection && ch != 0x03 && ch != 0x16) gui_terminal_clear_selection();
 
-    old_x = g_gui.terminal.cursor_x;
-    old_y = g_gui.terminal.cursor_y;
+    old_x = view->cursor_x;
+    old_y = view->cursor_y;
     gui_terminal_invalidate_cursor_at(old_x, old_y);
-
-    if (ch == '\n') {
-        gui_terminal_handle_line_feed(&body_dirty);
-    } else if (ch == '\r') {
-        gui_terminal_handle_carriage_return();
-    } else if (ch == '\b') {
-        gui_terminal_handle_backspace();
+    gui_terminal_view_putc(view, ch, &body_dirty);
+    if (body_dirty) {
+        gui_terminal_invalidate_body();
     } else {
-        if (g_gui.terminal.cursor_x >= g_gui.terminal.cols) {
-            gui_terminal_handle_line_feed(&body_dirty);
-        }
-        if (g_gui.terminal.cursor_y >= g_gui.terminal.rows) {
-            gui_terminal_scroll();
-            body_dirty = 1;
-        }
-        g_gui.terminal.cells[g_gui.terminal.cursor_y][g_gui.terminal.cursor_x] = ch;
-        if (!body_dirty) gui_terminal_invalidate_cell(g_gui.terminal.cursor_x, g_gui.terminal.cursor_y);
-        g_gui.terminal.cursor_x++;
+        gui_terminal_invalidate_cell(old_x, old_y);
+        gui_terminal_invalidate_cursor_at(view->cursor_x, view->cursor_y);
     }
-    if (g_gui.terminal.cursor_y >= g_gui.terminal.rows) {
-        gui_terminal_scroll();
-        body_dirty = 1;
-    }
-    if (!body_dirty) gui_terminal_invalidate_cursor_at(g_gui.terminal.cursor_x, g_gui.terminal.cursor_y);
     g_gui.terminal.cursor_visible = 1;
     g_gui.terminal.cursor_blink_ticks = 0;
     g_gui.terminal.dirty = 1;
@@ -4681,67 +8097,77 @@ static void gui_terminal_drain_output_queue(void) {
     }
 }
 
-void gui_terminal_redraw(void) {
+void gui_terminal_view_draw(const gui_terminal_view_t *view, const gui_terminal_view_layout_t *layout, int draw_cursor, uint32_t fg, uint32_t selection_bg, uint32_t selection_fg, uint32_t cursor_color) {
     uint32_t r, c;
     uint32_t r_start = 0, r_end;
     uint32_t c_start = 0, c_end;
-    gui_window_t *w = g_gui.terminal.window;
-    int ox, oy;
-    if (!w || !w->visible || (w->flags & GUI_WINDOW_FLAG_MINIMIZED)) return;
-    ox = w->rect.x + 6;
-    oy = w->rect.y + GUI_TITLE_HEIGHT + 5;
-    r_end = g_gui.terminal.rows;
-    c_end = g_gui.terminal.cols;
+    if (!view || !layout || view->cols == 0 || view->rows == 0) return;
+    r_end = view->rows;
+    c_end = view->cols;
     {
-        gui_rect_t client;
-        client.x = w->rect.x + GUI_BORDER_SIZE;
-        client.y = w->rect.y + GUI_TITLE_HEIGHT;
-        client.w = w->rect.w - GUI_BORDER_SIZE * 2;
-        client.h = w->rect.h - GUI_TITLE_HEIGHT - GUI_BORDER_SIZE;
-        gui_set_clip_rect(&client);
+        gui_rect_t clip = layout->clip_rect;
+        gui_set_clip_rect(&clip);
     }
     if (g_gui.clip_enabled && g_gui.clip_rect.w <= 0) {
         gui_clear_clip_rect();
         return;
     }
     if (g_gui.clip_enabled) {
-        int left = g_gui.clip_rect.x - ox;
-        int top = g_gui.clip_rect.y - oy;
-        int right = g_gui.clip_rect.x + g_gui.clip_rect.w - ox + GUI_CHAR_W - 1;
-        int bottom = g_gui.clip_rect.y + g_gui.clip_rect.h - oy + GUI_CHAR_H;
-        if (left > 0) c_start = (uint32_t)(left / GUI_CHAR_W);
-        if (top > 0) r_start = (uint32_t)(top / (GUI_CHAR_H + 1));
-        if (right > 0) c_end = (uint32_t)(right / GUI_CHAR_W);
-        if (bottom > 0) r_end = (uint32_t)(bottom / (GUI_CHAR_H + 1));
-        if (c_end > g_gui.terminal.cols) c_end = g_gui.terminal.cols;
-        if (r_end > g_gui.terminal.rows) r_end = g_gui.terminal.rows;
+        int left = g_gui.clip_rect.x - layout->x;
+        int top = g_gui.clip_rect.y - layout->y;
+        int right = g_gui.clip_rect.x + g_gui.clip_rect.w - layout->x + layout->cell_w - 1;
+        int bottom = g_gui.clip_rect.y + g_gui.clip_rect.h - layout->y + layout->char_h;
+        if (left > 0) c_start = (uint32_t)(left / layout->cell_w);
+        if (top > 0) r_start = (uint32_t)(top / layout->cell_h);
+        if (right > 0) c_end = (uint32_t)(right / layout->cell_w);
+        if (bottom > 0) r_end = (uint32_t)(bottom / layout->cell_h);
+        if (c_end > view->cols) c_end = view->cols;
+        if (r_end > view->rows) r_end = view->rows;
         if (c_start > c_end) c_start = c_end;
         if (r_start > r_end) r_start = r_end;
     }
     for (r = r_start; r < r_end; r++) {
         for (c = c_start; c < c_end; c++) {
-            char ch = g_gui.terminal.cells[r][c];
-            int px = ox + (int)c * GUI_CHAR_W;
-            int py = oy + (int)r * (GUI_CHAR_H + 1);
-            int selected = gui_terminal_cell_selected(c, r);
+            char ch = view->cells[r][c];
+            int px = layout->x + (int)c * layout->cell_w;
+            int py = layout->y + (int)r * layout->cell_h;
+            int selected = gui_terminal_view_cell_selected(view, c, r);
             if (selected) {
-                gui_raw_fill_rect(px, py, GUI_CHAR_W, GUI_CHAR_H + 1, gui_rgb(70, 105, 180));
+                gui_raw_fill_rect(px, py, layout->cell_w, layout->cell_h, selection_bg);
             }
             if (ch != ' ') {
-                gui_draw_char(px, py, ch, selected ? gui_rgb(255, 255, 255) : gui_rgb(185, 255, 185));
+                gui_draw_char(px, py, ch, selected ? selection_fg : fg);
             }
         }
     }
-    if (g_gui.terminal.input_focused && g_gui.terminal.cursor_visible) {
-        gui_raw_fill_rect(ox + (int)g_gui.terminal.cursor_x * GUI_CHAR_W,
-                          oy + (int)g_gui.terminal.cursor_y * (GUI_CHAR_H + 1) + GUI_CHAR_H,
-                          GUI_CHAR_W - 1, 1, gui_rgb(185, 255, 185));
+    if (draw_cursor && view->cursor_x < view->cols && view->cursor_y < view->rows) {
+        gui_raw_fill_rect(layout->x + (int)view->cursor_x * layout->cell_w,
+                          layout->y + (int)view->cursor_y * layout->cell_h + layout->char_h,
+                          layout->cell_w - 1, 1, cursor_color);
     }
     gui_clear_clip_rect();
 }
 
+void gui_terminal_redraw(void) {
+    gui_window_t *w = g_gui.terminal.window;
+    gui_rect_t client;
+    gui_terminal_view_layout_t layout;
+    if (!w || !w->visible || (w->flags & GUI_WINDOW_FLAG_MINIMIZED)) return;
+    client.x = w->rect.x + GUI_BORDER_SIZE;
+    client.y = w->rect.y + GUI_TITLE_HEIGHT;
+    client.w = w->rect.w - GUI_BORDER_SIZE * 2;
+    client.h = w->rect.h - GUI_TITLE_HEIGHT - GUI_BORDER_SIZE;
+    gui_terminal_view_make_layout(client, 6 - GUI_BORDER_SIZE, 5, &layout);
+    gui_terminal_view_draw(&g_gui.terminal.view, &layout,
+                           g_gui.terminal.input_focused && g_gui.terminal.cursor_visible,
+                           gui_rgb(185, 255, 185),
+                           gui_rgb(70, 105, 180),
+                           gui_rgb(255, 255, 255),
+                           gui_rgb(185, 255, 185));
+}
+
 static void gui_terminal_invalidate_cursor(void) {
-    gui_terminal_invalidate_cursor_at(g_gui.terminal.cursor_x, g_gui.terminal.cursor_y);
+    gui_terminal_invalidate_cursor_at(g_gui.terminal.view.cursor_x, g_gui.terminal.view.cursor_y);
 }
 
 static void gui_draw_taskbar_start_icon(gui_rect_t rect) {
@@ -5114,13 +8540,12 @@ static gui_icon_id_t taskbar_search_result_icon(const gui_taskbar_search_result_
 static void gui_draw_taskbar_search_results(void) {
     uint32_t i;
     gui_rect_t box = g_taskbar_search_rect;
+    gui_list_view_t list;
     int row_h = GUI_TEXT_LINE_H + 8;
     int panel_h;
     int panel_y;
     int max_chars;
     int cw = GUI_CHAR_W > 0 ? GUI_CHAR_W : 8;
-    int icon_size = 14;
-    int icon_x_pad = 8;
     int text_x_pad = 30;
     if (!g_gui.taskbar_search_focused || !g_gui.taskbar_search_text[0]) {
         g_gui.taskbar_search_results_rect.x = 0;
@@ -5170,30 +8595,41 @@ static void gui_draw_taskbar_search_results(void) {
                       "No files found", gui_rgb(160, 178, 205));
         return;
     }
+
+    list.rect = g_gui.taskbar_search_results_rect;
+    list.row_h = row_h;
+    list.selected_row = g_gui.taskbar_search_selected;
+    list.bg = gui_rgb(28, 34, 48);
+    list.alt_bg = gui_rgb(31, 38, 54);
+    list.selected_bg = gui_rgb(50, 64, 92);
+    list.border = gui_rgb(38, 46, 64);
+    list.selected_border = gui_rgb(90, 118, 170);
+
     for (i = 0; i < g_gui.taskbar_search_result_count; i++) {
         gui_taskbar_search_result_t *r = &g_gui.taskbar_search_results[i];
+        gui_rect_t row_rect;
+        gui_rect_t cell_rect;
         char line[GUI_TASKBAR_SEARCH_PATH_LEN];
         uint32_t k = 0;
         uint32_t j = 0;
-        int row_y = g_gui.taskbar_search_results_rect.y + (int)i * row_h;
-        int icon_y = row_y + (row_h - icon_size) / 2;
         uint32_t text_color;
         if (!r->used) continue;
-        if ((int)i == g_gui.taskbar_search_selected) {
-            gui_raw_fill_rect(g_gui.taskbar_search_results_rect.x + 2, row_y + 2,
-                              g_gui.taskbar_search_results_rect.w - 4, row_h - 4,
-                              gui_rgb(50, 64, 92));
-        }
+        row_rect = gui_list_view_row_rect(&list, (int)i);
+        cell_rect = row_rect;
+        cell_rect.x += 4;
+        cell_rect.y += 2;
+        cell_rect.w -= 8;
+        cell_rect.h -= 4;
+        gui_list_view_draw_row(&list, (int)i);
         while (r->path[j] && k + 1 < sizeof(line) && (int)k < max_chars) {
             line[k++] = r->path[j++];
         }
         line[k] = 0;
         text_color = r->is_dir ? gui_rgb(170, 220, 255) :
                      (r->is_executable ? gui_rgb(255, 210, 170) : gui_rgb(230, 240, 255));
-        gui_draw_file_icon(taskbar_search_result_icon(r),
-                           g_gui.taskbar_search_results_rect.x + icon_x_pad, icon_y);
-        gui_draw_text(g_gui.taskbar_search_results_rect.x + text_x_pad, row_y + 4,
-                      line, text_color);
+        gui_draw_file_icon_cell(&cell_rect, line, taskbar_search_result_icon(r),
+                                (int)i == g_gui.taskbar_search_selected, 0,
+                                text_color);
     }
 }
 
@@ -5204,10 +8640,9 @@ static void gui_draw_taskbar(void) {
     gui_taskbar_get_layout(&layout);
     bx = layout.first_window_x;
 
-    /* 任务栏背景横跨全屏宽度，遮住任务栏左右两侧未绘制的黑底，避免壁纸下沿
-     * 在居中任务栏左右两侧形成贯穿全屏的视觉假性蓝线。图标位置仍按居中布局。 */
+    /* 娴犺濮熼弽蹇氬剹閺咁垱铆鐠恒劌鍙忕仦蹇擃啍鎼达讣绱濋柆顔荤秶娴犺濮熼弽蹇撲箯閸欏厖琚辨笟褎婀紒妯哄煑閻ㄥ嫰绮︽惔鏇礉闁灝鍘ゆ竟浣虹剨娑撳锟?     * 閸︺劌鐪虫稉顓濇崲閸斺剝鐖锕€褰告稉銈勬櫠瑜般垺鍨氱拹顖溾敍閸忋劌鐫嗛惃鍕潒鐟欏浜ｉ幀褑鎽戠痪瑁も偓鍌氭禈閺嶅洣缍呯純顔荤矝閹稿鐪虫稉顓炵鐏炩偓锟?*/
     gui_raw_fill_rect(0, layout.bar.y, (int)g_gui.width, layout.bar.h, gui_rgb(24, 28, 38));
-    /* 全宽底部阴影边收口 */
+    /* 閸忋劌顔旀惔鏇㈠劥闂冩潙濂栨潏瑙勬暪锟?*/
     gui_raw_fill_rect(0, layout.bar.y + layout.bar.h - 1, (int)g_gui.width, 1, gui_rgb(10, 13, 20));
 
     g_gui.desktop_start_button_rect = layout.start_button;
@@ -6858,19 +10293,11 @@ static void network_refresh(gui_widget_t *w, void *ud) {
     gui_network_build(1);
 }
 
-static void network_up(gui_widget_t *w, void *ud) {
+static void network_toggle_admin(gui_widget_t *w, void *ud) {
     net_device_info_t info;
-    (void)w;
     (void)ud;
-    if (gui_get_primary_net_info(&info) == 0) net_set_device_admin_up(info.name, 1);
-    gui_network_build(1);
-}
-
-static void network_down(gui_widget_t *w, void *ud) {
-    net_device_info_t info;
-    (void)w;
-    (void)ud;
-    if (gui_get_primary_net_info(&info) == 0) net_set_device_admin_up(info.name, 0);
+    if (!w) return;
+    if (gui_get_primary_net_info(&info) == 0) net_set_device_admin_up(info.name, w->value ? 1 : 0);
     gui_network_build(1);
 }
 
@@ -6880,6 +10307,75 @@ static void network_dhcp(gui_widget_t *w, void *ud) {
     dhcp_start();
     (void)net_config_save_dhcp();
     gui_network_build(1);
+}
+
+void gui_settings_row_init(gui_settings_row_t *row,
+                           gui_window_t *window,
+                           int x,
+                           int y,
+                           int width,
+                           int label_h,
+                           int button_h,
+                           int button_w,
+                           int gap) {
+    if (!row) return;
+    row->window = window;
+    row->x = x;
+    row->y = y;
+    row->width = width;
+    row->label_h = label_h;
+    row->button_h = button_h;
+    row->button_w = button_w;
+    row->gap = gap;
+}
+
+void gui_settings_row_label(const gui_settings_row_t *row, const char *label) {
+    if (!row || !row->window || !label) return;
+    gui_add_label(row->window, row->x, row->y, row->width, row->label_h, label);
+}
+
+gui_widget_t *gui_settings_row_toggle(const gui_settings_row_t *row,
+                                             const char *text,
+                                             int checked,
+                                             gui_widget_callback_t cb,
+                                             void *ud) {
+    int w;
+    if (!row || !row->window) return 0;
+    w = row->button_w * 2 + row->gap;
+    return gui_add_toggle(row->window, row->x, row->y, w, row->button_h, text, checked, cb, ud);
+}
+
+gui_widget_t *gui_settings_row_button(const gui_settings_row_t *row,
+                                             const char *text,
+                                             gui_widget_callback_t cb,
+                                             void *ud) {
+    int w;
+    if (!row || !row->window) return 0;
+    w = row->button_w * 2 + row->gap;
+    return gui_add_button(row->window, row->x, row->y, w, row->button_h, text, cb, ud);
+}
+
+gui_widget_t *gui_settings_row_slider(const gui_settings_row_t *row,
+                                             int min,
+                                             int max,
+                                             int value,
+                                             int step,
+                                             gui_widget_callback_t cb,
+                                             void *ud) {
+    int w;
+    if (!row || !row->window) return 0;
+    w = row->button_w * 3 + row->gap * 2;
+    return gui_add_slider(row->window, row->x, row->y, w, row->button_h, min, max, value, step, cb, ud);
+}
+
+void gui_settings_row_slider_labels(const gui_settings_row_t *row,
+                                           const char *left,
+                                           const char *middle,
+                                           const char *right) {
+    if (!row || !row->window) return;
+    gui_add_label(row->window, row->x, row->y + row->button_h, row->button_w, row->label_h, left);
+    gui_add_label(row->window, row->x + row->button_w + row->gap, row->y + row->button_h, row->button_w, row->label_h, middle);
+    gui_add_label(row->window, row->x + (row->button_w + row->gap) * 2, row->y + row->button_h, row->button_w, row->label_h, right);
 }
 
 static int settings_parse_ipv4(const char *text, uint32_t *out) {
@@ -6939,6 +10435,7 @@ static void gui_settings_build(int show_notice) {
     int win_h = margin * 2 + row_h * 18 + 56;
     int x;
     int y;
+    gui_settings_row_t row;
 
     if (win_w < 640) win_w = 640;
     if (win_h < 560) win_h = 560;
@@ -6954,11 +10451,13 @@ static void gui_settings_build(int show_notice) {
 
     x = margin;
     y = 36;
-    gui_add_label(g_settings_win, x, y, win_w - margin * 2, line_h + 4, i18n_t(I18N_KEY_SETTINGS_LANGUAGE));
+    gui_settings_row_init(&row, g_settings_win, x, y, win_w - margin * 2, line_h + 4, button_h, button_w, gap);
+
+    gui_settings_row_label(&row, i18n_t(I18N_KEY_SETTINGS_LANGUAGE));
     y += row_h;
+    row.y = y;
     {
         char language_text[64];
-        int dropdown_x = x;
         int dropdown_w = button_w * 2 + gap;
         strncpy(language_text, gui_settings_language_name(), sizeof(language_text) - 4);
         language_text[sizeof(language_text) - 4] = '\0';
@@ -6970,32 +10469,34 @@ static void gui_settings_build(int show_notice) {
                 language_text[n + 2] = '\0';
             }
         }
-        gui_add_button(g_settings_win, dropdown_x, y, dropdown_w, button_h, language_text, settings_toggle_language_dropdown, 0);
+        gui_settings_row_button(&row, language_text, settings_toggle_language_dropdown, 0);
         if (g_settings_language_dropdown_open) {
-            gui_add_button(g_settings_win, dropdown_x, y + button_h + 2, dropdown_w, button_h, i18n_t(I18N_KEY_SETTINGS_LANGUAGE_ENGLISH), settings_apply_language_en, 0);
-            gui_add_button(g_settings_win, dropdown_x, y + (button_h + 2) * 2, dropdown_w, button_h, i18n_t(I18N_KEY_SETTINGS_LANGUAGE_CHINESE), settings_apply_language_zh, 0);
+            gui_add_button(g_settings_win, x, y + button_h + 2, dropdown_w, button_h, i18n_t(I18N_KEY_SETTINGS_LANGUAGE_ENGLISH), settings_apply_language_en, 0);
+            gui_add_button(g_settings_win, x, y + (button_h + 2) * 2, dropdown_w, button_h, i18n_t(I18N_KEY_SETTINGS_LANGUAGE_CHINESE), settings_apply_language_zh, 0);
         }
     }
 
     y += row_h + gap;
     if (g_settings_language_dropdown_open) y += (button_h + 2) * 2;
-    gui_add_label(g_settings_win, x, y, win_w - margin * 2, line_h + 4, i18n_t(I18N_KEY_SETTINGS_TEXT_SIZE));
+    row.y = y;
+    gui_settings_row_label(&row, i18n_t(I18N_KEY_SETTINGS_TEXT_SIZE));
     y += row_h;
+    row.y = y;
     {
-        int slider_x = x;
-        int slider_w = button_w * 3 + gap * 2;
         int value = (font_get_size() == FONT_SIZE_SMALL) ? 0 : ((font_get_size() == FONT_SIZE_LARGE) ? 2 : 1);
-        gui_add_slider(g_settings_win, slider_x, y, slider_w, button_h, 0, 2, value, settings_apply_font_slider, 0);
-        gui_add_label(g_settings_win, slider_x, y + button_h, button_w, line_h + 4, i18n_t(I18N_KEY_BTN_FONT_SMALL));
-        gui_add_label(g_settings_win, slider_x + button_w + gap, y + button_h, button_w, line_h + 4, i18n_t(I18N_KEY_BTN_FONT_MEDIUM));
-        gui_add_label(g_settings_win, slider_x + (button_w + gap) * 2, y + button_h, button_w, line_h + 4, i18n_t(I18N_KEY_BTN_FONT_LARGE));
+        gui_settings_row_slider(&row, 0, 2, value, 1, settings_apply_font_slider, 0);
+        gui_settings_row_slider_labels(&row,
+                                       i18n_t(I18N_KEY_BTN_FONT_SMALL),
+                                       i18n_t(I18N_KEY_BTN_FONT_MEDIUM),
+                                       i18n_t(I18N_KEY_BTN_FONT_LARGE));
     }
 
     y += button_h + line_h + 4 + gap;
-    gui_add_label(g_settings_win, x, y, win_w - margin * 2, line_h + 4, i18n_t(I18N_KEY_SETTINGS_NETWORK));
+    row.y = y;
+    gui_settings_row_label(&row, i18n_t(I18N_KEY_SETTINGS_NETWORK));
     y += row_h;
-    gui_add_button(g_settings_win, x, y, button_w * 2 + gap, button_h, i18n_t(I18N_KEY_SETTINGS_NETWORK_DEVICE), settings_open_network, 0);
-
+    row.y = y;
+    gui_settings_row_button(&row, i18n_t(I18N_KEY_SETTINGS_NETWORK_DEVICE), settings_open_network, 0);
 
     if (show_notice) gui_notify(i18n_t(I18N_KEY_SETTINGS_APPLIED));
     gui_render();
@@ -7079,10 +10580,12 @@ static void gui_wifi_open(void) {
 }
 
 static void gui_notif_open(void) {
-    int y;
     uint32_t i;
     char header[64];
+    char body[GUI_WIDGET_TEXT_CAP];
+    gui_widget_t *log_view;
     int pos;
+    int body_pos;
     char nbuf[16];
     if (g_notif_win) {
         gui_window_set_on_close(g_notif_win, 0, 0);
@@ -7109,14 +10612,20 @@ static void gui_notif_open(void) {
     gui_add_button(g_notif_win, 300, 32, 48, 22, i18n_t(I18N_KEY_BTN_CLEAR), notif_on_clear, 0);
     gui_add_button(g_notif_win, 354, 32, 48, 22, i18n_t(I18N_KEY_BTN_CLOSE), notif_on_close_btn, 0);
 
-    y = 64;
-    if (g_notif_count == 0) {
-        gui_add_label(g_notif_win, 16, y, 388, 16, "");
-    } else {
-        for (i = 0; i < g_notif_count && i < 14; i++) {
-            gui_add_label(g_notif_win, 16, y, 388, 16, g_notif_log[i].text);
-            y += 18;
+    body_pos = 0;
+    if (g_notif_count > 0) {
+        for (i = 0; i < g_notif_count && i < GUI_NOTIF_MAX; i++) {
+            if (i > 0) body_pos = fp_str_append(body, body_pos, sizeof(body), "\n");
+            body_pos = fp_str_append(body, body_pos, sizeof(body), g_notif_log[i].text);
         }
+    }
+    body[body_pos < (int)sizeof(body) ? body_pos : (int)sizeof(body) - 1] = 0;
+
+    log_view = gui_add_textarea(g_notif_win, 16, 64, 388, 230, body);
+    if (log_view) {
+        gui_widget_set_textbox_flags(log_view,
+            GUI_TEXTBOX_FLAG_READONLY | GUI_TEXTBOX_FLAG_MULTILINE | GUI_TEXTBOX_FLAG_WRAP);
+        gui_widget_set_placeholder(log_view, i18n_t(I18N_KEY_WIN_NOTIFICATIONS));
     }
 
     g_notif_unread = 0;
@@ -7157,7 +10666,7 @@ static int           fp_mode = 0;            /* 0=list, 1=view, 2=edit */
 static char          fp_view_name[GUI_FP_MAX_NAME];
 static int           fp_view_line_offset = 0; /* first visible line index in view mode */
 static int           fp_view_total_lines = 0; /* cached total wrapped line count */
-static gui_widget_t *fp_edit_widgets[GUI_FP_EDIT_MAX_LINES];
+static gui_widget_t *fp_edit_textarea = 0;
 static gui_widget_t *fp_edit_status = 0;
 static int           fp_sort_key  = 0;        /* 0=name, 1=mtime, 2=size */
 static int           fp_sort_desc = 0;        /* 0=asc, 1=desc */
@@ -7571,6 +11080,36 @@ typedef struct fp_list_layout {
     int sep_type;
 } fp_list_layout_t;
 
+typedef void (*gui_table_sort_handler_t)(gui_widget_t *w, void *ud);
+typedef void (*gui_table_row_handler_t)(gui_widget_t *w, void *ud);
+
+typedef struct gui_table_view_column {
+    int x;
+    int w;
+    int sep_x;
+    const char *title;
+    int sort_key;
+    int sortable;
+} gui_table_view_column_t;
+
+typedef struct gui_table_view {
+    gui_window_t *window;
+    int x;
+    int y;
+    int w;
+    int header_h;
+    int row_y;
+    int row_h;
+    int rows;
+    int sort_key;
+    int sort_desc;
+    int selected_row;
+    int column_count;
+    gui_table_view_column_t columns[4];
+    gui_table_sort_handler_t on_sort;
+    gui_table_row_handler_t on_row;
+} gui_table_view_t;
+
 static int gui_text_width_px(const char *text) {
     int w;
     if (!text) return 0;
@@ -7665,6 +11204,46 @@ static void fp_compute_list_layout(fp_list_layout_t *l) {
     l->size_x = l->sep_type + col_gap;
     l->size_w = l->x + l->w - l->size_x - col_gap / 2;
     if (l->size_w < size_min / 2) l->size_w = size_min / 2;
+}
+
+static void gui_table_view_draw_header(gui_table_view_t *table) {
+    int i;
+    if (!table || !table->window) return;
+    gui_add_button(table->window, table->columns[0].x, table->y + 2,
+                   table->columns[0].w, table->header_h - 4,
+                   table->columns[0].title, table->on_sort, (void*)(intptr_t)table->columns[0].sort_key);
+    for (i = 1; i < table->column_count; i++) {
+        const gui_table_view_column_t *col = &table->columns[i];
+        gui_add_button(table->window, col->x, table->y + 2,
+                       col->w, table->header_h - 4,
+                       col->title, col->sortable ? table->on_sort : 0,
+                       (void*)(intptr_t)col->sort_key);
+        gui_raw_line(col->sep_x, table->y + 4, col->sep_x, table->y + table->header_h - 6,
+                     gui_rgb(170, 185, 205));
+    }
+    gui_raw_line(table->x, table->y + table->header_h - 1,
+                 table->x + table->w, table->y + table->header_h - 1,
+                 gui_rgb(160, 175, 195));
+}
+
+static void gui_table_view_draw_row(gui_table_view_t *table, int row, int global_index) {
+    uint32_t bg;
+    uint32_t border;
+    int y;
+    if (!table || !table->window) return;
+    y = table->row_y + row * table->row_h;
+    bg = (row == table->selected_row) ? gui_rgb(215, 232, 255) :
+         ((row & 1) ? gui_rgb(248, 250, 252) : gui_rgb(240, 244, 248));
+    border = (row == table->selected_row) ? gui_rgb(90, 130, 190) : gui_rgb(210, 218, 228);
+    gui_raw_fill_rect(table->x, y, table->w, table->row_h - 1, bg);
+    gui_raw_line(table->x, y + table->row_h - 1, table->x + table->w, y + table->row_h - 1, border);
+    gui_add_button(table->window, table->x, y, table->w, table->row_h - 1,
+                   "", table->on_row, (void*)(intptr_t)global_index);
+}
+
+static void gui_table_view_draw_text_cell(gui_table_view_t *table, int col, int y, const char *text, uint32_t color) {
+    if (!table || col < 0 || col >= table->column_count) return;
+    gui_draw_text(table->columns[col].x, y, text, color);
 }
 
 static int fp_total_pages(void) {
@@ -7809,27 +11388,14 @@ static void fp_on_edit_cancel(gui_widget_t *w, void *ud) {
 
 static void fp_on_edit_save(gui_widget_t *w, void *ud) {
     char full[GUI_FP_MAX_PATH];
-    char out[GUI_FP_EDIT_MAX_LINES * (GUI_FP_EDIT_LINE_CHARS + 1) + 1];
-    int op = 0;
-    int i, j;
+    const char *src;
+    int total = 0;
     int fd;
     int written = 0;
-    int total;
-    int last_non_empty = -1;
     (void)w; (void)ud;
 
-    for (i = 0; i < GUI_FP_EDIT_MAX_LINES; i++) {
-        if (fp_edit_widgets[i] && fp_edit_widgets[i]->text[0]) last_non_empty = i;
-    }
-
-    for (i = 0; i <= last_non_empty; i++) {
-        const char *src = fp_edit_widgets[i] ? fp_edit_widgets[i]->text : "";
-        for (j = 0; src[j] && j < GUI_FP_EDIT_LINE_CHARS; j++) {
-            if (op < (int)sizeof(out) - 1) out[op++] = src[j];
-        }
-        if (i < last_non_empty && op < (int)sizeof(out) - 1) out[op++] = '\n';
-    }
-    total = op;
+    src = fp_edit_textarea ? fp_edit_textarea->text : "";
+    while (src[total]) total++;
 
     fp_path_join(fp_path, fp_view_name, full, sizeof(full));
     fd = vfs_open(full, O_WRONLY | O_TRUNC, 0644);
@@ -7839,7 +11405,7 @@ static void fp_on_edit_save(gui_widget_t *w, void *ud) {
         return;
     }
     while (written < total) {
-        int n = vfs_write(fd, out + written, total - written);
+        int n = vfs_write(fd, src + written, total - written);
         if (n <= 0) break;
         written += n;
     }
@@ -8170,6 +11736,7 @@ static void gui_file_preview_render_list(void) {
     int text_h, label_h, button_h, header_h, row_h, list_count;
     int path_y, nav_y, page_y, header_y, sep_y, list_y, toolbar_y, status_y;
     fp_list_layout_t layout;
+    gui_table_view_t table;
 
     if (!fp_window) return;
 
@@ -8192,6 +11759,44 @@ static void gui_file_preview_render_list(void) {
     toolbar_y = list_y + list_count * row_h + 8;
     status_y = toolbar_y + button_h + 6;
     fp_compute_list_layout(&layout);
+    table.window = fp_window;
+    table.x = layout.x;
+    table.y = header_y;
+    table.w = layout.w;
+    table.header_h = header_h;
+    table.row_y = list_y;
+    table.row_h = row_h;
+    table.rows = list_count;
+    table.sort_key = fp_sort_key;
+    table.sort_desc = fp_sort_desc;
+    table.selected_row = fp_selected;
+    table.column_count = 4;
+    table.on_sort = fp_on_sort;
+    table.on_row = fp_on_entry;
+    table.columns[0].x = layout.x;
+    table.columns[0].w = layout.sep_name - layout.x;
+    table.columns[0].sep_x = layout.sep_name;
+    table.columns[0].title = 0;
+    table.columns[0].sort_key = 0;
+    table.columns[0].sortable = 1;
+    table.columns[1].x = layout.mtime_x - 4;
+    table.columns[1].w = layout.sep_mtime - layout.mtime_x + 4;
+    table.columns[1].sep_x = layout.sep_name;
+    table.columns[1].title = 0;
+    table.columns[1].sort_key = 1;
+    table.columns[1].sortable = 1;
+    table.columns[2].x = layout.type_x;
+    table.columns[2].w = layout.type_w;
+    table.columns[2].sep_x = layout.sep_mtime;
+    table.columns[2].title = 0;
+    table.columns[2].sort_key = -1;
+    table.columns[2].sortable = 0;
+    table.columns[3].x = layout.size_x - 4;
+    table.columns[3].w = layout.x + layout.w - layout.size_x + 4;
+    table.columns[3].sep_x = layout.sep_type;
+    table.columns[3].title = 0;
+    table.columns[3].sort_key = 2;
+    table.columns[3].sortable = 1;
 
     /* path header */
     pos = 0;
@@ -8335,24 +11940,15 @@ static void gui_file_preview_render_list(void) {
         fp_str_append(htype, (int)strlen(htype), (int)sizeof(htype), suf_t);
         fp_str_append(hsize, (int)strlen(hsize), (int)sizeof(hsize), suf_s);
 
-        /* column header buttons (x positions matching item-row text columns) */
-        btn = gui_add_button(fp_window, layout.x, header_y, layout.sep_name - layout.x, header_h, hname, fp_on_sort, (void *)(intptr_t)0);
-        if (btn) { btn->bg_color = (fp_sort_key == 0) ? sel_bg : hdr_bg; btn->fg_color = hdr_fg; }
-        btn = gui_add_button(fp_window, layout.mtime_x - 4, header_y, layout.sep_mtime - layout.mtime_x + 4, header_h, hmod,  fp_on_sort, (void *)(intptr_t)1);
-        if (btn) { btn->bg_color = (fp_sort_key == 1) ? sel_bg : hdr_bg; btn->fg_color = hdr_fg; }
-        /* type column is not sortable: render as flat label-like panel */
-        lbl = gui_add_label(fp_window, layout.type_x, gui_text_center_y(header_y, header_h), layout.type_w, label_h, htype);
-        if (lbl) lbl->fg_color = hdr_fg;
-        btn = gui_add_button(fp_window, layout.size_x - 4, header_y, layout.x + layout.w - layout.size_x + 4, header_h, hsize, fp_on_sort, (void *)(intptr_t)2);
-        if (btn) { btn->bg_color = (fp_sort_key == 2) ? sel_bg : hdr_bg; btn->fg_color = hdr_fg; }
-
-        /* horizontal separator under header (1px) */
-        gui_add_panel(fp_window, layout.x, sep_y, layout.w, 1, sep_color);
-
-        /* vertical column separators (1px, span header + rows area) */
-        gui_add_panel(fp_window, layout.sep_name, header_y, 1, sep_y + 1 + list_count * row_h - header_y, sep_color);
-        gui_add_panel(fp_window, layout.sep_mtime, header_y, 1, sep_y + 1 + list_count * row_h - header_y, sep_color);
-        gui_add_panel(fp_window, layout.sep_type, header_y, 1, sep_y + 1 + list_count * row_h - header_y, sep_color);
+        table.columns[0].title = hname;
+        table.columns[1].title = hmod;
+        table.columns[2].title = htype;
+        table.columns[3].title = hsize;
+        gui_table_view_draw_header(&table);
+        (void)hdr_bg;
+        (void)sel_bg;
+        (void)sep_color;
+        (void)hdr_fg;
     }
 
     /* entries */
@@ -8372,9 +11968,13 @@ static void gui_file_preview_render_list(void) {
         const vfs_time_t *mt = 0;
         int p = 0;
         int col;
+        int selected;
+        int hover;
         int is_parent = 0;
 
         if (gidx >= total_items) break;
+        selected = (slot == fp_selected);
+        hover = 0;
 
         if (!fp_is_root() && gidx == 0) {
             is_parent = 1;
@@ -8406,13 +12006,11 @@ static void gui_file_preview_render_list(void) {
          * This avoids the old fixed-character table string overlapping when the
          * default font is scaled up or CJK glyphs are wider than ASCII glyphs. */
         line[0] = 0;
-        btn = gui_add_button(fp_window, layout.x, y, layout.w, row_h - 2, line,
-                             fp_on_entry, (void *)(intptr_t)slot);
-        if (btn) {
-            btn->bg_color = (slot == fp_selected) ? gui_rgb(218, 230, 250) : gui_rgb(246, 247, 250);
-        }
+        gui_table_view_draw_row(&table, slot, slot);
+        (void)line;
 
         {
+            gui_rect_t icon_cell;
             int bottom_pad = font_scale_value(2);
             int label_h = gui_text_glyph_height_px();
             int label_y;
@@ -8425,14 +12023,16 @@ static void gui_file_preview_render_list(void) {
             /* File rows intentionally place text close to the lower edge.
              * This matches the visual baseline of the bitmap font better than
              * mathematical vertical centering in the tall row background. */
-            lbl = gui_add_label(fp_window, layout.name_x, label_y, layout.name_w, label_h, display_name);
-            if (lbl) { gui_widget_set_icon(lbl, icon); lbl->fg_color = gui_rgb(24, 28, 34); }
-            lbl = gui_add_label(fp_window, layout.mtime_x, label_y, layout.mtime_w, label_h, mtimebuf);
-            if (lbl) lbl->fg_color = gui_rgb(42, 46, 54);
-            lbl = gui_add_label(fp_window, layout.type_x, label_y, layout.type_w, label_h, type_str);
-            if (lbl) lbl->fg_color = gui_rgb(42, 46, 54);
-            lbl = gui_add_label(fp_window, layout.size_x, label_y, layout.size_w, label_h, sizebuf);
-            if (lbl) lbl->fg_color = gui_rgb(42, 46, 54);
+            icon_cell.x = layout.name_x;
+            icon_cell.y = y + 1;
+            icon_cell.w = layout.name_w;
+            icon_cell.h = row_h - 2;
+            gui_draw_file_icon_cell(&icon_cell, display_name, icon,
+                                    selected, hover,
+                                    gui_rgb(24, 28, 34));
+            gui_table_view_draw_text_cell(&table, 1, label_y, mtimebuf, gui_rgb(42, 46, 54));
+            gui_table_view_draw_text_cell(&table, 2, label_y, type_str, gui_rgb(42, 46, 54));
+            gui_table_view_draw_text_cell(&table, 3, label_y, sizebuf, gui_rgb(42, 46, 54));
         }
 
         y += row_h;
@@ -8729,23 +12329,14 @@ static void fp_on_window_close(gui_window_t *win, void *ud) {
 
 /* render edit mode ---------------------------------------------- */
 static void gui_file_preview_render_edit(void) {
-    char header[GUI_FP_MAX_PATH + 16];
-    char full[GUI_FP_MAX_PATH];
-    char buf[GUI_FP_VIEW_BUF_SIZE + 1];
-    char line[GUI_FP_EDIT_LINE_CHARS + 1];
-    int fd, total, i, pos, n;
-    int line_pos;
-    int line_idx;
-    int margin;
-    int gap;
-    int label_h;
-    int row_h;
-    int button_h;
+    int margin, gap, label_h, button_h;
+    int header_y, nav_y, body_y;
     int content_w;
-    int header_y;
-    int nav_y;
-    int body_y;
-    int visible_lines;
+    char full[GUI_FP_MAX_PATH];
+    char header[128];
+    char buf[GUI_WIDGET_TEXT_CAP];
+    int fd, n, total;
+    int pos;
 
     if (!fp_window) return;
 
@@ -8753,16 +12344,14 @@ static void gui_file_preview_render_edit(void) {
     if (margin < 8) margin = 8;
     gap = fp_panel_gap();
     label_h = fp_line_h() + fp_scale_i(4);
-    row_h = fp_text_row_h() + fp_scale_i(4);
     button_h = fp_button_h();
-    visible_lines = fp_edit_visible_lines();
     content_w = fp_window->rect.w - margin * 2;
     if (content_w < 120) content_w = 120;
     header_y = GUI_TITLE_HEIGHT + gap;
     nav_y = header_y + label_h + gap;
     body_y = nav_y + button_h + gap;
 
-    for (i = 0; i < GUI_FP_EDIT_MAX_LINES; i++) fp_edit_widgets[i] = 0;
+    fp_edit_textarea = 0;
     fp_edit_status = 0;
 
     pos = 0;
@@ -8779,13 +12368,12 @@ static void gui_file_preview_render_edit(void) {
                                    nav_y + (button_h - label_h) / 2,
                                    fp_window->rect.w - margin * 2 - fp_scale_i(172), label_h, "");
 
-    /* load existing content */
     fp_path_join(fp_path, fp_view_name, full, sizeof(full));
     fd = vfs_open(full, O_RDONLY, 0);
     total = 0;
     if (fd >= 0) {
-        while (total < GUI_FP_VIEW_BUF_SIZE) {
-            n = vfs_read(fd, buf + total, GUI_FP_VIEW_BUF_SIZE - total);
+        while (total < (int)sizeof(buf) - 1) {
+            n = vfs_read(fd, buf + total, (int)sizeof(buf) - 1 - total);
             if (n <= 0) break;
             total += n;
         }
@@ -8793,35 +12381,14 @@ static void gui_file_preview_render_edit(void) {
     }
     buf[total] = 0;
 
-    /* split into lines, fill visible textboxes */
-    line_idx = 0;
-    line_pos = 0;
-    for (i = 0; i <= total && line_idx < visible_lines; i++) {
-        char c = (i < total) ? buf[i] : '\n';
-        int flush = 0;
-        if (c == '\n') flush = 1;
-        else if (line_pos >= GUI_FP_EDIT_LINE_CHARS) flush = 1;
-
-        if (flush) {
-            line[line_pos] = 0;
-            fp_edit_widgets[line_idx] = gui_add_textbox(fp_window, margin,
-                                                        body_y + line_idx * row_h,
-                                                        content_w, row_h - fp_scale_i(3), line);
-            line_idx++;
-            line_pos = 0;
-            if (c == '\n') continue;
-        }
-        if (i < total) {
-            unsigned char uc = (unsigned char)c;
-            if (uc < 32 || uc > 126) c = '.';
-            line[line_pos++] = c;
-        }
-    }
-    /* fill remaining visible slots with empty textboxes so user can append */
-    for (; line_idx < visible_lines; line_idx++) {
-        fp_edit_widgets[line_idx] = gui_add_textbox(fp_window, margin,
-                                                    body_y + line_idx * row_h,
-                                                    content_w, row_h - fp_scale_i(3), "");
+    fp_edit_textarea = gui_add_textarea(fp_window, margin, body_y,
+                                        content_w,
+                                        fp_window->rect.h - body_y - margin,
+                                        buf);
+    if (fp_edit_textarea) {
+        gui_widget_set_textbox_flags(fp_edit_textarea,
+            GUI_TEXTBOX_FLAG_MULTILINE | GUI_TEXTBOX_FLAG_WRAP);
+        gui_widget_set_placeholder(fp_edit_textarea, i18n_t(I18N_KEY_WIN_FILE_EDITOR));
     }
 }
 
@@ -8996,7 +12563,3 @@ void gui_demo(void) {
     if (app) gui_start_app(app);
     gui_render();
 }
-
-
-
-
