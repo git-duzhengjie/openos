@@ -1155,7 +1155,6 @@ int main(int argc, char **argv)
     int open_link_button;
     int next_field_button;
     int submit_button;
-    int close_button;
     int toolbar;
     int rc = 0;
     int scroll_line = 0;
@@ -1194,13 +1193,12 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    toolbar = openos_gui_add_toolbar(win, 0, 0, 900, 54, "<|>|Reload|addr:Search OpenOS or type a URL|Close", OPENOS_GUI_TOOLBAR_SHOW_GRIP | OPENOS_GUI_TOOLBAR_GROUPED_BUTTONS | OPENOS_GUI_TOOLBAR_HAS_ADDRESS | OPENOS_GUI_TOOLBAR_BOTTOM_BORDER);
+    toolbar = openos_gui_add_toolbar(win, 0, 0, 900, 54, "<|>|Reload|addr:Search OpenOS or type a URL", OPENOS_GUI_TOOLBAR_SHOW_GRIP | OPENOS_GUI_TOOLBAR_GROUPED_BUTTONS | OPENOS_GUI_TOOLBAR_HAS_ADDRESS | OPENOS_GUI_TOOLBAR_BOTTOM_BORDER);
     (void)toolbar;
     back_button = openos_gui_add_button(win, 16, 18, 40, 24, "<");
     forward_button = openos_gui_add_button(win, 60, 18, 40, 24, ">");
     load_button = openos_gui_add_button(win, 104, 18, 72, 24, "Reload");
-    address_label = openos_gui_add_textbox(win, 188, 18, 620, 24, "");
-    close_button = openos_gui_add_button(win, 824, 18, 56, 24, "Close");
+    address_label = openos_gui_add_textbox(win, 188, 18, 692, 24, "");
 
     if (argc > 1 && argv && argv[1] && argv[1][0])
         browser_format_address(home_address, sizeof(home_address), host, path, is_file);
@@ -1277,8 +1275,6 @@ int main(int argc, char **argv)
                 }
                 continue;
             }
-            if (event.widget_id == (unsigned int)close_button)
-                break;
             if (event.widget_id == (unsigned int)address_label) {
                 if (load.home_visible) {
                     snprintf(load.address_text, sizeof(load.address_text), "");
