@@ -1166,11 +1166,11 @@ static int browser_open_selected_link(browser_load_context_t *load, browser_hist
     error[0] = 0;
     if (load->link_count > 0) snprintf(selected_href, sizeof(selected_href), "%s", load->links[load->selected_link]);
     if (!cur || !selected_href[0]) {
-        openos_gui_set_text(win, status_label, "OpenLink: no link");
+        openos_gui_set_text(win, status_label, "No link selected");
         return -1;
     }
     if (browser_resolve_link(cur, selected_href, next_host, sizeof(next_host), next_path, sizeof(next_path), &next_is_file, error, sizeof(error)) != 0) {
-        openos_gui_set_text(win, status_label, error[0] ? error : "OpenLink: unsupported link");
+        openos_gui_set_text(win, status_label, error[0] ? error : "Unsupported link");
         return -1;
     }
     *scroll_line = 0;
@@ -1324,12 +1324,6 @@ int main(int argc, char **argv)
     int load_button;
     int back_button;
     int forward_button;
-    int up_button;
-    int down_button;
-    int next_link_button;
-    int open_link_button;
-    int next_field_button;
-    int submit_button;
     int toolbar;
     int rc = 0;
     int scroll_line = 0;
@@ -1386,18 +1380,12 @@ int main(int argc, char **argv)
         snprintf(home_address, sizeof(home_address), "Search OpenOS or type a URL");
     browser_make_home_view(summary, sizeof(summary), home_address);
 
-    body_label = openos_gui_add_label(win, 18, 96, 860, 278, summary);
+    body_label = openos_gui_add_label(win, 18, 96, 860, 368, summary);
     openos_gui_set_label_options(win, body_label,
                                  OPENOS_GUI_LABEL_MULTILINE | OPENOS_GUI_LABEL_SELECTABLE | OPENOS_GUI_LABEL_COPYABLE,
                                  OPENOS_GUI_LABEL_ALIGN_LEFT);
 
-    status_label = openos_gui_add_statusbar(win, 0, 394, 900, 24, "Ready - type an address and press Enter|OpenOS Browser|", OPENOS_GUI_STATUSBAR_SIZE_GRIP | OPENOS_GUI_STATUSBAR_TOP_BORDER | OPENOS_GUI_STATUSBAR_LINK_PROMPT);
-    up_button = openos_gui_add_button(win, 56, 438, 56, 24, "Up");
-    down_button = openos_gui_add_button(win, 120, 438, 56, 24, "Down");
-    next_link_button = openos_gui_add_button(win, 208, 438, 80, 24, "NextLink");
-    open_link_button = openos_gui_add_button(win, 296, 438, 80, 24, "OpenLink");
-    next_field_button = openos_gui_add_button(win, 408, 438, 88, 24, "NextField");
-    submit_button = openos_gui_add_button(win, 504, 438, 72, 24, "Submit");
+    status_label = openos_gui_add_statusbar(win, 0, 484, 900, 24, "Ready - type an address and press Enter|OpenOS Browser|", OPENOS_GUI_STATUSBAR_SIZE_GRIP | OPENOS_GUI_STATUSBAR_TOP_BORDER | OPENOS_GUI_STATUSBAR_LINK_PROMPT);
     load.window_id = win;
     load.status_label_id = status_label;
     load.body_label_id = body_label;
@@ -1511,36 +1499,6 @@ int main(int argc, char **argv)
                 } else {
                     openos_gui_set_text(win, status_label, "Forward: no history");
                 }
-            } else if (event.widget_id == (unsigned int)next_link_button) {
-                if (load.link_count <= 0) {
-                    openos_gui_set_text(win, status_label, "No links");
-                } else {
-                    load.focus_mode = BROWSER_FOCUS_LINK;
-                    load.selected_link = (load.selected_link + 1) % load.link_count;
-                    browser_update_link_status(win, status_label, &load);
-                }
-            } else if (event.widget_id == (unsigned int)next_field_button) {
-                if (ob_form_state_focus_next(&load.form_state) >= 0) {
-                    load.focus_mode = BROWSER_FOCUS_FORM;
-                    browser_refresh_form_body(&load, body_label, scroll_line);
-                    browser_update_form_status(win, status_label, &load);
-                } else {
-                    openos_gui_set_text(win, status_label, "No form controls");
-                }
-            } else if (event.widget_id == (unsigned int)submit_button) {
-                browser_submit_current_form(&load, &history, win, status_label, body_label, &scroll_line);
-            } else if (event.widget_id == (unsigned int)open_link_button) {
-                browser_open_selected_link(&load, &history, win, status_label, body_label, &scroll_line);
-            } else if (event.widget_id == (unsigned int)up_button) {
-                char view[BROWSER_BODY_MAX + BROWSER_TITLE_MAX + 32];
-                if (scroll_line > 0) --scroll_line;
-                browser_make_view(view, sizeof(view), &load, scroll_line);
-                openos_gui_set_text(win, body_label, view[0] ? view : "Nothing to scroll");
-            } else if (event.widget_id == (unsigned int)down_button) {
-                char view[BROWSER_BODY_MAX + BROWSER_TITLE_MAX + 32];
-                ++scroll_line;
-                browser_make_view(view, sizeof(view), &load, scroll_line);
-                openos_gui_set_text(win, body_label, view[0] ? view : "End of page");
             }
         }
         browser_finish_completed_load(&load, win, status_label, body_label, tabview, &tabs, &scroll_line, &rc);
