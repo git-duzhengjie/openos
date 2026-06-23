@@ -643,13 +643,6 @@ static void gui_draw_file_icon_cell(const gui_rect_t *rect, const char *label,
                                     gui_icon_id_t icon, int selected,
                                     int highlighted, uint32_t text_color);
 
-static uint32_t gui_text_visible_len_for_width(const char *text, uint32_t max_chars) {
-    uint32_t n = 0;
-    if (!text || max_chars == 0) return 0;
-    while (text[n] && text[n] != '\n' && n < max_chars) n++;
-    return n;
-}
-
 static uint32_t gui_text_len_until_break(const char *text) {
     uint32_t n = 0;
     if (!text) return 0;
@@ -657,22 +650,56 @@ static uint32_t gui_text_len_until_break(const char *text) {
     return n;
 }
 
-static void gui_make_ellipsis_line(char *dst, uint32_t dst_size, const char *src, uint32_t max_chars, int use_ellipsis) {
-    uint32_t i = 0;
+static uint32_t gui_utf8_step_bytes(const char *s) {
+    unsigned char c;
+    if (!s || !s[0]) return 0;
+    c = (unsigned char)s[0];
+    if (c < 0x80u) return 1;
+    if ((c & 0xE0u) == 0xC0u && (s[1] & 0xC0u) == 0x80u) return 2;
+    if ((c & 0xF0u) == 0xE0u && (s[1] & 0xC0u) == 0x80u && (s[2] & 0xC0u) == 0x80u) return 3;
+    if ((c & 0xF8u) == 0xF0u && (s[1] & 0xC0u) == 0x80u &&
+        (s[2] & 0xC0u) == 0x80u && (s[3] & 0xC0u) == 0x80u) return 4;
+    return 1;
+}
+
+static uint32_t gui_utf8_prefix_for_width(const char *src, uint32_t max_bytes, int max_width_px) {
+    uint32_t used = 0;
+    if (!src || max_width_px <= 0) return 0;
+    while (src[used] && src[used] != '\n' && used < max_bytes) {
+        uint32_t step = gui_utf8_step_bytes(src + used);
+        char tmp[256];
+        if (step == 0) break;
+        if (used + step > max_bytes || used + step >= sizeof(tmp)) break;
+        memcpy(tmp, src, used + step);
+        tmp[used + step] = 0;
+        if ((int)font_measure_text_width(font_get_default(), tmp) > max_width_px) break;
+        used += step;
+    }
+    return used;
+}
+
+static void gui_make_ellipsis_line_px(char *dst, uint32_t dst_size, const char *src,
+                                      uint32_t max_src_bytes, int max_width_px,
+                                      int use_ellipsis) {
+    uint32_t n;
     if (!dst || dst_size == 0) return;
     dst[0] = '\0';
-    if (!src || max_chars == 0) return;
-    if (max_chars + 1 > dst_size) max_chars = dst_size - 1;
-    while (src[i] && src[i] != '\n' && i < max_chars) {
-        dst[i] = src[i];
-        i++;
-    }
-    dst[i] = '\0';
-    if (use_ellipsis && src[i] && max_chars >= 3) {
-        dst[max_chars - 3] = '.';
-        dst[max_chars - 2] = '.';
-        dst[max_chars - 1] = '.';
-        dst[max_chars] = '\0';
+    if (!src || max_src_bytes == 0 || max_width_px <= 0) return;
+    if (max_src_bytes >= dst_size) max_src_bytes = dst_size - 1;
+    n = gui_utf8_prefix_for_width(src, max_src_bytes, max_width_px);
+    if (n >= dst_size) n = dst_size - 1;
+    memcpy(dst, src, n);
+    dst[n] = 0;
+    if (use_ellipsis && src[n] && src[n] != '\n') {
+        int ell_w = (int)font_measure_text_width(font_get_default(), "...");
+        int avail = max_width_px > ell_w ? max_width_px - ell_w : 0;
+        n = gui_utf8_prefix_for_width(src, max_src_bytes, avail);
+        if (n + 3 >= dst_size) n = dst_size > 4 ? dst_size - 4 : 0;
+        memcpy(dst, src, n);
+        dst[n++] = '.';
+        dst[n++] = '.';
+        dst[n++] = '.';
+        dst[n] = 0;
     }
 }
 
@@ -682,8 +709,7 @@ static int gui_draw_inline_icon(gui_icon_id_t icon, int x, int top, int height) 
     return 14 + 4;
 }
 
-static int gui_label_aligned_x(const gui_widget_t *wg, int left, int width, uint32_t chars, int icon_offset) {
-    int text_w = (int)chars * GUI_CHAR_W;
+static int gui_label_aligned_x_px(const gui_widget_t *wg, int left, int width, int text_w, int icon_offset) {
     int area_w = width - icon_offset;
     if (!wg || area_w <= text_w) return left + icon_offset;
     if (wg->label_align == GUI_LABEL_ALIGN_RIGHT) return left + icon_offset + area_w - text_w;
@@ -695,7 +721,7 @@ static void gui_draw_label_widget(gui_widget_t *wg, int ax, int ay) {
     int text_off = 0;
     uint32_t color;
     gui_rect_t clip;
-    uint32_t max_chars;
+    int max_text_width;
     uint32_t line_height;
     uint32_t line_cap;
     uint32_t line;
@@ -708,8 +734,8 @@ static void gui_draw_label_widget(gui_widget_t *wg, int ax, int ay) {
     clip.h = wg->rect.h;
     if (clip.w <= 0 || clip.h <= 0) return;
     color = wg->fg_color ? wg->fg_color : g_gui.colors.text_fg;
-    max_chars = (uint32_t)(clip.w / GUI_CHAR_W);
-    if (max_chars == 0) return;
+    max_text_width = clip.w;
+    if (max_text_width <= 0) return;
     line_height = (uint32_t)gui_text_line_height_px();
     if (line_height == 0) line_height = 10;
     line_cap = (wg->label_flags & GUI_LABEL_FLAG_MULTILINE) ? (uint32_t)(clip.h / (int)line_height) : 1u;
@@ -720,21 +746,23 @@ static void gui_draw_label_widget(gui_widget_t *wg, int ax, int ay) {
         char line_buf[256];
         uint32_t src_len = gui_text_len_until_break(p);
         uint32_t consume_len = src_len;
-        uint32_t draw_len;
+        int line_w;
         int multiline = (wg->label_flags & GUI_LABEL_FLAG_MULTILINE) != 0;
-        int hard_wrap = multiline && src_len > max_chars;
-        int truncated = src_len > max_chars;
+        int hard_wrap;
+        int truncated;
         int y = ay + (int)(line * line_height);
         if (!multiline) y = gui_text_center_y(ay, wg->rect.h);
         if (y > ay + wg->rect.h - 1) break;
-        if (hard_wrap) {
-            consume_len = max_chars;
-            truncated = 0;
-        }
-        gui_make_ellipsis_line(line_buf, sizeof(line_buf), p, max_chars,
-                               truncated && (wg->label_flags & GUI_LABEL_FLAG_ELLIPSIS));
-        draw_len = gui_text_visible_len_for_width(line_buf, max_chars);
-        gui_draw_window_title_text(gui_label_aligned_x(wg, ax, wg->rect.w, draw_len, text_off), y, line_buf, color, &clip);
+        consume_len = gui_utf8_prefix_for_width(p, src_len, max_text_width);
+        hard_wrap = multiline && consume_len < src_len;
+        truncated = consume_len < src_len;
+        if (!hard_wrap) consume_len = src_len;
+        gui_make_ellipsis_line_px(line_buf, sizeof(line_buf), p,
+                                  hard_wrap ? consume_len : src_len,
+                                  max_text_width,
+                                  truncated && !hard_wrap && (wg->label_flags & GUI_LABEL_FLAG_ELLIPSIS));
+        line_w = (int)font_measure_text_width(font_get_default(), line_buf);
+        gui_draw_window_title_text(gui_label_aligned_x_px(wg, ax, wg->rect.w, line_w, text_off), y, line_buf, color, &clip);
         p += consume_len;
         if (!hard_wrap && *p == '\n') p++;
         if (!multiline) break;
@@ -3248,8 +3276,8 @@ static int gui_menubar_item_width(const gui_widget_t *wg, int index) {
     char shortcut[64];
     int width;
     gui_menubar_item_text(wg, index, label, sizeof(label), shortcut, sizeof(shortcut));
-    width = 18 + (int)strlen(label) * (int)GUI_CHAR_W;
-    if (shortcut[0]) width += 10 + (int)strlen(shortcut) * (int)GUI_CHAR_W;
+    width = 18 + (int)font_measure_text_width(font_get_default(), label);
+    if (shortcut[0]) width += 10 + (int)font_measure_text_width(font_get_default(), shortcut);
     if (width < 48) width = 48;
     return width;
 }
@@ -3329,7 +3357,7 @@ int gui_menubar_get_active(gui_widget_t *widget, int *out_active_index) {
 }
 
 
-static int gui_contextmenu_row_height(void) { return (int)GUI_CHAR_H + 8; }
+static int gui_contextmenu_row_height(void) { return gui_text_line_height_px() + 8; }
 
 static int gui_contextmenu_index_at(gui_widget_t *wg, int sx, int sy) {
     int ax, ay, row;
@@ -3717,7 +3745,7 @@ static void gui_toolbar_draw_field(gui_widget_t *wg, int ax, int ay, int *cursor
 }
 
 static void gui_toolbar_draw_button(gui_widget_t *wg, int ax, int ay, int *cursor_x, const char *label) {
-    int w = (int)strlen(label) * (int)GUI_CHAR_W + 18;
+    int w = (int)font_measure_text_width(font_get_default(), label) + 18;
     int x = ax + *cursor_x;
     gui_rect_t clip;
     if (w < 26) w = 26;
@@ -4011,7 +4039,7 @@ static int gui_tabview_copy_tab(gui_widget_t *wg, int index, char *out, uint32_t
 }
 
 static int gui_tabview_tab_width(const char *label, int closeable) {
-    int w = (int)strlen(label ? label : "") * (int)GUI_CHAR_W + 30 + (closeable ? 18 : 0);
+    int w = (int)font_measure_text_width(font_get_default(), label ? label : "") + 30 + (closeable ? 18 : 0);
     if (w < 58) w = 58;
     if (w > 150) w = 150;
     return w;
@@ -4162,7 +4190,7 @@ static void gui_draw_statusbar_text_cell(int x, int y, int w, int h, const char 
     clip.y = y + 2;
     clip.w = w - 8;
     clip.h = h - 4;
-    text_w = (int)strlen(text) * (int)GUI_CHAR_W;
+    text_w = (int)font_measure_text_width(font_get_default(), text);
     tx = clip.x;
     if (align == 1) tx = x + (w - text_w) / 2;
     else if (align == 2) tx = x + w - text_w - 6;
@@ -4734,7 +4762,7 @@ static void gui_draw_widget(gui_widget_t *wg) {
                 if (percent >= 100) { pct[0] = '1'; pct[1] = '0'; pct[2] = '0'; pct[3] = '%'; pct[4] = 0; }
                 else if (percent >= 10) { pct[0] = (char)('0' + percent / 10); pct[1] = (char)('0' + percent % 10); pct[2] = '%'; pct[3] = 0; }
                 else { pct[0] = (char)('0' + percent); pct[1] = '%'; pct[2] = 0; }
-                gui_draw_window_title_text(ax + wg->rect.w / 2 - ((int)strlen(pct) * (int)GUI_CHAR_W) / 2, gui_text_center_y(ay, wg->rect.h), pct, wg->enabled ? g_gui.colors.text_fg : gui_rgb(125, 130, 140), &clip);
+                gui_draw_window_title_text(ax + wg->rect.w / 2 - ((int)font_measure_text_width(font_get_default(), pct)) / 2, gui_text_center_y(ay, wg->rect.h), pct, wg->enabled ? g_gui.colors.text_fg : gui_rgb(125, 130, 140), &clip);
             }
         }
     } else if (wg->type == GUI_WIDGET_MENUBAR) {
@@ -4761,7 +4789,7 @@ static void gui_draw_widget(gui_widget_t *wg) {
             }
             gui_draw_window_title_text(cx + 8, gui_text_center_y(ay, wg->rect.h), label, wg->enabled ? g_gui.colors.text_fg : gui_rgb(145, 150, 160), &clip);
             if (shortcut[0]) {
-                int sx = cx + iw - 8 - (int)strlen(shortcut) * (int)GUI_CHAR_W;
+                int sx = cx + iw - 8 - (int)font_measure_text_width(font_get_default(), shortcut);
                 if (sx > cx + 8) gui_draw_window_title_text(sx, gui_text_center_y(ay, wg->rect.h), shortcut, gui_rgb(100, 110, 128), &clip);
             }
             cx += iw;
@@ -4864,7 +4892,7 @@ static void gui_draw_widget(gui_widget_t *wg) {
             if (selected && !disabled) gui_raw_fill_rect(ax + 2, yy, wg->rect.w - 4, row_h, gui_rgb(219, 234, 254));
             gui_draw_text(ax + 8, yy + 4, label, disabled ? gui_rgb(148, 163, 184) : g_gui.colors.text_fg);
             if (shortcut[0]) {
-                int sw = (int)strlen(shortcut) * (int)GUI_CHAR_W;
+                int sw = (int)font_measure_text_width(font_get_default(), shortcut);
                 gui_draw_text(ax + wg->rect.w - sw - 8, yy + 4, shortcut, disabled ? gui_rgb(148, 163, 184) : gui_rgb(75, 85, 99));
             }
         }
@@ -7969,7 +7997,8 @@ static void gui_menu_reset(gui_menu_t *menu) {
     if (!menu) return;
     menu->item_count = 0;
     menu->w = GUI_CTXMENU_W;
-    menu->item_h = GUI_CTXMENU_ITEM_H;
+    menu->item_h = gui_text_line_height_px() + 10;
+    if (menu->item_h < GUI_CTXMENU_ITEM_H) menu->item_h = GUI_CTXMENU_ITEM_H;
     menu->padding = GUI_CTXMENU_PADDING;
 }
 
@@ -8072,13 +8101,16 @@ static void gui_menu_draw(const gui_menu_t *menu) {
         }
         int hovered = (i == gui_menu_item_at(menu, g_gui.mouse_x, g_gui.mouse_y)) && item->enabled;
         gui_menu_draw_item_fill(menu->x + 3, item_y, menu->w - 6, menu->item_h, hovered, bg, selected_bg);
-        gui_draw_text(menu->x + 12, item_y + 5, item->label, item->enabled ? fg : dim);
-        if (item->shortcut[0]) {
-            int sx = menu->x + menu->w - 12 - (int)font_measure_text_width(font_get_default(), item->shortcut);
-            gui_draw_text(sx, item_y + 5, item->shortcut, item->enabled ? hint : dim);
-        }
-        if (item->has_submenu) {
-            gui_draw_text(menu->x + menu->w - 16, item_y + 5, ">", item->enabled ? hint : dim);
+        {
+            int ty = item_y + (menu->item_h - gui_text_line_height_px()) / 2;
+            gui_draw_text(menu->x + 12, ty, item->label, item->enabled ? fg : dim);
+            if (item->shortcut[0]) {
+                int sx = menu->x + menu->w - 12 - (int)font_measure_text_width(font_get_default(), item->shortcut);
+                gui_draw_text(sx, ty, item->shortcut, item->enabled ? hint : dim);
+            }
+            if (item->has_submenu) {
+                gui_draw_text(menu->x + menu->w - 16, ty, ">", item->enabled ? hint : dim);
+            }
         }
         item_y += menu->item_h;
     }
@@ -10214,13 +10246,13 @@ static void gui_draw_taskbar_search_box(gui_rect_t r) {
         gui_raw_line(r.x + 10, gy + 5, r.x + 14, gy + 9, gui_rgb(170, 190, 220));
     }
 
-    max_chars = (r.w - 28) / cw;
-    if (max_chars < 1) max_chars = 1;
-    strncpy(clipped, text, (size_t)max_chars);
+    max_chars = gui_utf8_prefix_for_width(text, (uint32_t)strlen(text), r.w - 28);
+    if (max_chars + 1 > (int)sizeof(clipped)) max_chars = (int)sizeof(clipped) - 1;
+    memcpy(clipped, text, (size_t)max_chars);
     clipped[max_chars] = 0;
     gui_draw_text(r.x + 22, ty, clipped, fg);
     if (g_gui.taskbar_search_focused) {
-        int caret_x = r.x + 22 + (int)g_gui.taskbar_search_len * cw;
+        int caret_x = r.x + 22 + (int)font_measure_text_width(font_get_default(), g_gui.taskbar_search_text);
         if (caret_x > r.x + r.w - 6) caret_x = r.x + r.w - 6;
         gui_raw_line(caret_x, ty, caret_x, ty + text_h - 1, gui_rgb(230, 240, 255));
     }
@@ -10290,7 +10322,6 @@ static void gui_draw_taskbar_search_results(void) {
     int panel_h;
     int panel_y;
     int max_chars;
-    int cw = GUI_CHAR_W > 0 ? GUI_CHAR_W : 8;
     int text_x_pad = 30;
     if (!g_gui.taskbar_search_focused || !g_gui.taskbar_search_text[0]) {
         g_gui.taskbar_search_results_rect.x = 0;
@@ -10332,7 +10363,7 @@ static void gui_draw_taskbar_search_results(void) {
                  g_gui.taskbar_search_results_rect.y + g_gui.taskbar_search_results_rect.h - 1,
                  gui_rgb(10, 14, 22));
 
-    max_chars = (g_gui.taskbar_search_results_rect.w - text_x_pad - 8) / cw;
+    max_chars = g_gui.taskbar_search_results_rect.w - text_x_pad - 8;
     if (max_chars < 1) max_chars = 1;
     if (g_gui.taskbar_search_result_count == 0) {
         gui_draw_text(g_gui.taskbar_search_results_rect.x + 10,
@@ -10366,9 +10397,9 @@ static void gui_draw_taskbar_search_results(void) {
         cell_rect.w -= 8;
         cell_rect.h -= 4;
         gui_list_view_draw_row(&list, (int)i);
-        while (r->path[j] && k + 1 < sizeof(line) && (int)k < max_chars) {
-            line[k++] = r->path[j++];
-        }
+        k = gui_utf8_prefix_for_width(r->path, (uint32_t)strlen(r->path), max_chars);
+        if (k + 1 > sizeof(line)) k = sizeof(line) - 1;
+        memcpy(line, r->path, k);
         line[k] = 0;
         text_color = r->is_dir ? gui_rgb(170, 220, 255) :
                      (r->is_executable ? gui_rgb(255, 210, 170) : gui_rgb(230, 240, 255));
@@ -10725,7 +10756,14 @@ void gui_poll(void) {
             gui_invalidate_rect(clock_rect.x, clock_rect.y, clock_rect.w, clock_rect.h);
         }
     }
-    if (gui_has_dirty()) gui_render();
+    if (gui_has_dirty()) {
+        static uint32_t last_render_ms = 0;
+        uint32_t now_ms = sched_time_ms();
+        if ((uint32_t)(now_ms - last_render_ms) >= 16u) {
+            last_render_ms = now_ms;
+            gui_render();
+        }
+    }
 }
 
 static void gui_demo_button(gui_widget_t *widget, void *user_data) {
