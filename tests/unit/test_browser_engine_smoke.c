@@ -72,7 +72,7 @@ int main(void)
         int i;
         if (parser.iface.parse(&parser.iface, links, &doc) <= 1 ||
             renderer.iface.render(&renderer.iface, &doc, rendered, sizeof(rendered)) <= 0 ||
-            !strstr(rendered, "One [1] Two [2] Three [3]")) {
+            !strstr(rendered, "One [1] /one Two [2] /two Three [3] three")) {
             fprintf(stderr, "browser link render smoke failed: %s\n", rendered);
             return 1;
         }
@@ -121,7 +121,7 @@ int main(void)
                               "<ul><li>First</li><li>Second <a href='/next'>Next</a></li></ul></main>";
         if (parser.iface.parse(&parser.iface, outline, &doc) <= 1 ||
             renderer.iface.render(&renderer.iface, &doc, rendered, sizeof(rendered)) <= 0 ||
-            !strstr(rendered, "# Title\n## Part\n### Detail\n- First\n- Second Next [1]")) {
+            !strstr(rendered, "# Title\n## Part\n### Detail\n- First\n- Second Next [1] /next")) {
             fprintf(stderr, "browser heading/list render smoke failed: %s\n", rendered);
             return 1;
         }
