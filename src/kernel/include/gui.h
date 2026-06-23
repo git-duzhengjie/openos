@@ -64,6 +64,10 @@
 #define GUI_TABLEVIEW_FLAG_GRID_LINES      0x00000002u
 #define GUI_TABLEVIEW_FLAG_ROW_SELECT      0x00000004u
 #define GUI_TABLEVIEW_FLAG_SORTABLE        0x00000008u
+
+#define GUI_PROGRESSBAR_INDETERMINATE      0x00000001u
+#define GUI_PROGRESSBAR_SHOW_PERCENT       0x00000002u
+
 #define GUI_DIALOG_TYPE_MASK               0x0000000fu
 #define GUI_DIALOG_TYPE_INFO               0x00000000u
 #define GUI_DIALOG_TYPE_WARNING            0x00000001u
@@ -148,6 +152,7 @@ typedef enum gui_widget_type {
     GUI_WIDGET_CONTEXTMENU,
     GUI_WIDGET_DIALOG,
     GUI_WIDGET_TOAST,
+    GUI_WIDGET_PROGRESSBAR,
     GUI_WIDGET_TREEVIEW,
     GUI_WIDGET_SCROLLBAR,
     GUI_WIDGET_SCROLLVIEW
@@ -578,6 +583,7 @@ int gui_listview_set_selected(gui_widget_t *widget, int selected_index);
 int gui_listview_get_selected(gui_widget_t *widget, int *out_selected_index);
 int gui_listview_set_items(gui_widget_t *widget, const char *items);
 gui_widget_t *gui_add_slider(gui_window_t *window, int x, int y, int w, int h, int min, int max, int value, int step, gui_widget_callback_t cb, void *user_data);
+gui_widget_t *gui_add_progressbar(gui_window_t *window, int x, int y, int w, int h, int min, int max, int value, uint32_t flags);
 gui_widget_t *gui_add_scrollbar(gui_window_t *window, int x, int y, int w, int h, int min, int max, int value, int step, gui_widget_callback_t cb, void *user_data);
 gui_widget_t *gui_add_scrollview(gui_window_t *window, int x, int y, int w, int h, int content_w, int content_h);
 gui_widget_t *gui_find_widget(gui_window_t *window, uint32_t id);
@@ -618,6 +624,9 @@ int gui_slider_set_value(gui_widget_t *widget, int value);
 int gui_slider_get_value(gui_widget_t *widget, int *out_value);
 int gui_slider_set_step(gui_widget_t *widget, int step);
 int gui_slider_get_step(gui_widget_t *widget, int *out_step);
+int gui_progressbar_set_value(gui_widget_t *widget, int value);
+int gui_progressbar_get_value(gui_widget_t *widget, int *out_value);
+int gui_progressbar_set_flags(gui_widget_t *widget, uint32_t flags);
 int gui_scrollbar_set_value(gui_widget_t *widget, int value);
 int gui_scrollbar_get_value(gui_widget_t *widget, int *out_value);
 int gui_scrollbar_set_step(gui_widget_t *widget, int step);

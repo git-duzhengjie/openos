@@ -360,6 +360,20 @@ int gui_user_add_slider(uint32_t window_id, int x, int y, int w, int h, int min,
     return (int)widget->id;
 }
 
+int gui_user_add_progressbar(uint32_t window_id, int x, int y, int w, int h, int min, int max, int value, uint32_t flags) {
+    gui_window_t *win = gui_find_window(window_id);
+    gui_widget_t *widget;
+    if (!gui_user_window_owned_by_current(win) || w <= 0 || h <= 0) {
+        return -1;
+    }
+    widget = gui_add_progressbar(win, x, y, w, h, min, max, value, flags);
+    if (!widget) {
+        return -1;
+    }
+    gui_invalidate_rect(win->rect.x, win->rect.y, win->rect.w, win->rect.h);
+    return (int)widget->id;
+}
+
 int gui_user_add_scrollbar(uint32_t window_id, int x, int y, int w, int h, int min, int max, int value, int step) {
     gui_window_t *win = gui_find_window(window_id);
     gui_widget_t *widget;
@@ -1123,6 +1137,42 @@ int gui_user_get_slider_step(uint32_t window_id, uint32_t widget_id, int *out_st
     widget = gui_find_widget(win, widget_id);
     if (!widget || widget->type != GUI_WIDGET_SLIDER) return -1;
     return gui_slider_get_step(widget, out_step);
+}
+
+int gui_user_set_progressbar_value(uint32_t window_id, uint32_t widget_id, int value) {
+    gui_window_t *win = gui_find_window(window_id);
+    gui_widget_t *widget;
+    int old_value;
+    if (!gui_user_window_owned_by_current(win)) return -1;
+    widget = gui_find_widget(win, widget_id);
+    if (!widget || widget->type != GUI_WIDGET_PROGRESSBAR) return -1;
+    old_value = widget->value;
+    if (gui_progressbar_set_value(widget, value) < 0) return -1;
+    if (widget->value != old_value) {
+        gui_user_post_value_event(widget);
+        gui_invalidate_rect(win->rect.x, win->rect.y, win->rect.w, win->rect.h);
+    }
+    return 0;
+}
+
+int gui_user_get_progressbar_value(uint32_t window_id, uint32_t widget_id, int *out_value) {
+    gui_window_t *win = gui_find_window(window_id);
+    gui_widget_t *widget;
+    if (!out_value || !gui_user_window_owned_by_current(win)) return -1;
+    widget = gui_find_widget(win, widget_id);
+    if (!widget || widget->type != GUI_WIDGET_PROGRESSBAR) return -1;
+    return gui_progressbar_get_value(widget, out_value);
+}
+
+int gui_user_set_progressbar_flags(uint32_t window_id, uint32_t widget_id, uint32_t flags) {
+    gui_window_t *win = gui_find_window(window_id);
+    gui_widget_t *widget;
+    if (!gui_user_window_owned_by_current(win)) return -1;
+    widget = gui_find_widget(win, widget_id);
+    if (!widget || widget->type != GUI_WIDGET_PROGRESSBAR) return -1;
+    if (gui_progressbar_set_flags(widget, flags) < 0) return -1;
+    gui_invalidate_rect(win->rect.x, win->rect.y, win->rect.w, win->rect.h);
+    return 0;
 }
 
 int gui_user_set_scrollbar_value(uint32_t window_id, uint32_t widget_id, int value) {

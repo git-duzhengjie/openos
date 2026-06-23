@@ -590,8 +590,8 @@
   - [x] 支持模态、按钮区、默认按钮、Esc 关闭
 - [x] Toast / Notification：轻量提示组件
   - [x] 支持短提示、自动消失、通知中心复用
-- [ ] ProgressBar：进度条组件
-  - [ ] 支持确定进度和不确定加载状态
+- [x] ProgressBar：进度条组件
+  - [x] 支持确定进度和不确定加载状态
 - [ ] Spinner / BusyIndicator：加载动画组件
   - [ ] 支持网络加载、后台任务等待状态
 - [ ] ImageView：图片显示组件

@@ -3800,6 +3800,60 @@ static void gui_draw_widget(gui_widget_t *wg) {
             gui_raw_fill_rect(ax + wg->rect.w - 6, ay + header_h + 2, 4, track_h, gui_rgb(226, 230, 238));
             gui_raw_fill_rect(ax + wg->rect.w - 6, thumb_y, 4, thumb_h, gui_rgb(150, 162, 182));
         }
+    } else if (wg->type == GUI_WIDGET_PROGRESSBAR) {
+        int min = wg->min_value;
+        int max = wg->max_value;
+        int val = wg->value;
+        int pad = 2;
+        int inner_w = wg->rect.w - pad * 2;
+        int inner_h = wg->rect.h - pad * 2;
+        int percent;
+        uint32_t bg = wg->enabled ? gui_rgb(238, 242, 248) : gui_rgb(226, 229, 235);
+        uint32_t border = wg->hovered || wg->focused ? g_gui.colors.accent : g_gui.colors.button_border;
+        uint32_t fill = wg->enabled ? g_gui.colors.accent : gui_rgb(150, 154, 162);
+        gui_rect_t clip = { ax + 2, ay + 1, wg->rect.w - 4, wg->rect.h - 2 };
+        if (max <= min) max = min + 1;
+        if (val < min) val = min;
+        if (val > max) val = max;
+        if (inner_w < 0) inner_w = 0;
+        if (inner_h < 0) inner_h = 0;
+        percent = ((val - min) * 100 + (max - min) / 2) / (max - min);
+        if (percent < 0) percent = 0;
+        if (percent > 100) percent = 100;
+        gui_raw_fill_rect(ax, ay, wg->rect.w, wg->rect.h, bg);
+        gui_raw_line(ax, ay, ax + wg->rect.w - 1, ay, border);
+        gui_raw_line(ax, ay + wg->rect.h - 1, ax + wg->rect.w - 1, ay + wg->rect.h - 1, border);
+        gui_raw_line(ax, ay, ax, ay + wg->rect.h - 1, border);
+        gui_raw_line(ax + wg->rect.w - 1, ay, ax + wg->rect.w - 1, ay + wg->rect.h - 1, border);
+        if (wg->label_flags & GUI_PROGRESSBAR_INDETERMINATE) {
+            int block_w = inner_w / 3;
+            int offset = (wg->value + (int)(wg->id * 7u)) % (inner_w > 1 ? inner_w : 1);
+            int bx = ax + pad + offset - block_w / 2;
+            int stripe;
+            if (block_w < 18) block_w = inner_w < 18 ? inner_w : 18;
+            if (block_w > 0 && inner_h > 0) {
+                if (bx < ax + pad) bx = ax + pad;
+                if (bx + block_w > ax + pad + inner_w) bx = ax + pad + inner_w - block_w;
+                gui_raw_fill_rect(bx, ay + pad, block_w, inner_h, fill);
+            }
+            for (stripe = -inner_h; stripe < inner_w + inner_h; stripe += 10) {
+                int x0 = ax + pad + stripe;
+                int y0 = ay + pad + inner_h - 1;
+                int x1 = x0 + inner_h;
+                int y1 = ay + pad;
+                if (x1 >= ax + pad && x0 < ax + pad + inner_w) gui_raw_line(x0, y0, x1, y1, gui_rgb(190, 212, 245));
+            }
+        } else {
+            int fill_w = ((val - min) * inner_w + (max - min) / 2) / (max - min);
+            if (fill_w > 0 && inner_h > 0) gui_raw_fill_rect(ax + pad, ay + pad, fill_w, inner_h, fill);
+            if (wg->label_flags & GUI_PROGRESSBAR_SHOW_PERCENT) {
+                char pct[8];
+                if (percent >= 100) { pct[0] = '1'; pct[1] = '0'; pct[2] = '0'; pct[3] = '%'; pct[4] = 0; }
+                else if (percent >= 10) { pct[0] = (char)('0' + percent / 10); pct[1] = (char)('0' + percent % 10); pct[2] = '%'; pct[3] = 0; }
+                else { pct[0] = (char)('0' + percent); pct[1] = '%'; pct[2] = 0; }
+                gui_draw_window_title_text(ax + wg->rect.w / 2 - ((int)strlen(pct) * (int)GUI_CHAR_W) / 2, gui_text_center_y(ay, wg->rect.h), pct, wg->enabled ? g_gui.colors.text_fg : gui_rgb(125, 130, 140), &clip);
+            }
+        }
     } else if (wg->type == GUI_WIDGET_MENUBAR) {
         int count = gui_menubar_item_count(wg);
         int i;
@@ -7740,6 +7794,38 @@ int gui_slider_set_step(gui_widget_t *widget, int step) {
 int gui_slider_get_step(gui_widget_t *widget, int *out_step) {
     if (!widget || widget->type != GUI_WIDGET_SLIDER || !out_step) return -1;
     *out_step = gui_slider_normalize_step(widget);
+    return 0;
+}
+
+gui_widget_t *gui_add_progressbar(gui_window_t *window, int x, int y, int w, int h, int min, int max, int value, uint32_t flags) {
+    gui_widget_t *wg = gui_alloc_widget(window, GUI_WIDGET_PROGRESSBAR, x, y, w, h, "");
+    if (wg) {
+        if (max <= min) max = min + 1;
+        wg->min_value = min;
+        wg->max_value = max;
+        wg->step = 1;
+        wg->label_flags = flags & (GUI_PROGRESSBAR_INDETERMINATE | GUI_PROGRESSBAR_SHOW_PERCENT);
+        wg->value = gui_slider_snap_value(wg, value);
+        wg->bg_color = 0;
+    }
+    return wg;
+}
+
+int gui_progressbar_set_value(gui_widget_t *widget, int value) {
+    if (!widget || widget->type != GUI_WIDGET_PROGRESSBAR) return -1;
+    widget->value = gui_slider_snap_value(widget, value);
+    return 0;
+}
+
+int gui_progressbar_get_value(gui_widget_t *widget, int *out_value) {
+    if (!widget || widget->type != GUI_WIDGET_PROGRESSBAR || !out_value) return -1;
+    *out_value = widget->value;
+    return 0;
+}
+
+int gui_progressbar_set_flags(gui_widget_t *widget, uint32_t flags) {
+    if (!widget || widget->type != GUI_WIDGET_PROGRESSBAR) return -1;
+    widget->label_flags = flags & (GUI_PROGRESSBAR_INDETERMINATE | GUI_PROGRESSBAR_SHOW_PERCENT);
     return 0;
 }
 

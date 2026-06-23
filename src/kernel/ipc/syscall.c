@@ -3244,6 +3244,38 @@ uint32_t syscall_dispatch(uint32_t num,
             return 0;
         }
 
+    case SYS_GUI_ADD_PROGRESSBAR:
+        {
+            gui_user_progressbar_request_t req;
+            int id;
+            if (!a || !user_ptr_valid((void *)a, sizeof(req), USERMEM_READ))
+                return (uint32_t)-1;
+            if (copy_from_user(&req, (const void *)a, sizeof(req)) < 0)
+                return (uint32_t)-1;
+            id = gui_user_add_progressbar(req.window_id, req.x, req.y, req.w, req.h, req.min, req.max, req.value, req.flags);
+            if (id < 0)
+                return (uint32_t)-1;
+            return (uint32_t)id;
+        }
+
+    case SYS_GUI_SET_PROGRESSBAR_VALUE:
+        return (uint32_t)gui_user_set_progressbar_value((uint32_t)a, (uint32_t)b, (int)c);
+
+    case SYS_GUI_GET_PROGRESSBAR_VALUE:
+        {
+            int value = 0;
+            if (!c || !user_ptr_valid((void *)c, sizeof(value), USERMEM_WRITE))
+                return (uint32_t)-1;
+            if (gui_user_get_progressbar_value((uint32_t)a, (uint32_t)b, &value) < 0)
+                return (uint32_t)-1;
+            if (copy_to_user((void *)c, &value, sizeof(value)) < 0)
+                return (uint32_t)-1;
+            return 0;
+        }
+
+    case SYS_GUI_SET_PROGRESSBAR_FLAGS:
+        return (uint32_t)gui_user_set_progressbar_flags((uint32_t)a, (uint32_t)b, (uint32_t)c);
+
     case SYS_GUI_ADD_SCROLLBAR:
         {
             gui_user_scrollbar_request_t req;

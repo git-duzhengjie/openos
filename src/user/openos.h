@@ -220,6 +220,10 @@
 #define SYS_GUI_ADD_TOAST 423
 #define SYS_GUI_SHOW_TOAST 424
 #define SYS_GUI_HIDE_TOAST 425
+#define SYS_GUI_ADD_PROGRESSBAR 426
+#define SYS_GUI_SET_PROGRESSBAR_VALUE 427
+#define SYS_GUI_GET_PROGRESSBAR_VALUE 428
+#define SYS_GUI_SET_PROGRESSBAR_FLAGS 429
 
 #define OPENOS_GUI_TEXTBOX_READONLY  (1u << 0)
 #define OPENOS_GUI_TEXTBOX_DISABLED  (1u << 1)
@@ -245,6 +249,9 @@
 #define OPENOS_GUI_DIALOG_RESULT_NONE        0
 #define OPENOS_GUI_DIALOG_RESULT_OK          1
 #define OPENOS_GUI_DIALOG_RESULT_CANCEL      2
+
+#define OPENOS_GUI_PROGRESSBAR_INDETERMINATE 0x00000001u
+#define OPENOS_GUI_PROGRESSBAR_SHOW_PERCENT   0x00000002u
 
 #define OPENOS_GUI_TOAST_INFO                OPENOS_GUI_DIALOG_INFO
 #define OPENOS_GUI_TOAST_WARNING             OPENOS_GUI_DIALOG_WARNING
@@ -796,6 +803,19 @@ typedef struct openos_gui_slider_request {
     int value;
     int step;
 } openos_gui_slider_request_t;
+
+typedef struct openos_gui_progressbar_request {
+    unsigned int window_id;
+    unsigned int widget_id;
+    int x;
+    int y;
+    int w;
+    int h;
+    int min;
+    int max;
+    int value;
+    unsigned int flags;
+} openos_gui_progressbar_request_t;
 
 typedef struct openos_gui_scrollbar_request {
     unsigned int window_id;
@@ -1493,6 +1513,22 @@ static inline int openos_gui_add_slider(int window_id, int x, int y, int w, int 
     return openos_syscall_result(openos_syscall1(SYS_GUI_ADD_SLIDER, (int)&req));
 }
 
+static inline int openos_gui_add_progressbar(int window_id, int x, int y, int w, int h, int min, int max, int value, unsigned int flags)
+{
+    openos_gui_progressbar_request_t req;
+    req.window_id = (unsigned int)window_id;
+    req.widget_id = 0;
+    req.x = x;
+    req.y = y;
+    req.w = w;
+    req.h = h;
+    req.min = min;
+    req.max = max;
+    req.value = value;
+    req.flags = flags;
+    return openos_syscall_result(openos_syscall1(SYS_GUI_ADD_PROGRESSBAR, (int)&req));
+}
+
 static inline int openos_gui_add_scrollbar(int window_id, int x, int y, int w, int h, int min, int max, int value, int step)
 {
     openos_gui_scrollbar_request_t req;
@@ -1861,6 +1897,22 @@ static inline int openos_gui_set_slider_step(int window_id, int widget_id, int s
 static inline int openos_gui_get_slider_step(int window_id, int widget_id, int *step)
 {
     return openos_syscall_result(openos_syscall3(SYS_GUI_GET_SLIDER_STEP, window_id, widget_id, (int)step));
+}
+
+static inline int openos_gui_set_progressbar_value(int window_id, int widget_id, int value)
+{
+    return openos_syscall_result(openos_syscall3(SYS_GUI_SET_PROGRESSBAR_VALUE, window_id, widget_id, value));
+}
+
+static inline int openos_gui_get_progressbar_value(int window_id, int widget_id, int *value)
+{
+    if (!value) return -1;
+    return openos_syscall_result(openos_syscall3(SYS_GUI_GET_PROGRESSBAR_VALUE, window_id, widget_id, (int)value));
+}
+
+static inline int openos_gui_set_progressbar_flags(int window_id, int widget_id, unsigned int flags)
+{
+    return openos_syscall_result(openos_syscall3(SYS_GUI_SET_PROGRESSBAR_FLAGS, window_id, widget_id, (int)flags));
 }
 
 static inline int openos_gui_set_scrollbar_value(int window_id, int widget_id, int value)

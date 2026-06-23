@@ -174,6 +174,19 @@ typedef struct gui_user_slider_request {
     int32_t step;
 } gui_user_slider_request_t;
 
+typedef struct gui_user_progressbar_request {
+    uint32_t window_id;
+    uint32_t widget_id;
+    int32_t x;
+    int32_t y;
+    int32_t w;
+    int32_t h;
+    int32_t min;
+    int32_t max;
+    int32_t value;
+    uint32_t flags;
+} gui_user_progressbar_request_t;
+
 typedef struct gui_user_scrollbar_request {
     uint32_t window_id;
     uint32_t widget_id;
@@ -290,6 +303,10 @@ int gui_user_set_slider_value(uint32_t window_id, uint32_t widget_id, int value)
 int gui_user_get_slider_value(uint32_t window_id, uint32_t widget_id, int *out_value);
 int gui_user_set_slider_step(uint32_t window_id, uint32_t widget_id, int step);
 int gui_user_get_slider_step(uint32_t window_id, uint32_t widget_id, int *out_step);
+int gui_user_add_progressbar(uint32_t window_id, int x, int y, int w, int h, int min, int max, int value, uint32_t flags);
+int gui_user_set_progressbar_value(uint32_t window_id, uint32_t widget_id, int value);
+int gui_user_get_progressbar_value(uint32_t window_id, uint32_t widget_id, int *out_value);
+int gui_user_set_progressbar_flags(uint32_t window_id, uint32_t widget_id, uint32_t flags);
 int gui_user_set_scrollbar_value(uint32_t window_id, uint32_t widget_id, int value);
 int gui_user_get_scrollbar_value(uint32_t window_id, uint32_t widget_id, int *out_value);
 int gui_user_set_scrollbar_step(uint32_t window_id, uint32_t widget_id, int step);
