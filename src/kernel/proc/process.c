@@ -401,7 +401,12 @@ static void proc_wake_waiter(uint32_t pid)
     if (!parent || !parent->threads)
         return;
 
-    thread_wake(parent->threads);
+    thread_t *t = parent->threads;
+    while (t) {
+        if (t->state == PROC_BLOCKED || t->state == PROC_SLEEPING)
+            thread_wake(t);
+        t = t->proc_next;
+    }
 }
 
 void proc_wake_sleepers(uint32_t now_ms)
@@ -412,8 +417,11 @@ void proc_wake_sleepers(uint32_t now_ms)
             continue;
 
         thread_t *t = p->threads;
-        if (t->state == PROC_SLEEPING && t->wake_time <= now_ms)
-            thread_wake(t);
+        while (t) {
+            if (t->state == PROC_SLEEPING && t->wake_time <= now_ms)
+                thread_wake(t);
+            t = t->proc_next;
+        }
     }
 }
 
@@ -1227,8 +1235,12 @@ int proc_send_signal(uint32_t pid, int sig)
         return -1;
 
     p->pending_signals |= (1u << sig);
-    if (p->threads && (p->threads->state == PROC_BLOCKED || p->threads->state == PROC_SLEEPING))
-        thread_wake(p->threads);
+    thread_t *t = p->threads;
+    while (t) {
+        if (t->state == PROC_BLOCKED || t->state == PROC_SLEEPING)
+            thread_wake(t);
+        t = t->proc_next;
+    }
 
     if (sig == OPENOS_SIGKILL)
         return proc_handle_pending_signals(pid);
