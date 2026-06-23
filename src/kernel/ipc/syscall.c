@@ -3126,6 +3126,64 @@ uint32_t syscall_dispatch(uint32_t num,
             return (uint32_t)gui_user_set_statusbar_flags(req.window_id, req.widget_id, req.flags);
         }
 
+    case SYS_GUI_ADD_TABVIEW:
+        {
+            gui_user_tabview_request_t req;
+            if (!a || !user_ptr_valid((void *)a, sizeof(req), USERMEM_READ))
+                return (uint32_t)-1;
+            if (copy_from_user(&req, (const void *)a, sizeof(req)) < 0)
+                return (uint32_t)-1;
+            req.tabs[sizeof(req.tabs) - 1] = 0;
+            return (uint32_t)gui_user_add_tabview(req.window_id, req.x, req.y, req.w, req.h, req.tabs, req.active_index, req.flags);
+        }
+
+    case SYS_GUI_SET_TABVIEW_TABS:
+        {
+            gui_user_tabview_request_t req;
+            if (!a || !user_ptr_valid((void *)a, sizeof(req), USERMEM_READ))
+                return (uint32_t)-1;
+            if (copy_from_user(&req, (const void *)a, sizeof(req)) < 0)
+                return (uint32_t)-1;
+            req.tabs[sizeof(req.tabs) - 1] = 0;
+            return (uint32_t)gui_user_set_tabview_tabs(req.window_id, req.widget_id, req.tabs);
+        }
+
+    case SYS_GUI_SET_TABVIEW_ACTIVE:
+        {
+            gui_user_tabview_request_t req;
+            if (!a || !user_ptr_valid((void *)a, sizeof(req), USERMEM_READ))
+                return (uint32_t)-1;
+            if (copy_from_user(&req, (const void *)a, sizeof(req)) < 0)
+                return (uint32_t)-1;
+            return (uint32_t)gui_user_set_tabview_active(req.window_id, req.widget_id, req.active_index);
+        }
+
+    case SYS_GUI_GET_TABVIEW_ACTIVE:
+        {
+            gui_user_tabview_request_t req;
+            int active = -1;
+            if (!a || !user_ptr_valid((void *)a, sizeof(req), USERMEM_READ | USERMEM_WRITE))
+                return (uint32_t)-1;
+            if (copy_from_user(&req, (const void *)a, sizeof(req)) < 0)
+                return (uint32_t)-1;
+            if (gui_user_get_tabview_active(req.window_id, req.widget_id, &active) < 0)
+                return (uint32_t)-1;
+            req.active_index = active;
+            if (copy_to_user((void *)a, &req, sizeof(req)) < 0)
+                return (uint32_t)-1;
+            return 0;
+        }
+
+    case SYS_GUI_CLOSE_TABVIEW_TAB:
+        {
+            gui_user_tabview_request_t req;
+            if (!a || !user_ptr_valid((void *)a, sizeof(req), USERMEM_READ))
+                return (uint32_t)-1;
+            if (copy_from_user(&req, (const void *)a, sizeof(req)) < 0)
+                return (uint32_t)-1;
+            return (uint32_t)gui_user_close_tabview_tab(req.window_id, req.widget_id, req.tab_index);
+        }
+
     case SYS_GUI_ADD_ICONVIEW:
         {
             gui_user_iconview_request_t req;

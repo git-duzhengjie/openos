@@ -1190,7 +1190,7 @@ static int gui_widget_can_focus(gui_widget_t *wg) {
             wg->type == GUI_WIDGET_CHECKBOX || wg->type == GUI_WIDGET_RADIOBUTTON ||
             wg->type == GUI_WIDGET_SELECT || wg->type == GUI_WIDGET_COMBOBOX || wg->type == GUI_WIDGET_LISTVIEW ||
             wg->type == GUI_WIDGET_TABLEVIEW || wg->type == GUI_WIDGET_MENUBAR ||
-            wg->type == GUI_WIDGET_CONTEXTMENU || wg->type == GUI_WIDGET_DIALOG ||
+            wg->type == GUI_WIDGET_TABVIEW || wg->type == GUI_WIDGET_CONTEXTMENU || wg->type == GUI_WIDGET_DIALOG ||
             (wg->type == GUI_WIDGET_LABEL &&
              (wg->label_flags & (GUI_LABEL_FLAG_SELECTABLE | GUI_LABEL_FLAG_COPYABLE)) != 0));
 }
@@ -1202,7 +1202,7 @@ static int gui_widget_is_clickable(gui_widget_t *wg) {
             wg->type == GUI_WIDGET_RADIOBUTTON || wg->type == GUI_WIDGET_SELECT ||
             wg->type == GUI_WIDGET_COMBOBOX ||
             wg->type == GUI_WIDGET_LISTVIEW || wg->type == GUI_WIDGET_TABLEVIEW ||
-            wg->type == GUI_WIDGET_MENUBAR || wg->type == GUI_WIDGET_CONTEXTMENU || wg->type == GUI_WIDGET_DIALOG || wg->type == GUI_WIDGET_TOAST || wg->type == GUI_WIDGET_TREEVIEW || wg->type == GUI_WIDGET_ICONVIEW ||
+            wg->type == GUI_WIDGET_MENUBAR || wg->type == GUI_WIDGET_TABVIEW || wg->type == GUI_WIDGET_CONTEXTMENU || wg->type == GUI_WIDGET_DIALOG || wg->type == GUI_WIDGET_TOAST || wg->type == GUI_WIDGET_TREEVIEW || wg->type == GUI_WIDGET_ICONVIEW ||
             (wg->type == GUI_WIDGET_LABEL && (wg->label_flags & GUI_LABEL_FLAG_COPYABLE)));
 }
 
@@ -1213,7 +1213,7 @@ static int gui_widget_is_hoverable(gui_widget_t *wg) {
             wg->type == GUI_WIDGET_RADIOBUTTON || wg->type == GUI_WIDGET_SELECT ||
             wg->type == GUI_WIDGET_COMBOBOX ||
             wg->type == GUI_WIDGET_LISTVIEW || wg->type == GUI_WIDGET_TABLEVIEW ||
-            wg->type == GUI_WIDGET_MENUBAR || wg->type == GUI_WIDGET_CONTEXTMENU || wg->type == GUI_WIDGET_DIALOG || wg->type == GUI_WIDGET_TOAST ||
+            wg->type == GUI_WIDGET_MENUBAR || wg->type == GUI_WIDGET_TABVIEW || wg->type == GUI_WIDGET_CONTEXTMENU || wg->type == GUI_WIDGET_DIALOG || wg->type == GUI_WIDGET_TOAST ||
             wg->type == GUI_WIDGET_SLIDER || wg->type == GUI_WIDGET_SCROLLBAR || wg->type == GUI_WIDGET_ICONVIEW);
 }
 
@@ -3779,6 +3779,195 @@ static void gui_statusbar_split(const char *text, char *left, char *center, char
     }
 }
 
+static int gui_tabview_tab_count(gui_widget_t *wg) {
+    const char *p;
+    int count = 0;
+    int in_tab = 0;
+    if (!wg) return 0;
+    p = wg->text;
+    while (p && *p) {
+        if (*p == '|' || *p == '\n' || *p == '\r') {
+            if (in_tab) count++;
+            in_tab = 0;
+        } else {
+            in_tab = 1;
+        }
+        p++;
+    }
+    if (in_tab) count++;
+    return count;
+}
+
+static int gui_tabview_copy_tab(gui_widget_t *wg, int index, char *out, uint32_t out_size) {
+    const char *p;
+    int cur = 0;
+    uint32_t n = 0;
+    int in_tab = 0;
+    if (!wg || !out || out_size == 0 || index < 0) return -1;
+    out[0] = 0;
+    p = wg->text;
+    while (p && *p) {
+        if (*p == '|' || *p == '\n' || *p == '\r') {
+            if (in_tab) {
+                if (cur == index) { out[n] = 0; return 0; }
+                cur++;
+            }
+            n = 0;
+            in_tab = 0;
+        } else {
+            in_tab = 1;
+            if (cur == index && n + 1 < out_size) out[n++] = *p;
+        }
+        p++;
+    }
+    if (in_tab && cur == index) { out[n] = 0; return 0; }
+    out[0] = 0;
+    return -1;
+}
+
+static int gui_tabview_tab_width(const char *label, int closeable) {
+    int w = (int)strlen(label ? label : "") * (int)GUI_CHAR_W + 30 + (closeable ? 18 : 0);
+    if (w < 58) w = 58;
+    if (w > 150) w = 150;
+    return w;
+}
+
+static int gui_tabview_index_at(gui_widget_t *wg, int sx, int sy, int *out_close) {
+    int ax, ay, i, count, x;
+    int closeable;
+    char label[GUI_WIDGET_TEXT_CAP];
+    if (out_close) *out_close = 0;
+    if (!wg || wg->type != GUI_WIDGET_TABVIEW) return -1;
+    if (!gui_widget_absolute_origin(wg, &ax, &ay)) return -1;
+    if (sx < ax || sx >= ax + wg->rect.w || sy < ay || sy >= ay + 28) return -1;
+    count = gui_tabview_tab_count(wg);
+    closeable = (wg->tabview_flags & GUI_TABVIEW_CLOSE_BUTTONS) != 0;
+    x = ax + 2;
+    for (i = 0; i < count; ++i) {
+        int tw;
+        if (gui_tabview_copy_tab(wg, i, label, sizeof(label)) < 0) continue;
+        tw = gui_tabview_tab_width(label, closeable);
+        if (sx >= x && sx < x + tw) {
+            if (out_close && closeable && sx >= x + tw - 20 && sy >= ay + 6 && sy < ay + 22) *out_close = 1;
+            return i;
+        }
+        x += tw - 1;
+        if (x >= ax + wg->rect.w - 2) break;
+    }
+    return -1;
+}
+
+static void gui_tabview_select(gui_widget_t *wg, int index) {
+    int old_value;
+    int count;
+    if (!wg || wg->type != GUI_WIDGET_TABVIEW || !wg->enabled) return;
+    count = gui_tabview_tab_count(wg);
+    if (index < 0 || index >= count) return;
+    old_value = wg->value;
+    wg->value = index;
+    if (old_value != wg->value) gui_user_post_value_event(wg);
+    gui_invalidate_all();
+}
+
+int gui_tabview_set_tabs(gui_widget_t *widget, const char *tabs) {
+    int count;
+    if (!widget || widget->type != GUI_WIDGET_TABVIEW) return -1;
+    gui_widget_set_text(widget, tabs ? tabs : "");
+    count = gui_tabview_tab_count(widget);
+    widget->max_value = count - 1;
+    if (count <= 0) widget->value = -1;
+    else if (widget->value < 0 || widget->value >= count) widget->value = 0;
+    return 0;
+}
+
+int gui_tabview_set_active(gui_widget_t *widget, int active_index) {
+    int count;
+    if (!widget || widget->type != GUI_WIDGET_TABVIEW) return -1;
+    count = gui_tabview_tab_count(widget);
+    if (count <= 0) { widget->value = -1; return active_index < 0 ? 0 : -1; }
+    if (active_index < 0 || active_index >= count) return -1;
+    widget->value = active_index;
+    return 0;
+}
+
+int gui_tabview_get_active(gui_widget_t *widget, int *out_active_index) {
+    if (!widget || !out_active_index || widget->type != GUI_WIDGET_TABVIEW) return -1;
+    *out_active_index = widget->value;
+    return 0;
+}
+
+int gui_tabview_close_tab(gui_widget_t *widget, int tab_index) {
+    char out[GUI_WIDGET_TEXT_CAP];
+    char label[GUI_WIDGET_TEXT_CAP];
+    int i, count, first = 1;
+    if (!widget || widget->type != GUI_WIDGET_TABVIEW) return -1;
+    count = gui_tabview_tab_count(widget);
+    if (tab_index < 0 || tab_index >= count) return -1;
+    out[0] = 0;
+    for (i = 0; i < count; ++i) {
+        if (i == tab_index) continue;
+        if (gui_tabview_copy_tab(widget, i, label, sizeof(label)) < 0) continue;
+        if (!first) gui_tableview_append(out, sizeof(out), "|");
+        gui_tableview_append(out, sizeof(out), label);
+        first = 0;
+    }
+    gui_widget_set_text(widget, out);
+    count = gui_tabview_tab_count(widget);
+    widget->max_value = count - 1;
+    if (count <= 0) widget->value = -1;
+    else if (widget->value > tab_index) widget->value--;
+    else if (widget->value >= count) widget->value = count - 1;
+    gui_user_post_value_event(widget);
+    gui_invalidate_all();
+    return 0;
+}
+
+static void gui_tabview_activate(gui_widget_t *wg, int tab_index, int close_hit) {
+    if (!wg || wg->type != GUI_WIDGET_TABVIEW) return;
+    if (close_hit && (wg->tabview_flags & GUI_TABVIEW_CLOSE_BUTTONS)) gui_tabview_close_tab(wg, tab_index);
+    else gui_tabview_select(wg, tab_index);
+}
+
+static void gui_draw_tabview_widget(gui_widget_t *wg, int ax, int ay) {
+    int count, i, x;
+    int closeable;
+    char label[GUI_WIDGET_TEXT_CAP];
+    gui_raw_fill_rect(ax, ay, wg->rect.w, wg->rect.h, gui_rgb(245, 247, 251));
+    if (wg->rect.h > 28) gui_raw_fill_rect(ax, ay + 27, wg->rect.w, wg->rect.h - 27, gui_rgb(255, 255, 255));
+    gui_raw_line(ax, ay + 27, ax + wg->rect.w - 1, ay + 27, gui_rgb(166, 174, 188));
+    if (wg->tabview_flags & GUI_TABVIEW_BOTTOM_BORDER) gui_raw_line(ax, ay + wg->rect.h - 1, ax + wg->rect.w - 1, ay + wg->rect.h - 1, gui_rgb(166, 174, 188));
+    count = gui_tabview_tab_count(wg);
+    closeable = (wg->tabview_flags & GUI_TABVIEW_CLOSE_BUTTONS) != 0;
+    x = ax + 2;
+    for (i = 0; i < count; ++i) {
+        int tw;
+        uint32_t bg;
+        gui_rect_t clip;
+        if (gui_tabview_copy_tab(wg, i, label, sizeof(label)) < 0) continue;
+        tw = gui_tabview_tab_width(label, closeable);
+        if (x + tw > ax + wg->rect.w - 2) tw = ax + wg->rect.w - 2 - x;
+        if (tw <= 18) break;
+        bg = (i == wg->value) ? gui_rgb(255, 255, 255) : gui_rgb(226, 232, 240);
+        gui_raw_fill_rect(x, ay + 3, tw, 25, bg);
+        gui_raw_line(x, ay + 3, x + tw - 1, ay + 3, gui_rgb(255, 255, 255));
+        gui_raw_line(x, ay + 3, x, ay + 27, gui_rgb(166, 174, 188));
+        gui_raw_line(x + tw - 1, ay + 3, x + tw - 1, ay + 27, gui_rgb(166, 174, 188));
+        if (i != wg->value) gui_raw_line(x, ay + 27, x + tw - 1, ay + 27, gui_rgb(166, 174, 188));
+        clip.x = x + 10;
+        clip.y = ay + 5;
+        clip.w = tw - 18 - (closeable ? 18 : 0);
+        clip.h = 20;
+        if (clip.w > 0) gui_draw_window_title_text(clip.x, gui_text_center_y(ay + 3, 25), label, g_gui.colors.text_fg, &clip);
+        if (closeable) {
+            int cx = x + tw - 15;
+            int cy = ay + 15;
+            gui_raw_line(cx - 3, cy - 3, cx + 3, cy + 3, gui_rgb(92, 102, 118));
+            gui_raw_line(cx + 3, cy - 3, cx - 3, cy + 3, gui_rgb(92, 102, 118));
+        }
+        x += tw - 1;
+    }
+}
+
 static void gui_draw_statusbar_text_cell(int x, int y, int w, int h, const char *text, uint32_t color, int align) {
     gui_rect_t clip;
     int tx;
@@ -3921,6 +4110,8 @@ static void gui_draw_widget(gui_widget_t *wg) {
         gui_draw_toolbar_widget(wg, ax, ay);
     } else if (wg->type == GUI_WIDGET_STATUSBAR) {
         gui_draw_statusbar_widget(wg, ax, ay);
+    } else if (wg->type == GUI_WIDGET_TABVIEW) {
+        gui_draw_tabview_widget(wg, ax, ay);
     } else if (wg->type == GUI_WIDGET_ICONVIEW) {
         int count = gui_iconview_count(wg);
         int cols = gui_iconview_columns(wg);
@@ -5822,6 +6013,12 @@ static void gui_handle_mouse_down(int x, int y) {
                 int menu_index = gui_menubar_index_at(wg, x, y);
                 gui_set_focused_widget(wg);
                 if (menu_index >= 0) gui_menubar_activate(wg, menu_index);
+                return;
+            } else if (wg->type == GUI_WIDGET_TABVIEW) {
+                int close_hit = 0;
+                int tab_index = gui_tabview_index_at(wg, x, y, &close_hit);
+                gui_set_focused_widget(wg);
+                if (tab_index >= 0) gui_tabview_activate(wg, tab_index, close_hit);
                 return;
             } else if (wg->type == GUI_WIDGET_CONTEXTMENU) {
                 int item_index = gui_contextmenu_index_at(wg, x, y);
@@ -8473,6 +8670,20 @@ int gui_statusbar_set_flags(gui_widget_t *widget, uint32_t flags) {
     if (!widget || widget->type != GUI_WIDGET_STATUSBAR) return -1;
     widget->statusbar_flags = flags & (GUI_STATUSBAR_LOADING | GUI_STATUSBAR_SIZE_GRIP | GUI_STATUSBAR_LINK_PROMPT | GUI_STATUSBAR_TOP_BORDER);
     return 0;
+}
+
+gui_widget_t *gui_add_tabview(gui_window_t *window, int x, int y, int w, int h, const char *tabs, int active_index, uint32_t flags, gui_widget_callback_t cb, void *user_data) {
+    gui_widget_t *wg = gui_alloc_widget(window, GUI_WIDGET_TABVIEW, x, y, w, h, "TabView");
+    if (wg) {
+        wg->on_click = cb;
+        wg->user_data = user_data;
+        wg->tabview_flags = flags & (GUI_TABVIEW_CLOSE_BUTTONS | GUI_TABVIEW_SCROLLABLE | GUI_TABVIEW_BOTTOM_BORDER);
+        wg->min_value = 0;
+        wg->value = active_index;
+        gui_tabview_set_tabs(wg, tabs ? tabs : "");
+        if (active_index >= 0) gui_tabview_set_active(wg, active_index);
+    }
+    return wg;
 }
 
 gui_widget_t *gui_add_iconview(gui_window_t *window, int x, int y, int w, int h, const char *items, int selected_index, uint32_t flags, gui_widget_callback_t cb, void *user_data) {

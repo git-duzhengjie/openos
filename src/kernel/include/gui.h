@@ -92,6 +92,10 @@
 #define GUI_TREEVIEW_FLAG_SHOW_LINES        0x00000001u
 #define GUI_TREEVIEW_FLAG_SHOW_ICONS        0x00000002u
 
+#define GUI_TABVIEW_CLOSE_BUTTONS           0x00000001u
+#define GUI_TABVIEW_SCROLLABLE               0x00000002u
+#define GUI_TABVIEW_BOTTOM_BORDER            0x00000004u
+
 #define GUI_PANEL_FLAG_BORDER      0x00000001u
 #define GUI_PANEL_FLAG_ROUNDED     0x00000002u
 #define GUI_PANEL_FLAG_SHADOW      0x00000004u
@@ -167,6 +171,7 @@ typedef enum gui_widget_type {
     GUI_WIDGET_IMAGEVIEW,
     GUI_WIDGET_TOOLBAR,
     GUI_WIDGET_STATUSBAR,
+    GUI_WIDGET_TABVIEW,
     GUI_WIDGET_TREEVIEW,
     GUI_WIDGET_SCROLLBAR,
     GUI_WIDGET_SCROLLVIEW
@@ -271,6 +276,7 @@ struct gui_widget {
     uint32_t image_flags;
     uint32_t toolbar_flags;
     uint32_t statusbar_flags;
+    uint32_t tabview_flags;
 };
 
 struct gui_window {
@@ -576,6 +582,11 @@ int gui_toolbar_set_items(gui_widget_t *widget, const char *items);
 gui_widget_t *gui_add_statusbar(gui_window_t *window, int x, int y, int w, int h, const char *text, uint32_t flags);
 int gui_statusbar_set_text(gui_widget_t *widget, const char *text);
 int gui_statusbar_set_flags(gui_widget_t *widget, uint32_t flags);
+gui_widget_t *gui_add_tabview(gui_window_t *window, int x, int y, int w, int h, const char *tabs, int active_index, uint32_t flags, gui_widget_callback_t cb, void *user_data);
+int gui_tabview_set_tabs(gui_widget_t *widget, const char *tabs);
+int gui_tabview_set_active(gui_widget_t *widget, int active_index);
+int gui_tabview_get_active(gui_widget_t *widget, int *out_active_index);
+int gui_tabview_close_tab(gui_widget_t *widget, int tab_index);
 int gui_iconview_set_items(gui_widget_t *widget, const char *items);
 int gui_iconview_set_selected(gui_widget_t *widget, int selected_index);
 int gui_iconview_get_selected(gui_widget_t *widget, int *out_selected_index);

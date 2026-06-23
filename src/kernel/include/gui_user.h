@@ -91,6 +91,19 @@ typedef struct gui_user_statusbar_request {
     char text[256];
 } gui_user_statusbar_request_t;
 
+typedef struct gui_user_tabview_request {
+    uint32_t window_id;
+    uint32_t widget_id;
+    int32_t x;
+    int32_t y;
+    int32_t w;
+    int32_t h;
+    int32_t active_index;
+    int32_t tab_index;
+    uint32_t flags;
+    char tabs[256];
+} gui_user_tabview_request_t;
+
 typedef struct gui_user_radio_request {
     uint32_t window_id;
     uint32_t group_id;
@@ -321,6 +334,11 @@ int gui_user_set_toolbar_items(uint32_t window_id, uint32_t widget_id, const cha
 int gui_user_add_statusbar(uint32_t window_id, int x, int y, int w, int h, const char *text, uint32_t flags);
 int gui_user_set_statusbar_text(uint32_t window_id, uint32_t widget_id, const char *text);
 int gui_user_set_statusbar_flags(uint32_t window_id, uint32_t widget_id, uint32_t flags);
+int gui_user_add_tabview(uint32_t window_id, int x, int y, int w, int h, const char *tabs, int active_index, uint32_t flags);
+int gui_user_set_tabview_tabs(uint32_t window_id, uint32_t widget_id, const char *tabs);
+int gui_user_set_tabview_active(uint32_t window_id, uint32_t widget_id, int active_index);
+int gui_user_get_tabview_active(uint32_t window_id, uint32_t widget_id, int *out_active_index);
+int gui_user_close_tabview_tab(uint32_t window_id, uint32_t widget_id, int tab_index);
 int gui_user_add_panel(uint32_t window_id, int x, int y, int w, int h, uint32_t color);
 int gui_user_add_canvas(uint32_t window_id, int x, int y, int w, int h, uint32_t color);
 int gui_user_add_toggle(uint32_t window_id, int x, int y, int w, int h, const char *text, int checked);

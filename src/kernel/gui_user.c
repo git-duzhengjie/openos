@@ -299,6 +299,62 @@ int gui_user_set_statusbar_flags(uint32_t window_id, uint32_t widget_id, uint32_
     return 0;
 }
 
+int gui_user_add_tabview(uint32_t window_id, int x, int y, int w, int h, const char *tabs, int active_index, uint32_t flags) {
+    gui_window_t *win = gui_find_window(window_id);
+    gui_widget_t *widget;
+    char safe_tabs[GUI_USER_TEXT_MAX + 1];
+    if (!gui_user_window_owned_by_current(win) || w <= 0 || h <= 0) return -1;
+    gui_user_copy_text(safe_tabs, sizeof(safe_tabs), tabs ? tabs : "");
+    widget = gui_add_tabview(win, x, y, w, h, safe_tabs, active_index, flags, NULL, NULL);
+    if (!widget) return -1;
+    gui_invalidate_rect(win->rect.x, win->rect.y, win->rect.w, win->rect.h);
+    return (int)widget->id;
+}
+
+int gui_user_set_tabview_tabs(uint32_t window_id, uint32_t widget_id, const char *tabs) {
+    gui_window_t *win = gui_find_window(window_id);
+    gui_widget_t *widget;
+    char safe_tabs[GUI_USER_TEXT_MAX + 1];
+    if (!gui_user_window_owned_by_current(win)) return -1;
+    widget = gui_find_widget(win, widget_id);
+    if (!widget || widget->type != GUI_WIDGET_TABVIEW) return -1;
+    gui_user_copy_text(safe_tabs, sizeof(safe_tabs), tabs ? tabs : "");
+    if (gui_tabview_set_tabs(widget, safe_tabs) < 0) return -1;
+    gui_invalidate_rect(win->rect.x, win->rect.y, win->rect.w, win->rect.h);
+    return 0;
+}
+
+int gui_user_set_tabview_active(uint32_t window_id, uint32_t widget_id, int active_index) {
+    gui_window_t *win = gui_find_window(window_id);
+    gui_widget_t *widget;
+    if (!gui_user_window_owned_by_current(win)) return -1;
+    widget = gui_find_widget(win, widget_id);
+    if (!widget || widget->type != GUI_WIDGET_TABVIEW) return -1;
+    if (gui_tabview_set_active(widget, active_index) < 0) return -1;
+    gui_invalidate_rect(win->rect.x, win->rect.y, win->rect.w, win->rect.h);
+    return 0;
+}
+
+int gui_user_get_tabview_active(uint32_t window_id, uint32_t widget_id, int *out_active_index) {
+    gui_window_t *win = gui_find_window(window_id);
+    gui_widget_t *widget;
+    if (!gui_user_window_owned_by_current(win) || !out_active_index) return -1;
+    widget = gui_find_widget(win, widget_id);
+    if (!widget || widget->type != GUI_WIDGET_TABVIEW) return -1;
+    return gui_tabview_get_active(widget, out_active_index);
+}
+
+int gui_user_close_tabview_tab(uint32_t window_id, uint32_t widget_id, int tab_index) {
+    gui_window_t *win = gui_find_window(window_id);
+    gui_widget_t *widget;
+    if (!gui_user_window_owned_by_current(win)) return -1;
+    widget = gui_find_widget(win, widget_id);
+    if (!widget || widget->type != GUI_WIDGET_TABVIEW) return -1;
+    if (gui_tabview_close_tab(widget, tab_index) < 0) return -1;
+    gui_invalidate_rect(win->rect.x, win->rect.y, win->rect.w, win->rect.h);
+    return 0;
+}
+
 int gui_user_add_iconview(uint32_t window_id, int x, int y, int w, int h, const char *items, int selected_index, uint32_t flags) {
     gui_window_t *win = gui_find_window(window_id);
     gui_widget_t *widget;
