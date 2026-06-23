@@ -98,6 +98,7 @@ int main(void)
     (void)openos_gui_add_error_dialog(win, 192, 232, 210, 108, "Error", "错误弹窗：用于失败状态。");
     (void)openos_gui_add_dialog(win, 414, 232, 210, 108, "Confirm", "Confirm dialog: default OK, Esc cancels.",
                                 OPENOS_GUI_DIALOG_CONFIRM | OPENOS_GUI_DIALOG_CANCEL | OPENOS_GUI_DIALOG_MODAL | OPENOS_GUI_DIALOG_DEFAULT_OK);
+    (void)openos_gui_add_toast(win, 300, 344, 260, 52, "Settings saved automatically", OPENOS_GUI_TOAST_INFO, 3000);
     if (openos_gui_get_contextmenu_index(win, contextmenu, &contextmenu_value) < 0) {
         contextmenu_value = -1;
     }

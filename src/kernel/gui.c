@@ -1180,6 +1180,7 @@ static gui_widget_t *gui_widget_at(gui_window_t *w, int sx, int sy) {
 
 static int gui_widget_can_focus(gui_widget_t *wg) {
     if (!wg || !wg->visible || !wg->enabled) return 0;
+    if (wg->type == GUI_WIDGET_TOAST) return 0;
     if ((wg->type == GUI_WIDGET_TEXTBOX || wg->type == GUI_WIDGET_TEXTAREA) &&
         (wg->textbox_flags & GUI_TEXTBOX_FLAG_DISABLED)) return 0;
     return (wg->type == GUI_WIDGET_TEXTBOX || wg->type == GUI_WIDGET_TEXTAREA || wg->type == GUI_WIDGET_BUTTON ||
@@ -1199,7 +1200,7 @@ static int gui_widget_is_clickable(gui_widget_t *wg) {
             wg->type == GUI_WIDGET_RADIOBUTTON || wg->type == GUI_WIDGET_SELECT ||
             wg->type == GUI_WIDGET_COMBOBOX ||
             wg->type == GUI_WIDGET_LISTVIEW || wg->type == GUI_WIDGET_TABLEVIEW ||
-            wg->type == GUI_WIDGET_MENUBAR || wg->type == GUI_WIDGET_CONTEXTMENU || wg->type == GUI_WIDGET_DIALOG || wg->type == GUI_WIDGET_TREEVIEW ||
+            wg->type == GUI_WIDGET_MENUBAR || wg->type == GUI_WIDGET_CONTEXTMENU || wg->type == GUI_WIDGET_DIALOG || wg->type == GUI_WIDGET_TOAST || wg->type == GUI_WIDGET_TREEVIEW ||
             (wg->type == GUI_WIDGET_LABEL && (wg->label_flags & GUI_LABEL_FLAG_COPYABLE)));
 }
 
@@ -1210,7 +1211,7 @@ static int gui_widget_is_hoverable(gui_widget_t *wg) {
             wg->type == GUI_WIDGET_RADIOBUTTON || wg->type == GUI_WIDGET_SELECT ||
             wg->type == GUI_WIDGET_COMBOBOX ||
             wg->type == GUI_WIDGET_LISTVIEW || wg->type == GUI_WIDGET_TABLEVIEW ||
-            wg->type == GUI_WIDGET_MENUBAR || wg->type == GUI_WIDGET_CONTEXTMENU || wg->type == GUI_WIDGET_DIALOG ||
+            wg->type == GUI_WIDGET_MENUBAR || wg->type == GUI_WIDGET_CONTEXTMENU || wg->type == GUI_WIDGET_DIALOG || wg->type == GUI_WIDGET_TOAST ||
             wg->type == GUI_WIDGET_SLIDER || wg->type == GUI_WIDGET_SCROLLBAR);
 }
 
@@ -3828,6 +3829,24 @@ static void gui_draw_widget(gui_widget_t *wg) {
             }
             cx += iw;
         }
+    } else if (wg->type == GUI_WIDGET_TOAST) {
+        uint32_t toast_type = wg->label_flags & GUI_DIALOG_TYPE_MASK;
+        uint32_t accent = gui_rgb(59, 130, 246);
+        uint32_t bg = gui_rgb(31, 41, 55);
+        gui_rect_t title_clip = { ax + 12, ay + 7, wg->rect.w - 20, 14 };
+        gui_rect_t msg_clip = { ax + 12, ay + 23, wg->rect.w - 20, wg->rect.h - 27 };
+        const char *title = "Notification";
+        if (toast_type == GUI_DIALOG_TYPE_WARNING) { accent = gui_rgb(217, 119, 6); title = "Warning"; }
+        else if (toast_type == GUI_DIALOG_TYPE_ERROR) { accent = gui_rgb(220, 38, 38); title = "Error"; }
+        else if (toast_type == GUI_DIALOG_TYPE_CONFIRM) { accent = gui_rgb(37, 99, 235); title = "Notice"; }
+        gui_raw_fill_rect(ax, ay, wg->rect.w, wg->rect.h, bg);
+        gui_raw_fill_rect(ax, ay, 4, wg->rect.h, accent);
+        gui_raw_line(ax, ay, ax + wg->rect.w - 1, ay, accent);
+        gui_raw_line(ax, ay + wg->rect.h - 1, ax + wg->rect.w - 1, ay + wg->rect.h - 1, gui_rgb(17, 24, 39));
+        gui_raw_line(ax, ay, ax, ay + wg->rect.h - 1, gui_rgb(17, 24, 39));
+        gui_raw_line(ax + wg->rect.w - 1, ay, ax + wg->rect.w - 1, ay + wg->rect.h - 1, gui_rgb(17, 24, 39));
+        gui_draw_window_title_text(ax + 12, ay + 7, wg->text[0] ? wg->text : title, gui_rgb(255, 255, 255), &title_clip);
+        if (wg->placeholder[0]) gui_draw_window_title_text(ax + 12, ay + 23, wg->placeholder, gui_rgb(209, 213, 219), &msg_clip);
     } else if (wg->type == GUI_WIDGET_DIALOG) {
         const int title_h = 24;
         const int icon_size = 18;
@@ -4183,7 +4202,25 @@ static void gui_draw_widget(gui_widget_t *wg) {
     }
 }
 
+static void gui_update_toasts(gui_window_t *w) {
+    uint32_t now;
+    uint32_t i;
+    int changed = 0;
+    if (!w) return;
+    now = (uint32_t)sched_time_ms();
+    for (i = 0; i < w->widget_count; ++i) {
+        gui_widget_t *wg = &w->widgets[i];
+        if (wg->type == GUI_WIDGET_TOAST && wg->visible && wg->max_value > 0 && now >= (uint32_t)wg->max_value) {
+            wg->visible = 0;
+            if (g_gui.focused_widget == wg) gui_set_focused_widget(0);
+            changed = 1;
+        }
+    }
+    if (changed) gui_invalidate_rect(w->rect.x, w->rect.y, w->rect.w, w->rect.h);
+}
+
 static void gui_draw_window(gui_window_t *w) {
+    gui_update_toasts(w);
     uint32_t i;
     uint32_t border;
     uint32_t title;
@@ -7243,7 +7280,7 @@ int gui_should_capture_key_code(int key) {
 
     if (key == GUI_KEY_TAB) return 1;
 
-    if (wg->type == GUI_WIDGET_LISTVIEW || wg->type == GUI_WIDGET_TABLEVIEW || wg->type == GUI_WIDGET_MENUBAR || wg->type == GUI_WIDGET_CONTEXTMENU || wg->type == GUI_WIDGET_DIALOG || wg->type == GUI_WIDGET_TREEVIEW) return 1;
+    if (wg->type == GUI_WIDGET_LISTVIEW || wg->type == GUI_WIDGET_TABLEVIEW || wg->type == GUI_WIDGET_MENUBAR || wg->type == GUI_WIDGET_CONTEXTMENU || wg->type == GUI_WIDGET_DIALOG || wg->type == GUI_WIDGET_TOAST || wg->type == GUI_WIDGET_TREEVIEW) return 1;
 
     if (key == GUI_KEY_UP || key == GUI_KEY_DOWN) return 0;
 
@@ -7790,6 +7827,39 @@ int gui_dialog_show(gui_widget_t *widget) {
 
 int gui_dialog_hide(gui_widget_t *widget) {
     if (!widget || widget->type != GUI_WIDGET_DIALOG) return -1;
+    widget->visible = 0;
+    if (g_gui.focused_widget == widget) gui_set_focused_widget(0);
+    gui_invalidate_all();
+    return 0;
+}
+
+gui_widget_t *gui_add_toast(gui_window_t *window, int x, int y, int w, int h, const char *message, uint32_t flags, uint32_t duration_ms, gui_widget_callback_t cb, void *user_data) {
+    gui_widget_t *wg = gui_alloc_widget(window, GUI_WIDGET_TOAST, x, y, w, h, "Notification");
+    if (wg) {
+        wg->on_click = cb;
+        wg->user_data = user_data;
+        wg->label_flags = flags & GUI_DIALOG_TYPE_MASK;
+        wg->value = (int)duration_ms;
+        wg->max_value = duration_ms ? (int)((uint32_t)sched_time_ms() + duration_ms) : 0;
+        gui_widget_set_placeholder(wg, message ? message : "");
+        if (w < 180) wg->rect.w = 180;
+        if (h < 46) wg->rect.h = 46;
+        wg->visible = 1;
+    }
+    return wg;
+}
+
+int gui_toast_show(gui_widget_t *widget, uint32_t duration_ms) {
+    if (!widget || widget->type != GUI_WIDGET_TOAST) return -1;
+    widget->visible = 1;
+    widget->value = (int)duration_ms;
+    widget->max_value = duration_ms ? (int)((uint32_t)sched_time_ms() + duration_ms) : 0;
+    gui_invalidate_all();
+    return 0;
+}
+
+int gui_toast_hide(gui_widget_t *widget) {
+    if (!widget || widget->type != GUI_WIDGET_TOAST) return -1;
     widget->visible = 0;
     if (g_gui.focused_widget == widget) gui_set_focused_widget(0);
     gui_invalidate_all();

@@ -212,6 +212,18 @@ typedef struct gui_user_draw_request {
     char text[128];
 } gui_user_draw_request_t;
 
+typedef struct gui_user_toast_request {
+    uint32_t window_id;
+    uint32_t widget_id;
+    int32_t x;
+    int32_t y;
+    int32_t w;
+    int32_t h;
+    uint32_t flags;
+    uint32_t duration_ms;
+    char message[256];
+} gui_user_toast_request_t;
+
 typedef struct gui_user_window_info {
     uint32_t window_id;
     uint32_t owner_pid;
@@ -247,6 +259,7 @@ int gui_user_add_listview(uint32_t window_id, int x, int y, int w, int h, const 
 int gui_user_add_tableview(uint32_t window_id, int x, int y, int w, int h, const char *columns, const char *rows, int selected_row, uint32_t flags);
 int gui_user_add_menubar(uint32_t window_id, int x, int y, int w, int h, const char *menus, int active_index);
 int gui_user_add_dialog(uint32_t window_id, int x, int y, int w, int h, const char *title, const char *message, uint32_t flags);
+int gui_user_add_toast(uint32_t window_id, int x, int y, int w, int h, const char *message, uint32_t flags, uint32_t duration_ms);
 int gui_user_add_contextmenu(uint32_t window_id, int x, int y, int w, int h, const char *items, int selected_index, uint32_t disabled_mask);
 int gui_user_add_treeview(uint32_t window_id, int x, int y, int w, int h, const char *nodes, int selected_node, uint32_t flags);
 int gui_user_add_slider(uint32_t window_id, int x, int y, int w, int h, int min, int max, int value, int step);
@@ -313,6 +326,8 @@ int gui_user_hide_contextmenu(uint32_t window_id, uint32_t widget_id);
 int gui_user_set_dialog_message(uint32_t window_id, uint32_t widget_id, const char *message);
 int gui_user_show_dialog(uint32_t window_id, uint32_t widget_id);
 int gui_user_hide_dialog(uint32_t window_id, uint32_t widget_id);
+int gui_user_show_toast(uint32_t window_id, uint32_t widget_id, uint32_t duration_ms);
+int gui_user_hide_toast(uint32_t window_id, uint32_t widget_id);
 int gui_user_set_treeview_node(uint32_t window_id, uint32_t widget_id, int selected_node);
 int gui_user_get_treeview_node(uint32_t window_id, uint32_t widget_id, int *out_selected_node);
 int gui_user_set_treeview_nodes(uint32_t window_id, uint32_t widget_id, const char *nodes);

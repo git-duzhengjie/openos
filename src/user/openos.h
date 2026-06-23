@@ -217,6 +217,9 @@
 #define SYS_GUI_SET_DIALOG_MESSAGE 420
 #define SYS_GUI_SHOW_DIALOG 421
 #define SYS_GUI_HIDE_DIALOG 422
+#define SYS_GUI_ADD_TOAST 423
+#define SYS_GUI_SHOW_TOAST 424
+#define SYS_GUI_HIDE_TOAST 425
 
 #define OPENOS_GUI_TEXTBOX_READONLY  (1u << 0)
 #define OPENOS_GUI_TEXTBOX_DISABLED  (1u << 1)
@@ -242,6 +245,10 @@
 #define OPENOS_GUI_DIALOG_RESULT_NONE        0
 #define OPENOS_GUI_DIALOG_RESULT_OK          1
 #define OPENOS_GUI_DIALOG_RESULT_CANCEL      2
+
+#define OPENOS_GUI_TOAST_INFO                OPENOS_GUI_DIALOG_INFO
+#define OPENOS_GUI_TOAST_WARNING             OPENOS_GUI_DIALOG_WARNING
+#define OPENOS_GUI_TOAST_ERROR               OPENOS_GUI_DIALOG_ERROR
 
 #define OPENOS_GUI_TREEVIEW_SHOW_LINES        (1u << 0)
 #define OPENOS_GUI_TREEVIEW_SHOW_ICONS        (1u << 1)
@@ -703,6 +710,18 @@ typedef struct openos_gui_event {
     int key;
     int button;
 } openos_gui_event_t;
+
+typedef struct openos_gui_toast_request {
+    unsigned int window_id;
+    unsigned int widget_id;
+    int x;
+    int y;
+    int w;
+    int h;
+    unsigned int flags;
+    unsigned int duration_ms;
+    char message[256];
+} openos_gui_toast_request_t;
 
 typedef struct openos_gui_window_info {
     unsigned int window_id;
@@ -1368,6 +1387,31 @@ static inline int openos_gui_show_dialog(int window_id, int widget_id) {
 
 static inline int openos_gui_hide_dialog(int window_id, int widget_id) {
     return openos_syscall_result(openos_syscall2(SYS_GUI_HIDE_DIALOG, window_id, widget_id));
+}
+
+static inline int openos_gui_add_toast(int window_id, int x, int y, int w, int h, const char *message, unsigned int flags, unsigned int duration_ms)
+{
+    openos_gui_toast_request_t req;
+    req.window_id = (unsigned int)window_id;
+    req.widget_id = 0;
+    req.x = x;
+    req.y = y;
+    req.w = w;
+    req.h = h;
+    req.flags = flags;
+    req.duration_ms = duration_ms;
+    openos_gui_copy_text256(req.message, message);
+    return openos_syscall_result(openos_syscall1(SYS_GUI_ADD_TOAST, (int)&req));
+}
+
+static inline int openos_gui_show_toast(int window_id, int widget_id, unsigned int duration_ms)
+{
+    return openos_syscall_result(openos_syscall3(SYS_GUI_SHOW_TOAST, window_id, widget_id, (int)duration_ms));
+}
+
+static inline int openos_gui_hide_toast(int window_id, int widget_id)
+{
+    return openos_syscall_result(openos_syscall2(SYS_GUI_HIDE_TOAST, window_id, widget_id));
 }
 
 static inline int openos_gui_add_contextmenu(int window_id, int x, int y, int w, int h, const char *items, int selected_index, unsigned int disabled_mask) {

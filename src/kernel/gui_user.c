@@ -537,6 +537,38 @@ int gui_user_hide_dialog(uint32_t window_id, uint32_t widget_id) {
     return 0;
 }
 
+int gui_user_add_toast(uint32_t window_id, int x, int y, int w, int h, const char *message, uint32_t flags, uint32_t duration_ms) {
+    gui_window_t *win = gui_find_window(window_id);
+    gui_widget_t *widget;
+    char safe_message[GUI_USER_TEXT_MAX + 1];
+    if (!gui_user_window_owned_by_current(win) || w <= 0 || h <= 0) return -1;
+    gui_user_copy_text(safe_message, sizeof(safe_message), message ? message : "");
+    widget = gui_add_toast(win, x, y, w, h, safe_message, flags, duration_ms, NULL, NULL);
+    if (!widget) return -1;
+    gui_invalidate_rect(win->rect.x, win->rect.y, win->rect.w, win->rect.h);
+    return (int)widget->id;
+}
+
+int gui_user_show_toast(uint32_t window_id, uint32_t widget_id, uint32_t duration_ms) {
+    gui_window_t *win = gui_find_window(window_id);
+    gui_widget_t *widget;
+    if (!gui_user_window_owned_by_current(win)) return -1;
+    widget = gui_find_widget(win, widget_id);
+    if (gui_toast_show(widget, duration_ms) < 0) return -1;
+    gui_invalidate_rect(win->rect.x, win->rect.y, win->rect.w, win->rect.h);
+    return 0;
+}
+
+int gui_user_hide_toast(uint32_t window_id, uint32_t widget_id) {
+    gui_window_t *win = gui_find_window(window_id);
+    gui_widget_t *widget;
+    if (!gui_user_window_owned_by_current(win)) return -1;
+    widget = gui_find_widget(win, widget_id);
+    if (gui_toast_hide(widget) < 0) return -1;
+    gui_invalidate_rect(win->rect.x, win->rect.y, win->rect.w, win->rect.h);
+    return 0;
+}
+
 int gui_user_add_treeview(uint32_t window_id, int x, int y, int w, int h, const char *nodes, int selected_node, uint32_t flags) {
     gui_window_t *win = gui_find_window(window_id);
     gui_widget_t *widget;

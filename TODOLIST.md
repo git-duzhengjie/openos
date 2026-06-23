@@ -588,8 +588,8 @@
 - [x] Dialog：通用弹窗组件
   - [x] 支持信息/警告/错误/确认弹窗
   - [x] 支持模态、按钮区、默认按钮、Esc 关闭
-- [ ] Toast / Notification：轻量提示组件
-  - [ ] 支持短提示、自动消失、通知中心复用
+- [x] Toast / Notification：轻量提示组件
+  - [x] 支持短提示、自动消失、通知中心复用
 - [ ] ProgressBar：进度条组件
   - [ ] 支持确定进度和不确定加载状态
 - [ ] Spinner / BusyIndicator：加载动画组件

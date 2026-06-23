@@ -3589,6 +3589,21 @@ uint32_t syscall_dispatch(uint32_t num,
     case SYS_GUI_HIDE_DIALOG:
         return (uint32_t)gui_user_hide_dialog((uint32_t)a, (uint32_t)b);
 
+    case SYS_GUI_ADD_TOAST:
+        {
+            gui_user_toast_request_t req;
+            if (!a || !user_ptr_valid((void *)a, sizeof(req), USERMEM_READ)) return (uint32_t)-1;
+            if (copy_from_user(&req, (const void *)a, sizeof(req)) < 0) return (uint32_t)-1;
+            req.message[sizeof(req.message) - 1] = 0;
+            return (uint32_t)gui_user_add_toast(req.window_id, req.x, req.y, req.w, req.h, req.message, req.flags, req.duration_ms);
+        }
+
+    case SYS_GUI_SHOW_TOAST:
+        return (uint32_t)gui_user_show_toast((uint32_t)a, (uint32_t)b, (uint32_t)c);
+
+    case SYS_GUI_HIDE_TOAST:
+        return (uint32_t)gui_user_hide_toast((uint32_t)a, (uint32_t)b);
+
     case SYS_GUI_ADD_CONTEXTMENU:
         {
             gui_user_contextmenu_request_t req;
