@@ -1207,17 +1207,7 @@ int main(int argc, char **argv)
     browser_make_home_view(summary, sizeof(summary), home_address);
 
     openos_gui_add_tabview(win, 10, 76, 560, 30, "New Tab|Docs|Console", 0, OPENOS_GUI_TABVIEW_CLOSE_BUTTONS | OPENOS_GUI_TABVIEW_BOTTOM_BORDER);
-    body_label = openos_gui_add_label(win, 18, 116, 572, 258, summary);
-    {
-        openos_gui_layout_box_t side_layout;
-        openos_gui_rect_t card_rect;
-        openos_gui_rect_t form_rect;
-        openos_gui_layout_box_begin(&side_layout, 610, 112, 270, 262, OPENOS_GUI_LAYOUT_VERTICAL, 0, 0, 8);
-        card_rect = openos_gui_layout_box_next(&side_layout, 92, 270);
-        openos_gui_add_groupbox(win, card_rect.x, card_rect.y, card_rect.w, card_rect.h, "页面信息", OPENOS_GUI_GROUPBOX_BORDER | OPENOS_GUI_GROUPBOX_CARD | OPENOS_GUI_GROUPBOX_TITLEBAR);
-        form_rect = openos_gui_layout_box_next(&side_layout, 154, 270);
-        { int form = openos_gui_add_form(win, form_rect.x, form_rect.y, form_rect.w, form_rect.h, "表单", OPENOS_GUI_FORM_BORDER | OPENOS_GUI_FORM_CARD | OPENOS_GUI_FORM_TITLEBAR); if (form >= 0) { openos_gui_add_form_field(win, form, 0, "地址", "http://", "帮助文本", OPENOS_GUI_FORM_FIELD_HELP); openos_gui_add_form_submit(win, form, 1, "提交"); } }
-    }
+    body_label = openos_gui_add_label(win, 18, 116, 860, 258, summary);
 
     status_label = openos_gui_add_statusbar(win, 0, 394, 900, 24, "Ready - type an address and press Enter|OpenOS Browser|", OPENOS_GUI_STATUSBAR_SIZE_GRIP | OPENOS_GUI_STATUSBAR_TOP_BORDER | OPENOS_GUI_STATUSBAR_LINK_PROMPT);
     up_button = openos_gui_add_button(win, 56, 438, 56, 24, "Up");
