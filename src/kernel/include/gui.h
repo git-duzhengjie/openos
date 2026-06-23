@@ -96,6 +96,12 @@
 #define GUI_TABVIEW_SCROLLABLE               0x00000002u
 #define GUI_TABVIEW_BOTTOM_BORDER            0x00000004u
 
+#define GUI_SPLITVIEW_VERTICAL               0x00000000u
+#define GUI_SPLITVIEW_HORIZONTAL             0x00000001u
+#define GUI_SPLITVIEW_RESIZABLE              0x00000002u
+#define GUI_SPLITVIEW_SHOW_GRIP              0x00000004u
+#define GUI_SPLITVIEW_PANE_BORDER            0x00000008u
+
 #define GUI_PANEL_FLAG_BORDER      0x00000001u
 #define GUI_PANEL_FLAG_ROUNDED     0x00000002u
 #define GUI_PANEL_FLAG_SHADOW      0x00000004u
@@ -172,6 +178,7 @@ typedef enum gui_widget_type {
     GUI_WIDGET_TOOLBAR,
     GUI_WIDGET_STATUSBAR,
     GUI_WIDGET_TABVIEW,
+    GUI_WIDGET_SPLITVIEW,
     GUI_WIDGET_TREEVIEW,
     GUI_WIDGET_SCROLLBAR,
     GUI_WIDGET_SCROLLVIEW
@@ -277,6 +284,8 @@ struct gui_widget {
     uint32_t toolbar_flags;
     uint32_t statusbar_flags;
     uint32_t tabview_flags;
+    uint32_t splitview_flags;
+    int splitview_ratio;
 };
 
 struct gui_window {
@@ -458,6 +467,7 @@ typedef struct gui_system {
     gui_widget_t *pressed_widget;
     gui_widget_t *slider_widget;
     gui_widget_t *scrollbar_widget;
+    gui_widget_t *splitview_widget;
     gui_widget_t *hovered_widget;
     gui_widget_t *focused_widget;
     gui_widget_t *text_select_widget;
@@ -587,6 +597,9 @@ int gui_tabview_set_tabs(gui_widget_t *widget, const char *tabs);
 int gui_tabview_set_active(gui_widget_t *widget, int active_index);
 int gui_tabview_get_active(gui_widget_t *widget, int *out_active_index);
 int gui_tabview_close_tab(gui_widget_t *widget, int tab_index);
+gui_widget_t *gui_add_splitview(gui_window_t *window, int x, int y, int w, int h, int ratio, uint32_t flags, gui_widget_callback_t cb, void *user_data);
+int gui_splitview_set_ratio(gui_widget_t *widget, int ratio);
+int gui_splitview_get_ratio(gui_widget_t *widget, int *out_ratio);
 int gui_iconview_set_items(gui_widget_t *widget, const char *items);
 int gui_iconview_set_selected(gui_widget_t *widget, int selected_index);
 int gui_iconview_get_selected(gui_widget_t *widget, int *out_selected_index);

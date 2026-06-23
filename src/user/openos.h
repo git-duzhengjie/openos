@@ -244,6 +244,9 @@
 #define SYS_GUI_SET_TABVIEW_ACTIVE 447
 #define SYS_GUI_GET_TABVIEW_ACTIVE 448
 #define SYS_GUI_CLOSE_TABVIEW_TAB 449
+#define SYS_GUI_ADD_SPLITVIEW 450
+#define SYS_GUI_SET_SPLITVIEW_RATIO 451
+#define SYS_GUI_GET_SPLITVIEW_RATIO 452
 
 #define OPENOS_GUI_TEXTBOX_READONLY  (1u << 0)
 #define OPENOS_GUI_TEXTBOX_DISABLED  (1u << 1)
@@ -294,6 +297,12 @@
 #define OPENOS_GUI_TABVIEW_CLOSE_BUTTONS         0x00000001u
 #define OPENOS_GUI_TABVIEW_SCROLLABLE             0x00000002u
 #define OPENOS_GUI_TABVIEW_BOTTOM_BORDER          0x00000004u
+
+#define OPENOS_GUI_SPLITVIEW_VERTICAL             0x00000000u
+#define OPENOS_GUI_SPLITVIEW_HORIZONTAL           0x00000001u
+#define OPENOS_GUI_SPLITVIEW_RESIZABLE            0x00000002u
+#define OPENOS_GUI_SPLITVIEW_SHOW_GRIP            0x00000004u
+#define OPENOS_GUI_SPLITVIEW_PANE_BORDER          0x00000008u
 
 #define OPENOS_GUI_TOAST_INFO                OPENOS_GUI_DIALOG_INFO
 #define OPENOS_GUI_TOAST_WARNING             OPENOS_GUI_DIALOG_WARNING
@@ -857,6 +866,17 @@ typedef struct openos_gui_tabview_request {
     unsigned int flags;
     char tabs[256];
 } openos_gui_tabview_request_t;
+
+typedef struct openos_gui_splitview_request {
+    unsigned int window_id;
+    unsigned int widget_id;
+    int x;
+    int y;
+    int w;
+    int h;
+    int ratio;
+    unsigned int flags;
+} openos_gui_splitview_request_t;
 
 typedef struct openos_gui_text_request {
     unsigned int window_id;
@@ -1461,6 +1481,43 @@ static inline int openos_gui_close_tabview_tab(int window_id, int widget_id, int
     req.flags = 0;
     req.tabs[0] = 0;
     return openos_syscall_result(openos_syscall1(SYS_GUI_CLOSE_TABVIEW_TAB, (int)&req));
+}
+
+static inline int openos_gui_add_splitview(int window_id, int x, int y, int w, int h, int ratio, unsigned int flags)
+{
+    openos_gui_splitview_request_t req;
+    req.window_id = (unsigned int)window_id;
+    req.widget_id = 0;
+    req.x = x;
+    req.y = y;
+    req.w = w;
+    req.h = h;
+    req.ratio = ratio;
+    req.flags = flags;
+    return openos_syscall_result(openos_syscall1(SYS_GUI_ADD_SPLITVIEW, (int)&req));
+}
+
+static inline int openos_gui_set_splitview_ratio(int window_id, int widget_id, int ratio)
+{
+    openos_gui_splitview_request_t req;
+    req.window_id = (unsigned int)window_id;
+    req.widget_id = (unsigned int)widget_id;
+    req.x = req.y = req.w = req.h = 0;
+    req.ratio = ratio;
+    req.flags = 0;
+    return openos_syscall_result(openos_syscall1(SYS_GUI_SET_SPLITVIEW_RATIO, (int)&req));
+}
+
+static inline int openos_gui_get_splitview_ratio(int window_id, int widget_id)
+{
+    openos_gui_splitview_request_t req;
+    req.window_id = (unsigned int)window_id;
+    req.widget_id = (unsigned int)widget_id;
+    req.x = req.y = req.w = req.h = 0;
+    req.ratio = -1;
+    req.flags = 0;
+    if (openos_syscall_result(openos_syscall1(SYS_GUI_GET_SPLITVIEW_RATIO, (int)&req)) < 0) return -1;
+    return req.ratio;
 }
 
 static inline int openos_gui_add_textbox(int window_id, int x, int y, int w, int h, const char *text)

@@ -355,6 +355,36 @@ int gui_user_close_tabview_tab(uint32_t window_id, uint32_t widget_id, int tab_i
     return 0;
 }
 
+int gui_user_add_splitview(uint32_t window_id, int x, int y, int w, int h, int ratio, uint32_t flags) {
+    gui_window_t *win = gui_find_window(window_id);
+    gui_widget_t *widget;
+    if (!gui_user_window_owned_by_current(win) || w <= 0 || h <= 0) return -1;
+    widget = gui_add_splitview(win, x, y, w, h, ratio, flags, NULL, NULL);
+    if (!widget) return -1;
+    gui_invalidate_rect(win->rect.x, win->rect.y, win->rect.w, win->rect.h);
+    return (int)widget->id;
+}
+
+int gui_user_set_splitview_ratio(uint32_t window_id, uint32_t widget_id, int ratio) {
+    gui_window_t *win = gui_find_window(window_id);
+    gui_widget_t *widget;
+    if (!gui_user_window_owned_by_current(win)) return -1;
+    widget = gui_find_widget(win, widget_id);
+    if (!widget || widget->type != GUI_WIDGET_SPLITVIEW) return -1;
+    if (gui_splitview_set_ratio(widget, ratio) < 0) return -1;
+    gui_invalidate_rect(win->rect.x, win->rect.y, win->rect.w, win->rect.h);
+    return 0;
+}
+
+int gui_user_get_splitview_ratio(uint32_t window_id, uint32_t widget_id, int *out_ratio) {
+    gui_window_t *win = gui_find_window(window_id);
+    gui_widget_t *widget;
+    if (!gui_user_window_owned_by_current(win) || !out_ratio) return -1;
+    widget = gui_find_widget(win, widget_id);
+    if (!widget || widget->type != GUI_WIDGET_SPLITVIEW) return -1;
+    return gui_splitview_get_ratio(widget, out_ratio);
+}
+
 int gui_user_add_iconview(uint32_t window_id, int x, int y, int w, int h, const char *items, int selected_index, uint32_t flags) {
     gui_window_t *win = gui_find_window(window_id);
     gui_widget_t *widget;

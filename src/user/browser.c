@@ -1181,6 +1181,7 @@ int main(int argc, char **argv)
 
     status_label = openos_gui_add_statusbar(win, 0, 394, 900, 24, "Ready - type an address and press Enter|OpenOS Browser|", OPENOS_GUI_STATUSBAR_SIZE_GRIP | OPENOS_GUI_STATUSBAR_TOP_BORDER | OPENOS_GUI_STATUSBAR_LINK_PROMPT);
     openos_gui_add_tabview(win, 10, 76, 560, 30, "New Tab|Docs|Console", 0, OPENOS_GUI_TABVIEW_CLOSE_BUTTONS | OPENOS_GUI_TABVIEW_BOTTOM_BORDER);
+    openos_gui_add_splitview(win, 10, 112, 220, 120, 35, OPENOS_GUI_SPLITVIEW_RESIZABLE | OPENOS_GUI_SPLITVIEW_SHOW_GRIP | OPENOS_GUI_SPLITVIEW_PANE_BORDER);
     up_button = openos_gui_add_button(win, 56, 438, 56, 24, "Up");
     down_button = openos_gui_add_button(win, 120, 438, 56, 24, "Down");
     next_link_button = openos_gui_add_button(win, 208, 438, 80, 24, "NextLink");

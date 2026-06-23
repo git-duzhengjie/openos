@@ -531,6 +531,7 @@ int main(int argc, char **argv)
     close_button = openos_gui_add_button(win, 558, 324, 64, 24, "Close");
     openos_gui_add_statusbar(win, 0, CHROME_H - 24, CHROME_W, 24, "Ready|OpenOS Chromium|Hover links for hints", OPENOS_GUI_STATUSBAR_SIZE_GRIP | OPENOS_GUI_STATUSBAR_TOP_BORDER | OPENOS_GUI_STATUSBAR_LINK_PROMPT);
     openos_gui_add_tabview(win, 10, 76, 560, 30, "New Tab|Docs|Console", 0, OPENOS_GUI_TABVIEW_CLOSE_BUTTONS | OPENOS_GUI_TABVIEW_BOTTOM_BORDER);
+    openos_gui_add_splitview(win, 12, 112, 220, 120, 40, OPENOS_GUI_SPLITVIEW_RESIZABLE | OPENOS_GUI_SPLITVIEW_SHOW_GRIP | OPENOS_GUI_SPLITVIEW_PANE_BORDER);
     (void)back_button;
     (void)forward_button;
     (void)go_button;

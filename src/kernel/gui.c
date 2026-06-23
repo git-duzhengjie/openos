@@ -1190,7 +1190,7 @@ static int gui_widget_can_focus(gui_widget_t *wg) {
             wg->type == GUI_WIDGET_CHECKBOX || wg->type == GUI_WIDGET_RADIOBUTTON ||
             wg->type == GUI_WIDGET_SELECT || wg->type == GUI_WIDGET_COMBOBOX || wg->type == GUI_WIDGET_LISTVIEW ||
             wg->type == GUI_WIDGET_TABLEVIEW || wg->type == GUI_WIDGET_MENUBAR ||
-            wg->type == GUI_WIDGET_TABVIEW || wg->type == GUI_WIDGET_CONTEXTMENU || wg->type == GUI_WIDGET_DIALOG ||
+            wg->type == GUI_WIDGET_TABVIEW || wg->type == GUI_WIDGET_SPLITVIEW || wg->type == GUI_WIDGET_CONTEXTMENU || wg->type == GUI_WIDGET_DIALOG ||
             (wg->type == GUI_WIDGET_LABEL &&
              (wg->label_flags & (GUI_LABEL_FLAG_SELECTABLE | GUI_LABEL_FLAG_COPYABLE)) != 0));
 }
@@ -1202,7 +1202,7 @@ static int gui_widget_is_clickable(gui_widget_t *wg) {
             wg->type == GUI_WIDGET_RADIOBUTTON || wg->type == GUI_WIDGET_SELECT ||
             wg->type == GUI_WIDGET_COMBOBOX ||
             wg->type == GUI_WIDGET_LISTVIEW || wg->type == GUI_WIDGET_TABLEVIEW ||
-            wg->type == GUI_WIDGET_MENUBAR || wg->type == GUI_WIDGET_TABVIEW || wg->type == GUI_WIDGET_CONTEXTMENU || wg->type == GUI_WIDGET_DIALOG || wg->type == GUI_WIDGET_TOAST || wg->type == GUI_WIDGET_TREEVIEW || wg->type == GUI_WIDGET_ICONVIEW ||
+            wg->type == GUI_WIDGET_MENUBAR || wg->type == GUI_WIDGET_TABVIEW || wg->type == GUI_WIDGET_SPLITVIEW || wg->type == GUI_WIDGET_CONTEXTMENU || wg->type == GUI_WIDGET_DIALOG || wg->type == GUI_WIDGET_TOAST || wg->type == GUI_WIDGET_TREEVIEW || wg->type == GUI_WIDGET_ICONVIEW ||
             (wg->type == GUI_WIDGET_LABEL && (wg->label_flags & GUI_LABEL_FLAG_COPYABLE)));
 }
 
@@ -3779,6 +3779,111 @@ static void gui_statusbar_split(const char *text, char *left, char *center, char
     }
 }
 
+static int gui_splitview_is_horizontal(gui_widget_t *wg) {
+    return wg && ((wg->splitview_flags & GUI_SPLITVIEW_HORIZONTAL) != 0);
+}
+
+static int gui_splitview_clamp_ratio(int ratio) {
+    if (ratio < 10) return 10;
+    if (ratio > 90) return 90;
+    return ratio;
+}
+
+static int gui_splitview_bar_pos(gui_widget_t *wg) {
+    int span;
+    if (!wg) return 0;
+    span = gui_splitview_is_horizontal(wg) ? wg->rect.h : wg->rect.w;
+    if (span < 16) return span / 2;
+    return (span * gui_splitview_clamp_ratio(wg->splitview_ratio)) / 100;
+}
+
+static int gui_splitview_hit_bar(gui_widget_t *wg, int sx, int sy) {
+    int ax, ay, pos;
+    if (!wg || wg->type != GUI_WIDGET_SPLITVIEW) return 0;
+    if (!gui_widget_absolute_origin(wg, &ax, &ay)) return 0;
+    pos = gui_splitview_bar_pos(wg);
+    if (gui_splitview_is_horizontal(wg)) {
+        int by = ay + pos;
+        return sx >= ax && sx < ax + wg->rect.w && sy >= by - 3 && sy <= by + 3;
+    }
+    {
+        int bx = ax + pos;
+        return sy >= ay && sy < ay + wg->rect.h && sx >= bx - 3 && sx <= bx + 3;
+    }
+}
+
+static void gui_splitview_apply_screen(gui_widget_t *wg, int sx, int sy) {
+    int ax, ay, span, rel, ratio;
+    if (!wg || wg->type != GUI_WIDGET_SPLITVIEW) return;
+    if (!(wg->splitview_flags & GUI_SPLITVIEW_RESIZABLE)) return;
+    if (!gui_widget_absolute_origin(wg, &ax, &ay)) return;
+    if (gui_splitview_is_horizontal(wg)) {
+        span = wg->rect.h;
+        rel = sy - ay;
+    } else {
+        span = wg->rect.w;
+        rel = sx - ax;
+    }
+    if (span <= 0) return;
+    ratio = (rel * 100) / span;
+    ratio = gui_splitview_clamp_ratio(ratio);
+    if (ratio != wg->splitview_ratio) {
+        wg->splitview_ratio = ratio;
+        wg->value = ratio;
+        gui_user_post_value_event(wg);
+        gui_invalidate_all();
+    }
+}
+
+int gui_splitview_set_ratio(gui_widget_t *widget, int ratio) {
+    if (!widget || widget->type != GUI_WIDGET_SPLITVIEW) return -1;
+    widget->splitview_ratio = gui_splitview_clamp_ratio(ratio);
+    widget->value = widget->splitview_ratio;
+    return 0;
+}
+
+int gui_splitview_get_ratio(gui_widget_t *widget, int *out_ratio) {
+    if (!widget || !out_ratio || widget->type != GUI_WIDGET_SPLITVIEW) return -1;
+    *out_ratio = widget->splitview_ratio;
+    return 0;
+}
+
+static void gui_draw_splitview_widget(gui_widget_t *wg, int ax, int ay) {
+    int pos = gui_splitview_bar_pos(wg);
+    uint32_t pane_a = gui_rgb(248, 250, 252);
+    uint32_t pane_b = gui_rgb(241, 245, 249);
+    uint32_t border = gui_rgb(203, 213, 225);
+    uint32_t bar = (wg->hovered || wg->pressed) ? gui_rgb(96, 165, 250) : gui_rgb(148, 163, 184);
+    gui_raw_fill_rect(ax, ay, wg->rect.w, wg->rect.h, pane_b);
+    if (gui_splitview_is_horizontal(wg)) {
+        int by = ay + pos;
+        if (pos > 0) gui_raw_fill_rect(ax, ay, wg->rect.w, pos, pane_a);
+        if (by < ay + wg->rect.h) gui_raw_fill_rect(ax, by + 3, wg->rect.w, wg->rect.h - pos - 3, pane_b);
+        gui_raw_fill_rect(ax, by - 1, wg->rect.w, 3, bar);
+        if (wg->splitview_flags & GUI_SPLITVIEW_SHOW_GRIP) {
+            int cx = ax + wg->rect.w / 2;
+            gui_raw_line(cx - 18, by - 4, cx + 18, by - 4, border);
+            gui_raw_line(cx - 18, by + 4, cx + 18, by + 4, border);
+        }
+    } else {
+        int bx = ax + pos;
+        if (pos > 0) gui_raw_fill_rect(ax, ay, pos, wg->rect.h, pane_a);
+        if (bx < ax + wg->rect.w) gui_raw_fill_rect(bx + 3, ay, wg->rect.w - pos - 3, wg->rect.h, pane_b);
+        gui_raw_fill_rect(bx - 1, ay, 3, wg->rect.h, bar);
+        if (wg->splitview_flags & GUI_SPLITVIEW_SHOW_GRIP) {
+            int cy = ay + wg->rect.h / 2;
+            gui_raw_line(bx - 4, cy - 18, bx - 4, cy + 18, border);
+            gui_raw_line(bx + 4, cy - 18, bx + 4, cy + 18, border);
+        }
+    }
+    if (wg->splitview_flags & GUI_SPLITVIEW_PANE_BORDER) {
+        gui_raw_line(ax, ay, ax + wg->rect.w - 1, ay, border);
+        gui_raw_line(ax, ay + wg->rect.h - 1, ax + wg->rect.w - 1, ay + wg->rect.h - 1, border);
+        gui_raw_line(ax, ay, ax, ay + wg->rect.h - 1, border);
+        gui_raw_line(ax + wg->rect.w - 1, ay, ax + wg->rect.w - 1, ay + wg->rect.h - 1, border);
+    }
+}
+
 static int gui_tabview_tab_count(gui_widget_t *wg) {
     const char *p;
     int count = 0;
@@ -4112,6 +4217,8 @@ static void gui_draw_widget(gui_widget_t *wg) {
         gui_draw_statusbar_widget(wg, ax, ay);
     } else if (wg->type == GUI_WIDGET_TABVIEW) {
         gui_draw_tabview_widget(wg, ax, ay);
+    } else if (wg->type == GUI_WIDGET_SPLITVIEW) {
+        gui_draw_splitview_widget(wg, ax, ay);
     } else if (wg->type == GUI_WIDGET_ICONVIEW) {
         int count = gui_iconview_count(wg);
         int cols = gui_iconview_columns(wg);
@@ -5983,6 +6090,12 @@ static void gui_handle_mouse_down(int x, int y) {
             g_gui.scrollbar_widget = wg;
             gui_scrollbar_apply_screen(wg, x, y);
             gui_invalidate_all();
+        } else if (wg && wg->type == GUI_WIDGET_SPLITVIEW && wg->enabled && gui_splitview_hit_bar(wg, x, y)) {
+            gui_set_focused_widget(wg);
+            wg->pressed = 1;
+            g_gui.splitview_widget = wg;
+            gui_splitview_apply_screen(wg, x, y);
+            gui_invalidate_all();
         } else if (gui_widget_is_clickable(wg)) {
             int select_index = -1;
             if (wg->type == GUI_WIDGET_SELECT || wg->type == GUI_WIDGET_COMBOBOX) {
@@ -6107,6 +6220,11 @@ static void gui_handle_mouse_up(int x, int y) {
         g_gui.scrollbar_widget = 0;
         gui_invalidate_all();
     }
+    if (g_gui.splitview_widget) {
+        g_gui.splitview_widget->pressed = 0;
+        g_gui.splitview_widget = 0;
+        gui_invalidate_all();
+    }
     if (g_gui.pressed_widget) {
         gui_widget_t *wg = g_gui.pressed_widget;
         int still_inside = 0;
@@ -6160,6 +6278,11 @@ static void gui_handle_mouse_move(int x, int y) {
     if (g_gui.scrollbar_widget) {
         gui_set_hovered_widget(g_gui.scrollbar_widget);
         gui_scrollbar_apply_screen(g_gui.scrollbar_widget, x, y);
+        return;
+    }
+    if (g_gui.splitview_widget) {
+        gui_set_hovered_widget(g_gui.splitview_widget);
+        gui_splitview_apply_screen(g_gui.splitview_widget, x, y);
         return;
     }
     search_idx = gui_taskbar_search_result_index_at(x, y);
@@ -8670,6 +8793,20 @@ int gui_statusbar_set_flags(gui_widget_t *widget, uint32_t flags) {
     if (!widget || widget->type != GUI_WIDGET_STATUSBAR) return -1;
     widget->statusbar_flags = flags & (GUI_STATUSBAR_LOADING | GUI_STATUSBAR_SIZE_GRIP | GUI_STATUSBAR_LINK_PROMPT | GUI_STATUSBAR_TOP_BORDER);
     return 0;
+}
+
+gui_widget_t *gui_add_splitview(gui_window_t *window, int x, int y, int w, int h, int ratio, uint32_t flags, gui_widget_callback_t cb, void *user_data) {
+    gui_widget_t *wg = gui_alloc_widget(window, GUI_WIDGET_SPLITVIEW, x, y, w, h, "SplitView");
+    if (wg) {
+        wg->on_click = cb;
+        wg->user_data = user_data;
+        wg->splitview_flags = flags & (GUI_SPLITVIEW_HORIZONTAL | GUI_SPLITVIEW_RESIZABLE | GUI_SPLITVIEW_SHOW_GRIP | GUI_SPLITVIEW_PANE_BORDER);
+        wg->min_value = 10;
+        wg->max_value = 90;
+        wg->step = 1;
+        gui_splitview_set_ratio(wg, ratio);
+    }
+    return wg;
 }
 
 gui_widget_t *gui_add_tabview(gui_window_t *window, int x, int y, int w, int h, const char *tabs, int active_index, uint32_t flags, gui_widget_callback_t cb, void *user_data) {

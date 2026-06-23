@@ -3184,6 +3184,42 @@ uint32_t syscall_dispatch(uint32_t num,
             return (uint32_t)gui_user_close_tabview_tab(req.window_id, req.widget_id, req.tab_index);
         }
 
+    case SYS_GUI_ADD_SPLITVIEW:
+        {
+            gui_user_splitview_request_t req;
+            if (!a || !user_ptr_valid((void *)a, sizeof(req), USERMEM_READ))
+                return (uint32_t)-1;
+            if (copy_from_user(&req, (const void *)a, sizeof(req)) < 0)
+                return (uint32_t)-1;
+            return (uint32_t)gui_user_add_splitview(req.window_id, req.x, req.y, req.w, req.h, req.ratio, req.flags);
+        }
+
+    case SYS_GUI_SET_SPLITVIEW_RATIO:
+        {
+            gui_user_splitview_request_t req;
+            if (!a || !user_ptr_valid((void *)a, sizeof(req), USERMEM_READ))
+                return (uint32_t)-1;
+            if (copy_from_user(&req, (const void *)a, sizeof(req)) < 0)
+                return (uint32_t)-1;
+            return (uint32_t)gui_user_set_splitview_ratio(req.window_id, req.widget_id, req.ratio);
+        }
+
+    case SYS_GUI_GET_SPLITVIEW_RATIO:
+        {
+            gui_user_splitview_request_t req;
+            int ratio = -1;
+            if (!a || !user_ptr_valid((void *)a, sizeof(req), USERMEM_READ | USERMEM_WRITE))
+                return (uint32_t)-1;
+            if (copy_from_user(&req, (const void *)a, sizeof(req)) < 0)
+                return (uint32_t)-1;
+            if (gui_user_get_splitview_ratio(req.window_id, req.widget_id, &ratio) < 0)
+                return (uint32_t)-1;
+            req.ratio = ratio;
+            if (copy_to_user((void *)a, &req, sizeof(req)) < 0)
+                return (uint32_t)-1;
+            return 0;
+        }
+
     case SYS_GUI_ADD_ICONVIEW:
         {
             gui_user_iconview_request_t req;
