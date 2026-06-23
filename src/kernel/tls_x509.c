@@ -817,6 +817,74 @@ int tls_x509_rsa_verify_pkcs1_v15_sha256(const tls_x509_rsa_public_key_t* public
         &(tls_x509_slice_t){encoded, key_len}, digest);
 }
 
+int tls_x509_rsa_encrypt_pkcs1_v15(const tls_x509_rsa_public_key_t* public_key,
+                                   const uint8_t* message,
+                                   size_t message_len,
+                                   const uint8_t* nonzero_padding,
+                                   size_t nonzero_padding_len,
+                                   uint8_t* out_encrypted,
+                                   size_t out_encrypted_cap,
+                                   size_t* out_encrypted_len)
+{
+    tls_x509_slice_t modulus_value;
+    tls_x509_slice_t exponent_value;
+    uint8_t modulus[TLS_X509_RSA_MAX_BYTES];
+    uint8_t exponent[TLS_X509_RSA_MAX_BYTES];
+    uint8_t encoded[TLS_X509_RSA_MAX_BYTES];
+    size_t key_len;
+    size_t padding_len;
+
+    if (!public_key || !message || message_len == 0u ||
+        !nonzero_padding || !out_encrypted || !out_encrypted_len ||
+        tls_x509_integer_value_from_der(&public_key->modulus_der, &modulus_value) != 0 ||
+        tls_x509_integer_value_from_der(&public_key->public_exponent_der, &exponent_value) != 0 ||
+        modulus_value.len == 0u || modulus_value.len > TLS_X509_RSA_MAX_BYTES ||
+        exponent_value.len == 0u || exponent_value.len > TLS_X509_RSA_MAX_BYTES) {
+        return -1;
+    }
+
+    key_len = modulus_value.len;
+    if (out_encrypted_cap < key_len || key_len < message_len + 11u) {
+        return -1;
+    }
+    padding_len = key_len - message_len - 3u;
+    if (nonzero_padding_len < padding_len) {
+        return -1;
+    }
+    for (size_t i = 0u; i < padding_len; ++i) {
+        if (nonzero_padding[i] == 0u) {
+            return -1;
+        }
+    }
+
+    tls_x509_bn_zero(modulus, key_len);
+    tls_x509_bn_zero(exponent, key_len);
+    tls_x509_bn_zero(encoded, key_len);
+    for (size_t i = 0u; i < key_len; ++i) {
+        modulus[i] = modulus_value.data[i];
+    }
+    for (size_t i = 0u; i < exponent_value.len; ++i) {
+        exponent[key_len - exponent_value.len + i] = exponent_value.data[i];
+    }
+
+    encoded[0] = 0x00u;
+    encoded[1] = 0x02u;
+    for (size_t i = 0u; i < padding_len; ++i) {
+        encoded[2u + i] = nonzero_padding[i];
+    }
+    encoded[2u + padding_len] = 0x00u;
+    for (size_t i = 0u; i < message_len; ++i) {
+        encoded[3u + padding_len + i] = message[i];
+    }
+
+    if (tls_x509_bn_cmp(encoded, modulus, key_len) >= 0) {
+        return -1;
+    }
+    tls_x509_bn_mod_pow(out_encrypted, encoded, exponent, key_len, modulus, key_len);
+    *out_encrypted_len = key_len;
+    return 0;
+}
+
 int tls_x509_parse_signature_algorithm(const tls_x509_certificate_view_t* cert,
                                        tls_x509_algorithm_identifier_t* out_algorithm)
 {

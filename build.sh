@@ -4,6 +4,8 @@
 set -e
 if [ -d /mnt/e/openos ]; then
     cd /mnt/e/openos
+elif [ -d /mnt/host/e/openos ]; then
+    cd /mnt/host/e/openos
 else
     cd /e/openos
 fi
@@ -518,8 +520,22 @@ fi
 if [ -f $USR/browser.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \
+        -I $SRC/include -I src/shared \
         -c $USR/browser.c -o $BUILD/browser.o
-    ld -m elf_i386 -T $USR/user.ld -o $BUILD/browser.elf $BUILD/crt0.o $BUILD/browser.o
+    for tls_src in tls_parser tls_crypto tls_x509 tls_handshake; do
+        gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+            -fno-stack-protector -fno-builtin \
+            -I $SRC/include -I src/shared \
+            -c $SRC/${tls_src}.c -o $BUILD/browser_${tls_src}.o
+    done
+    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+        -fno-stack-protector -fno-builtin \
+        -I $SRC/include -I src/shared \
+        -c $USR/tls_user_compat.c -o $BUILD/browser_tls_user_compat.o
+    ld -m elf_i386 -T $USR/user.ld -o $BUILD/browser.elf \
+        $BUILD/crt0.o $BUILD/browser.o $BUILD/browser_tls_user_compat.o \
+        $BUILD/browser_tls_parser.o $BUILD/browser_tls_crypto.o \
+        $BUILD/browser_tls_x509.o $BUILD/browser_tls_handshake.o
     verify_user_start $BUILD/browser.elf browser.elf
     python3 _embed_elf.py $BUILD/browser.elf $SRC/include/embed_browser.h browser_elf
     echo "  Embedded: browser.elf"

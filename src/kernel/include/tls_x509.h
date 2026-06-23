@@ -133,6 +133,14 @@ int tls_x509_rsa_pkcs1_v15_encoded_message_matches_sha256(const tls_x509_slice_t
 int tls_x509_rsa_verify_pkcs1_v15_sha256(const tls_x509_rsa_public_key_t* public_key,
                                          const tls_x509_bit_string_t* signature,
                                          const uint8_t digest[32]);
+int tls_x509_rsa_encrypt_pkcs1_v15(const tls_x509_rsa_public_key_t* public_key,
+                                   const uint8_t* message,
+                                   size_t message_len,
+                                   const uint8_t* nonzero_padding,
+                                   size_t nonzero_padding_len,
+                                   uint8_t* out_encrypted,
+                                   size_t out_encrypted_cap,
+                                   size_t* out_encrypted_len);
 int tls_x509_parse_signature_algorithm(const tls_x509_certificate_view_t* cert,
                                        tls_x509_algorithm_identifier_t* out_algorithm);
 int tls_x509_verify_certificate_signature_sha256_rsa(const tls_x509_certificate_view_t* child,
