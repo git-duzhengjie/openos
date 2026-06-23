@@ -1276,12 +1276,14 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    toolbar = openos_gui_add_toolbar(win, 0, 0, 900, 54, "<|>|Reload|addr:Search OpenOS or type a URL", OPENOS_GUI_TOOLBAR_SHOW_GRIP | OPENOS_GUI_TOOLBAR_GROUPED_BUTTONS | OPENOS_GUI_TOOLBAR_HAS_ADDRESS | OPENOS_GUI_TOOLBAR_BOTTOM_BORDER);
+    openos_gui_add_tabview(win, 10, 0, 560, 30, "New Tab|Docs|Console", 0, OPENOS_GUI_TABVIEW_CLOSE_BUTTONS | OPENOS_GUI_TABVIEW_BOTTOM_BORDER);
+
+    toolbar = openos_gui_add_toolbar(win, 0, 30, 900, 54, "<|>|Reload|addr:Search OpenOS or type a URL", OPENOS_GUI_TOOLBAR_SHOW_GRIP | OPENOS_GUI_TOOLBAR_GROUPED_BUTTONS | OPENOS_GUI_TOOLBAR_HAS_ADDRESS | OPENOS_GUI_TOOLBAR_BOTTOM_BORDER);
     (void)toolbar;
-    back_button = openos_gui_add_button(win, 16, 18, 40, 24, "<");
-    forward_button = openos_gui_add_button(win, 60, 18, 40, 24, ">");
-    load_button = openos_gui_add_button(win, 104, 18, 72, 24, "Reload");
-    address_label = openos_gui_add_textbox(win, 188, 18, 692, 24, "");
+    back_button = openos_gui_add_button(win, 16, 48, 40, 24, "<");
+    forward_button = openos_gui_add_button(win, 60, 48, 40, 24, ">");
+    load_button = openos_gui_add_button(win, 104, 48, 72, 24, "Reload");
+    address_label = openos_gui_add_textbox(win, 188, 48, 692, 24, "");
 
     if (argc > 1 && argv && argv[1] && argv[1][0])
         browser_format_address(home_address, sizeof(home_address), host, path, is_file);
@@ -1289,8 +1291,7 @@ int main(int argc, char **argv)
         snprintf(home_address, sizeof(home_address), "Search OpenOS or type a URL");
     browser_make_home_view(summary, sizeof(summary), home_address);
 
-    openos_gui_add_tabview(win, 10, 76, 560, 30, "New Tab|Docs|Console", 0, OPENOS_GUI_TABVIEW_CLOSE_BUTTONS | OPENOS_GUI_TABVIEW_BOTTOM_BORDER);
-    body_label = openos_gui_add_label(win, 18, 116, 860, 258, summary);
+    body_label = openos_gui_add_label(win, 18, 96, 860, 278, summary);
 
     status_label = openos_gui_add_statusbar(win, 0, 394, 900, 24, "Ready - type an address and press Enter|OpenOS Browser|", OPENOS_GUI_STATUSBAR_SIZE_GRIP | OPENOS_GUI_STATUSBAR_TOP_BORDER | OPENOS_GUI_STATUSBAR_LINK_PROMPT);
     up_button = openos_gui_add_button(win, 56, 438, 56, 24, "Up");
