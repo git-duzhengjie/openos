@@ -24,6 +24,28 @@ typedef struct pci_snapshot_entry {
 
 static pci_snapshot_entry_t pci_known[PCI_TRACK_MAX];
 static uint32_t pci_known_count;
+static uint8_t pci_known_initialized;
+
+static uint32_t pci_safe_known_count(void) {
+    if (pci_known_count <= PCI_TRACK_MAX) return pci_known_count;
+
+    /*
+     * Never let a corrupted counter drive fixed-size table traversal.  Drop
+     * the stale snapshot instead of clamping to the maximum: old entries are
+     * only a cache for hotplug diffing, so losing them is safer than walking
+     * potentially invalid names during early boot.
+     */
+    memset(pci_known, 0, sizeof(pci_known));
+    pci_known_count = 0;
+    pci_known_initialized = 0;
+    return 0;
+}
+
+static void pci_reset_hotplug_tracker(void) {
+    memset(pci_known, 0, sizeof(pci_known));
+    pci_known_count = 0;
+    pci_known_initialized = 0;
+}
 
 uint32_t pci_addr(uint8_t bus, uint8_t dev, uint8_t func, uint8_t off) {
     return (1u << 31)
@@ -149,13 +171,14 @@ static void pci_register_entry(const pci_snapshot_entry_t *entry) {
 }
 
 uint32_t pci_known_device_count(void) {
-    return pci_known_count;
+    return pci_safe_known_count();
 }
 
 int pci_rescan_hotplug(void) {
     pci_snapshot_entry_t now[PCI_TRACK_MAX];
     uint8_t matched_old[PCI_TRACK_MAX];
     uint32_t now_count;
+    uint32_t old_count;
     uint32_t i, j;
     int changes = 0;
 
@@ -163,9 +186,21 @@ int pci_rescan_hotplug(void) {
     memset(matched_old, 0, sizeof(matched_old));
     now_count = pci_collect_snapshot(now, PCI_TRACK_MAX);
 
+    if (!pci_known_initialized) {
+        memcpy(pci_known, now, sizeof(pci_known));
+        pci_known_count = now_count;
+        pci_known_initialized = 1;
+        for (i = 0; i < now_count; i++) {
+            pci_register_entry(&now[i]);
+        }
+        return (int)now_count;
+    }
+
+    old_count = pci_safe_known_count();
+
     for (i = 0; i < now_count; i++) {
         int found = -1;
-        for (j = 0; j < pci_known_count; j++) {
+        for (j = 0; j < old_count; j++) {
             if (pci_entry_same_slot(&now[i], &pci_known[j])) {
                 found = (int)j;
                 matched_old[j] = 1;
@@ -183,7 +218,7 @@ int pci_rescan_hotplug(void) {
         }
     }
 
-    for (j = 0; j < pci_known_count; j++) {
+    for (j = 0; j < old_count; j++) {
         if (!matched_old[j]) {
             (void)devmgr_unregister(pci_known[j].name);
             changes++;
@@ -192,6 +227,7 @@ int pci_rescan_hotplug(void) {
 
     memcpy(pci_known, now, sizeof(pci_known));
     pci_known_count = now_count;
+    pci_known_initialized = 1;
     return changes;
 }
 
@@ -241,6 +277,7 @@ void pci_scan_all(void) {
         }
     }
 
+    pci_reset_hotplug_tracker();
     (void)pci_rescan_hotplug();
     serial_write("=====================================\n");
 }
