@@ -83,8 +83,8 @@ timeout --preserve-status --kill-after=3s "${TIMEOUT_SECONDS}s" \
 status=$?
 set -e
 
-# timeout can return 124/143 when OpenOS keeps running; that is expected for a smoke boot.
-if [[ $status -ne 0 && $status -ne 124 && $status -ne 143 ]]; then
+# timeout can return 124/143 when OpenOS keeps running; WSL-hosted Windows QEMU may return 15.
+if [[ $status -ne 0 && $status -ne 15 && $status -ne 124 && $status -ne 143 ]]; then
     echo "QEMU exited with unexpected status: $status" >&2
     if [[ -f "$LOG_PATH" ]]; then
         tail -80 "$LOG_PATH" >&2 || true

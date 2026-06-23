@@ -1058,3 +1058,37 @@
 - [√] GDB 调试脚本
 - [√] 发布打包流程
 - [√] 版本号 / release 管理
+
+---
+
+## P7：浏览器 HTTPS ECDHE-RSA/P-256 支持
+
+> 目标：让 OpenOS 自研浏览器支持百度等现代站点要求的 TLS 1.2 `ECDHE-RSA-AES128-GCM-SHA256` + `secp256r1/P-256` 握手，避免 `unsupported server handshake`。
+
+- [x] P7.1：确认百度 TLS 协商需求并补充失败回归用例
+  - [x] 记录静态 RSA 被拒绝、ECDHE-RSA/P-256 可成功的验证结论：OpenSSL 验证百度拒绝静态 RSA/AES128-GCM，接受 ECDHE-RSA-AES128-GCM-SHA256 + P-256
+  - [x] 为当前 `unsupported server handshake` 路径补测试或诊断文案
+- [x] P7.2：新增 P-256 椭圆曲线基础运算
+  - [x] 实现 256 位有限域加减乘平方逆元
+  - [x] 实现 secp256r1 点加、倍点、标量乘
+  - [x] 增加 RFC/NIST 测试向量或自洽单元测试
+- [x] P7.3：扩展 TLS 1.2 ECDHE-RSA 握手解析
+  - [x] 解析 `ServerKeyExchange` 中的 named_curve、server ECDHE public key 和签名
+  - [x] 校验曲线必须为 `secp256r1/P-256`
+  - [x] 校验 RSA-SHA256 ServerKeyExchange 签名
+- [x] P7.4：实现 ECDHE ClientKeyExchange 与 master secret 派生
+  - [x] 生成客户端 P-256 临时密钥对
+  - [x] 发送 uncompressed point 格式的 ECDHE ClientKeyExchange
+  - [x] 使用 ECDHE shared secret 派生 TLS master secret
+- [x] P7.5：接入浏览器 HTTPS 加载路径
+  - [x] 在 ClientHello 中正确声明 ECDHE-RSA-AES128-GCM-SHA256、supported_groups 和 ec_point_formats
+  - [x] 保持静态 RSA/AES-GCM 兼容路径
+  - [x] HTTPS 错误页输出更准确的协商失败原因
+- [x] P7.6：构建、单测、QEMU smoke 与提交
+  - [x] Windows/MinGW 等价全量单元测试
+  - [x] `wsl -d Ubuntu -- bash -lc "cd /mnt/e/openos && ./build.sh test"`
+  - [x] freestanding/browser 语法检查
+  - [x] `wsl -d Ubuntu -- bash -lc "cd /mnt/e/openos && ./build.sh"`
+  - [x] `scripts/qemu-smoke.sh --timeout 25`
+  - [x] 重新生成 `src/kernel/include/embed_browser.h`
+  - [x] 提交修改

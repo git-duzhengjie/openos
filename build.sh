@@ -522,7 +522,7 @@ if [ -f $USR/browser.c ]; then
         -fno-stack-protector -fno-builtin \
         -I $SRC/include -I src/shared \
         -c $USR/browser.c -o $BUILD/browser.o
-    for tls_src in tls_parser tls_crypto tls_x509 tls_handshake; do
+    for tls_src in tls_parser tls_crypto tls_x509 tls_p256 tls_handshake; do
         gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
             -fno-stack-protector -fno-builtin \
             -I $SRC/include -I src/shared \
@@ -535,7 +535,8 @@ if [ -f $USR/browser.c ]; then
     ld -m elf_i386 -T $USR/user.ld -o $BUILD/browser.elf \
         $BUILD/crt0.o $BUILD/browser.o $BUILD/browser_tls_user_compat.o \
         $BUILD/browser_tls_parser.o $BUILD/browser_tls_crypto.o \
-        $BUILD/browser_tls_x509.o $BUILD/browser_tls_handshake.o
+        $BUILD/browser_tls_x509.o $BUILD/browser_tls_p256.o \
+        $BUILD/browser_tls_handshake.o
     verify_user_start $BUILD/browser.elf browser.elf
     python3 _embed_elf.py $BUILD/browser.elf $SRC/include/embed_browser.h browser_elf
     echo "  Embedded: browser.elf"
@@ -1356,6 +1357,11 @@ gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
     -I $SRC/include \
+    -c $SRC/tls_p256.c -o $BUILD/tls_p256.o
+
+gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
+    -I $SRC/include \
     -c $SRC/tls_handshake.c -o $BUILD/tls_handshake.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
@@ -1547,6 +1553,7 @@ ld -m elf_i386 -T $SRC/linker.ld \
     $BUILD/tls_handshake.o \
     $BUILD/tls_trust.o \
     $BUILD/tls_x509.o \
+    $BUILD/tls_p256.o \
     $BUILD/gui.o \
     $BUILD/gui_user.o \
     $BUILD/image.o \

@@ -1,4 +1,6 @@
 #include "tls_handshake.h"
+#include "tls_p256.h"
+#include "tls_x509.h"
 
 #define TLS_HANDSHAKE_HEADER_SIZE 4u
 #define TLS_HANDSHAKE_RANDOM_OFFSET 6u
@@ -89,6 +91,37 @@ static void tls_zero(void* ptr, size_t len)
     for (i = 0; i < len; ++i) {
         bytes[i] = 0;
     }
+}
+
+static size_t tls_hs_cstr_len(const char* s)
+{
+    size_t n = 0;
+
+    if (!s) {
+        return 0;
+    }
+    while (s[n]) {
+        ++n;
+    }
+    return n;
+}
+
+static void tls12_set_last_error(tls12_handshake_context_t* ctx, const char* reason)
+{
+    size_t i;
+    size_t n;
+
+    if (!ctx) {
+        return;
+    }
+    n = tls_hs_cstr_len(reason);
+    if (n >= TLS12_HANDSHAKE_LAST_ERROR_SIZE) {
+        n = TLS12_HANDSHAKE_LAST_ERROR_SIZE - 1u;
+    }
+    for (i = 0; i < n; ++i) {
+        ctx->last_error[i] = reason[i];
+    }
+    ctx->last_error[n] = '\0';
 }
 
 static void tls_copy(uint8_t* dst, const uint8_t* src, size_t len)
@@ -192,6 +225,48 @@ int tls12_build_rsa_client_key_exchange_message(const uint8_t* encrypted_pre_mas
                              &p,
                              encrypted_pre_master_secret,
                              encrypted_pre_master_secret_len)) {
+        return 0;
+    }
+
+    *out_handshake_message_len = p;
+    return 1;
+}
+
+int tls12_build_ecdhe_client_key_exchange_message(
+    const uint8_t client_public_key[TLS12_ECDHE_P256_PUBLIC_KEY_SIZE],
+    uint8_t* out_handshake_message,
+    size_t out_handshake_message_cap,
+    size_t* out_handshake_message_len)
+{
+    size_t p = 0u;
+    size_t body_len = 1u + TLS12_ECDHE_P256_PUBLIC_KEY_SIZE;
+    tls_p256_point_t decoded;
+
+    if (out_handshake_message_len) {
+        *out_handshake_message_len = 0u;
+    }
+
+    if (!client_public_key || client_public_key[0] != TLS12_EC_POINT_UNCOMPRESSED ||
+        !tls_p256_decode_uncompressed(client_public_key, &decoded) ||
+        !out_handshake_message || !out_handshake_message_len ||
+        out_handshake_message_cap < TLS_HANDSHAKE_HEADER_SIZE + body_len) {
+        return 0;
+    }
+
+    if (!tls_hs_append_u8(out_handshake_message,
+                          out_handshake_message_cap,
+                          &p,
+                          TLS_HANDSHAKE_CLIENT_KEY_EXCHANGE) ||
+        !tls_hs_append_u24(out_handshake_message, out_handshake_message_cap, &p, (uint32_t)body_len) ||
+        !tls_hs_append_u8(out_handshake_message,
+                          out_handshake_message_cap,
+                          &p,
+                          TLS12_ECDHE_P256_PUBLIC_KEY_SIZE) ||
+        !tls_hs_append_bytes(out_handshake_message,
+                             out_handshake_message_cap,
+                             &p,
+                             client_public_key,
+                             TLS12_ECDHE_P256_PUBLIC_KEY_SIZE)) {
         return 0;
     }
 
@@ -358,6 +433,15 @@ int tls12_build_client_hello_record(const char* server_name,
 }
 
 static int tls12_cipher_suite_is_aes128_gcm(uint16_t cipher_suite);
+static int tls12_cipher_suite_is_ecdhe_rsa(uint16_t cipher_suite);
+static int tls12_parse_server_key_exchange(tls12_handshake_context_t* ctx,
+                                           const uint8_t* message,
+                                           size_t message_len);
+static int tls12_verify_server_key_exchange_signature(tls12_handshake_context_t* ctx,
+                                                      const uint8_t* signed_params,
+                                                      size_t signed_params_len,
+                                                      const uint8_t* signature,
+                                                      size_t signature_len);
 
 static int tls12_parse_server_hello_extension(tls12_handshake_context_t* ctx,
                                               uint16_t extension_type,
@@ -541,7 +625,148 @@ static int tls12_capture_finished(uint8_t* out,
 
 static int tls12_cipher_suite_is_aes128_gcm(uint16_t cipher_suite)
 {
-    return cipher_suite == TLS12_CIPHER_SUITE_RSA_WITH_AES_128_GCM_SHA256;
+    return cipher_suite == TLS12_CIPHER_SUITE_RSA_WITH_AES_128_GCM_SHA256 ||
+           cipher_suite == TLS12_CIPHER_SUITE_ECDHE_RSA_WITH_AES_128_GCM_SHA256;
+}
+
+static int tls12_cipher_suite_is_ecdhe_rsa(uint16_t cipher_suite)
+{
+    return cipher_suite == TLS12_CIPHER_SUITE_ECDHE_RSA_WITH_AES_128_GCM_SHA256;
+}
+
+static int tls12_verify_server_key_exchange_signature(tls12_handshake_context_t* ctx,
+                                                      const uint8_t* signed_params,
+                                                      size_t signed_params_len,
+                                                      const uint8_t* signature,
+                                                      size_t signature_len)
+{
+    tls_x509_certificate_view_t leaf;
+    tls_x509_subject_public_key_info_t spki;
+    tls_x509_rsa_public_key_t public_key;
+    tls_x509_bit_string_t signature_bits;
+    uint8_t digest[TLS_SHA256_DIGEST_SIZE];
+    uint8_t signed_message[TLS12_RANDOM_SIZE + TLS12_RANDOM_SIZE + TLS12_ECDHE_SIGNED_PARAMS_MAX_SIZE];
+    size_t signed_message_len;
+
+    if (!ctx || !signed_params || signed_params_len == 0u || !signature || signature_len == 0u ||
+        !ctx->has_client_random || !ctx->has_server_random ||
+        signed_params_len > TLS12_ECDHE_SIGNED_PARAMS_MAX_SIZE ||
+        !ctx->has_certificate || ctx->certificate_chain.stored_certificate_count == 0u) {
+        tls12_set_last_error(ctx, "missing certificate or randoms for ECDHE signature verification");
+        return 0;
+    }
+
+    if (tls_x509_parse_certificate(ctx->certificate_chain.certificates[0],
+                                   ctx->certificate_chain.certificate_lengths[0],
+                                   &leaf) != 0 ||
+        tls_x509_parse_subject_public_key_info(&leaf, &spki) != 0 ||
+        spki.algorithm.known_oid != TLS_X509_OID_RSA_ENCRYPTION ||
+        tls_x509_parse_rsa_public_key_from_spki(&spki, &public_key) != 0) {
+        tls12_set_last_error(ctx, "invalid certificate RSA public key for ECDHE signature");
+        return 0;
+    }
+
+    tls_copy(signed_message, ctx->client_random, TLS12_RANDOM_SIZE);
+    tls_copy(signed_message + TLS12_RANDOM_SIZE, ctx->server_random, TLS12_RANDOM_SIZE);
+    tls_copy(signed_message + TLS12_RANDOM_SIZE + TLS12_RANDOM_SIZE, signed_params, signed_params_len);
+    signed_message_len = TLS12_RANDOM_SIZE + TLS12_RANDOM_SIZE + signed_params_len;
+
+    tls_sha256(signed_message, signed_message_len, digest);
+    signature_bits.unused_bits = 0u;
+    signature_bits.bytes.data = signature;
+    signature_bits.bytes.len = signature_len;
+    if (!tls_x509_rsa_verify_pkcs1_v15_sha256(&public_key, &signature_bits, digest)) {
+        tls12_set_last_error(ctx, "invalid ECDHE ServerKeyExchange RSA-SHA256 signature");
+        return 0;
+    }
+
+    return 1;
+}
+
+static int tls12_parse_server_key_exchange(tls12_handshake_context_t* ctx,
+                                           const uint8_t* message,
+                                           size_t message_len)
+{
+    size_t body_len;
+    size_t pos;
+    size_t body_end;
+    uint8_t public_key_len;
+    uint16_t signature_algorithm;
+    uint16_t signature_len;
+    size_t signed_params_start;
+    size_t signed_params_len;
+    tls_p256_point_t server_point;
+
+    if (!ctx || !message ||
+        !tls_handshake_header_valid(message,
+                                    message_len,
+                                    TLS_HANDSHAKE_SERVER_KEY_EXCHANGE,
+                                    &body_len)) {
+        return 0;
+    }
+
+    if (!tls12_cipher_suite_is_ecdhe_rsa(ctx->cipher_suite)) {
+        tls12_set_last_error(ctx, "unexpected ServerKeyExchange for selected cipher suite");
+        return 0;
+    }
+
+    body_end = TLS_HANDSHAKE_HEADER_SIZE + body_len;
+    pos = TLS_HANDSHAKE_HEADER_SIZE;
+    signed_params_start = pos;
+
+    if (body_end - pos < 4u) {
+        tls12_set_last_error(ctx, "truncated ECDHE ServerKeyExchange params");
+        return 0;
+    }
+
+    ctx->server_key_exchange.curve_type = message[pos++];
+    ctx->server_key_exchange.named_curve = tls_hs_read_u16(message + pos);
+    pos += 2u;
+    public_key_len = message[pos++];
+
+    if (ctx->server_key_exchange.curve_type != TLS12_EC_CURVE_TYPE_NAMED_CURVE ||
+        ctx->server_key_exchange.named_curve != TLS12_NAMED_CURVE_SECP256R1 ||
+        public_key_len != TLS12_ECDHE_P256_PUBLIC_KEY_SIZE ||
+        body_end - pos < (size_t)public_key_len + 4u) {
+        tls12_set_last_error(ctx, "unsupported ECDHE ServerKeyExchange curve or point");
+        return 0;
+    }
+
+    tls_copy(ctx->server_key_exchange.public_key, message + pos, public_key_len);
+    ctx->server_key_exchange.public_key_len = public_key_len;
+    if (ctx->server_key_exchange.public_key[0] != TLS12_EC_POINT_UNCOMPRESSED ||
+        !tls_p256_decode_uncompressed(ctx->server_key_exchange.public_key, &server_point)) {
+        tls12_set_last_error(ctx, "invalid ECDHE P-256 server public key");
+        return 0;
+    }
+    pos += public_key_len;
+
+    signature_algorithm = tls_hs_read_u16(message + pos);
+    pos += 2u;
+    signature_len = tls_hs_read_u16(message + pos);
+    pos += 2u;
+
+    signed_params_len = (pos - 4u) - signed_params_start;
+
+    if (signature_algorithm != TLS12_SIGNATURE_ALGORITHM_RSA_PKCS1_SHA256 ||
+        signature_len == 0u || body_end - pos != (size_t)signature_len) {
+        tls12_set_last_error(ctx, "unsupported ECDHE ServerKeyExchange signature");
+        return 0;
+    }
+
+    if (!tls12_verify_server_key_exchange_signature(ctx,
+                                                    message + signed_params_start,
+                                                    signed_params_len,
+                                                    message + pos,
+                                                    signature_len)) {
+        return 0;
+    }
+
+    ctx->server_key_exchange.signature_algorithm = signature_algorithm;
+    ctx->server_key_exchange.signature = message + pos;
+    ctx->server_key_exchange.signature_len = signature_len;
+    ctx->has_server_key_exchange = 1;
+    return 1;
 }
 
 static int tls12_handshake_make_aes128_gcm_key_view(tls12_handshake_context_t* ctx,
@@ -608,6 +833,14 @@ static int tls12_handshake_compute_expected_finished(
                                                                      verify_data) == 0;
 }
 
+const char* tls12_handshake_last_error(const tls12_handshake_context_t* ctx)
+{
+    if (!ctx || !ctx->last_error[0]) {
+        return "";
+    }
+    return ctx->last_error;
+}
+
 const char* tls12_handshake_state_name(tls12_handshake_state_t state)
 {
     switch (state) {
@@ -661,6 +894,7 @@ int tls12_handshake_set_rsa_pre_master_secret(
     }
 
     tls_copy(ctx->pre_master_secret, pre_master_secret, TLS12_RSA_PRE_MASTER_SECRET_SIZE);
+    ctx->pre_master_secret_len = TLS12_RSA_PRE_MASTER_SECRET_SIZE;
     ctx->has_pre_master_secret = 1;
 
     if (tls12_derive_master_secret_sha256(ctx->pre_master_secret,
@@ -676,6 +910,81 @@ int tls12_handshake_set_rsa_pre_master_secret(
     ctx->has_key_block = 0;
     ctx->has_record_layer = 0;
     tls12_aes128_gcm_record_layer_init(&ctx->record_layer);
+    return 1;
+}
+
+int tls12_handshake_set_ecdhe_pre_master_secret(
+    tls12_handshake_context_t* ctx,
+    const uint8_t shared_secret[TLS12_ECDHE_PRE_MASTER_SECRET_SIZE])
+{
+    if (!ctx || !shared_secret || ctx->state == TLS12_HANDSHAKE_STATE_ERROR ||
+        !ctx->has_client_random || !ctx->has_server_random ||
+        !tls12_cipher_suite_is_ecdhe_rsa(ctx->cipher_suite)) {
+        if (ctx) {
+            ctx->state = TLS12_HANDSHAKE_STATE_ERROR;
+        }
+        return 0;
+    }
+
+    tls_copy(ctx->pre_master_secret, shared_secret, TLS12_ECDHE_PRE_MASTER_SECRET_SIZE);
+    ctx->pre_master_secret_len = TLS12_ECDHE_PRE_MASTER_SECRET_SIZE;
+    ctx->has_pre_master_secret = 1;
+
+    if (tls12_derive_master_secret_sha256(ctx->pre_master_secret,
+                                          ctx->pre_master_secret_len,
+                                          ctx->client_random,
+                                          ctx->server_random,
+                                          ctx->master_secret) != 0) {
+        ctx->state = TLS12_HANDSHAKE_STATE_ERROR;
+        return 0;
+    }
+
+    ctx->has_master_secret = 1;
+    ctx->has_key_block = 0;
+    ctx->has_record_layer = 0;
+    tls12_aes128_gcm_record_layer_init(&ctx->record_layer);
+    return 1;
+}
+
+int tls12_handshake_build_ecdhe_client_key_exchange(
+    tls12_handshake_context_t* ctx,
+    const uint8_t client_private_key[TLS12_ECDHE_PRE_MASTER_SECRET_SIZE],
+    uint8_t* out_handshake_message,
+    size_t out_handshake_message_cap,
+    size_t* out_handshake_message_len)
+{
+    tls_p256_point_t client_public;
+    tls_p256_point_t server_public;
+    uint8_t encoded_public[TLS12_ECDHE_P256_PUBLIC_KEY_SIZE];
+    uint8_t shared_secret[TLS12_ECDHE_PRE_MASTER_SECRET_SIZE];
+
+    if (out_handshake_message_len) {
+        *out_handshake_message_len = 0u;
+    }
+
+    if (!ctx || ctx->state != TLS12_HANDSHAKE_STATE_SERVER_HELLO_DONE_RECEIVED ||
+        !client_private_key || !out_handshake_message || !out_handshake_message_len ||
+        !ctx->has_server_key_exchange ||
+        ctx->server_key_exchange.public_key_len != TLS12_ECDHE_P256_PUBLIC_KEY_SIZE ||
+        !tls_p256_is_valid_private_key(client_private_key) ||
+        !tls_p256_decode_uncompressed(ctx->server_key_exchange.public_key, &server_public) ||
+        !tls_p256_base_point_mul(client_private_key, &client_public) ||
+        !tls_p256_encode_uncompressed(&client_public, encoded_public) ||
+        !tls_p256_ecdh_shared_secret(&server_public, client_private_key, shared_secret) ||
+        !tls12_build_ecdhe_client_key_exchange_message(encoded_public,
+                                                       out_handshake_message,
+                                                       out_handshake_message_cap,
+                                                       out_handshake_message_len) ||
+        !tls12_handshake_set_ecdhe_pre_master_secret(ctx, shared_secret) ||
+        !tls12_handshake_on_client_key_exchange_sent(ctx,
+                                                     out_handshake_message,
+                                                     *out_handshake_message_len)) {
+        if (ctx) {
+            ctx->state = TLS12_HANDSHAKE_STATE_ERROR;
+        }
+        return 0;
+    }
+
     return 1;
 }
 
@@ -1018,6 +1327,7 @@ int tls12_handshake_on_server_handshake(tls12_handshake_context_t* ctx,
     if (!ctx || !handshake_message || handshake_message_len < TLS_HANDSHAKE_HEADER_SIZE) {
         if (ctx) {
             ctx->state = TLS12_HANDSHAKE_STATE_ERROR;
+            tls12_set_last_error(ctx, "malformed server handshake");
         }
         return 0;
     }
@@ -1051,8 +1361,18 @@ int tls12_handshake_on_server_handshake(tls12_handshake_context_t* ctx,
         ctx->state = TLS12_HANDSHAKE_STATE_CERTIFICATE_RECEIVED;
         return 1;
 
+    case TLS_HANDSHAKE_SERVER_KEY_EXCHANGE:
+        if (ctx->state != TLS12_HANDSHAKE_STATE_CERTIFICATE_RECEIVED ||
+            !tls12_parse_server_key_exchange(ctx, handshake_message, handshake_message_len) ||
+            !tls12_transcript_add(ctx, handshake_message, handshake_message_len)) {
+            ctx->state = TLS12_HANDSHAKE_STATE_ERROR;
+            return 0;
+        }
+        return 1;
+
     case TLS_HANDSHAKE_SERVER_HELLO_DONE:
         if (ctx->state != TLS12_HANDSHAKE_STATE_CERTIFICATE_RECEIVED ||
+            (tls12_cipher_suite_is_ecdhe_rsa(ctx->cipher_suite) && !ctx->has_server_key_exchange) ||
             !tls_handshake_header_valid(handshake_message,
                                         handshake_message_len,
                                         TLS_HANDSHAKE_SERVER_HELLO_DONE,
@@ -1067,6 +1387,7 @@ int tls12_handshake_on_server_handshake(tls12_handshake_context_t* ctx,
 
     default:
         ctx->state = TLS12_HANDSHAKE_STATE_ERROR;
+        tls12_set_last_error(ctx, "unsupported server handshake message");
         return 0;
     }
 }
@@ -1076,18 +1397,30 @@ int tls12_handshake_on_client_key_exchange_sent(tls12_handshake_context_t* ctx,
                                                 size_t handshake_message_len)
 {
     size_t body_len;
+    int body_ok = 0;
 
     if (!ctx || ctx->state != TLS12_HANDSHAKE_STATE_SERVER_HELLO_DONE_RECEIVED ||
         !tls_handshake_header_valid(handshake_message,
                                     handshake_message_len,
                                     TLS_HANDSHAKE_CLIENT_KEY_EXCHANGE,
-                                    &body_len) ||
-        body_len < 2u ||
-        (size_t)tls_hs_read_u16(handshake_message + TLS_HANDSHAKE_HEADER_SIZE) != body_len - 2u ||
-        !tls12_transcript_add(ctx, handshake_message, handshake_message_len)) {
+                                    &body_len)) {
         if (ctx) {
             ctx->state = TLS12_HANDSHAKE_STATE_ERROR;
         }
+        return 0;
+    }
+
+    if (tls12_cipher_suite_is_ecdhe_rsa(ctx->cipher_suite)) {
+        body_ok = body_len == 1u + TLS12_ECDHE_P256_PUBLIC_KEY_SIZE &&
+                  handshake_message[TLS_HANDSHAKE_HEADER_SIZE] == TLS12_ECDHE_P256_PUBLIC_KEY_SIZE &&
+                  handshake_message[TLS_HANDSHAKE_HEADER_SIZE + 1u] == TLS12_EC_POINT_UNCOMPRESSED;
+    } else {
+        body_ok = body_len >= 2u &&
+                  (size_t)tls_hs_read_u16(handshake_message + TLS_HANDSHAKE_HEADER_SIZE) == body_len - 2u;
+    }
+
+    if (!body_ok || !tls12_transcript_add(ctx, handshake_message, handshake_message_len)) {
+        ctx->state = TLS12_HANDSHAKE_STATE_ERROR;
         return 0;
     }
 

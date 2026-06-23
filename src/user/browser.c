@@ -1356,7 +1356,12 @@ static int browser_tls_process_server_handshake_record(browser_tls_session_t *se
         size_t message_len = 4u + body_len;
         if (message_len > (size_t)sess->server_hs_len - off) break;
         if (tls12_handshake_on_server_handshake(&sess->hs, sess->server_hs_buf + off, message_len) == 0) {
-            snprintf(err, err_size, "TLS: unsupported server handshake");
+            const char *tls_err = tls12_handshake_last_error(&sess->hs);
+            if (tls_err && tls_err[0]) {
+                snprintf(err, err_size, "TLS: %s", tls_err);
+            } else {
+                snprintf(err, err_size, "TLS: unsupported server handshake");
+            }
             return -1;
         }
         off += message_len;
@@ -1438,12 +1443,35 @@ static int browser_tls_send_client_key_exchange(int fd, browser_tls_session_t *s
     unsigned char premaster[TLS12_RSA_PRE_MASTER_SECRET_SIZE];
     unsigned char encrypted[320];
     unsigned char padding[320];
+    unsigned char ecdhe_private[TLS12_ECDHE_PRE_MASTER_SECRET_SIZE];
     tls_x509_subject_public_key_info_t spki;
     tls_x509_rsa_public_key_t rsa_key;
     size_t encrypted_len = 0;
     unsigned char handshake[4 + 2 + sizeof(encrypted)];
     size_t handshake_len = 0;
+    int i;
+
     if (!sess || !cert) return -1;
+
+    if (sess->hs.cipher_suite == TLS12_CIPHER_SUITE_ECDHE_RSA_WITH_AES_128_GCM_SHA256) {
+        browser_tls_make_random(ecdhe_private,
+                                (int)sizeof(ecdhe_private),
+                                (unsigned int)((sess->hs.state + sess->server_hs_len) * 2246822519u + 0x9e3779b9u));
+        if (tls12_handshake_build_ecdhe_client_key_exchange(&sess->hs,
+                                                            ecdhe_private,
+                                                            handshake,
+                                                            sizeof(handshake),
+                                                            &handshake_len) == 0) {
+            snprintf(err, err_size, "TLS: failed to build ECDHE client key exchange");
+            return -1;
+        }
+        if (browser_tls_send_plain_record(fd, TLS_CONTENT_TYPE_HANDSHAKE, handshake, (int)handshake_len) < 0) {
+            snprintf(err, err_size, "TLS: failed to send ECDHE client key exchange");
+            return -1;
+        }
+        return 0;
+    }
+
     if (tls_x509_parse_subject_public_key_info(cert, &spki) != 0 ||
         tls_x509_parse_rsa_public_key_from_spki(&spki, &rsa_key) != 0) {
         snprintf(err, err_size, "TLS: certificate does not contain an RSA key");
@@ -1451,7 +1479,7 @@ static int browser_tls_send_client_key_exchange(int fd, browser_tls_session_t *s
     }
     browser_tls_make_random(rnd, (int)sizeof(rnd), (unsigned int)((sess->hs.state + sess->server_hs_len) * 1103515245u + 12345u));
     browser_tls_make_random(padding, (int)sizeof(padding), (unsigned int)((sess->hs.state + sess->server_hs_len) * 2654435761u + 0x10203u));
-    for (int i = 0; i < (int)sizeof(padding); ++i) {
+    for (i = 0; i < (int)sizeof(padding); ++i) {
         if (padding[i] == 0) padding[i] = (unsigned char)(i + 1);
     }
     if (tls12_make_rsa_pre_master_secret(sess->hs.negotiated_version, rnd, premaster) == 0 ||
