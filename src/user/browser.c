@@ -24,7 +24,6 @@
 #define BROWSER_VIEW_LINES 12
 #define BROWSER_LINE_MAX 96
 #define BROWSER_ADDRESS_MAX 256
-#define BROWSER_TAB_MAX 8
 #define BROWSER_TAB_TITLE_MAX 32
 #define BROWSER_FOCUS_LINK 1
 #define BROWSER_FOCUS_FORM 2
@@ -86,9 +85,14 @@ typedef struct browser_page_cache_entry {
     char location[OB_MAX_HEADER_VALUE];
 } browser_page_cache_entry_t;
 
+typedef struct browser_tab_entry {
+    char title[BROWSER_TAB_TITLE_MAX];
+} browser_tab_entry_t;
+
 typedef struct browser_tabs {
-    char titles[BROWSER_TAB_MAX][BROWSER_TAB_TITLE_MAX];
+    browser_tab_entry_t *items;
     int count;
+    int capacity;
     int active;
 } browser_tabs_t;
 
@@ -554,20 +558,62 @@ static void browser_update_link_status(int win, int status_label, const browser_
     openos_gui_set_text(win, status_label, status);
 }
 
+static int browser_tabs_reserve(browser_tabs_t *tabs, int needed)
+{
+    browser_tab_entry_t *next;
+    int new_capacity;
+
+    if (!tabs || needed <= 0) return -1;
+    if (tabs->capacity >= needed) return 0;
+
+    new_capacity = tabs->capacity > 0 ? tabs->capacity : 4;
+    while (new_capacity < needed) {
+        if (new_capacity > 1024 * 1024) return -1;
+        new_capacity *= 2;
+    }
+
+    next = (browser_tab_entry_t *)realloc(tabs->items, new_capacity * (int)sizeof(browser_tab_entry_t));
+    if (!next) return -1;
+    memset(next + tabs->capacity, 0, (new_capacity - tabs->capacity) * sizeof(browser_tab_entry_t));
+    tabs->items = next;
+    tabs->capacity = new_capacity;
+    return 0;
+}
+
+static const char *browser_tabs_title_at(const browser_tabs_t *tabs, int index)
+{
+    if (!tabs || !tabs->items || index < 0 || index >= tabs->count) return "New Tab";
+    return tabs->items[index].title[0] ? tabs->items[index].title : "New Tab";
+}
+
 static void browser_tabs_refresh(int win, browser_tabs_t *tabs, int tabview_id)
 {
-    char joined[BROWSER_TAB_MAX * BROWSER_TAB_TITLE_MAX];
+    char *joined;
+    int joined_size;
+    int used = 0;
     int i;
 
     if (win < 0 || tabview_id < 0 || !tabs) return;
-    joined[0] = 0;
-    for (i = 0; i < tabs->count; ++i) {
-        if (i > 0) strncat(joined, "|", sizeof(joined) - strlen(joined) - 1);
-        strncat(joined,
-                tabs->titles[i][0] ? tabs->titles[i] : "New Tab",
-                sizeof(joined) - strlen(joined) - 1);
+    if (tabs->count <= 0) {
+        openos_gui_set_tabview_tabs(win, tabview_id, "New Tab");
+        openos_gui_set_tabview_active(win, tabview_id, 0);
+        return;
     }
+
+    joined_size = tabs->count * (BROWSER_TAB_TITLE_MAX + 1) + 1;
+    joined = (char *)malloc(joined_size);
+    if (!joined) return;
+    joined[0] = 0;
+
+    for (i = 0; i < tabs->count; ++i) {
+        const char *title = browser_tabs_title_at(tabs, i);
+        if (i > 0 && used < joined_size - 1) joined[used++] = '|';
+        while (*title && used < joined_size - 1) joined[used++] = *title++;
+        joined[used] = 0;
+    }
+
     openos_gui_set_tabview_tabs(win, tabview_id, joined[0] ? joined : "New Tab");
+    free(joined);
     openos_gui_set_tabview_active(win, tabview_id, tabs->active);
 }
 
@@ -575,9 +621,10 @@ static void browser_tabs_init(int win, browser_tabs_t *tabs, int tabview_id)
 {
     if (!tabs) return;
     memset(tabs, 0, sizeof(*tabs));
+    if (browser_tabs_reserve(tabs, 1) < 0) return;
     tabs->count = 1;
     tabs->active = 0;
-    snprintf(tabs->titles[0], sizeof(tabs->titles[0]), "New Tab");
+    snprintf(tabs->items[0].title, sizeof(tabs->items[0].title), "New Tab");
     browser_tabs_refresh(win, tabs, tabview_id);
 }
 
@@ -605,22 +652,23 @@ static void browser_update_tab_title(int win, int tabview_id, browser_tabs_t *ta
     char title[BROWSER_TITLE_MAX + 16];
     const char *source = "New Tab";
 
-    if (tabview_id < 0 || !load || !tabs || tabs->active < 0 || tabs->active >= tabs->count) return;
+    if (tabview_id < 0 || !load || !tabs || !tabs->items || tabs->active < 0 || tabs->active >= tabs->count) return;
     if (load->title[0]) {
         source = load->title;
     } else if (load->host[0]) {
         source = load->host;
     }
     browser_sanitize_tab_title(title, sizeof(title), source);
-    snprintf(tabs->titles[tabs->active], sizeof(tabs->titles[tabs->active]), "%s", title);
+    snprintf(tabs->items[tabs->active].title, sizeof(tabs->items[tabs->active].title), "%s", title);
     browser_tabs_refresh(win, tabs, tabview_id);
 }
 
 static int browser_tabs_new(int win, browser_tabs_t *tabs, int tabview_id)
 {
-    if (!tabs || tabs->count >= BROWSER_TAB_MAX) return -1;
+    if (!tabs) return -1;
+    if (browser_tabs_reserve(tabs, tabs->count + 1) < 0) return -1;
     tabs->active = tabs->count;
-    snprintf(tabs->titles[tabs->count], sizeof(tabs->titles[tabs->count]), "New Tab");
+    snprintf(tabs->items[tabs->count].title, sizeof(tabs->items[tabs->count].title), "New Tab");
     tabs->count++;
     browser_tabs_refresh(win, tabs, tabview_id);
     return 0;
@@ -628,8 +676,9 @@ static int browser_tabs_new(int win, browser_tabs_t *tabs, int tabview_id)
 
 static int browser_tabs_sync_from_widget(int win, browser_tabs_t *tabs, int tabview_id, int *out_closed)
 {
-    char joined[BROWSER_TAB_MAX * BROWSER_TAB_TITLE_MAX];
+    char *joined;
     char token[BROWSER_TAB_TITLE_MAX];
+    int joined_size;
     int old_count;
     int count = 0;
     int token_len = 0;
@@ -640,25 +689,37 @@ static int browser_tabs_sync_from_widget(int win, browser_tabs_t *tabs, int tabv
     if (win < 0 || tabview_id < 0 || !tabs) return -1;
 
     old_count = tabs->count;
+    joined_size = (tabs->count > 0 ? tabs->count : 1) * (BROWSER_TAB_TITLE_MAX + 1) + 1;
+    joined = (char *)malloc(joined_size);
+    if (!joined) return -1;
     joined[0] = 0;
-    if (openos_gui_get_text(win, tabview_id, joined, sizeof(joined)) < 0) return -1;
+    if (openos_gui_get_text(win, tabview_id, joined, joined_size) < 0) {
+        free(joined);
+        return -1;
+    }
 
     for (i = 0; ; ++i) {
         char ch = joined[i];
         if (ch == '|' || ch == 0) {
+            if (browser_tabs_reserve(tabs, count + 1) < 0) {
+                free(joined);
+                return -1;
+            }
             token[token_len] = 0;
-            browser_sanitize_tab_title(tabs->titles[count], sizeof(tabs->titles[count]), token);
+            browser_sanitize_tab_title(tabs->items[count].title, sizeof(tabs->items[count].title), token);
             count++;
             token_len = 0;
-            if (ch == 0 || count >= BROWSER_TAB_MAX) break;
+            if (ch == 0) break;
         } else if (token_len < (int)sizeof(token) - 1) {
             token[token_len++] = ch;
         }
     }
+    free(joined);
 
     if (count <= 0) {
+        if (browser_tabs_reserve(tabs, 1) < 0) return -1;
         count = 1;
-        snprintf(tabs->titles[0], sizeof(tabs->titles[0]), "New Tab");
+        snprintf(tabs->items[0].title, sizeof(tabs->items[0].title), "New Tab");
     }
     tabs->count = count;
 
@@ -1554,7 +1615,7 @@ int main(int argc, char **argv)
                     openos_gui_set_text(win, body_label, new_home);
                     openos_gui_set_text(win, status_label, "New tab - type an address and press Enter");
                 } else {
-                    openos_gui_set_text(win, status_label, "Maximum tabs reached");
+                    openos_gui_set_text(win, status_label, "Could not create new tab");
                 }
             } else if (event.widget_id == (unsigned int)load_button) {
                 const browser_history_entry_t *cur = browser_history_current(&history);
