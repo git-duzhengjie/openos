@@ -25,6 +25,16 @@
 #define BROWSER_LINE_MAX 96
 #define BROWSER_ADDRESS_MAX 256
 #define BROWSER_TAB_TITLE_MAX 32
+#define BROWSER_WINDOW_W 900
+#define BROWSER_WINDOW_H 520
+#define BROWSER_TAB_X 10
+#define BROWSER_TAB_Y 0
+#define BROWSER_NEW_TAB_BUTTON_W 28
+#define BROWSER_NEW_TAB_BUTTON_H 24
+#define BROWSER_NEW_TAB_BUTTON_MARGIN_RIGHT 10
+#define BROWSER_TAB_GAP 6
+#define BROWSER_TABVIEW_W (BROWSER_WINDOW_W - BROWSER_TAB_X - BROWSER_NEW_TAB_BUTTON_W - BROWSER_TAB_GAP - BROWSER_NEW_TAB_BUTTON_MARGIN_RIGHT)
+#define BROWSER_NEW_TAB_BUTTON_X (BROWSER_TAB_X + BROWSER_TABVIEW_W + BROWSER_TAB_GAP)
 #define BROWSER_FOCUS_LINK 1
 #define BROWSER_FOCUS_FORM 2
 
@@ -1465,17 +1475,17 @@ int main(int argc, char **argv)
 
     browser_history_init(&history, host, path, is_file);
 
-    win = openos_gui_create_window("OpenOS Browser", 54, 44, 900, 520);
+    win = openos_gui_create_window("OpenOS Browser", 54, 44, BROWSER_WINDOW_W, BROWSER_WINDOW_H);
     if (win < 0) {
         printf("browser: failed to create GUI window\n");
         return 1;
     }
 
-    tabview = openos_gui_add_tabview(win, 10, 0, 220, 30, "New Tab", 0, OPENOS_GUI_TABVIEW_BOTTOM_BORDER | OPENOS_GUI_TABVIEW_CLOSE_BUTTONS);
-    new_tab_button = openos_gui_add_button(win, 236, 2, 28, 24, "+");
+    tabview = openos_gui_add_tabview(win, BROWSER_TAB_X, BROWSER_TAB_Y, BROWSER_TABVIEW_W, 30, "New Tab", 0, OPENOS_GUI_TABVIEW_BOTTOM_BORDER | OPENOS_GUI_TABVIEW_CLOSE_BUTTONS);
+    new_tab_button = openos_gui_add_button(win, BROWSER_NEW_TAB_BUTTON_X, 2, BROWSER_NEW_TAB_BUTTON_W, BROWSER_NEW_TAB_BUTTON_H, "+");
     browser_tabs_init(win, &tabs, tabview);
 
-    toolbar = openos_gui_add_toolbar(win, 0, 30, 900, 54, "<|>|Reload|addr:Search OpenOS or type a URL", OPENOS_GUI_TOOLBAR_SHOW_GRIP | OPENOS_GUI_TOOLBAR_GROUPED_BUTTONS | OPENOS_GUI_TOOLBAR_HAS_ADDRESS | OPENOS_GUI_TOOLBAR_BOTTOM_BORDER);
+    toolbar = openos_gui_add_toolbar(win, 0, 30, BROWSER_WINDOW_W, 54, "<|>|Reload|addr:Search OpenOS or type a URL", OPENOS_GUI_TOOLBAR_SHOW_GRIP | OPENOS_GUI_TOOLBAR_GROUPED_BUTTONS | OPENOS_GUI_TOOLBAR_HAS_ADDRESS | OPENOS_GUI_TOOLBAR_BOTTOM_BORDER);
     (void)toolbar;
     back_button = openos_gui_add_button(win, 16, 48, 40, 24, "<");
     forward_button = openos_gui_add_button(win, 60, 48, 40, 24, ">");
@@ -1493,7 +1503,7 @@ int main(int argc, char **argv)
                                  OPENOS_GUI_LABEL_MULTILINE | OPENOS_GUI_LABEL_SELECTABLE | OPENOS_GUI_LABEL_COPYABLE,
                                  OPENOS_GUI_LABEL_ALIGN_LEFT);
 
-    status_label = openos_gui_add_statusbar(win, 0, 484, 900, 24, "Ready - type an address and press Enter|OpenOS Browser|", OPENOS_GUI_STATUSBAR_SIZE_GRIP | OPENOS_GUI_STATUSBAR_TOP_BORDER | OPENOS_GUI_STATUSBAR_LINK_PROMPT);
+    status_label = openos_gui_add_statusbar(win, 0, 484, BROWSER_WINDOW_W, 24, "Ready - type an address and press Enter|OpenOS Browser|", OPENOS_GUI_STATUSBAR_SIZE_GRIP | OPENOS_GUI_STATUSBAR_TOP_BORDER | OPENOS_GUI_STATUSBAR_LINK_PROMPT);
     load.window_id = win;
     load.status_label_id = status_label;
     load.body_label_id = body_label;
