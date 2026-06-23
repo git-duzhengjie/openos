@@ -103,6 +103,64 @@ void gui_user_post_key_event(gui_window_t *window, int key) {
     gui_user_push_event(&event);
 }
 
+void gui_user_post_key_up_event(gui_window_t *window, int key) {
+    gui_user_event_t event;
+    if (!window || window->user_owner_pid == 0 || key == 0) return;
+    memset(&event, 0, sizeof(event));
+    event.owner_pid = window->user_owner_pid;
+    event.type = GUI_USER_EVENT_KEY_UP;
+    event.window_id = window->id;
+    gui_widget_t *focused = gui_get_focused_widget();
+    event.widget_id = (focused && focused->owner == window) ? focused->id : 0;
+    event.key = key;
+    gui_user_push_event(&event);
+}
+
+void gui_user_post_selection_event(gui_widget_t *widget) {
+    gui_user_event_t event;
+    if (!widget || !widget->owner || widget->owner->user_owner_pid == 0) return;
+    memset(&event, 0, sizeof(event));
+    event.owner_pid = widget->owner->user_owner_pid;
+    event.type = GUI_USER_EVENT_SELECTION_CHANGED;
+    event.window_id = widget->owner->id;
+    event.widget_id = widget->id;
+    event.x = widget->value;
+    event.y = widget->value;
+    gui_user_push_event(&event);
+}
+
+void gui_user_post_mouse_event(gui_window_t *window, uint32_t event_type, int x, int y, int button, int wheel_delta) {
+    gui_user_event_t event;
+    if (!window || window->user_owner_pid == 0) return;
+    if (event_type != GUI_USER_EVENT_MOUSE_MOVE && event_type != GUI_USER_EVENT_MOUSE_DOWN &&
+        event_type != GUI_USER_EVENT_MOUSE_UP && event_type != GUI_USER_EVENT_MOUSE_WHEEL) return;
+    memset(&event, 0, sizeof(event));
+    event.owner_pid = window->user_owner_pid;
+    event.type = event_type;
+    event.window_id = window->id;
+    event.widget_id = 0;
+    event.x = x - window->rect.x;
+    event.y = y - window->rect.y;
+    event.button = button;
+    event.key = wheel_delta;
+    gui_user_push_event(&event);
+}
+
+void gui_user_post_window_event(gui_window_t *window, uint32_t event_type) {
+    gui_user_event_t event;
+    if (!window || window->user_owner_pid == 0) return;
+    if (event_type != GUI_USER_EVENT_MOVE && event_type != GUI_USER_EVENT_RESIZE) return;
+    memset(&event, 0, sizeof(event));
+    event.owner_pid = window->user_owner_pid;
+    event.type = event_type;
+    event.window_id = window->id;
+    event.x = window->rect.x;
+    event.y = window->rect.y;
+    event.key = window->rect.w;
+    event.button = window->rect.h;
+    gui_user_push_event(&event);
+}
+
 void gui_user_post_text_event(gui_widget_t *widget, uint32_t event_type) {
     gui_user_event_t event;
     if (!widget || !widget->owner || widget->owner->user_owner_pid == 0) return;
@@ -1677,6 +1735,7 @@ int gui_user_resize_window(uint32_t window_id, int w, int h) {
     int old_h = win->rect.h;
     win->rect.w = w;
     win->rect.h = h;
+    gui_user_post_window_event(win, GUI_USER_EVENT_RESIZE);
     gui_invalidate_rect(old_x, old_y, old_w, old_h);
     gui_invalidate_rect(win->rect.x, win->rect.y, win->rect.w, win->rect.h);
     return 0;

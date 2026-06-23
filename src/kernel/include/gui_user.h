@@ -25,6 +25,14 @@ typedef struct gui_widget gui_widget_t;
 #define GUI_USER_EVENT_FOCUS        6u
 #define GUI_USER_EVENT_BLUR         7u
 #define GUI_USER_EVENT_VALUE_CHANGED 8u
+#define GUI_USER_EVENT_RESIZE       9u
+#define GUI_USER_EVENT_MOVE         10u
+#define GUI_USER_EVENT_MOUSE_MOVE   11u
+#define GUI_USER_EVENT_MOUSE_DOWN   12u
+#define GUI_USER_EVENT_MOUSE_UP     13u
+#define GUI_USER_EVENT_MOUSE_WHEEL  14u
+#define GUI_USER_EVENT_KEY_UP       15u
+#define GUI_USER_EVENT_SELECTION_CHANGED 16u
 
 typedef struct gui_user_event {
     uint32_t owner_pid;
@@ -410,8 +418,12 @@ int gui_user_add_textbox(uint32_t window_id, int x, int y, int w, int h, const c
 int gui_user_add_textarea(uint32_t window_id, int x, int y, int w, int h, const char *text);
 int gui_user_poll_event(gui_user_event_t *out_event);
 void gui_user_post_key_event(gui_window_t *window, int key);
+void gui_user_post_key_up_event(gui_window_t *window, int key);
 void gui_user_post_text_event(gui_widget_t *widget, uint32_t event_type);
 void gui_user_post_value_event(gui_widget_t *widget);
+void gui_user_post_selection_event(gui_widget_t *widget);
+void gui_user_post_mouse_event(gui_window_t *window, uint32_t event_type, int x, int y, int button, int wheel_delta);
+void gui_user_post_window_event(gui_window_t *window, uint32_t event_type);
 void gui_user_widget_click_at(gui_widget_t *widget, int x, int y);
 int gui_user_set_text(uint32_t window_id, uint32_t widget_id, const char *text);
 int gui_user_set_text_cursor(uint32_t window_id, uint32_t widget_id, const char *text, int cursor);

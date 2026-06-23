@@ -5980,6 +5980,8 @@ const char *gui_terminal_get_clipboard_text(void) {
 
 __attribute__((optimize("no-jump-tables")))
 static void gui_handle_mouse_down(int x, int y) {
+    gui_window_t *event_window = gui_window_at(x, y);
+    if (event_window) gui_user_post_mouse_event(event_window, GUI_USER_EVENT_MOUSE_DOWN, x, y, 1, 0);
     if (gui_ctxmenu_is_open()) {
         gui_ctxmenu_handle_click(x, y);
         return;
@@ -6227,6 +6229,8 @@ static void gui_handle_mouse_down(int x, int y) {
 
 __attribute__((optimize("no-jump-tables")))
 static void gui_handle_mouse_up(int x, int y) {
+    gui_window_t *event_window = gui_window_at(x, y);
+    if (event_window) gui_user_post_mouse_event(event_window, GUI_USER_EVENT_MOUSE_UP, x, y, 1, 0);
     if (g_gui.terminal.view.selecting) {
         uint32_t tc, trc;
         if (gui_terminal_point_to_cell(x, y, &tc, &trc)) {
@@ -6288,7 +6292,15 @@ static void gui_handle_mouse_up(int x, int y) {
 
 __attribute__((optimize("no-jump-tables")))
 static void gui_handle_mouse_move(int x, int y) {
+    static int last_user_move_x = -32768;
+    static int last_user_move_y = -32768;
+    gui_window_t *event_window = gui_window_at(x, y);
     int search_idx;
+    if (event_window && (x != last_user_move_x || y != last_user_move_y)) {
+        gui_user_post_mouse_event(event_window, GUI_USER_EVENT_MOUSE_MOVE, x, y, 0, 0);
+        last_user_move_x = x;
+        last_user_move_y = y;
+    }
     if (g_gui.text_select_widget) {
         gui_widget_t *tw = g_gui.text_select_widget;
         if (tw->owner) {
@@ -6336,12 +6348,15 @@ static void gui_handle_mouse_move(int x, int y) {
         gui_invalidate_rect(x - 18, y - 18, 36, 36);
     } else if (g_gui.drag_window && g_gui.drag_window->dragging) {
         gui_window_t *w = g_gui.drag_window;
+        int old_x = w->rect.x;
+        int old_y = w->rect.y;
         w->rect.x = x - w->drag_offset_x;
         w->rect.y = y - w->drag_offset_y;
         if (w->rect.x < 0) w->rect.x = 0;
         if (w->rect.y < 0) w->rect.y = 0;
         if (w->rect.x + w->rect.w > (int)g_gui.width) w->rect.x = (int)g_gui.width - w->rect.w;
         if (w->rect.y + w->rect.h > (int)g_gui.height - GUI_TASKBAR_HEIGHT) w->rect.y = (int)g_gui.height - GUI_TASKBAR_HEIGHT - w->rect.h;
+        if (w->rect.x != old_x || w->rect.y != old_y) gui_user_post_window_event(w, GUI_USER_EVENT_MOVE);
         gui_invalidate_all();
     } else if (g_gui.drag_window && g_gui.drag_window->resizing) {
         gui_window_t *w = g_gui.drag_window;
@@ -6353,8 +6368,11 @@ static void gui_handle_mouse_move(int x, int y) {
         if (nh < 100) nh = 100;
         if (nw > max_w) nw = max_w;
         if (nh > max_h) nh = max_h;
-        w->rect.w = nw;
-        w->rect.h = nh;
+        if (w->rect.w != nw || w->rect.h != nh) {
+            w->rect.w = nw;
+            w->rect.h = nh;
+            gui_user_post_window_event(w, GUI_USER_EVENT_RESIZE);
+        }
         gui_invalidate_all();
     } else {
         gui_invalidate_rect(x - 18, y - 18, 36, 36);
@@ -6424,6 +6442,7 @@ void gui_process_events(void) {
                 }
             } else if (g_gui.active_window && g_gui.active_window->user_owner_pid != 0) {
                 gui_user_post_key_event(g_gui.active_window, ev.key);
+                gui_user_post_key_up_event(g_gui.active_window, ev.key);
             } else if (g_gui.focused_widget && g_gui.focused_widget->focused) {
                 /* Focused widgets consume keys that they do not handle. */
             } else {
@@ -6437,7 +6456,9 @@ void gui_process_events(void) {
         } else if (ev.type == GUI_EVENT_MOUSE_MOVE) {
             gui_handle_mouse_move(ev.x, ev.y);
         } else if (ev.type == GUI_EVENT_MOUSE_WHEEL) {
+            gui_window_t *wheel_window = gui_window_at(ev.x, ev.y);
             gui_widget_t *wheel_widget = gui_widget_at_screen(ev.x, ev.y);
+            if (wheel_window) gui_user_post_mouse_event(wheel_window, GUI_USER_EVENT_MOUSE_WHEEL, ev.x, ev.y, 0, ev.dy);
             if (wheel_widget && wheel_widget->type == GUI_WIDGET_TEXTAREA) {
                 gui_textarea_scroll_lines(wheel_widget, ev.dy > 0 ? -1 : 1);
             } else if (wheel_widget && wheel_widget->type == GUI_WIDGET_SCROLLBAR) {

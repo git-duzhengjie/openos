@@ -618,13 +618,13 @@
 
 #### 17.0.1.3 GUI 事件和 ABI 补齐
 
-- [ ] 补齐用户态 GUI 事件
-  - [ ] TextChanged / TextSubmit
-  - [ ] Focus / Blur
-  - [ ] Resize / Move
-  - [ ] MouseMove / MouseDown / MouseUp / MouseWheel
-  - [ ] KeyUp
-  - [ ] ValueChanged / SelectionChanged
+- [x] 补齐用户态 GUI 事件
+  - [x] TextChanged / TextSubmit
+  - [x] Focus / Blur
+  - [x] Resize / Move
+  - [x] MouseMove / MouseDown / MouseUp / MouseWheel
+  - [x] KeyUp
+  - [x] ValueChanged / SelectionChanged
 - [ ] 补齐键盘事件修饰键
   - [ ] Shift / Ctrl / Alt / Meta modifiers
   - [ ] 支持 Shift+Tab、Ctrl+A/C/V/X、快捷键分发
