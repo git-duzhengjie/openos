@@ -106,6 +106,11 @@
 #define GUI_PANEL_FLAG_ROUNDED     0x00000002u
 #define GUI_PANEL_FLAG_SHADOW      0x00000004u
 
+#define GUI_GROUPBOX_FLAG_BORDER    0x00000001u
+#define GUI_GROUPBOX_FLAG_CARD      0x00000002u
+#define GUI_GROUPBOX_FLAG_ERROR     0x00000004u
+#define GUI_GROUPBOX_FLAG_TITLEBAR  0x00000008u
+
 #define GUI_WINDOW_FLAG_NONE      0x00000000u
 #define GUI_WINDOW_FLAG_CLOSABLE  0x00000001u
 #define GUI_WINDOW_FLAG_MINIMIZED 0x00000002u
@@ -179,6 +184,7 @@ typedef enum gui_widget_type {
     GUI_WIDGET_STATUSBAR,
     GUI_WIDGET_TABVIEW,
     GUI_WIDGET_SPLITVIEW,
+    GUI_WIDGET_GROUPBOX,
     GUI_WIDGET_TREEVIEW,
     GUI_WIDGET_SCROLLBAR,
     GUI_WIDGET_SCROLLVIEW
@@ -582,6 +588,7 @@ void gui_cycle_windows(void);
 gui_widget_t *gui_add_label(gui_window_t *window, int x, int y, int w, int h, const char *text);
 gui_widget_t *gui_add_button(gui_window_t *window, int x, int y, int w, int h, const char *text, gui_widget_callback_t cb, void *user_data);
 gui_widget_t *gui_add_panel(gui_window_t *window, int x, int y, int w, int h, uint32_t color);
+gui_widget_t *gui_add_groupbox(gui_window_t *window, int x, int y, int w, int h, const char *title);
 gui_widget_t *gui_add_textbox(gui_window_t *window, int x, int y, int w, int h, const char *text);
 gui_widget_t *gui_add_textarea(gui_window_t *window, int x, int y, int w, int h, const char *text);
 gui_widget_t *gui_add_canvas(gui_window_t *window, int x, int y, int w, int h, uint32_t color);
@@ -676,6 +683,7 @@ int gui_widget_blit_rgba32(gui_widget_t *widget, int x, int y, int w, int h, con
 int gui_widget_scroll_rect(gui_widget_t *widget, int dst_x, int dst_y, int src_x, int src_y, int w, int h);
 int gui_widget_present(gui_widget_t *widget);
 void gui_widget_set_panel_options(gui_widget_t *widget, uint32_t bg_color, uint32_t border_color, uint32_t flags, uint32_t border_width, uint32_t padding);
+void gui_widget_set_groupbox_options(gui_widget_t *widget, const char *title, uint32_t bg_color, uint32_t border_color, uint32_t flags, uint32_t padding);
 int gui_toggle_set_checked(gui_widget_t *widget, int checked);
 int gui_toggle_get_checked(const gui_widget_t *widget);
 int gui_checkbox_set_checked(gui_widget_t *widget, int checked);

@@ -3848,6 +3848,38 @@ int gui_splitview_get_ratio(gui_widget_t *widget, int *out_ratio) {
     return 0;
 }
 
+static void gui_draw_groupbox_widget(gui_widget_t *wg, int ax, int ay) {
+    uint32_t bg = wg->bg_color ? wg->bg_color : gui_rgb(248, 250, 252);
+    uint32_t border = wg->panel_border_color ? wg->panel_border_color : g_gui.colors.button_border;
+    uint32_t title_color = (wg->panel_flags & GUI_GROUPBOX_FLAG_ERROR) ? gui_rgb(185, 28, 28) : g_gui.colors.text_fg;
+    uint32_t header_bg = (wg->panel_flags & GUI_GROUPBOX_FLAG_ERROR) ? gui_rgb(254, 242, 242) : gui_rgb(241, 245, 249);
+    uint32_t bw = wg->panel_border_width ? wg->panel_border_width : 1;
+    uint32_t i;
+    int title_h = (wg->text[0] != '\0') ? 22 : 0;
+    if (bw > 8) bw = 8;
+    if (wg->panel_flags & GUI_GROUPBOX_FLAG_CARD) {
+        gui_raw_fill_rect(ax + 2, ay + 2, wg->rect.w, wg->rect.h, gui_rgb(205, 210, 220));
+    }
+    gui_raw_fill_rect(ax, ay, wg->rect.w, wg->rect.h, bg);
+    if ((wg->panel_flags & GUI_GROUPBOX_FLAG_TITLEBAR) && title_h > 0) {
+        gui_raw_fill_rect(ax + 1, ay + 1, wg->rect.w - 2, title_h, header_bg);
+        gui_raw_line(ax + 1, ay + title_h + 1, ax + wg->rect.w - 2, ay + title_h + 1, border);
+    }
+    if (wg->panel_flags & GUI_GROUPBOX_FLAG_BORDER) {
+        for (i = 0; i < bw; i++) {
+            gui_raw_line(ax + (int)i, ay + (int)i, ax + wg->rect.w - 1 - (int)i, ay + (int)i, border);
+            gui_raw_line(ax + (int)i, ay + wg->rect.h - 1 - (int)i, ax + wg->rect.w - 1 - (int)i, ay + wg->rect.h - 1 - (int)i, border);
+            gui_raw_line(ax + (int)i, ay + (int)i, ax + (int)i, ay + wg->rect.h - 1 - (int)i, border);
+            gui_raw_line(ax + wg->rect.w - 1 - (int)i, ay + (int)i, ax + wg->rect.w - 1 - (int)i, ay + wg->rect.h - 1 - (int)i, border);
+        }
+    }
+    if (wg->text[0] != '\0') {
+        gui_rect_t clip = { ax + 8, ay + 2, wg->rect.w - 16, title_h > 0 ? title_h : 18 };
+        int ty = (wg->panel_flags & GUI_GROUPBOX_FLAG_TITLEBAR) ? gui_text_center_y(ay + 1, title_h) : ay - 1;
+        gui_draw_window_title_text(ax + 8, ty, wg->text, title_color, &clip);
+    }
+}
+
 static void gui_draw_splitview_widget(gui_widget_t *wg, int ax, int ay) {
     int pos = gui_splitview_bar_pos(wg);
     uint32_t pane_a = gui_rgb(248, 250, 252);
@@ -4219,6 +4251,8 @@ static void gui_draw_widget(gui_widget_t *wg) {
         gui_draw_tabview_widget(wg, ax, ay);
     } else if (wg->type == GUI_WIDGET_SPLITVIEW) {
         gui_draw_splitview_widget(wg, ax, ay);
+    } else if (wg->type == GUI_WIDGET_GROUPBOX) {
+        gui_draw_groupbox_widget(wg, ax, ay);
     } else if (wg->type == GUI_WIDGET_ICONVIEW) {
         int count = gui_iconview_count(wg);
         int cols = gui_iconview_columns(wg);
@@ -9111,6 +9145,19 @@ gui_widget_t *gui_add_panel(gui_window_t *window, int x, int y, int w, int h, ui
     return wg;
 }
 
+gui_widget_t *gui_add_groupbox(gui_window_t *window, int x, int y, int w, int h, const char *title) {
+    gui_widget_t *wg = gui_alloc_widget(window, GUI_WIDGET_GROUPBOX, x, y, w, h, title ? title : "");
+    if (wg) {
+        wg->bg_color = gui_rgb(255, 255, 255);
+        wg->fg_color = g_gui.colors.text_fg;
+        wg->panel_border_color = g_gui.colors.button_border;
+        wg->panel_border_width = 1;
+        wg->panel_padding = 12;
+        wg->panel_flags = GUI_GROUPBOX_FLAG_BORDER | GUI_GROUPBOX_FLAG_CARD | GUI_GROUPBOX_FLAG_TITLEBAR;
+    }
+    return wg;
+}
+
 gui_widget_t *gui_add_canvas(gui_window_t *window, int x, int y, int w, int h, uint32_t color) {
     gui_widget_t *wg = gui_alloc_widget(window, GUI_WIDGET_CANVAS, x, y, w, h, "");
     if (wg) {
@@ -9346,6 +9393,24 @@ void gui_widget_set_panel_options(gui_widget_t *widget, uint32_t bg_color, uint3
     if (padding > 64) padding = 64;
     widget->panel_border_width = border_width;
     widget->panel_padding = padding;
+    gui_widget_invalidate(widget);
+}
+
+void gui_widget_set_groupbox_options(gui_widget_t *widget, const char *title, uint32_t bg_color, uint32_t border_color, uint32_t flags, uint32_t padding) {
+    size_t len;
+    if (!widget || widget->type != GUI_WIDGET_GROUPBOX) return;
+    if (title) {
+        len = strlen(title);
+        if (len >= sizeof(widget->text)) len = sizeof(widget->text) - 1;
+        memcpy(widget->text, title, len);
+        widget->text[len] = '\0';
+    }
+    widget->bg_color = bg_color ? bg_color : gui_rgb(255, 255, 255);
+    widget->panel_border_color = border_color ? border_color : g_gui.colors.button_border;
+    widget->panel_flags = flags & (GUI_GROUPBOX_FLAG_BORDER | GUI_GROUPBOX_FLAG_CARD | GUI_GROUPBOX_FLAG_ERROR | GUI_GROUPBOX_FLAG_TITLEBAR);
+    if (padding > 64) padding = 64;
+    widget->panel_padding = padding;
+    widget->panel_border_width = 1;
     gui_widget_invalidate(widget);
 }
 

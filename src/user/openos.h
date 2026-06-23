@@ -247,6 +247,8 @@
 #define SYS_GUI_ADD_SPLITVIEW 450
 #define SYS_GUI_SET_SPLITVIEW_RATIO 451
 #define SYS_GUI_GET_SPLITVIEW_RATIO 452
+#define SYS_GUI_ADD_GROUPBOX 453
+#define SYS_GUI_SET_GROUPBOX_OPTIONS 454
 
 #define OPENOS_GUI_TEXTBOX_READONLY  (1u << 0)
 #define OPENOS_GUI_TEXTBOX_DISABLED  (1u << 1)
@@ -303,6 +305,11 @@
 #define OPENOS_GUI_SPLITVIEW_RESIZABLE            0x00000002u
 #define OPENOS_GUI_SPLITVIEW_SHOW_GRIP            0x00000004u
 #define OPENOS_GUI_SPLITVIEW_PANE_BORDER          0x00000008u
+
+#define OPENOS_GUI_GROUPBOX_BORDER                0x00000001u
+#define OPENOS_GUI_GROUPBOX_CARD                  0x00000002u
+#define OPENOS_GUI_GROUPBOX_ERROR                 0x00000004u
+#define OPENOS_GUI_GROUPBOX_TITLEBAR              0x00000008u
 
 #define OPENOS_GUI_TOAST_INFO                OPENOS_GUI_DIALOG_INFO
 #define OPENOS_GUI_TOAST_WARNING             OPENOS_GUI_DIALOG_WARNING
@@ -877,6 +884,20 @@ typedef struct openos_gui_splitview_request {
     int ratio;
     unsigned int flags;
 } openos_gui_splitview_request_t;
+
+typedef struct openos_gui_groupbox_request {
+    unsigned int window_id;
+    unsigned int widget_id;
+    int x;
+    int y;
+    int w;
+    int h;
+    unsigned int bg_color;
+    unsigned int border_color;
+    unsigned int flags;
+    unsigned int padding;
+    char title[256];
+} openos_gui_groupbox_request_t;
 
 typedef struct openos_gui_text_request {
     unsigned int window_id;
@@ -1481,6 +1502,37 @@ static inline int openos_gui_close_tabview_tab(int window_id, int widget_id, int
     req.flags = 0;
     req.tabs[0] = 0;
     return openos_syscall_result(openos_syscall1(SYS_GUI_CLOSE_TABVIEW_TAB, (int)&req));
+}
+
+static inline int openos_gui_add_groupbox(int window_id, int x, int y, int w, int h, const char *title, unsigned int flags)
+{
+    openos_gui_groupbox_request_t req;
+    req.window_id = (unsigned int)window_id;
+    req.widget_id = 0;
+    req.x = x;
+    req.y = y;
+    req.w = w;
+    req.h = h;
+    req.bg_color = 0xffffffu;
+    req.border_color = 0xcbd5e1u;
+    req.flags = flags;
+    req.padding = 12;
+    openos_gui_copy_text256(req.title, title);
+    return openos_syscall_result(openos_syscall1(SYS_GUI_ADD_GROUPBOX, (int)&req));
+}
+
+static inline int openos_gui_set_groupbox_options(int window_id, int widget_id, const char *title, unsigned int bg_color, unsigned int border_color, unsigned int flags, unsigned int padding)
+{
+    openos_gui_groupbox_request_t req;
+    req.window_id = (unsigned int)window_id;
+    req.widget_id = (unsigned int)widget_id;
+    req.x = req.y = req.w = req.h = 0;
+    req.bg_color = bg_color;
+    req.border_color = border_color;
+    req.flags = flags;
+    req.padding = padding;
+    openos_gui_copy_text256(req.title, title);
+    return openos_syscall_result(openos_syscall1(SYS_GUI_SET_GROUPBOX_OPTIONS, (int)&req));
 }
 
 static inline int openos_gui_add_splitview(int window_id, int x, int y, int w, int h, int ratio, unsigned int flags)

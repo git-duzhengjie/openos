@@ -3184,6 +3184,28 @@ uint32_t syscall_dispatch(uint32_t num,
             return (uint32_t)gui_user_close_tabview_tab(req.window_id, req.widget_id, req.tab_index);
         }
 
+    case SYS_GUI_ADD_GROUPBOX:
+        {
+            gui_user_groupbox_request_t req;
+            if (!a || !user_ptr_valid((void *)a, sizeof(req), USERMEM_READ))
+                return (uint32_t)-1;
+            if (copy_from_user(&req, (const void *)a, sizeof(req)) < 0)
+                return (uint32_t)-1;
+            req.title[sizeof(req.title) - 1] = 0;
+            return (uint32_t)gui_user_add_groupbox(req.window_id, req.x, req.y, req.w, req.h, req.title, req.bg_color, req.border_color, req.flags, req.padding);
+        }
+
+    case SYS_GUI_SET_GROUPBOX_OPTIONS:
+        {
+            gui_user_groupbox_request_t req;
+            if (!a || !user_ptr_valid((void *)a, sizeof(req), USERMEM_READ))
+                return (uint32_t)-1;
+            if (copy_from_user(&req, (const void *)a, sizeof(req)) < 0)
+                return (uint32_t)-1;
+            req.title[sizeof(req.title) - 1] = 0;
+            return (uint32_t)gui_user_set_groupbox_options(req.window_id, req.widget_id, req.title, req.bg_color, req.border_color, req.flags, req.padding);
+        }
+
     case SYS_GUI_ADD_SPLITVIEW:
         {
             gui_user_splitview_request_t req;

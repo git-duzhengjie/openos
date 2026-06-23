@@ -115,6 +115,20 @@ typedef struct gui_user_splitview_request {
     uint32_t flags;
 } gui_user_splitview_request_t;
 
+typedef struct gui_user_groupbox_request {
+    uint32_t window_id;
+    uint32_t widget_id;
+    int32_t x;
+    int32_t y;
+    int32_t w;
+    int32_t h;
+    uint32_t bg_color;
+    uint32_t border_color;
+    uint32_t flags;
+    uint32_t padding;
+    char title[256];
+} gui_user_groupbox_request_t;
+
 typedef struct gui_user_radio_request {
     uint32_t window_id;
     uint32_t group_id;
@@ -353,6 +367,8 @@ int gui_user_close_tabview_tab(uint32_t window_id, uint32_t widget_id, int tab_i
 int gui_user_add_splitview(uint32_t window_id, int x, int y, int w, int h, int ratio, uint32_t flags);
 int gui_user_set_splitview_ratio(uint32_t window_id, uint32_t widget_id, int ratio);
 int gui_user_get_splitview_ratio(uint32_t window_id, uint32_t widget_id, int *out_ratio);
+int gui_user_add_groupbox(uint32_t window_id, int x, int y, int w, int h, const char *title, uint32_t bg_color, uint32_t border_color, uint32_t flags, uint32_t padding);
+int gui_user_set_groupbox_options(uint32_t window_id, uint32_t widget_id, const char *title, uint32_t bg_color, uint32_t border_color, uint32_t flags, uint32_t padding);
 int gui_user_add_panel(uint32_t window_id, int x, int y, int w, int h, uint32_t color);
 int gui_user_add_canvas(uint32_t window_id, int x, int y, int w, int h, uint32_t color);
 int gui_user_add_toggle(uint32_t window_id, int x, int y, int w, int h, const char *text, int checked);

@@ -93,6 +93,8 @@ int main(void)
     openos_gui_add_tabview(win, 8, 306, 420, 42, "Home|Downloads|Settings", 0, OPENOS_GUI_TABVIEW_CLOSE_BUTTONS | OPENOS_GUI_TABVIEW_BOTTOM_BORDER);
     openos_gui_add_splitview(win, 436, 150, 164, 112, 55, OPENOS_GUI_SPLITVIEW_RESIZABLE | OPENOS_GUI_SPLITVIEW_SHOW_GRIP | OPENOS_GUI_SPLITVIEW_PANE_BORDER);
     openos_gui_add_splitview(win, 436, 270, 164, 84, 45, OPENOS_GUI_SPLITVIEW_HORIZONTAL | OPENOS_GUI_SPLITVIEW_RESIZABLE | OPENOS_GUI_SPLITVIEW_SHOW_GRIP | OPENOS_GUI_SPLITVIEW_PANE_BORDER);
+    openos_gui_add_groupbox(win, 612, 150, 166, 88, "设置分组", OPENOS_GUI_GROUPBOX_BORDER | OPENOS_GUI_GROUPBOX_CARD | OPENOS_GUI_GROUPBOX_TITLEBAR);
+    openos_gui_add_groupbox(win, 612, 248, 166, 88, "错误页", OPENOS_GUI_GROUPBOX_BORDER | OPENOS_GUI_GROUPBOX_CARD | OPENOS_GUI_GROUPBOX_ERROR | OPENOS_GUI_GROUPBOX_TITLEBAR);
     label = openos_gui_add_label(win, 16, 32, 260, 20, "Hello from user mode GUI ABI");
     button = openos_gui_add_button(win, 16, 72, 120, 24, "OK");
     panel = openos_gui_add_panel(win, 150, 66, 150, 42, 0xFFEAF4FFu);

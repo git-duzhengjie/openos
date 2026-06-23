@@ -355,6 +355,32 @@ int gui_user_close_tabview_tab(uint32_t window_id, uint32_t widget_id, int tab_i
     return 0;
 }
 
+int gui_user_add_groupbox(uint32_t window_id, int x, int y, int w, int h, const char *title, uint32_t bg_color, uint32_t border_color, uint32_t flags, uint32_t padding) {
+    gui_window_t *win = gui_find_window(window_id);
+    gui_widget_t *widget;
+    char safe_title[GUI_USER_TEXT_MAX + 1];
+    if (!gui_user_window_owned_by_current(win) || w <= 0 || h <= 0) return -1;
+    gui_user_copy_text(safe_title, sizeof(safe_title), title ? title : "");
+    widget = gui_add_groupbox(win, x, y, w, h, safe_title);
+    if (!widget) return -1;
+    gui_widget_set_groupbox_options(widget, safe_title, bg_color, border_color, flags, padding);
+    gui_invalidate_rect(win->rect.x, win->rect.y, win->rect.w, win->rect.h);
+    return (int)widget->id;
+}
+
+int gui_user_set_groupbox_options(uint32_t window_id, uint32_t widget_id, const char *title, uint32_t bg_color, uint32_t border_color, uint32_t flags, uint32_t padding) {
+    gui_window_t *win = gui_find_window(window_id);
+    gui_widget_t *widget;
+    char safe_title[GUI_USER_TEXT_MAX + 1];
+    if (!gui_user_window_owned_by_current(win)) return -1;
+    widget = gui_find_widget(win, widget_id);
+    if (!widget || widget->type != GUI_WIDGET_GROUPBOX) return -1;
+    gui_user_copy_text(safe_title, sizeof(safe_title), title ? title : widget->text);
+    gui_widget_set_groupbox_options(widget, safe_title, bg_color, border_color, flags, padding);
+    gui_invalidate_rect(win->rect.x, win->rect.y, win->rect.w, win->rect.h);
+    return 0;
+}
+
 int gui_user_add_splitview(uint32_t window_id, int x, int y, int w, int h, int ratio, uint32_t flags) {
     gui_window_t *win = gui_find_window(window_id);
     gui_widget_t *widget;
