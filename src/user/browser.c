@@ -1272,6 +1272,14 @@ typedef struct browser_tls_session {
     int server_hs_len;
 } browser_tls_session_t;
 
+#define BROWSER_TLS_NOINLINE __attribute__((noinline))
+
+static browser_tls_session_t g_browser_tls_session;
+static unsigned char g_browser_tls_plain_record[5 + BROWSER_TLS_MAX_RECORD_PLAIN];
+static unsigned char g_browser_tls_io_record[BROWSER_TLS_MAX_RECORD_CIPHER + 5];
+static unsigned char g_browser_tls_io_record_alt[BROWSER_TLS_MAX_RECORD_CIPHER + 5];
+static unsigned char g_browser_tls_app_plain[4096];
+
 static int browser_sock_send_all(int fd, const unsigned char *buf, int len)
 {
     int off = 0;
@@ -1360,9 +1368,9 @@ static int browser_tls_process_server_handshake_record(browser_tls_session_t *se
     }
     return 0;
 }
-static int browser_tls_send_plain_record(int fd, uint8_t content_type, const unsigned char *plain, int plain_len)
+static BROWSER_TLS_NOINLINE int browser_tls_send_plain_record(int fd, uint8_t content_type, const unsigned char *plain, int plain_len)
 {
-    unsigned char record[5 + BROWSER_TLS_MAX_RECORD_PLAIN];
+    unsigned char *record = g_browser_tls_plain_record;
     if (!plain || plain_len < 0 || plain_len > BROWSER_TLS_MAX_RECORD_PLAIN) return -1;
     record[0] = content_type;
     record[1] = 0x03;
@@ -1373,24 +1381,24 @@ static int browser_tls_send_plain_record(int fd, uint8_t content_type, const uns
     return browser_sock_send_all(fd, record, plain_len + 5);
 }
 
-static int browser_tls_send_encrypted_record(browser_tls_session_t *sess, int fd, uint8_t content_type, const unsigned char *plain, int plain_len)
+static BROWSER_TLS_NOINLINE int browser_tls_send_encrypted_record(browser_tls_session_t *sess, int fd, uint8_t content_type, const unsigned char *plain, int plain_len)
 {
-    unsigned char record[BROWSER_TLS_MAX_RECORD_CIPHER + 5];
+    unsigned char *record = g_browser_tls_io_record;
     size_t out_len = 0;
     if (!sess || !sess->hs.has_record_layer || plain_len < 0 || plain_len > BROWSER_TLS_MAX_RECORD_PLAIN) return -1;
-    if (tls12_aes128_gcm_record_layer_protect(&sess->hs.record_layer, content_type, plain, (size_t)plain_len, record, sizeof(record), &out_len) != 0) return -1;
+    if (tls12_aes128_gcm_record_layer_protect(&sess->hs.record_layer, content_type, plain, (size_t)plain_len, record, sizeof(g_browser_tls_io_record), &out_len) != 0) return -1;
     return browser_sock_send_all(fd, record, (int)out_len);
 }
 
-static int browser_tls_read_decrypted_record(browser_tls_session_t *sess, int fd, uint8_t *content_type, unsigned char *plain, int plain_cap, int *plain_len)
+static BROWSER_TLS_NOINLINE int browser_tls_read_decrypted_record(browser_tls_session_t *sess, int fd, uint8_t *content_type, unsigned char *plain, int plain_cap, int *plain_len)
 {
-    unsigned char record[BROWSER_TLS_MAX_RECORD_CIPHER + 5];
+    unsigned char *record = g_browser_tls_io_record;
     int record_len = 0;
     unsigned char raw_type = 0;
     size_t out_len = 0;
     uint8_t out_type = 0;
     if (!sess || !content_type || !plain || plain_cap <= 0 || !plain_len) return -1;
-    if (browser_tls_read_record_raw(fd, record, (int)sizeof(record), &record_len, &raw_type) < 0) return -1;
+    if (browser_tls_read_record_raw(fd, record, (int)sizeof(g_browser_tls_io_record), &record_len, &raw_type) < 0) return -1;
     if (raw_type == TLS_CONTENT_TYPE_ALERT) return -2;
     if (!sess->hs.has_record_layer) return -1;
     if (tls12_aes128_gcm_record_layer_unprotect(&sess->hs.record_layer, record, (size_t)record_len, plain, (size_t)plain_cap, &out_len, &out_type) != 0) return -1;
@@ -1469,9 +1477,9 @@ static int browser_tls_send_client_key_exchange(int fd, browser_tls_session_t *s
     }
     return 0;
 }
-static int browser_tls_complete_handshake(int fd, const char *host, browser_tls_session_t *sess, char *err, int err_size)
+static BROWSER_TLS_NOINLINE int browser_tls_complete_handshake(int fd, const char *host, browser_tls_session_t *sess, char *err, int err_size)
 {
-    unsigned char record[BROWSER_TLS_MAX_RECORD_CIPHER + 5];
+    unsigned char *record = g_browser_tls_io_record;
     size_t record_len_sz = 0;
     int record_len = 0;
     unsigned char type = 0;
@@ -1480,7 +1488,7 @@ static int browser_tls_complete_handshake(int fd, const char *host, browser_tls_
     tls_x509_certificate_view_t cert;
     unsigned char ccs_record[8];
     size_t ccs_len = 0;
-    unsigned char fin_record[BROWSER_TLS_MAX_RECORD_CIPHER + 5];
+    unsigned char *fin_record = g_browser_tls_io_record_alt;
     size_t fin_len = 0;
     unsigned char client_random[TLS12_CLIENT_RANDOM_SIZE];
     unsigned char server_finished_msg[128];
@@ -1490,7 +1498,7 @@ static int browser_tls_complete_handshake(int fd, const char *host, browser_tls_
     tls12_handshake_context_init(&sess->hs);
     browser_tls_make_random(client_random, (int)sizeof(client_random), 0x5eed1234u);
 
-    if (tls12_build_client_hello_record(host, client_random, record, sizeof(record), &record_len_sz) == 0) {
+    if (tls12_build_client_hello_record(host, client_random, record, sizeof(g_browser_tls_io_record), &record_len_sz) == 0) {
         snprintf(err, err_size, "TLS: failed to build ClientHello");
         return -1;
     }
@@ -1501,7 +1509,7 @@ static int browser_tls_complete_handshake(int fd, const char *host, browser_tls_
     }
 
     for (guard = 0; guard < BROWSER_TLS_HANDSHAKE_RECORD_MAX && !saw_done; guard++) {
-        if (browser_tls_read_record_raw(fd, record, (int)sizeof(record), &record_len, &type) < 0) {
+        if (browser_tls_read_record_raw(fd, record, (int)sizeof(g_browser_tls_io_record), &record_len, &type) < 0) {
             snprintf(err, err_size, "TLS: failed to read server handshake");
             return -1;
         }
@@ -1533,18 +1541,18 @@ static int browser_tls_complete_handshake(int fd, const char *host, browser_tls_
         snprintf(err, err_size, "TLS: failed to send ChangeCipherSpec");
         return -1;
     }
-    if (tls12_handshake_build_client_finished_record(&sess->hs, fin_record, sizeof(fin_record), &fin_len) == 0 ||
+    if (tls12_handshake_build_client_finished_record(&sess->hs, fin_record, sizeof(g_browser_tls_io_record_alt), &fin_len) == 0 ||
         browser_sock_send_all(fd, fin_record, (int)fin_len) < 0) {
         snprintf(err, err_size, "TLS: failed to send Finished");
         return -1;
     }
 
-    if (browser_tls_read_record_raw(fd, record, (int)sizeof(record), &record_len, &type) < 0 ||
+    if (browser_tls_read_record_raw(fd, record, (int)sizeof(g_browser_tls_io_record), &record_len, &type) < 0 ||
         tls12_handshake_on_server_change_cipher_spec_record(&sess->hs, record, (size_t)record_len) == 0) {
         snprintf(err, err_size, "TLS: failed to read server ChangeCipherSpec");
         return -1;
     }
-    if (browser_tls_read_record_raw(fd, record, (int)sizeof(record), &record_len, &type) < 0 ||
+    if (browser_tls_read_record_raw(fd, record, (int)sizeof(g_browser_tls_io_record), &record_len, &type) < 0 ||
         tls12_handshake_on_server_finished_record(&sess->hs, record, (size_t)record_len, server_finished_msg, sizeof(server_finished_msg), &server_finished_len) == 0) {
         snprintf(err, err_size, "TLS: server Finished verification failed");
         return -1;
@@ -1552,9 +1560,9 @@ static int browser_tls_complete_handshake(int fd, const char *host, browser_tls_
     return 0;
 }
 
-static int browser_fetch_https_tls(int fd, const char *host, const char *path, char *out, int out_size)
+static BROWSER_TLS_NOINLINE int browser_fetch_https_tls(int fd, const char *host, const char *path, char *out, int out_size)
 {
-    browser_tls_session_t sess;
+    browser_tls_session_t *sess = &g_browser_tls_session;
     char err[160];
     char req[512];
     int req_len;
@@ -1563,7 +1571,7 @@ static int browser_fetch_https_tls(int fd, const char *host, const char *path, c
 
     snprintf(err, sizeof(err), "TLS failed");
     if (out_size > 0) out[0] = 0;
-    if (browser_tls_complete_handshake(fd, host, &sess, err, sizeof(err)) < 0) {
+    if (browser_tls_complete_handshake(fd, host, sess, err, sizeof(err)) < 0) {
         snprintf(out, out_size,
                          "HTTP/1.0 495 TLS Error\r\nContent-Type: text/html\r\n\r\n"
                          "<html><head><title>TLS Error</title></head><body>"
@@ -1575,16 +1583,16 @@ static int browser_fetch_https_tls(int fd, const char *host, const char *path, c
     }
 
     req_len = snprintf(req, sizeof(req), "GET %s HTTP/1.0\r\nHost: %s\r\nUser-Agent: OpenOS-Browser/0.1\r\nAccept: text/html,*/*\r\nConnection: close\r\n\r\n", path, host);
-    if (req_len <= 0 || req_len >= (int)sizeof(req) || browser_tls_send_encrypted_record(&sess, fd, TLS_CONTENT_TYPE_APPLICATION_DATA, (const unsigned char *)req, req_len) < 0) {
+    if (req_len <= 0 || req_len >= (int)sizeof(req) || browser_tls_send_encrypted_record(sess, fd, TLS_CONTENT_TYPE_APPLICATION_DATA, (const unsigned char *)req, req_len) < 0) {
         snprintf(out, out_size, "HTTP/1.0 495 TLS Error\r\nContent-Type: text/html\r\n\r\n<html><body><h1>HTTPS TLS failed</h1><p>Failed to send encrypted HTTP request.</p></body></html>");
         return -1;
     }
 
     for (guard = 0; guard < BROWSER_TLS_APP_RECORD_MAX && total < out_size - 1; guard++) {
-        unsigned char plain[4096];
+        unsigned char *plain = g_browser_tls_app_plain;
         uint8_t content_type = 0;
         int plain_len = 0;
-        int rc = browser_tls_read_decrypted_record(&sess, fd, &content_type, plain, (int)sizeof(plain), &plain_len);
+        int rc = browser_tls_read_decrypted_record(sess, fd, &content_type, plain, (int)sizeof(g_browser_tls_app_plain), &plain_len);
         if (rc == -2) break;
         if (rc < 0) {
             if (total == 0) snprintf(out, out_size, "HTTP/1.0 495 TLS Error\r\nContent-Type: text/html\r\n\r\n<html><body><h1>HTTPS TLS failed</h1><p>Failed to decrypt HTTPS response.</p></body></html>");
