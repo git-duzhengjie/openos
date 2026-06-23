@@ -1276,7 +1276,7 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    openos_gui_add_tabview(win, 10, 0, 560, 30, "New Tab|Docs|Console", 0, OPENOS_GUI_TABVIEW_CLOSE_BUTTONS | OPENOS_GUI_TABVIEW_BOTTOM_BORDER);
+    openos_gui_add_tabview(win, 10, 0, 180, 30, "New Tab", 0, OPENOS_GUI_TABVIEW_BOTTOM_BORDER);
 
     toolbar = openos_gui_add_toolbar(win, 0, 30, 900, 54, "<|>|Reload|addr:Search OpenOS or type a URL", OPENOS_GUI_TOOLBAR_SHOW_GRIP | OPENOS_GUI_TOOLBAR_GROUPED_BUTTONS | OPENOS_GUI_TOOLBAR_HAS_ADDRESS | OPENOS_GUI_TOOLBAR_BOTTOM_BORDER);
     (void)toolbar;
