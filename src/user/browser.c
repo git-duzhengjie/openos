@@ -1182,8 +1182,16 @@ int main(int argc, char **argv)
     status_label = openos_gui_add_statusbar(win, 0, 394, 900, 24, "Ready - type an address and press Enter|OpenOS Browser|", OPENOS_GUI_STATUSBAR_SIZE_GRIP | OPENOS_GUI_STATUSBAR_TOP_BORDER | OPENOS_GUI_STATUSBAR_LINK_PROMPT);
     openos_gui_add_tabview(win, 10, 76, 560, 30, "New Tab|Docs|Console", 0, OPENOS_GUI_TABVIEW_CLOSE_BUTTONS | OPENOS_GUI_TABVIEW_BOTTOM_BORDER);
     openos_gui_add_splitview(win, 10, 112, 220, 120, 35, OPENOS_GUI_SPLITVIEW_RESIZABLE | OPENOS_GUI_SPLITVIEW_SHOW_GRIP | OPENOS_GUI_SPLITVIEW_PANE_BORDER);
-    openos_gui_add_groupbox(win, 246, 112, 160, 72, "页面信息", OPENOS_GUI_GROUPBOX_BORDER | OPENOS_GUI_GROUPBOX_CARD | OPENOS_GUI_GROUPBOX_TITLEBAR);
-    { int form = openos_gui_add_form(win, 246, 190, 220, 116, "表单", OPENOS_GUI_FORM_BORDER | OPENOS_GUI_FORM_CARD | OPENOS_GUI_FORM_TITLEBAR); if (form >= 0) { openos_gui_add_form_field(win, form, 0, "地址", "http://", "帮助文本", OPENOS_GUI_FORM_FIELD_HELP); openos_gui_add_form_submit(win, form, 1, "提交"); } }
+    {
+        openos_gui_layout_box_t side_layout;
+        openos_gui_rect_t card_rect;
+        openos_gui_rect_t form_rect;
+        openos_gui_layout_box_begin(&side_layout, 246, 112, 220, 194, OPENOS_GUI_LAYOUT_VERTICAL, 0, 0, 6);
+        card_rect = openos_gui_layout_box_next(&side_layout, 72, 160);
+        openos_gui_add_groupbox(win, card_rect.x, card_rect.y, card_rect.w, card_rect.h, "页面信息", OPENOS_GUI_GROUPBOX_BORDER | OPENOS_GUI_GROUPBOX_CARD | OPENOS_GUI_GROUPBOX_TITLEBAR);
+        form_rect = openos_gui_layout_box_next(&side_layout, 116, 220);
+        { int form = openos_gui_add_form(win, form_rect.x, form_rect.y, form_rect.w, form_rect.h, "表单", OPENOS_GUI_FORM_BORDER | OPENOS_GUI_FORM_CARD | OPENOS_GUI_FORM_TITLEBAR); if (form >= 0) { openos_gui_add_form_field(win, form, 0, "地址", "http://", "帮助文本", OPENOS_GUI_FORM_FIELD_HELP); openos_gui_add_form_submit(win, form, 1, "提交"); } }
+    }
     up_button = openos_gui_add_button(win, 56, 438, 56, 24, "Up");
     down_button = openos_gui_add_button(win, 120, 438, 56, 24, "Down");
     next_link_button = openos_gui_add_button(win, 208, 438, 80, 24, "NextLink");

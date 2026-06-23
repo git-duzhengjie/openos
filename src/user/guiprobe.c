@@ -91,12 +91,22 @@ int main(void)
     (void)toolbar;
     openos_gui_add_statusbar(win, 8, 282, 420, 22, "Ready|center pane|https://openos.local", OPENOS_GUI_STATUSBAR_SIZE_GRIP | OPENOS_GUI_STATUSBAR_TOP_BORDER | OPENOS_GUI_STATUSBAR_LINK_PROMPT);
     openos_gui_add_tabview(win, 8, 306, 420, 42, "Home|Downloads|Settings", 0, OPENOS_GUI_TABVIEW_CLOSE_BUTTONS | OPENOS_GUI_TABVIEW_BOTTOM_BORDER);
-    openos_gui_add_splitview(win, 436, 150, 164, 112, 55, OPENOS_GUI_SPLITVIEW_RESIZABLE | OPENOS_GUI_SPLITVIEW_SHOW_GRIP | OPENOS_GUI_SPLITVIEW_PANE_BORDER);
-    openos_gui_add_splitview(win, 436, 270, 164, 84, 45, OPENOS_GUI_SPLITVIEW_HORIZONTAL | OPENOS_GUI_SPLITVIEW_RESIZABLE | OPENOS_GUI_SPLITVIEW_SHOW_GRIP | OPENOS_GUI_SPLITVIEW_PANE_BORDER);
-    openos_gui_add_groupbox(win, 612, 150, 166, 88, "设置分组", OPENOS_GUI_GROUPBOX_BORDER | OPENOS_GUI_GROUPBOX_CARD | OPENOS_GUI_GROUPBOX_TITLEBAR);
-    openos_gui_add_groupbox(win, 612, 248, 166, 88, "错误页", OPENOS_GUI_GROUPBOX_BORDER | OPENOS_GUI_GROUPBOX_CARD | OPENOS_GUI_GROUPBOX_ERROR | OPENOS_GUI_GROUPBOX_TITLEBAR);
     {
-        int form = openos_gui_add_form(win, 16, 344, 360, 132, "登录表单", OPENOS_GUI_FORM_BORDER | OPENOS_GUI_FORM_CARD | OPENOS_GUI_FORM_TITLEBAR);
+        openos_gui_layout_grid_t grid;
+        openos_gui_rect_t cell;
+        openos_gui_layout_grid_begin(&grid, 436, 150, 342, 186, 2, 2, 0, 0, 12);
+        cell = openos_gui_layout_grid_cell(&grid, 0, 0, 1, 1);
+        openos_gui_add_splitview(win, cell.x, cell.y, cell.w, cell.h, 55, OPENOS_GUI_SPLITVIEW_RESIZABLE | OPENOS_GUI_SPLITVIEW_SHOW_GRIP | OPENOS_GUI_SPLITVIEW_PANE_BORDER);
+        cell = openos_gui_layout_grid_cell(&grid, 1, 0, 1, 1);
+        openos_gui_add_splitview(win, cell.x, cell.y, cell.w, cell.h, 45, OPENOS_GUI_SPLITVIEW_HORIZONTAL | OPENOS_GUI_SPLITVIEW_RESIZABLE | OPENOS_GUI_SPLITVIEW_SHOW_GRIP | OPENOS_GUI_SPLITVIEW_PANE_BORDER);
+        cell = openos_gui_layout_grid_cell(&grid, 0, 1, 1, 1);
+        openos_gui_add_groupbox(win, cell.x, cell.y, cell.w, cell.h, "设置分组", OPENOS_GUI_GROUPBOX_BORDER | OPENOS_GUI_GROUPBOX_CARD | OPENOS_GUI_GROUPBOX_TITLEBAR);
+        cell = openos_gui_layout_grid_cell(&grid, 1, 1, 1, 1);
+        openos_gui_add_groupbox(win, cell.x, cell.y, cell.w, cell.h, "错误页", OPENOS_GUI_GROUPBOX_BORDER | OPENOS_GUI_GROUPBOX_CARD | OPENOS_GUI_GROUPBOX_ERROR | OPENOS_GUI_GROUPBOX_TITLEBAR);
+    }
+    {
+        openos_gui_rect_t form_rect = openos_gui_layout_anchor(openos_gui_rect_make(8, 344, 420, 132), 360, 132, OPENOS_GUI_LAYOUT_CENTER_X | OPENOS_GUI_LAYOUT_ANCHOR_TOP, 0);
+        int form = openos_gui_add_form(win, form_rect.x, form_rect.y, form_rect.w, form_rect.h, "登录表单", OPENOS_GUI_FORM_BORDER | OPENOS_GUI_FORM_CARD | OPENOS_GUI_FORM_TITLEBAR);
         if (form >= 0) {
             openos_gui_add_form_field(win, form, 0, "用户名", "openos", "请输入账户名", OPENOS_GUI_FORM_FIELD_HELP);
             openos_gui_add_form_field(win, form, 1, "密码", "", "密码不能为空", OPENOS_GUI_FORM_FIELD_ERROR);

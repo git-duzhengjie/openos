@@ -320,6 +320,15 @@
 #define OPENOS_GUI_FORM_FIELD_ERROR               0x00000001u
 #define OPENOS_GUI_FORM_FIELD_HELP                0x00000002u
 
+#define OPENOS_GUI_LAYOUT_HORIZONTAL              0u
+#define OPENOS_GUI_LAYOUT_VERTICAL                1u
+#define OPENOS_GUI_LAYOUT_ANCHOR_LEFT             0x00000001u
+#define OPENOS_GUI_LAYOUT_ANCHOR_RIGHT            0x00000002u
+#define OPENOS_GUI_LAYOUT_ANCHOR_TOP              0x00000004u
+#define OPENOS_GUI_LAYOUT_ANCHOR_BOTTOM           0x00000008u
+#define OPENOS_GUI_LAYOUT_CENTER_X                0x00000010u
+#define OPENOS_GUI_LAYOUT_CENTER_Y                0x00000020u
+
 #define OPENOS_GUI_TOAST_INFO                OPENOS_GUI_DIALOG_INFO
 #define OPENOS_GUI_TOAST_WARNING             OPENOS_GUI_DIALOG_WARNING
 #define OPENOS_GUI_TOAST_ERROR               OPENOS_GUI_DIALOG_ERROR
@@ -1284,6 +1293,141 @@ static inline void openos_gui_copy_text256(char out[256], const char *text)
         ++i;
     }
     out[i] = 0;
+}
+
+typedef struct openos_gui_rect {
+    int x;
+    int y;
+    int w;
+    int h;
+} openos_gui_rect_t;
+
+typedef struct openos_gui_layout_box {
+    openos_gui_rect_t bounds;
+    unsigned int direction;
+    int padding;
+    int margin;
+    int gap;
+    int cursor;
+} openos_gui_layout_box_t;
+
+typedef struct openos_gui_layout_grid {
+    openos_gui_rect_t bounds;
+    int rows;
+    int cols;
+    int padding;
+    int margin;
+    int gap;
+} openos_gui_layout_grid_t;
+
+static inline openos_gui_rect_t openos_gui_rect_make(int x, int y, int w, int h)
+{
+    openos_gui_rect_t r;
+    r.x = x;
+    r.y = y;
+    r.w = w;
+    r.h = h;
+    return r;
+}
+
+static inline openos_gui_rect_t openos_gui_rect_inset(openos_gui_rect_t r, int inset)
+{
+    r.x += inset;
+    r.y += inset;
+    r.w -= inset * 2;
+    r.h -= inset * 2;
+    if (r.w < 0) r.w = 0;
+    if (r.h < 0) r.h = 0;
+    return r;
+}
+
+static inline void openos_gui_layout_box_begin(openos_gui_layout_box_t *box, int x, int y, int w, int h, unsigned int direction, int padding, int margin, int gap)
+{
+    if (!box) return;
+    box->bounds = openos_gui_rect_make(x + margin, y + margin, w - margin * 2, h - margin * 2);
+    if (box->bounds.w < 0) box->bounds.w = 0;
+    if (box->bounds.h < 0) box->bounds.h = 0;
+    box->direction = direction;
+    box->padding = padding;
+    box->margin = margin;
+    box->gap = gap;
+    box->cursor = padding;
+}
+
+static inline openos_gui_rect_t openos_gui_layout_box_next(openos_gui_layout_box_t *box, int major_size, int cross_size)
+{
+    openos_gui_rect_t r = openos_gui_rect_make(0, 0, 0, 0);
+    if (!box) return r;
+    if (box->direction == OPENOS_GUI_LAYOUT_VERTICAL) {
+        r.x = box->bounds.x + box->padding;
+        r.y = box->bounds.y + box->cursor;
+        r.w = box->bounds.w - box->padding * 2;
+        r.h = major_size;
+        if (cross_size > 0 && cross_size < r.w) r.w = cross_size;
+        box->cursor += major_size + box->gap;
+    } else {
+        r.x = box->bounds.x + box->cursor;
+        r.y = box->bounds.y + box->padding;
+        r.w = major_size;
+        r.h = box->bounds.h - box->padding * 2;
+        if (cross_size > 0 && cross_size < r.h) r.h = cross_size;
+        box->cursor += major_size + box->gap;
+    }
+    if (r.w < 0) r.w = 0;
+    if (r.h < 0) r.h = 0;
+    return r;
+}
+
+static inline void openos_gui_layout_grid_begin(openos_gui_layout_grid_t *grid, int x, int y, int w, int h, int rows, int cols, int padding, int margin, int gap)
+{
+    if (!grid) return;
+    grid->bounds = openos_gui_rect_make(x + margin, y + margin, w - margin * 2, h - margin * 2);
+    if (grid->bounds.w < 0) grid->bounds.w = 0;
+    if (grid->bounds.h < 0) grid->bounds.h = 0;
+    grid->rows = rows > 0 ? rows : 1;
+    grid->cols = cols > 0 ? cols : 1;
+    grid->padding = padding;
+    grid->margin = margin;
+    grid->gap = gap;
+}
+
+static inline openos_gui_rect_t openos_gui_layout_grid_cell(const openos_gui_layout_grid_t *grid, int row, int col, int row_span, int col_span)
+{
+    int content_w;
+    int content_h;
+    int cell_w;
+    int cell_h;
+    openos_gui_rect_t r = openos_gui_rect_make(0, 0, 0, 0);
+    if (!grid) return r;
+    if (row < 0) row = 0;
+    if (col < 0) col = 0;
+    if (row_span <= 0) row_span = 1;
+    if (col_span <= 0) col_span = 1;
+    content_w = grid->bounds.w - grid->padding * 2 - grid->gap * (grid->cols - 1);
+    content_h = grid->bounds.h - grid->padding * 2 - grid->gap * (grid->rows - 1);
+    cell_w = grid->cols ? content_w / grid->cols : content_w;
+    cell_h = grid->rows ? content_h / grid->rows : content_h;
+    if (cell_w < 0) cell_w = 0;
+    if (cell_h < 0) cell_h = 0;
+    r.x = grid->bounds.x + grid->padding + col * (cell_w + grid->gap);
+    r.y = grid->bounds.y + grid->padding + row * (cell_h + grid->gap);
+    r.w = cell_w * col_span + grid->gap * (col_span - 1);
+    r.h = cell_h * row_span + grid->gap * (row_span - 1);
+    return r;
+}
+
+static inline openos_gui_rect_t openos_gui_layout_anchor(openos_gui_rect_t parent, int w, int h, unsigned int anchor, int margin)
+{
+    openos_gui_rect_t r;
+    r.w = w;
+    r.h = h;
+    if (anchor & OPENOS_GUI_LAYOUT_ANCHOR_RIGHT) r.x = parent.x + parent.w - margin - w;
+    else if (anchor & OPENOS_GUI_LAYOUT_CENTER_X) r.x = parent.x + (parent.w - w) / 2;
+    else r.x = parent.x + margin;
+    if (anchor & OPENOS_GUI_LAYOUT_ANCHOR_BOTTOM) r.y = parent.y + parent.h - margin - h;
+    else if (anchor & OPENOS_GUI_LAYOUT_CENTER_Y) r.y = parent.y + (parent.h - h) / 2;
+    else r.y = parent.y + margin;
+    return r;
 }
 
 static inline void openos_gui_copy_text128(char *dst, const char *src)

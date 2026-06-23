@@ -612,9 +612,9 @@
   - [x] 支持标题、边框、卡片背景，用于设置页和错误页
 - [x] Form 组件族：表单布局与输入项组合
   - [x] 支持 Label + Input、错误提示、帮助文本、提交按钮布局
-- [ ] Layout 布局系统
-  - [ ] 支持水平/垂直 Box、Grid、Anchor、居中、padding、margin、gap
-  - [ ] 减少应用手写坐标布局
+- [x] Layout 布局系统
+  - [x] 支持水平/垂直 Box、Grid、Anchor、居中、padding、margin、gap
+  - [x] 减少应用手写坐标布局
 
 #### 17.0.1.3 GUI 事件和 ABI 补齐
 
