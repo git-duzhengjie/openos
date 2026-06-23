@@ -289,9 +289,11 @@ int main(void)
             fprintf(stderr, "browser address parse default host smoke failed: host=%s path=%s error=%s\n", parts.host, parts.path, error);
             return 1;
         }
-        if (ob_url_parse_address("https://example.com/", 0, &parts, error, sizeof(error)) == 0 ||
-            !strstr(error, "HTTPS")) {
-            fprintf(stderr, "browser address parse https rejection smoke failed: error=%s\n", error);
+        if (ob_url_parse_address("https://example.com/secure", 0, &parts, error, sizeof(error)) != 0 ||
+            parts.is_file || !parts.is_https || strcmp(parts.host, "example.com") != 0 ||
+            strcmp(parts.path, "/secure") != 0) {
+            fprintf(stderr, "browser address parse https smoke failed: host=%s path=%s https=%d error=%s\n",
+                    parts.host, parts.path, parts.is_https, error);
             return 1;
         }
     }

@@ -1133,6 +1133,7 @@ typedef struct ob_url_parts {
     char host[128];
     char path[256];
     int is_file;
+    int is_https;
 } ob_url_parts_t;
 
 static int ob_ascii_match_ci(const char *p, const char *token)
@@ -1165,8 +1166,8 @@ static int ob_url_parse_address(const char *text, const char *default_host, ob_u
     }
     memset(out, 0, sizeof(*out));
     if (ob_ascii_match_ci(p, "https://")) {
-        if (error && error_size > 0) snprintf(error, error_size, "HTTPS is not supported yet");
-        return -1;
+        out->is_https = 1;
+        p += 8;
     }
     if (ob_ascii_match_ci(p, "file://")) {
         p += 7;
@@ -1189,7 +1190,7 @@ static int ob_url_parse_address(const char *text, const char *default_host, ob_u
         }
         return 0;
     }
-    if (ob_ascii_match_ci(p, "http://")) p += 7;
+    if (!out->is_https && ob_ascii_match_ci(p, "http://")) p += 7;
     slash = strchr(p, '/');
     host_len = slash ? (int)(slash - p) : (int)strlen(p);
     while (host_len > 0 && (p[host_len - 1] == ' ' || p[host_len - 1] == '\t' || p[host_len - 1] == '\r' || p[host_len - 1] == '\n')) --host_len;

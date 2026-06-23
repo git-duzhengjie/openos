@@ -51,6 +51,7 @@ typedef struct browser_load_context {
     volatile int done;
     volatile int result;
     int is_file;
+    int is_https;
     int window_id;
     int status_label_id;
     int body_label_id;
@@ -82,6 +83,7 @@ typedef struct browser_history_entry {
     char host[BROWSER_HOST_MAX];
     char path[BROWSER_PATH_MAX];
     int is_file;
+    int is_https;
 } browser_history_entry_t;
 
 typedef struct browser_history {
@@ -93,6 +95,7 @@ typedef struct browser_history {
 typedef struct browser_page_cache_entry {
     int valid;
     int is_file;
+    int is_https;
     int scroll_line;
     char host[BROWSER_HOST_MAX];
     char path[BROWSER_PATH_MAX];
@@ -109,6 +112,7 @@ typedef struct browser_tab_snapshot {
     int done;
     int result;
     int is_file;
+    int is_https;
     int home_visible;
     int link_count;
     int selected_link;
@@ -418,7 +422,7 @@ static void browser_extract_title(char *dst, int dst_size, const char *html)
     dst[out] = 0;
 }
 
-static int browser_parse_url_arg(const char *url, char *host, int host_size, char *path, int path_size)
+static int browser_parse_url_arg(const char *url, char *host, int host_size, char *path, int path_size, int *is_https)
 {
     ob_url_parts_t parts;
     char error[64];
@@ -426,14 +430,15 @@ static int browser_parse_url_arg(const char *url, char *host, int host_size, cha
     if (ob_url_parse_address(url, 0, &parts, error, sizeof(error)) != 0 || parts.is_file) return -1;
     snprintf(host, host_size, "%s", parts.host);
     snprintf(path, path_size, "%s", parts.path);
+    if (is_https) *is_https = parts.is_https;
     return 0;
 }
 
-static void browser_format_address(char *out, int out_size, const char *host, const char *path, int is_file)
+static void browser_format_address(char *out, int out_size, const char *host, const char *path, int is_file, int is_https)
 {
     if (!out || out_size <= 0) return;
     if (is_file) snprintf(out, out_size, "file://%s", path && path[0] ? path : "/");
-    else snprintf(out, out_size, "http://%s%s", host && host[0] ? host : BROWSER_DEFAULT_HOST, path && path[0] ? path : "/");
+    else snprintf(out, out_size, "%s://%s%s", is_https ? "https" : "http", host && host[0] ? host : BROWSER_DEFAULT_HOST, path && path[0] ? path : "/");
 }
 
 static void browser_update_address_label(browser_load_context_t *ctx)
@@ -444,14 +449,14 @@ static void browser_update_address_label(browser_load_context_t *ctx)
     openos_gui_set_text_cursor(ctx->window_id, ctx->address_label_id, text, (int)strlen(text));
 }
 
-static void browser_sync_address_from_target(browser_load_context_t *ctx, const char *host, const char *path, int is_file)
+static void browser_sync_address_from_target(browser_load_context_t *ctx, const char *host, const char *path, int is_file, int is_https)
 {
     if (!ctx) return;
-    browser_format_address(ctx->address_text, sizeof(ctx->address_text), host, path, is_file);
+    browser_format_address(ctx->address_text, sizeof(ctx->address_text), host, path, is_file, is_https);
     browser_update_address_label(ctx);
 }
 
-static int browser_address_submit_text(browser_load_context_t *ctx, const char *address, char *host, int host_size, char *path, int path_size, int *is_file, char *error, int error_size)
+static int browser_address_submit_text(browser_load_context_t *ctx, const char *address, char *host, int host_size, char *path, int path_size, int *is_file, int *is_https, char *error, int error_size)
 {
     ob_url_parts_t parts;
     const char *base_host;
@@ -461,7 +466,8 @@ static int browser_address_submit_text(browser_load_context_t *ctx, const char *
     if (host && host_size > 0) snprintf(host, host_size, "%s", parts.host);
     if (path && path_size > 0) snprintf(path, path_size, "%s", parts.path);
     if (is_file) *is_file = parts.is_file;
-    browser_sync_address_from_target(ctx, parts.host, parts.path, parts.is_file);
+    if (is_https) *is_https = parts.is_https;
+    browser_sync_address_from_target(ctx, parts.host, parts.path, parts.is_file, parts.is_https);
     return 1;
 }
 
@@ -494,13 +500,14 @@ static int browser_parse_file_arg(const char *url, char *path, int path_size)
     return 0;
 }
 
-static void browser_history_init(browser_history_t *history, const char *host, const char *path, int is_file)
+static void browser_history_init(browser_history_t *history, const char *host, const char *path, int is_file, int is_https)
 {
     if (!history) return;
     memset(history, 0, sizeof(*history));
     snprintf(history->entries[0].host, sizeof(history->entries[0].host), "%s", host ? host : BROWSER_DEFAULT_HOST);
     snprintf(history->entries[0].path, sizeof(history->entries[0].path), "%s", path ? path : BROWSER_DEFAULT_PATH);
     history->entries[0].is_file = is_file;
+    history->entries[0].is_https = is_https;
     history->count = 1;
     history->current = 0;
 }
@@ -521,7 +528,7 @@ static int browser_history_go(browser_history_t *history, int delta)
     return 0;
 }
 
-static void browser_history_push(browser_history_t *history, const char *host, const char *path, int is_file)
+static void browser_history_push(browser_history_t *history, const char *host, const char *path, int is_file, int is_https)
 {
     int i;
     if (!history || !path || !path[0]) return;
@@ -538,6 +545,7 @@ static void browser_history_push(browser_history_t *history, const char *host, c
     snprintf(history->entries[history->current].host, sizeof(history->entries[history->current].host), "%s", is_file ? "" : host);
     snprintf(history->entries[history->current].path, sizeof(history->entries[history->current].path), "%s", path);
     history->entries[history->current].is_file = is_file;
+    history->entries[history->current].is_https = is_https;
     history->count = history->current + 1;
 }
 
@@ -558,22 +566,20 @@ static void browser_join_relative_path(char *out, int out_size, const char *base
     ob_url_join_relative_path(out, out_size, base_path, href);
 }
 
-static int browser_resolve_link(const browser_history_entry_t *base, const char *href, char *host, int host_size, char *path, int path_size, int *is_file, char *error, int error_size)
+static int browser_resolve_link(const browser_history_entry_t *base, const char *href, char *host, int host_size, char *path, int path_size, int *is_file, int *is_https, char *error, int error_size)
 {
-    if (!base || !href || !href[0] || !host || !path || !is_file) return -1;
+    if (!base || !href || !href[0] || !host || !path || !is_file || !is_https) return -1;
     host[0] = 0;
     path[0] = 0;
     *is_file = base->is_file;
-    if (browser_match_token_ci(href, "https://")) {
-        if (error && error_size > 0) snprintf(error, error_size, "HTTPS links are not supported yet");
-        return -1;
-    }
-    if (browser_match_token_ci(href, "http://")) {
+    *is_https = base->is_https;
+    if (browser_match_token_ci(href, "https://") || browser_match_token_ci(href, "http://")) {
         *is_file = 0;
-        return browser_parse_url_arg(href, host, host_size, path, path_size);
+        return browser_parse_url_arg(href, host, host_size, path, path_size, is_https);
     }
     if (browser_match_token_ci(href, "file://")) {
         *is_file = 1;
+        *is_https = 0;
         host[0] = 0;
         return browser_parse_file_arg(href, path, path_size);
     }
@@ -585,10 +591,12 @@ static int browser_resolve_link(const browser_history_entry_t *base, const char 
         host[0] = 0;
         browser_join_relative_path(path, path_size, base->path, href);
         *is_file = 1;
+        *is_https = 0;
     } else {
         snprintf(host, host_size, "%s", base->host);
         browser_join_relative_path(path, path_size, base->path, href);
         *is_file = 0;
+        *is_https = base->is_https;
     }
     return path[0] ? 0 : -1;
 }
@@ -811,6 +819,7 @@ static void browser_tab_snapshot_save(browser_tab_snapshot_t *page, const browse
     page->done = load->done;
     page->result = load->result;
     page->is_file = load->is_file;
+    page->is_https = load->is_https;
     page->home_visible = load->home_visible;
     page->link_count = load->link_count;
     page->selected_link = load->selected_link;
@@ -836,6 +845,7 @@ static void browser_tab_snapshot_restore(browser_load_context_t *load, const bro
     load->done = page->done;
     load->result = page->result;
     load->is_file = page->is_file;
+    load->is_https = page->is_https;
     load->home_visible = page->home_visible;
     load->link_count = page->link_count;
     load->selected_link = page->selected_link;
@@ -1069,7 +1079,7 @@ static void browser_make_view(char *out, int out_size, const browser_load_contex
 }
 
 static void browser_start_load(browser_load_context_t *load, int win, int status_label, int body_label,
-                               const char *host, const char *path, int is_file)
+                               const char *host, const char *path, int is_file, int is_https)
 {
     openos_thread_t tid;
     char loading[128];
@@ -1099,7 +1109,7 @@ static void browser_start_load(browser_load_context_t *load, int win, int status
     load->tabs = tabs;
     snprintf(load->address_text, sizeof(load->address_text), "%s", address_text);
     load->home_visible = 0;
-    snprintf(loading, sizeof(loading), "Loading %s%s%s ...", is_file ? "file://" : "http://", is_file ? "" : load->host, load->path);
+    snprintf(loading, sizeof(loading), "Loading %s%s%s ...", is_file ? "file://" : (is_https ? "https://" : "http://"), is_file ? "" : load->host, load->path);
     load->active = 1;
     load->done = 0;
     load->result = -1;
@@ -1127,6 +1137,7 @@ static int browser_submit_address_bar(browser_load_context_t *load, browser_hist
     char address[BROWSER_ADDRESS_MAX];
     char error[96];
     int next_is_file = 0;
+    int next_is_https = 0;
     int submit_rc;
     if (!load || !history || !scroll_line) return -1;
     address[0] = 0;
@@ -1141,7 +1152,7 @@ static int browser_submit_address_bar(browser_load_context_t *load, browser_hist
     snprintf(next_host, sizeof(next_host), "%s", cur ? cur->host : (load->host[0] ? load->host : BROWSER_DEFAULT_HOST));
     snprintf(next_path, sizeof(next_path), "%s", cur ? cur->path : (load->path[0] ? load->path : BROWSER_DEFAULT_PATH));
     error[0] = 0;
-    submit_rc = browser_address_submit_text(load, address, next_host, sizeof(next_host), next_path, sizeof(next_path), &next_is_file, error, sizeof(error));
+    submit_rc = browser_address_submit_text(load, address, next_host, sizeof(next_host), next_path, sizeof(next_path), &next_is_file, &next_is_https, error, sizeof(error));
     if (submit_rc < 0) {
         openos_gui_set_text(win, status_label, error[0] ? error : "Invalid address");
         return -1;
@@ -1151,9 +1162,9 @@ static int browser_submit_address_bar(browser_load_context_t *load, browser_hist
     if (current_host) *current_host = next_is_file ? "" : load->host;
     if (current_path) *current_path = load->path;
     browser_tab_save_current((browser_tabs_t *)load->tabs, load, *scroll_line);
-    browser_history_push(history, next_host, next_path, next_is_file);
+    browser_history_push(history, next_host, next_path, next_is_file, next_is_https);
     *scroll_line = 0;
-    browser_start_load(load, win, status_label, body_label, next_host, next_path, next_is_file);
+    browser_start_load(load, win, status_label, body_label, next_host, next_path, next_is_file, next_is_https);
     return 0;
 }
 
@@ -1237,13 +1248,186 @@ static int browser_response_has_complete_body(const char *response, int total)
     return (int)(response + total - body) >= expected;
 }
 
-static int browser_fetch_http_once(const char *host, const char *path, char *out, int out_size, ob_http_headers_t *headers)
+static int browser_tls_append_u8(unsigned char *buf, int cap, int *pos, unsigned int v)
+{
+    if (!buf || !pos || *pos < 0 || *pos >= cap) return -1;
+    buf[*pos] = (unsigned char)(v & 0xffu);
+    *pos += 1;
+    return 0;
+}
+
+static int browser_tls_append_u16(unsigned char *buf, int cap, int *pos, unsigned int v)
+{
+    if (browser_tls_append_u8(buf, cap, pos, (v >> 8) & 0xffu) < 0) return -1;
+    return browser_tls_append_u8(buf, cap, pos, v & 0xffu);
+}
+
+static int browser_tls_append_bytes(unsigned char *buf, int cap, int *pos, const unsigned char *data, int len)
+{
+    int i;
+    if (!buf || !pos || !data || len < 0 || *pos < 0 || *pos + len > cap) return -1;
+    for (i = 0; i < len; ++i) buf[*pos + i] = data[i];
+    *pos += len;
+    return 0;
+}
+
+static int browser_tls_build_client_hello(const char *host, unsigned char *out, int out_cap)
+{
+    int pos = 0;
+    int hs_len_pos;
+    int cs_len_pos;
+    int ext_len_pos;
+    int sni_ext_len_pos;
+    int sni_list_len_pos;
+    int hs_start;
+    int ext_start;
+    int host_len = host ? (int)strlen(host) : 0;
+    static const unsigned char random_bytes[32] = {
+        0x4f,0x70,0x65,0x6e,0x4f,0x53,0x2d,0x48,
+        0x54,0x54,0x50,0x53,0x2d,0x50,0x72,0x6f,
+        0x62,0x65,0x2d,0x52,0x61,0x6e,0x64,0x6f,
+        0x6d,0x2d,0x30,0x30,0x30,0x31,0x21,0x21
+    };
+    static const unsigned char sig_algs[] = { 0x04,0x03, 0x05,0x03, 0x06,0x03, 0x08,0x04, 0x08,0x05, 0x04,0x01, 0x05,0x01 };
+    if (!out || out_cap < 128) return -1;
+    if (host_len < 0 || host_len > 120) host_len = 0;
+
+    if (browser_tls_append_u8(out, out_cap, &pos, 0x16) < 0) return -1;
+    if (browser_tls_append_u16(out, out_cap, &pos, 0x0301) < 0) return -1;
+    if (browser_tls_append_u16(out, out_cap, &pos, 0) < 0) return -1;
+
+    hs_start = pos;
+    if (browser_tls_append_u8(out, out_cap, &pos, 0x01) < 0) return -1;
+    hs_len_pos = pos;
+    if (browser_tls_append_u8(out, out_cap, &pos, 0) < 0) return -1;
+    if (browser_tls_append_u16(out, out_cap, &pos, 0) < 0) return -1;
+    if (browser_tls_append_u16(out, out_cap, &pos, 0x0303) < 0) return -1;
+    if (browser_tls_append_bytes(out, out_cap, &pos, random_bytes, (int)sizeof(random_bytes)) < 0) return -1;
+    if (browser_tls_append_u8(out, out_cap, &pos, 0) < 0) return -1;
+
+    cs_len_pos = pos;
+    if (browser_tls_append_u16(out, out_cap, &pos, 0) < 0) return -1;
+    if (browser_tls_append_u16(out, out_cap, &pos, 0xc02f) < 0) return -1;
+    if (browser_tls_append_u16(out, out_cap, &pos, 0xc02b) < 0) return -1;
+    if (browser_tls_append_u16(out, out_cap, &pos, 0x009c) < 0) return -1;
+    if (browser_tls_append_u16(out, out_cap, &pos, 0x002f) < 0) return -1;
+    out[cs_len_pos] = 0;
+    out[cs_len_pos + 1] = (unsigned char)(pos - cs_len_pos - 2);
+
+    if (browser_tls_append_u8(out, out_cap, &pos, 1) < 0) return -1;
+    if (browser_tls_append_u8(out, out_cap, &pos, 0) < 0) return -1;
+
+    ext_len_pos = pos;
+    if (browser_tls_append_u16(out, out_cap, &pos, 0) < 0) return -1;
+    ext_start = pos;
+
+    if (host_len > 0) {
+        if (browser_tls_append_u16(out, out_cap, &pos, 0x0000) < 0) return -1;
+        sni_ext_len_pos = pos;
+        if (browser_tls_append_u16(out, out_cap, &pos, 0) < 0) return -1;
+        sni_list_len_pos = pos;
+        if (browser_tls_append_u16(out, out_cap, &pos, 0) < 0) return -1;
+        if (browser_tls_append_u8(out, out_cap, &pos, 0) < 0) return -1;
+        if (browser_tls_append_u16(out, out_cap, &pos, (unsigned int)host_len) < 0) return -1;
+        if (browser_tls_append_bytes(out, out_cap, &pos, (const unsigned char *)host, host_len) < 0) return -1;
+        out[sni_list_len_pos] = (unsigned char)(((pos - sni_list_len_pos - 2) >> 8) & 0xff);
+        out[sni_list_len_pos + 1] = (unsigned char)((pos - sni_list_len_pos - 2) & 0xff);
+        out[sni_ext_len_pos] = (unsigned char)(((pos - sni_ext_len_pos - 2) >> 8) & 0xff);
+        out[sni_ext_len_pos + 1] = (unsigned char)((pos - sni_ext_len_pos - 2) & 0xff);
+    }
+
+    if (browser_tls_append_u16(out, out_cap, &pos, 0x000a) < 0) return -1;
+    if (browser_tls_append_u16(out, out_cap, &pos, 8) < 0) return -1;
+    if (browser_tls_append_u16(out, out_cap, &pos, 6) < 0) return -1;
+    if (browser_tls_append_u16(out, out_cap, &pos, 0x001d) < 0) return -1;
+    if (browser_tls_append_u16(out, out_cap, &pos, 0x0017) < 0) return -1;
+    if (browser_tls_append_u16(out, out_cap, &pos, 0x0018) < 0) return -1;
+
+    if (browser_tls_append_u16(out, out_cap, &pos, 0x000b) < 0) return -1;
+    if (browser_tls_append_u16(out, out_cap, &pos, 2) < 0) return -1;
+    if (browser_tls_append_u8(out, out_cap, &pos, 1) < 0) return -1;
+    if (browser_tls_append_u8(out, out_cap, &pos, 0) < 0) return -1;
+
+    if (browser_tls_append_u16(out, out_cap, &pos, 0x000d) < 0) return -1;
+    if (browser_tls_append_u16(out, out_cap, &pos, (unsigned int)(2 + sizeof(sig_algs))) < 0) return -1;
+    if (browser_tls_append_u16(out, out_cap, &pos, (unsigned int)sizeof(sig_algs)) < 0) return -1;
+    if (browser_tls_append_bytes(out, out_cap, &pos, sig_algs, (int)sizeof(sig_algs)) < 0) return -1;
+
+    out[ext_len_pos] = (unsigned char)(((pos - ext_start) >> 8) & 0xff);
+    out[ext_len_pos + 1] = (unsigned char)((pos - ext_start) & 0xff);
+    out[hs_len_pos] = (unsigned char)(((pos - hs_start - 4) >> 16) & 0xff);
+    out[hs_len_pos + 1] = (unsigned char)(((pos - hs_start - 4) >> 8) & 0xff);
+    out[hs_len_pos + 2] = (unsigned char)((pos - hs_start - 4) & 0xff);
+    out[3] = (unsigned char)(((pos - 5) >> 8) & 0xff);
+    out[4] = (unsigned char)((pos - 5) & 0xff);
+    return pos;
+}
+
+static void browser_make_https_probe_response(char *out, int out_size, const char *host, const char *path, const char *detail)
+{
+    char body[1400];
+    int len;
+    if (!out || out_size <= 0) return;
+    snprintf(body, sizeof(body),
+             "<html><head><title>HTTPS: %s</title></head>"
+             "<body><h1>HTTPS connection established</h1>"
+             "<p>OpenOS connected to https://%s%s and received a TLS response.</p>"
+             "<p>%s</p>"
+             "<p>Full encrypted HTTPS page rendering still requires the user-mode TLS record decryptor and certificate path to be wired into /bin/browser.</p>"
+             "</body></html>",
+             host ? host : "", host ? host : "", path ? path : "/", detail ? detail : "TLS probe completed.");
+    len = (int)strlen(body);
+    snprintf(out, out_size,
+             "HTTP/1.0 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s",
+             len, body);
+}
+
+static int browser_fetch_https_probe(int fd, const char *host, const char *path, char *out, int out_size)
+{
+    unsigned char hello[256];
+    unsigned char reply[256];
+    int hello_len;
+    int ready;
+    int n;
+    if (!host || !out || out_size <= 0) return -1;
+    hello_len = browser_tls_build_client_hello(host, hello, (int)sizeof(hello));
+    if (hello_len <= 0) {
+        snprintf(out, out_size, "TLS ClientHello build failed for %s", host);
+        return -1;
+    }
+    if (openos_send(fd, (const char *)hello, (unsigned int)hello_len, 0) < 0) {
+        snprintf(out, out_size, "TLS ClientHello send failed for %s", host);
+        return -1;
+    }
+    ready = browser_poll_fd(fd, OPENOS_POLLIN, BROWSER_RESPONSE_TIMEOUT_MS);
+    if (ready <= 0) {
+        snprintf(out, out_size, "TLS handshake timeout from %s", host);
+        return -1;
+    }
+    n = openos_recv(fd, (char *)reply, (unsigned int)sizeof(reply), 0);
+    if (n <= 0) {
+        snprintf(out, out_size, "TLS response receive failed from %s", host);
+        return -1;
+    }
+    if (reply[0] == 0x16) {
+        browser_make_https_probe_response(out, out_size, host, path, "The server answered with a TLS handshake record.");
+        return 0;
+    }
+    if (reply[0] == 0x15) {
+        browser_make_https_probe_response(out, out_size, host, path, "The server answered with a TLS alert record.");
+        return 0;
+    }
+    snprintf(out, out_size, "unexpected TLS response from %s: record type 0x%02x", host, (unsigned int)reply[0]);
+    return -1;
+}
+
+static int browser_fetch_http_once(const char *host, const char *path, int is_https, char *out, int out_size, ob_http_headers_t *headers)
 {
     int fd;
     int total = 0;
     char request[256];
     unsigned int dst_ip = 0;
-    unsigned short dst_port = 80;
+    unsigned short dst_port = is_https ? 443 : 80;
 
     if (!host || !path || !out || out_size <= 0) return -1;
     out[0] = 0;
@@ -1299,6 +1483,13 @@ static int browser_fetch_http_once(const char *host, const char *path, char *out
             openos_close(fd);
             return -1;
         }
+    }
+
+    if (is_https) {
+        int https_rc = browser_fetch_https_probe(fd, host, path, out, out_size);
+        openos_close(fd);
+        if (headers && https_rc == 0) ob_http_parse_headers(out, headers);
+        return https_rc;
     }
 
     snprintf(request, sizeof(request),
@@ -1372,10 +1563,11 @@ static int browser_is_redirect_status(int code)
     return code == 301 || code == 302 || code == 303 || code == 307 || code == 308;
 }
 
-static int browser_fetch_http(const char *host, const char *path, char *out, int out_size, ob_http_headers_t *headers)
+static int browser_fetch_http(const char *host, const char *path, int is_https, char *out, int out_size, ob_http_headers_t *headers)
 {
     char cur_host[BROWSER_HOST_MAX];
     char cur_path[BROWSER_PATH_MAX];
+    int cur_is_https = is_https;
     int redirects;
     if (!host || !path || !out || out_size <= 0) return -1;
     snprintf(cur_host, sizeof(cur_host), "%s", host);
@@ -1383,7 +1575,7 @@ static int browser_fetch_http(const char *host, const char *path, char *out, int
     for (redirects = 0; redirects <= BROWSER_REDIRECT_MAX; ++redirects) {
         ob_http_headers_t parsed;
         int code;
-        int rc = browser_fetch_http_once(cur_host, cur_path, out, out_size, &parsed);
+        int rc = browser_fetch_http_once(cur_host, cur_path, cur_is_https, out, out_size, &parsed);
         if (rc < 0) return rc;
         code = browser_http_status_code(parsed.status_line);
         if (!browser_is_redirect_status(code)) {
@@ -1398,14 +1590,11 @@ static int browser_fetch_http(const char *host, const char *path, char *out, int
             snprintf(out, out_size, "redirect stage failed: too many redirects after Location=%s", parsed.location);
             return -1;
         }
-        if (browser_match_token_ci(parsed.location, "http://")) {
-            if (browser_parse_url_arg(parsed.location, cur_host, sizeof(cur_host), cur_path, sizeof(cur_path)) != 0) {
+        if (browser_match_token_ci(parsed.location, "http://") || browser_match_token_ci(parsed.location, "https://")) {
+            if (browser_parse_url_arg(parsed.location, cur_host, sizeof(cur_host), cur_path, sizeof(cur_path), &cur_is_https) != 0) {
                 snprintf(out, out_size, "redirect stage failed: invalid Location=%s", parsed.location);
                 return -1;
             }
-        } else if (browser_match_token_ci(parsed.location, "https://")) {
-            snprintf(out, out_size, "redirect stage failed: HTTPS Location is not supported: %s", parsed.location);
-            return -1;
         } else {
             char joined[BROWSER_PATH_MAX];
             browser_join_relative_path(joined, sizeof(joined), cur_path, parsed.location);
@@ -1416,10 +1605,10 @@ static int browser_fetch_http(const char *host, const char *path, char *out, int
     return -1;
 }
 
-static int browser_cache_key_eq(const browser_page_cache_entry_t *entry, const char *host, const char *path, int is_file)
+static int browser_cache_key_eq(const browser_page_cache_entry_t *entry, const char *host, const char *path, int is_file, int is_https)
 {
     if (!entry || !entry->valid || !path) return 0;
-    if (entry->is_file != is_file) return 0;
+    if (entry->is_file != is_file || entry->is_https != is_https) return 0;
     if (strcmp(entry->path, path) != 0) return 0;
     return is_file || strcmp(entry->host, host ? host : "") == 0;
 }
@@ -1430,11 +1619,12 @@ static void browser_cache_store(const browser_load_context_t *load, int scroll_l
     int i;
     if (!load || load->result < 0 || !load->path[0]) return;
     for (i = 0; i < BROWSER_CACHE_MAX; ++i) {
-        if (browser_cache_key_eq(&g_page_cache[i], load->host, load->path, load->is_file)) { slot = i; break; }
+        if (browser_cache_key_eq(&g_page_cache[i], load->host, load->path, load->is_file, load->is_https)) { slot = i; break; }
         if (!g_page_cache[i].valid) slot = i;
     }
     g_page_cache[slot].valid = 1;
     g_page_cache[slot].is_file = load->is_file;
+    g_page_cache[slot].is_https = load->is_https;
     g_page_cache[slot].scroll_line = scroll_line;
     snprintf(g_page_cache[slot].host, sizeof(g_page_cache[slot].host), "%s", load->host);
     snprintf(g_page_cache[slot].path, sizeof(g_page_cache[slot].path), "%s", load->path);
@@ -1447,12 +1637,12 @@ static void browser_cache_store(const browser_load_context_t *load, int scroll_l
 }
 
 static int browser_cache_restore(browser_load_context_t *load, int win, int status_label, int body_label, int tabview_id, browser_tabs_t *tabs,
-                                 const char *host, const char *path, int is_file, int *scroll_line)
+                                 const char *host, const char *path, int is_file, int is_https, int *scroll_line)
 {
     int i;
     if (!load || !path) return -1;
     for (i = 0; i < BROWSER_CACHE_MAX; ++i) {
-        if (browser_cache_key_eq(&g_page_cache[i], host, path, is_file)) {
+        if (browser_cache_key_eq(&g_page_cache[i], host, path, is_file, is_https)) {
             memset(load, 0, sizeof(*load));
             load->window_id = win;
             load->status_label_id = status_label;
@@ -1461,6 +1651,7 @@ static int browser_cache_restore(browser_load_context_t *load, int win, int stat
             load->address_label_id = -1;
             load->tabs = tabs;
             load->is_file = is_file;
+            load->is_https = is_https;
             load->done = 1;
             load->result = 0;
             snprintf(load->host, sizeof(load->host), "%s", host ? host : "");
@@ -1585,6 +1776,7 @@ static int browser_open_selected_link(browser_load_context_t *load, browser_hist
     char next_path[BROWSER_PATH_MAX];
     char error[96];
     int next_is_file = 0;
+    int next_is_https = 0;
     if (!load || !history || !scroll_line) return -1;
     cur = browser_history_current(history);
     selected_href[0] = 0;
@@ -1594,15 +1786,15 @@ static int browser_open_selected_link(browser_load_context_t *load, browser_hist
         openos_gui_set_text(win, status_label, "No link selected");
         return -1;
     }
-    if (browser_resolve_link(cur, selected_href, next_host, sizeof(next_host), next_path, sizeof(next_path), &next_is_file, error, sizeof(error)) != 0) {
+    if (browser_resolve_link(cur, selected_href, next_host, sizeof(next_host), next_path, sizeof(next_path), &next_is_file, &next_is_https, error, sizeof(error)) != 0) {
         openos_gui_set_text(win, status_label, error[0] ? error : "Unsupported link");
         return -1;
     }
     *scroll_line = 0;
     browser_tab_save_current((browser_tabs_t *)load->tabs, load, *scroll_line);
-    browser_history_push(history, next_host, next_path, next_is_file);
-    browser_sync_address_from_target(load, next_host, next_path, next_is_file);
-    browser_start_load(load, win, status_label, body_label, next_host, next_path, next_is_file);
+    browser_history_push(history, next_host, next_path, next_is_file, next_is_https);
+    browser_sync_address_from_target(load, next_host, next_path, next_is_file, next_is_https);
+    browser_start_load(load, win, status_label, body_label, next_host, next_path, next_is_file, next_is_https);
     return 0;
 }
 
@@ -1615,6 +1807,7 @@ static int browser_submit_current_form(browser_load_context_t *load, browser_his
     char next_path[BROWSER_PATH_MAX];
     char error[96];
     int next_is_file = 0;
+    int next_is_https = 0;
     int submit_id = -1;
     int build_rc;
     if (!load || !history || !scroll_line) return -1;
@@ -1628,14 +1821,14 @@ static int browser_submit_current_form(browser_load_context_t *load, browser_his
         openos_gui_set_text(win, status_label, build_rc == -2 ? "Submit: only GET forms supported" : "Submit: no GET form target");
         return -1;
     }
-    if (browser_resolve_link(cur, action_url, next_host, sizeof(next_host), next_path, sizeof(next_path), &next_is_file, error, sizeof(error)) != 0) {
+    if (browser_resolve_link(cur, action_url, next_host, sizeof(next_host), next_path, sizeof(next_path), &next_is_file, &next_is_https, error, sizeof(error)) != 0) {
         openos_gui_set_text(win, status_label, error[0] ? error : "Submit: unsupported target");
         return -1;
     }
     *scroll_line = 0;
-    browser_history_push(history, next_host, next_path, next_is_file);
-    browser_sync_address_from_target(load, next_host, next_path, next_is_file);
-    browser_start_load(load, win, status_label, body_label, next_host, next_path, next_is_file);
+    browser_history_push(history, next_host, next_path, next_is_file, next_is_https);
+    browser_sync_address_from_target(load, next_host, next_path, next_is_file, next_is_https);
+    browser_start_load(load, win, status_label, body_label, next_host, next_path, next_is_file, next_is_https);
     return 0;
 }
 
@@ -1651,7 +1844,7 @@ static void browser_load_worker(void *arg)
         ob_http_headers_t headers;
         ob_http_headers_init(&headers);
         rc = ctx->is_file ? browser_fetch_file(ctx->path, ctx->response, sizeof(ctx->response))
-                          : browser_fetch_http(ctx->host, ctx->path, ctx->response, sizeof(ctx->response), &headers);
+                          : browser_fetch_http(ctx->host, ctx->path, ctx->is_https, ctx->response, sizeof(ctx->response), &headers);
         if (!ctx->is_file && rc == 0) {
             snprintf(ctx->content_type, sizeof(ctx->content_type), "%s", headers.content_type);
             snprintf(ctx->content_length, sizeof(ctx->content_length), "%s", headers.content_length);
@@ -1661,7 +1854,7 @@ static void browser_load_worker(void *arg)
     ctx->result = rc;
     ctx->home_visible = 0;
     if (rc < 0) {
-        browser_make_error_page(ctx, ctx->is_file ? "File load failed" : "Network load failed", ctx->response);
+        browser_make_error_page(ctx, ctx->is_file ? "File load failed" : (ctx->is_https ? "HTTPS load failed" : "Network load failed"), ctx->response);
         printf("browser: %s\n", ctx->response);
     } else {
         const char *body = ctx->is_file ? ctx->response : find_body(ctx->response);
@@ -1682,7 +1875,7 @@ static void browser_load_worker(void *arg)
                      ctx->content_type[0] ? ctx->content_type : "unknown",
                      ctx->content_length[0] ? ctx->content_length : "unknown");
             browser_make_error_page(ctx, "Unsupported content", detail);
-            printf("browser: unsupported content http://%s%s %s\n", ctx->host, ctx->path, ctx->content_type);
+            printf("browser: unsupported content %s://%s%s %s\n", ctx->is_https ? "https" : "http", ctx->host, ctx->path, ctx->content_type);
         } else if (!ctx->is_file && (http_code < 200 || http_code >= 300)) {
             char detail[BROWSER_BODY_MAX / 2];
             ctx->result = -2;
@@ -1691,7 +1884,7 @@ static void browser_load_worker(void *arg)
                      ctx->http_status[0] ? ctx->http_status : "HTTP status unknown",
                      body && body[0] ? body : "<empty response body>");
             browser_make_error_page(ctx, ctx->http_status[0] ? ctx->http_status : "HTTP error", detail);
-            printf("browser: HTTP error http://%s%s %s\n", ctx->host, ctx->path, ctx->status);
+            printf("browser: HTTP error %s://%s%s %s\n", ctx->is_https ? "https" : "http", ctx->host, ctx->path, ctx->status);
         } else {
             browser_extract_title(ctx->title, sizeof(ctx->title), body);
             {
@@ -1723,7 +1916,7 @@ static void browser_load_worker(void *arg)
                          ctx->location[0] ? " Location=" : "", ctx->location[0] ? ctx->location : "");
             else
                 snprintf(ctx->status, sizeof(ctx->status), "%s", ctx->http_status[0] ? ctx->http_status : "Done");
-            printf("browser: loaded %s%s%s %s\n", ctx->is_file ? "file://" : "http://", ctx->is_file ? "" : ctx->host, ctx->path, ctx->status);
+            printf("browser: loaded %s%s%s %s\n", ctx->is_file ? "file://" : (ctx->is_https ? "https://" : "http://"), ctx->is_file ? "" : ctx->host, ctx->path, ctx->status);
             if (ctx->title[0]) printf("title: %s\n", ctx->title);
         }
     }
@@ -1740,6 +1933,7 @@ int main(int argc, char **argv)
     const char *host = BROWSER_DEFAULT_HOST;
     const char *path = BROWSER_DEFAULT_PATH;
     int is_file = 0;
+    int is_https = 0;
     char summary[BROWSER_BODY_MAX];
     char home_address[BROWSER_ADDRESS_MAX];
     int win;
@@ -1769,7 +1963,7 @@ int main(int argc, char **argv)
                 is_file = 1;
             }
         } else if (strstr(argv[1], "://") || strchr(argv[1], '/')) {
-            if (browser_parse_url_arg(argv[1], load.host, sizeof(load.host), load.path, sizeof(load.path)) == 0) {
+            if (browser_parse_url_arg(argv[1], load.host, sizeof(load.host), load.path, sizeof(load.path), &is_https) == 0) {
                 host = load.host;
                 path = load.path;
             } else {
@@ -1779,11 +1973,11 @@ int main(int argc, char **argv)
             host = argv[1];
         }
     }
-    if (argc > 2 && argv && argv[2] && argv[2][0]) { path = argv[2]; is_file = 0; }
+    if (argc > 2 && argv && argv[2] && argv[2][0]) { path = argv[2]; is_file = 0; is_https = 0; }
     if (!is_file && (!host || !host[0])) host = BROWSER_DEFAULT_HOST;
     if (!path || !path[0]) path = BROWSER_DEFAULT_PATH;
 
-    browser_history_init(&history, host, path, is_file);
+    browser_history_init(&history, host, path, is_file, is_https);
 
     win = openos_gui_create_window("OpenOS Browser", 54, 44, BROWSER_WINDOW_W, BROWSER_WINDOW_H);
     if (win < 0) {
@@ -1809,7 +2003,7 @@ int main(int argc, char **argv)
     address_label = openos_gui_add_textbox(win, 120, 48, 760, 24, "");
 
     if (argc > 1 && argv && argv[1] && argv[1][0])
-        browser_format_address(home_address, sizeof(home_address), host, path, is_file);
+        browser_format_address(home_address, sizeof(home_address), host, path, is_file, is_https);
     else
         snprintf(home_address, sizeof(home_address), "Search OpenOS or type a URL");
     browser_make_home_view(summary, sizeof(summary), home_address);
@@ -1828,7 +2022,7 @@ int main(int argc, char **argv)
     load.tabs = &tabs;
     load.home_visible = 1;
     if (argc > 1 && argv && argv[1] && argv[1][0]) {
-        browser_sync_address_from_target(&load, host, path, is_file);
+        browser_sync_address_from_target(&load, host, path, is_file, is_https);
         openos_gui_set_text(win, status_label, "Ready - press Reload to open the address");
     } else {
         load.address_text[0] = 0;
@@ -1934,16 +2128,16 @@ int main(int argc, char **argv)
                     browser_submit_address_bar(&load, &history, win, status_label, body_label, &scroll_line, &host, &path);
                 } else if (cur) {
                     scroll_line = 0;
-                    browser_sync_address_from_target(&load, cur->host, cur->path, cur->is_file);
-                    browser_start_load(&load, win, status_label, body_label, cur->host, cur->path, cur->is_file);
+                    browser_sync_address_from_target(&load, cur->host, cur->path, cur->is_file, cur->is_https);
+                    browser_start_load(&load, win, status_label, body_label, cur->host, cur->path, cur->is_file, cur->is_https);
                 }
             } else if (event.widget_id == (unsigned int)back_button) {
                 if (browser_history_go(&history, -1) == 0) {
                     const browser_history_entry_t *cur = browser_history_current(&history);
                     scroll_line = 0;
-                    browser_sync_address_from_target(&load, cur->host, cur->path, cur->is_file);
-                    if (browser_cache_restore(&load, win, status_label, body_label, tabview, &tabs, cur->host, cur->path, cur->is_file, &scroll_line) != 0)
-                        browser_start_load(&load, win, status_label, body_label, cur->host, cur->path, cur->is_file);
+                    browser_sync_address_from_target(&load, cur->host, cur->path, cur->is_file, cur->is_https);
+                    if (browser_cache_restore(&load, win, status_label, body_label, tabview, &tabs, cur->host, cur->path, cur->is_file, cur->is_https, &scroll_line) != 0)
+                        browser_start_load(&load, win, status_label, body_label, cur->host, cur->path, cur->is_file, cur->is_https);
                 } else {
                     openos_gui_set_text(win, status_label, "Back: no history");
                 }
@@ -1951,9 +2145,9 @@ int main(int argc, char **argv)
                 if (browser_history_go(&history, 1) == 0) {
                     const browser_history_entry_t *cur = browser_history_current(&history);
                     scroll_line = 0;
-                    browser_sync_address_from_target(&load, cur->host, cur->path, cur->is_file);
-                    if (browser_cache_restore(&load, win, status_label, body_label, tabview, &tabs, cur->host, cur->path, cur->is_file, &scroll_line) != 0)
-                        browser_start_load(&load, win, status_label, body_label, cur->host, cur->path, cur->is_file);
+                    browser_sync_address_from_target(&load, cur->host, cur->path, cur->is_file, cur->is_https);
+                    if (browser_cache_restore(&load, win, status_label, body_label, tabview, &tabs, cur->host, cur->path, cur->is_file, cur->is_https, &scroll_line) != 0)
+                        browser_start_load(&load, win, status_label, body_label, cur->host, cur->path, cur->is_file, cur->is_https);
                 } else {
                     openos_gui_set_text(win, status_label, "Forward: no history");
                 }
