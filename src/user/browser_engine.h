@@ -597,6 +597,30 @@ static void ob_dom_close_tag(ob_dom_document_t *doc, int *stack, int *depth, con
     }
 }
 
+static int ob_html_text_is_blank(const char *text, int text_len)
+{
+    int i;
+    if (!text || text_len <= 0) return 1;
+    for (i = 0; i < text_len; ++i) {
+        char ch = text[i];
+        if (ch != ' ' && ch != '\t' && ch != '\r' && ch != '\n') return 0;
+    }
+    return 1;
+}
+
+static int ob_html_should_skip_subtree_tag(const char *tag)
+{
+    if (!tag || !tag[0]) return 0;
+    return ob_token_eq_ci(tag, "head") ||
+           ob_token_eq_ci(tag, "script") ||
+           ob_token_eq_ci(tag, "style") ||
+           ob_token_eq_ci(tag, "title") ||
+           ob_token_eq_ci(tag, "meta") ||
+           ob_token_eq_ci(tag, "link") ||
+           ob_token_eq_ci(tag, "base") ||
+           ob_token_eq_ci(tag, "noscript");
+}
+
 static int ob_html_parse_impl(ob_html_parser_i_t *iface, const char *html, ob_dom_document_t *doc)
 {
     ob_html_tokenizer_base_t tokenizer;
@@ -604,6 +628,7 @@ static int ob_html_parse_impl(ob_html_parser_i_t *iface, const char *html, ob_do
     ob_html_token_t tok;
     int stack[OB_MAX_DOM_NODES];
     int depth = 0;
+    int skip_depth = 0;
     int current;
     (void)iface;
     if (!doc) return -1;
@@ -614,15 +639,32 @@ static int ob_html_parse_impl(ob_html_parser_i_t *iface, const char *html, ob_do
     ob_default_style_resolver_init(&styles);
     ob_html_tokenizer_base_init(&tokenizer, html);
     while (tokenizer.iface.next(&tokenizer.iface, &tok) == 0 && tok.type != OB_HTML_TOKEN_EOF) {
+        if (skip_depth > 0) {
+            if (tok.type == OB_HTML_TOKEN_TAG && tok.name[0]) {
+                if (tok.closing) {
+                    --skip_depth;
+                } else if (!tok.self_closing && !ob_is_void_tag(tok.name)) {
+                    ++skip_depth;
+                }
+            }
+            continue;
+        }
         current = stack[depth - 1];
         if (tok.type == OB_HTML_TOKEN_TEXT) {
-            ob_dom_add_node(doc, OB_DOM_NODE_TEXT, "#text", tok.text, tok.text_len, current, OB_DISPLAY_INLINE);
+            if (!ob_html_text_is_blank(tok.text, tok.text_len))
+                ob_dom_add_node(doc, OB_DOM_NODE_TEXT, "#text", tok.text, tok.text_len, current, OB_DISPLAY_INLINE);
         } else if (tok.type == OB_HTML_TOKEN_TAG && tok.name[0]) {
             if (tok.closing) {
                 ob_dom_close_tag(doc, stack, &depth, tok.name);
             } else {
-                int display = styles.iface.display_for_tag(&styles.iface, tok.name);
-                int id = ob_dom_add_node(doc, OB_DOM_NODE_ELEMENT, tok.name, 0, 0, current, display);
+                int display;
+                int id;
+                if (ob_html_should_skip_subtree_tag(tok.name)) {
+                    if (!tok.self_closing && !ob_is_void_tag(tok.name)) skip_depth = 1;
+                    continue;
+                }
+                display = styles.iface.display_for_tag(&styles.iface, tok.name);
+                id = ob_dom_add_node(doc, OB_DOM_NODE_ELEMENT, tok.name, 0, 0, current, display);
                 if (id >= 0 && ob_token_eq_ci(tok.name, "a"))
                     ob_extract_attr_value(tok.attrs, tok.attrs_len, "href", doc->nodes[id].href, sizeof(doc->nodes[id].href));
                 if (id >= 0) {

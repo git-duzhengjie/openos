@@ -182,6 +182,24 @@ int main(void)
 
 
     {
+        const char *heavy_head =
+            "<html><head><title>Baidu</title>"
+            "<meta charset='utf-8'><link rel='stylesheet' href='x.css'>"
+            "<script>var a=1;</script><script>var b=2;</script><script>var c=3;</script>"
+            "<style>body{display:block}</style><noscript>hidden</noscript></head>"
+            "<body><form action='/s'><input type='text' name='wd' placeholder='Search'>"
+            "<input type='submit' value='Go'></form><p>Visible result</p></body></html>";
+        if (parser.iface.parse(&parser.iface, heavy_head, &doc) <= 1 ||
+            renderer.iface.render(&renderer.iface, &doc, rendered, sizeof(rendered)) <= 0 ||
+            !strstr(rendered, "[input type=\"text\" name=\"wd\" placeholder=\"Search\"]") ||
+            !strstr(rendered, "Visible result") ||
+            strstr(rendered, "var a") || strstr(rendered, "body{display") || strstr(rendered, "Baidu")) {
+            fprintf(stderr, "browser heavy head skip smoke failed: %s\n", rendered);
+            return 1;
+        }
+    }
+
+    {
         const char *editable_forms = "<form><input name='q' value='hi'><textarea name='msg'></textarea></form>";
         ob_dom_document_t copied_doc;
         ob_form_state_t form;
