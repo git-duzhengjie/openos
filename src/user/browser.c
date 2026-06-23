@@ -132,7 +132,7 @@ typedef struct browser_tab_entry {
     int icon_kind;
     int has_page;
     int scroll_line;
-    browser_tab_snapshot_t page;
+    browser_tab_snapshot_t *page;
 } browser_tab_entry_t;
 
 typedef struct browser_tabs {
@@ -770,6 +770,34 @@ static void browser_copy_bytes(void *dst, const void *src, int len)
     while (len-- > 0) *d++ = *s++;
 }
 
+static browser_tab_snapshot_t *browser_tab_page_alloc(void)
+{
+    browser_tab_snapshot_t *page = (browser_tab_snapshot_t *)malloc((int)sizeof(browser_tab_snapshot_t));
+    if (!page) return 0;
+    memset(page, 0, sizeof(*page));
+    return page;
+}
+
+static void browser_tab_entry_free_page(browser_tab_entry_t *tab)
+{
+    if (!tab) return;
+    if (tab->page) free(tab->page);
+    tab->page = 0;
+    tab->has_page = 0;
+}
+
+static void browser_tabs_destroy(browser_tabs_t *tabs)
+{
+    int i;
+    if (!tabs) return;
+    if (tabs->items) {
+        for (i = 0; i < tabs->count; ++i)
+            browser_tab_entry_free_page(&tabs->items[i]);
+        free(tabs->items);
+    }
+    memset(tabs, 0, sizeof(*tabs));
+}
+
 static void browser_copy_tab_entry(browser_tab_entry_t *dst, const browser_tab_entry_t *src)
 {
     browser_copy_bytes(dst, src, (int)sizeof(*dst));
@@ -834,8 +862,10 @@ static void browser_tab_save_current(browser_tabs_t *tabs, const browser_load_co
     if (!tabs || !tabs->items || !load || tabs->active < 0 || tabs->active >= tabs->count) return;
     tab = &tabs->items[tabs->active];
     snprintf(title, sizeof(title), "%s", tab->title);
-    browser_tab_snapshot_save(&tab->page, load);
-    tab->icon_kind = tab->page.tab_icon;
+    if (!tab->page) tab->page = browser_tab_page_alloc();
+    if (!tab->page) return;
+    browser_tab_snapshot_save(tab->page, load);
+    tab->icon_kind = tab->page->tab_icon;
     tab->has_page = 1;
     tab->scroll_line = scroll_line;
     snprintf(tab->title, sizeof(tab->title), "%s", title[0] ? title : "New Tab");
@@ -871,13 +901,13 @@ static void browser_tab_restore_current(browser_tabs_t *tabs, browser_load_conte
     }
 
     tab = &tabs->items[tabs->active];
-    if (!tab->has_page) {
+    if (!tab->has_page || !tab->page) {
         browser_clear_current_view(load, win, status_label, body_label, address_label, tabview_id, tabs, scroll_line);
         return;
     }
 
     memset(load, 0, sizeof(*load));
-    browser_tab_snapshot_restore(load, &tab->page);
+    browser_tab_snapshot_restore(load, tab->page);
     load->window_id = win;
     load->status_label_id = status_label;
     load->body_label_id = body_label;
@@ -983,16 +1013,22 @@ static int browser_tabs_sync_from_widget(int win, browser_tabs_t *tabs, int tabv
                 char title[BROWSER_TAB_TITLE_MAX];
                 snprintf(title, sizeof(title), "%s", tabs->items[i].title);
                 browser_copy_tab_entry(&tabs->items[i], &old_items[old_index]);
+                old_items[old_index].page = 0;
                 snprintf(tabs->items[i].title, sizeof(tabs->items[i].title), "%s", title);
             }
         }
+        if (close_index >= 0 && close_index < old_count)
+            browser_tab_entry_free_page(&old_items[close_index]);
     } else if (old_items && count <= old_count) {
         for (i = 0; i < count; ++i) {
             char title[BROWSER_TAB_TITLE_MAX];
             snprintf(title, sizeof(title), "%s", tabs->items[i].title);
             browser_copy_tab_entry(&tabs->items[i], &old_items[i]);
+            old_items[i].page = 0;
             snprintf(tabs->items[i].title, sizeof(tabs->items[i].title), "%s", title);
         }
+        for (i = count; i < old_count; ++i)
+            browser_tab_entry_free_page(&old_items[i]);
     }
     if (old_items) free(old_items);
 
@@ -1927,6 +1963,7 @@ int main(int argc, char **argv)
         openos_sleep(10);
     }
 
+    browser_tabs_destroy(&tabs);
     openos_gui_destroy_window(win);
     return rc < 0 ? 1 : 0;
 }
