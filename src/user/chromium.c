@@ -529,6 +529,7 @@ int main(int argc, char **argv)
     go_button = openos_gui_add_button(win, 516, 8, 38, 26, "Go");
     download_button = openos_gui_add_button(win, 560, 8, 54, 26, "Save");
     close_button = openos_gui_add_button(win, 558, 324, 64, 24, "Close");
+    openos_gui_add_statusbar(win, 0, CHROME_H - 24, CHROME_W, 24, "Ready|OpenOS Chromium|Hover links for hints", OPENOS_GUI_STATUSBAR_SIZE_GRIP | OPENOS_GUI_STATUSBAR_TOP_BORDER | OPENOS_GUI_STATUSBAR_LINK_PROMPT);
     (void)back_button;
     (void)forward_button;
     (void)go_button;

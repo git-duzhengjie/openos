@@ -263,6 +263,42 @@ int gui_user_set_toolbar_items(uint32_t window_id, uint32_t widget_id, const cha
     return 0;
 }
 
+int gui_user_add_statusbar(uint32_t window_id, int x, int y, int w, int h, const char *text, uint32_t flags) {
+    gui_window_t *win = gui_find_window(window_id);
+    gui_widget_t *widget;
+    char safe_text[GUI_USER_TEXT_MAX + 1];
+    if (!gui_user_window_owned_by_current(win) || w <= 0 || h <= 0) return -1;
+    gui_user_copy_text(safe_text, sizeof(safe_text), text ? text : "");
+    widget = gui_add_statusbar(win, x, y, w, h, safe_text, flags);
+    if (!widget) return -1;
+    gui_invalidate_rect(win->rect.x, win->rect.y, win->rect.w, win->rect.h);
+    return (int)widget->id;
+}
+
+int gui_user_set_statusbar_text(uint32_t window_id, uint32_t widget_id, const char *text) {
+    gui_window_t *win = gui_find_window(window_id);
+    gui_widget_t *widget;
+    char safe_text[GUI_USER_TEXT_MAX + 1];
+    if (!gui_user_window_owned_by_current(win)) return -1;
+    widget = gui_find_widget(win, widget_id);
+    if (!widget || widget->type != GUI_WIDGET_STATUSBAR) return -1;
+    gui_user_copy_text(safe_text, sizeof(safe_text), text ? text : "");
+    if (gui_statusbar_set_text(widget, safe_text) < 0) return -1;
+    gui_invalidate_rect(win->rect.x, win->rect.y, win->rect.w, win->rect.h);
+    return 0;
+}
+
+int gui_user_set_statusbar_flags(uint32_t window_id, uint32_t widget_id, uint32_t flags) {
+    gui_window_t *win = gui_find_window(window_id);
+    gui_widget_t *widget;
+    if (!gui_user_window_owned_by_current(win)) return -1;
+    widget = gui_find_widget(win, widget_id);
+    if (!widget || widget->type != GUI_WIDGET_STATUSBAR) return -1;
+    if (gui_statusbar_set_flags(widget, flags) < 0) return -1;
+    gui_invalidate_rect(win->rect.x, win->rect.y, win->rect.w, win->rect.h);
+    return 0;
+}
+
 int gui_user_add_iconview(uint32_t window_id, int x, int y, int w, int h, const char *items, int selected_index, uint32_t flags) {
     gui_window_t *win = gui_find_window(window_id);
     gui_widget_t *widget;

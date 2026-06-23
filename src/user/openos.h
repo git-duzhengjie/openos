@@ -236,6 +236,9 @@
 #define SYS_GUI_GET_ICONVIEW_SELECTED 439
 #define SYS_GUI_ADD_TOOLBAR 440
 #define SYS_GUI_SET_TOOLBAR_ITEMS 441
+#define SYS_GUI_ADD_STATUSBAR 442
+#define SYS_GUI_SET_STATUSBAR_TEXT 443
+#define SYS_GUI_SET_STATUSBAR_FLAGS 444
 
 #define OPENOS_GUI_TEXTBOX_READONLY  (1u << 0)
 #define OPENOS_GUI_TEXTBOX_DISABLED  (1u << 1)
@@ -277,6 +280,11 @@
 #define OPENOS_GUI_TOOLBAR_HAS_ADDRESS           0x00000004u
 #define OPENOS_GUI_TOOLBAR_HAS_SEARCH            0x00000008u
 #define OPENOS_GUI_TOOLBAR_BOTTOM_BORDER         0x00000010u
+
+#define OPENOS_GUI_STATUSBAR_LOADING             0x00000001u
+#define OPENOS_GUI_STATUSBAR_SIZE_GRIP           0x00000002u
+#define OPENOS_GUI_STATUSBAR_LINK_PROMPT         0x00000004u
+#define OPENOS_GUI_STATUSBAR_TOP_BORDER          0x00000008u
 
 #define OPENOS_GUI_TOAST_INFO                OPENOS_GUI_DIALOG_INFO
 #define OPENOS_GUI_TOAST_WARNING             OPENOS_GUI_DIALOG_WARNING
@@ -817,6 +825,17 @@ typedef struct openos_gui_toolbar_request {
     char items[256];
 } openos_gui_toolbar_request_t;
 
+typedef struct openos_gui_statusbar_request {
+    unsigned int window_id;
+    unsigned int widget_id;
+    int x;
+    int y;
+    int w;
+    int h;
+    unsigned int flags;
+    char text[256];
+} openos_gui_statusbar_request_t;
+
 typedef struct openos_gui_text_request {
     unsigned int window_id;
     unsigned int widget_id;
@@ -1315,6 +1334,42 @@ static inline int openos_gui_set_toolbar_items(int window_id, int widget_id, con
     req.flags = 0;
     openos_gui_copy_text256(req.items, items);
     return openos_syscall_result(openos_syscall1(SYS_GUI_SET_TOOLBAR_ITEMS, (int)&req));
+}
+
+static inline int openos_gui_add_statusbar(int window_id, int x, int y, int w, int h, const char *text, unsigned int flags)
+{
+    openos_gui_statusbar_request_t req;
+    req.window_id = (unsigned int)window_id;
+    req.widget_id = 0;
+    req.x = x;
+    req.y = y;
+    req.w = w;
+    req.h = h;
+    req.flags = flags;
+    openos_gui_copy_text256(req.text, text);
+    return openos_syscall_result(openos_syscall1(SYS_GUI_ADD_STATUSBAR, (int)&req));
+}
+
+static inline int openos_gui_set_statusbar_text(int window_id, int widget_id, const char *text)
+{
+    openos_gui_statusbar_request_t req;
+    req.window_id = (unsigned int)window_id;
+    req.widget_id = (unsigned int)widget_id;
+    req.x = req.y = req.w = req.h = 0;
+    req.flags = 0;
+    openos_gui_copy_text256(req.text, text);
+    return openos_syscall_result(openos_syscall1(SYS_GUI_SET_STATUSBAR_TEXT, (int)&req));
+}
+
+static inline int openos_gui_set_statusbar_flags(int window_id, int widget_id, unsigned int flags)
+{
+    openos_gui_statusbar_request_t req;
+    req.window_id = (unsigned int)window_id;
+    req.widget_id = (unsigned int)widget_id;
+    req.x = req.y = req.w = req.h = 0;
+    req.flags = flags;
+    req.text[0] = 0;
+    return openos_syscall_result(openos_syscall1(SYS_GUI_SET_STATUSBAR_FLAGS, (int)&req));
 }
 
 static inline int openos_gui_add_textbox(int window_id, int x, int y, int w, int h, const char *text)

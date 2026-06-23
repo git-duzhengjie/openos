@@ -3754,6 +3754,96 @@ static void gui_draw_toolbar_widget(gui_widget_t *wg, int ax, int ay) {
     }
 }
 
+static void gui_statusbar_split(const char *text, char *left, char *center, char *right, int cap) {
+    const char *p;
+    char *dst = left;
+    int n = 0;
+    if (left && cap > 0) left[0] = 0;
+    if (center && cap > 0) center[0] = 0;
+    if (right && cap > 0) right[0] = 0;
+    if (!text || cap <= 0) return;
+    p = text;
+    while (*p) {
+        if (*p == '|') {
+            if (dst == left) dst = center;
+            else if (dst == center) dst = right;
+            n = 0;
+            p++;
+            continue;
+        }
+        if (n < cap - 1) {
+            dst[n++] = *p;
+            dst[n] = 0;
+        }
+        p++;
+    }
+}
+
+static void gui_draw_statusbar_text_cell(int x, int y, int w, int h, const char *text, uint32_t color, int align) {
+    gui_rect_t clip;
+    int tx;
+    int text_w;
+    if (!text || !text[0] || w <= 8) return;
+    clip.x = x + 4;
+    clip.y = y + 2;
+    clip.w = w - 8;
+    clip.h = h - 4;
+    text_w = (int)strlen(text) * (int)GUI_CHAR_W;
+    tx = clip.x;
+    if (align == 1) tx = x + (w - text_w) / 2;
+    else if (align == 2) tx = x + w - text_w - 6;
+    if (tx < clip.x) tx = clip.x;
+    gui_draw_window_title_text(tx, gui_text_center_y(y, h), text, color, &clip);
+}
+
+static void gui_draw_statusbar_widget(gui_widget_t *wg, int ax, int ay) {
+    char left[96];
+    char center[96];
+    char right[96];
+    int left_w;
+    int center_w;
+    int right_w;
+    uint32_t text_color;
+    if (!wg) return;
+    gui_statusbar_split(wg->text, left, center, right, sizeof(left));
+    gui_raw_fill_rect(ax, ay, wg->rect.w, wg->rect.h, gui_rgb(238, 242, 247));
+    gui_raw_fill_rect(ax, ay + wg->rect.h / 2, wg->rect.w, wg->rect.h - wg->rect.h / 2, gui_rgb(224, 230, 238));
+    if (wg->statusbar_flags & GUI_STATUSBAR_TOP_BORDER) {
+        gui_raw_line(ax, ay, ax + wg->rect.w - 1, ay, gui_rgb(166, 174, 188));
+        gui_raw_line(ax, ay + 1, ax + wg->rect.w - 1, ay + 1, gui_rgb(255, 255, 255));
+    }
+    if (wg->statusbar_flags & GUI_STATUSBAR_LOADING) {
+        int dot_x = ax + 8;
+        int dot_y = ay + wg->rect.h / 2 - 2;
+        gui_raw_fill_rect(dot_x, dot_y, 4, 4, gui_rgb(52, 120, 246));
+        gui_raw_fill_rect(dot_x + 7, dot_y, 4, 4, gui_rgb(92, 150, 250));
+        gui_raw_fill_rect(dot_x + 14, dot_y, 4, 4, gui_rgb(132, 176, 252));
+        if (!left[0]) { left[0] = 'L'; left[1] = 'o'; left[2] = 'a'; left[3] = 'd'; left[4] = 'i'; left[5] = 'n'; left[6] = 'g'; left[7] = 0; }
+        left_w = wg->rect.w / 3;
+        gui_draw_statusbar_text_cell(ax + 28, ay, left_w - 28, wg->rect.h, left, g_gui.colors.text_fg, 0);
+    } else {
+        left_w = wg->rect.w / 3;
+        gui_draw_statusbar_text_cell(ax, ay, left_w, wg->rect.h, left, g_gui.colors.text_fg, 0);
+    }
+    center_w = wg->rect.w / 3;
+    right_w = wg->rect.w - left_w - center_w;
+    gui_raw_line(ax + left_w, ay + 4, ax + left_w, ay + wg->rect.h - 5, gui_rgb(202, 210, 222));
+    gui_raw_line(ax + left_w + center_w, ay + 4, ax + left_w + center_w, ay + wg->rect.h - 5, gui_rgb(202, 210, 222));
+    gui_draw_statusbar_text_cell(ax + left_w, ay, center_w, wg->rect.h, center, gui_rgb(88, 98, 116), 1);
+    text_color = (wg->statusbar_flags & GUI_STATUSBAR_LINK_PROMPT) ? gui_rgb(32, 98, 190) : gui_rgb(88, 98, 116);
+    gui_draw_statusbar_text_cell(ax + left_w + center_w, ay, right_w - ((wg->statusbar_flags & GUI_STATUSBAR_SIZE_GRIP) ? 18 : 0), wg->rect.h, right, text_color, 2);
+    if (wg->statusbar_flags & GUI_STATUSBAR_SIZE_GRIP) {
+        int gx = ax + wg->rect.w - 15;
+        int gy = ay + wg->rect.h - 5;
+        gui_raw_line(gx + 8, gy - 8, gx + 12, gy - 12, gui_rgb(150, 160, 174));
+        gui_raw_line(gx + 4, gy - 4, gx + 12, gy - 12, gui_rgb(150, 160, 174));
+        gui_raw_line(gx, gy, gx + 12, gy - 12, gui_rgb(150, 160, 174));
+        gui_raw_line(gx + 9, gy - 8, gx + 13, gy - 12, gui_rgb(255, 255, 255));
+        gui_raw_line(gx + 5, gy - 4, gx + 13, gy - 12, gui_rgb(255, 255, 255));
+        gui_raw_line(gx + 1, gy, gx + 13, gy - 12, gui_rgb(255, 255, 255));
+    }
+}
+
 static void gui_draw_widget(gui_widget_t *wg) {
     uint32_t bg, fg;
     int ax;
@@ -3829,6 +3919,8 @@ static void gui_draw_widget(gui_widget_t *wg) {
         }
     } else if (wg->type == GUI_WIDGET_TOOLBAR) {
         gui_draw_toolbar_widget(wg, ax, ay);
+    } else if (wg->type == GUI_WIDGET_STATUSBAR) {
+        gui_draw_statusbar_widget(wg, ax, ay);
     } else if (wg->type == GUI_WIDGET_ICONVIEW) {
         int count = gui_iconview_count(wg);
         int cols = gui_iconview_columns(wg);
@@ -8359,6 +8451,27 @@ gui_widget_t *gui_add_toolbar(gui_window_t *window, int x, int y, int w, int h, 
 int gui_toolbar_set_items(gui_widget_t *widget, const char *items) {
     if (!widget || widget->type != GUI_WIDGET_TOOLBAR) return -1;
     gui_widget_set_text(widget, items ? items : "");
+    return 0;
+}
+
+gui_widget_t *gui_add_statusbar(gui_window_t *window, int x, int y, int w, int h, const char *text, uint32_t flags) {
+    gui_widget_t *wg = gui_alloc_widget(window, GUI_WIDGET_STATUSBAR, x, y, w, h, text ? text : "");
+    if (wg) {
+        wg->statusbar_flags = flags & (GUI_STATUSBAR_LOADING | GUI_STATUSBAR_SIZE_GRIP | GUI_STATUSBAR_LINK_PROMPT | GUI_STATUSBAR_TOP_BORDER);
+        wg->bg_color = 0;
+    }
+    return wg;
+}
+
+int gui_statusbar_set_text(gui_widget_t *widget, const char *text) {
+    if (!widget || widget->type != GUI_WIDGET_STATUSBAR) return -1;
+    gui_widget_set_text(widget, text ? text : "");
+    return 0;
+}
+
+int gui_statusbar_set_flags(gui_widget_t *widget, uint32_t flags) {
+    if (!widget || widget->type != GUI_WIDGET_STATUSBAR) return -1;
+    widget->statusbar_flags = flags & (GUI_STATUSBAR_LOADING | GUI_STATUSBAR_SIZE_GRIP | GUI_STATUSBAR_LINK_PROMPT | GUI_STATUSBAR_TOP_BORDER);
     return 0;
 }
 
