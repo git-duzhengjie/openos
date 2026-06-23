@@ -626,6 +626,52 @@ static int browser_tabs_new(int win, browser_tabs_t *tabs, int tabview_id)
     return 0;
 }
 
+static int browser_tabs_sync_from_widget(int win, browser_tabs_t *tabs, int tabview_id, int *out_closed)
+{
+    char joined[BROWSER_TAB_MAX * BROWSER_TAB_TITLE_MAX];
+    char token[BROWSER_TAB_TITLE_MAX];
+    int old_count;
+    int count = 0;
+    int token_len = 0;
+    int i;
+    int active;
+
+    if (out_closed) *out_closed = 0;
+    if (win < 0 || tabview_id < 0 || !tabs) return -1;
+
+    old_count = tabs->count;
+    joined[0] = 0;
+    if (openos_gui_get_text(win, tabview_id, joined, sizeof(joined)) < 0) return -1;
+
+    for (i = 0; ; ++i) {
+        char ch = joined[i];
+        if (ch == '|' || ch == 0) {
+            token[token_len] = 0;
+            browser_sanitize_tab_title(tabs->titles[count], sizeof(tabs->titles[count]), token);
+            count++;
+            token_len = 0;
+            if (ch == 0 || count >= BROWSER_TAB_MAX) break;
+        } else if (token_len < (int)sizeof(token) - 1) {
+            token[token_len++] = ch;
+        }
+    }
+
+    if (count <= 0) {
+        count = 1;
+        snprintf(tabs->titles[0], sizeof(tabs->titles[0]), "New Tab");
+    }
+    tabs->count = count;
+
+    active = openos_gui_get_tabview_active(win, tabview_id);
+    if (active < 0) active = 0;
+    if (active >= tabs->count) active = tabs->count - 1;
+    tabs->active = active;
+
+    if (out_closed && tabs->count < old_count) *out_closed = 1;
+    browser_tabs_refresh(win, tabs, tabview_id);
+    return 0;
+}
+
 static void browser_make_view(char *out, int out_size, const browser_load_context_t *load, int scroll_line)
 {
     int line = 0;
@@ -1327,6 +1373,7 @@ int main(int argc, char **argv)
     int toolbar;
     int rc = 0;
     int scroll_line = 0;
+    int address_dirty = 0;
     static browser_load_context_t load;
     static browser_history_t history;
     static browser_tabs_t tabs;
@@ -1363,7 +1410,7 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    tabview = openos_gui_add_tabview(win, 10, 0, 220, 30, "New Tab", 0, OPENOS_GUI_TABVIEW_BOTTOM_BORDER);
+    tabview = openos_gui_add_tabview(win, 10, 0, 220, 30, "New Tab", 0, OPENOS_GUI_TABVIEW_BOTTOM_BORDER | OPENOS_GUI_TABVIEW_CLOSE_BUTTONS);
     new_tab_button = openos_gui_add_button(win, 236, 2, 28, 24, "+");
     browser_tabs_init(win, &tabs, tabview);
 
@@ -1412,11 +1459,43 @@ int main(int argc, char **argv)
         if (ev > 0 && event.type != OPENOS_GUI_EVENT_NONE && event.window_id == (unsigned int)win) {
             if (event.type == OPENOS_GUI_EVENT_TEXT_CHANGED && event.widget_id == (unsigned int)address_label) {
                 openos_gui_get_text(win, address_label, load.address_text, sizeof(load.address_text));
+                address_dirty = 1;
                 openos_gui_set_text(win, status_label, "Address bar selected - type a URL, then press Enter");
                 continue;
             }
-            if (event.type == OPENOS_GUI_EVENT_TEXT_SUBMIT && event.widget_id == (unsigned int)address_label) {
-                browser_submit_address_bar(&load, &history, win, status_label, body_label, &scroll_line, &host, &path);
+            if (event.type == OPENOS_GUI_EVENT_TEXT_SUBMIT) {
+                if (event.widget_id == (unsigned int)address_label || load.home_visible || address_dirty) {
+                    address_dirty = 0;
+                    browser_submit_address_bar(&load, &history, win, status_label, body_label, &scroll_line, &host, &path);
+                    continue;
+                }
+            }
+            if (event.type == OPENOS_GUI_EVENT_VALUE_CHANGED && event.widget_id == (unsigned int)tabview) {
+                int closed = 0;
+                if (browser_tabs_sync_from_widget(win, &tabs, tabview, &closed) == 0) {
+                    if (closed) {
+                        char new_home[BROWSER_BODY_MAX];
+                        history.count = 0;
+                        history.current = -1;
+                        scroll_line = 0;
+                        rc = 0;
+                        address_dirty = 0;
+                        memset(&load, 0, sizeof(load));
+                        load.window_id = win;
+                        load.status_label_id = status_label;
+                        load.body_label_id = body_label;
+                        load.address_label_id = address_label;
+                        load.tabview_id = tabview;
+                        load.tabs = &tabs;
+                        load.home_visible = 1;
+                        browser_update_address_label(&load);
+                        browser_make_home_view(new_home, sizeof(new_home), "Search OpenOS or type a URL");
+                        openos_gui_set_text(win, body_label, new_home);
+                        openos_gui_set_text(win, status_label, "Tab closed");
+                    } else {
+                        openos_gui_set_text(win, status_label, "Tab selected");
+                    }
+                }
                 continue;
             }
             if (event.type == OPENOS_GUI_EVENT_KEY_DOWN || event.type == OPENOS_GUI_EVENT_TEXT_INPUT) {
@@ -1425,7 +1504,14 @@ int main(int argc, char **argv)
                     continue;
                 }
                 if (event.type == OPENOS_GUI_EVENT_KEY_DOWN && event.key == OPENOS_GUI_KEY_ENTER) {
-                    if (event.widget_id == (unsigned int)address_label || load.home_visible) {
+                    char address_snapshot[BROWSER_ADDRESS_MAX];
+                    address_snapshot[0] = 0;
+                    openos_gui_get_text(win, address_label, address_snapshot, sizeof(address_snapshot));
+                    if (event.widget_id == (unsigned int)address_label ||
+                        load.home_visible ||
+                        address_dirty ||
+                        address_snapshot[0]) {
+                        address_dirty = 0;
                         browser_submit_address_bar(&load, &history, win, status_label, body_label, &scroll_line, &host, &path);
                     } else if (load.focus_mode == BROWSER_FOCUS_FORM) {
                         browser_submit_current_form(&load, &history, win, status_label, body_label, &scroll_line);
