@@ -2111,12 +2111,12 @@ static int gui_textbox_on_key(gui_widget_t *wg, int key) {
         uint32_t target = (wg->type == GUI_WIDGET_TEXTAREA) ? gui_textarea_current_line_end(wg) : len;
         wg->cursor = target;
         gui_text_widget_clear_selection(wg);
-    } else if (key == GUI_KEY_ENTER) {
+    } else if (gui_is_enter_key(key)) {
         if (wg->type == GUI_WIDGET_TEXTAREA) {
             text_changed = gui_text_widget_insert_text(wg, "\n");
         } else {
             if (wg->owner && wg->owner->user_owner_pid != 0) {
-                gui_user_post_text_event(wg, GUI_EVENT_TEXT_SUBMIT);
+                gui_user_post_text_event(wg, GUI_USER_EVENT_TEXT_SUBMIT);
                 gui_user_post_key_event(wg->owner, GUI_KEY_ENTER);
             }
             return 1;
@@ -8338,7 +8338,7 @@ int gui_should_capture_key_code_with_modifiers(int key, uint32_t modifiers) {
         if (key == GUI_KEY_BACKSPACE || key == GUI_KEY_DELETE ||
             key == GUI_KEY_LEFT || key == GUI_KEY_RIGHT ||
             key == GUI_KEY_HOME || key == GUI_KEY_END ||
-            key == GUI_KEY_ENTER || key == GUI_KEY_TAB) return 1;
+            gui_is_enter_key(key) || key == GUI_KEY_TAB) return 1;
     }
 
     /* GUI Terminal is the Shell's graphical output window. Do not capture
@@ -8360,7 +8360,7 @@ int gui_should_capture_key_code_with_modifiers(int key, uint32_t modifiers) {
     if (wg->type == GUI_WIDGET_TEXTBOX || wg->type == GUI_WIDGET_TEXTAREA) return 1;
 
     if (wg->type == GUI_WIDGET_BUTTON) {
-        return key == GUI_KEY_ENTER || key == GUI_KEY_SPACE;
+        return gui_is_enter_key(key) || key == GUI_KEY_SPACE;
     }
 
     return 0;

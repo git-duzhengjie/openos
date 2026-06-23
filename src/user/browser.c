@@ -1564,7 +1564,7 @@ int main(int argc, char **argv)
                     browser_focus_next(&load, win, status_label, body_label, scroll_line);
                     continue;
                 }
-                if (event.type == OPENOS_GUI_EVENT_KEY_DOWN && event.key == OPENOS_GUI_KEY_ENTER) {
+                if (event.type == OPENOS_GUI_EVENT_KEY_DOWN && (event.key == OPENOS_GUI_KEY_ENTER || event.key == '\n' || event.key == '\r')) {
                     char address_snapshot[BROWSER_ADDRESS_MAX];
                     address_snapshot[0] = 0;
                     openos_gui_get_text(win, address_label, address_snapshot, sizeof(address_snapshot));
