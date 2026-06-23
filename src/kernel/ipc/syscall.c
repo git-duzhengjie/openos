@@ -3072,6 +3072,54 @@ uint32_t syscall_dispatch(uint32_t num,
             return (uint32_t)gui_user_add_textarea(req.window_id, req.x, req.y, req.w, req.h, req.text);
         }
 
+    case SYS_GUI_ADD_ICONVIEW:
+        {
+            gui_user_iconview_request_t req;
+            if (!a || !user_ptr_valid((void *)a, sizeof(req), USERMEM_READ))
+                return (uint32_t)-1;
+            if (copy_from_user(&req, (const void *)a, sizeof(req)) < 0)
+                return (uint32_t)-1;
+            req.items[sizeof(req.items) - 1] = 0;
+            return (uint32_t)gui_user_add_iconview(req.window_id, req.x, req.y, req.w, req.h, req.items, req.selected_index, req.flags);
+        }
+
+    case SYS_GUI_SET_ICONVIEW_ITEMS:
+        {
+            gui_user_iconview_request_t req;
+            if (!a || !user_ptr_valid((void *)a, sizeof(req), USERMEM_READ))
+                return (uint32_t)-1;
+            if (copy_from_user(&req, (const void *)a, sizeof(req)) < 0)
+                return (uint32_t)-1;
+            req.items[sizeof(req.items) - 1] = 0;
+            return (uint32_t)gui_user_set_iconview_items(req.window_id, req.widget_id, req.items);
+        }
+
+    case SYS_GUI_SET_ICONVIEW_SELECTED:
+        {
+            gui_user_iconview_request_t req;
+            if (!a || !user_ptr_valid((void *)a, sizeof(req), USERMEM_READ))
+                return (uint32_t)-1;
+            if (copy_from_user(&req, (const void *)a, sizeof(req)) < 0)
+                return (uint32_t)-1;
+            return (uint32_t)gui_user_set_iconview_selected(req.window_id, req.widget_id, req.selected_index);
+        }
+
+    case SYS_GUI_GET_ICONVIEW_SELECTED:
+        {
+            gui_user_iconview_request_t req;
+            int selected = -1;
+            if (!a || !user_ptr_valid((void *)a, sizeof(req), USERMEM_READ | USERMEM_WRITE))
+                return (uint32_t)-1;
+            if (copy_from_user(&req, (const void *)a, sizeof(req)) < 0)
+                return (uint32_t)-1;
+            if (gui_user_get_iconview_selected(req.window_id, req.widget_id, &selected) < 0)
+                return (uint32_t)-1;
+            req.selected_index = selected;
+            if (copy_to_user((void *)a, &req, sizeof(req)) < 0)
+                return (uint32_t)-1;
+            return 0;
+        }
+
     case SYS_GUI_ADD_PANEL:
         {
             gui_user_panel_request_t req;

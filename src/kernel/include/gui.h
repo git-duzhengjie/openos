@@ -73,6 +73,9 @@
 #define GUI_IMAGEVIEW_KEEP_ASPECT           0x00000001u
 #define GUI_IMAGEVIEW_PLACEHOLDER           0x00000002u
 #define GUI_IMAGEVIEW_BITMAP_ALPHA          0x00000004u
+#define GUI_ICONVIEW_SHOW_LABELS            0x00000001u
+#define GUI_ICONVIEW_COMPACT                0x00000002u
+#define GUI_ICONVIEW_LIST_MODE              0x00000004u
 
 #define GUI_DIALOG_TYPE_MASK               0x0000000fu
 #define GUI_DIALOG_TYPE_INFO               0x00000000u
@@ -147,6 +150,7 @@ typedef enum gui_widget_type {
     GUI_WIDGET_TEXTAREA,
     GUI_WIDGET_CANVAS,
     GUI_WIDGET_ICON_BUTTON,
+    GUI_WIDGET_ICONVIEW,
     GUI_WIDGET_TOGGLE,
     GUI_WIDGET_CHECKBOX,
     GUI_WIDGET_RADIOBUTTON,
@@ -562,6 +566,10 @@ gui_widget_t *gui_add_textbox(gui_window_t *window, int x, int y, int w, int h, 
 gui_widget_t *gui_add_textarea(gui_window_t *window, int x, int y, int w, int h, const char *text);
 gui_widget_t *gui_add_canvas(gui_window_t *window, int x, int y, int w, int h, uint32_t color);
 gui_widget_t *gui_add_icon_button(gui_window_t *window, int x, int y, int w, int h, const char *text, gui_icon_id_t icon, gui_widget_callback_t cb, void *user_data);
+gui_widget_t *gui_add_iconview(gui_window_t *window, int x, int y, int w, int h, const char *items, int selected_index, uint32_t flags, gui_widget_callback_t cb, void *user_data);
+int gui_iconview_set_items(gui_widget_t *widget, const char *items);
+int gui_iconview_set_selected(gui_widget_t *widget, int selected_index);
+int gui_iconview_get_selected(gui_widget_t *widget, int *out_selected_index);
 gui_widget_t *gui_add_toggle(gui_window_t *window, int x, int y, int w, int h, const char *text, int checked, gui_widget_callback_t cb, void *user_data);
 gui_widget_t *gui_add_checkbox(gui_window_t *window, int x, int y, int w, int h, const char *text, int checked, gui_widget_callback_t cb, void *user_data);
 gui_widget_t *gui_add_radiobutton(gui_window_t *window, int x, int y, int w, int h, const char *text, int group_id, int checked, gui_widget_callback_t cb, void *user_data);

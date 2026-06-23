@@ -57,6 +57,18 @@ typedef struct gui_user_icon_button_request {
     char text[256];
 } gui_user_icon_button_request_t;
 
+typedef struct gui_user_iconview_request {
+    uint32_t window_id;
+    uint32_t widget_id;
+    int32_t x;
+    int32_t y;
+    int32_t w;
+    int32_t h;
+    int32_t selected_index;
+    uint32_t flags;
+    char items[256];
+} gui_user_iconview_request_t;
+
 typedef struct gui_user_radio_request {
     uint32_t window_id;
     uint32_t group_id;
@@ -278,6 +290,10 @@ int gui_user_destroy_window(uint32_t window_id);
 int gui_user_add_label(uint32_t window_id, int x, int y, int w, int h, const char *text);
 int gui_user_add_button(uint32_t window_id, int x, int y, int w, int h, const char *text);
 int gui_user_add_icon_button(uint32_t window_id, int x, int y, int w, int h, const char *text, uint32_t icon);
+int gui_user_add_iconview(uint32_t window_id, int x, int y, int w, int h, const char *items, int selected_index, uint32_t flags);
+int gui_user_set_iconview_items(uint32_t window_id, uint32_t widget_id, const char *items);
+int gui_user_set_iconview_selected(uint32_t window_id, uint32_t widget_id, int selected_index);
+int gui_user_get_iconview_selected(uint32_t window_id, uint32_t widget_id, int *out_selected_index);
 int gui_user_add_panel(uint32_t window_id, int x, int y, int w, int h, uint32_t color);
 int gui_user_add_canvas(uint32_t window_id, int x, int y, int w, int h, uint32_t color);
 int gui_user_add_toggle(uint32_t window_id, int x, int y, int w, int h, const char *text, int checked);

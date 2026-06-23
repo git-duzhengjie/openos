@@ -230,6 +230,10 @@
 #define SYS_GUI_ADD_IMAGEVIEW 433
 #define SYS_GUI_SET_IMAGEVIEW_RGBA 434
 #define SYS_GUI_SET_IMAGEVIEW_BITMAP 435
+#define SYS_GUI_ADD_ICONVIEW 436
+#define SYS_GUI_SET_ICONVIEW_ITEMS 437
+#define SYS_GUI_SET_ICONVIEW_SELECTED 438
+#define SYS_GUI_GET_ICONVIEW_SELECTED 439
 
 #define OPENOS_GUI_TEXTBOX_READONLY  (1u << 0)
 #define OPENOS_GUI_TEXTBOX_DISABLED  (1u << 1)
@@ -263,6 +267,9 @@
 #define OPENOS_GUI_IMAGEVIEW_KEEP_ASPECT       0x00000001u
 #define OPENOS_GUI_IMAGEVIEW_PLACEHOLDER       0x00000002u
 #define OPENOS_GUI_IMAGEVIEW_BITMAP_ALPHA      0x00000004u
+#define OPENOS_GUI_ICONVIEW_SHOW_LABELS         0x00000001u
+#define OPENOS_GUI_ICONVIEW_COMPACT             0x00000002u
+#define OPENOS_GUI_ICONVIEW_LIST_MODE           0x00000004u
 
 #define OPENOS_GUI_TOAST_INFO                OPENOS_GUI_DIALOG_INFO
 #define OPENOS_GUI_TOAST_WARNING             OPENOS_GUI_DIALOG_WARNING
@@ -780,6 +787,18 @@ typedef struct openos_gui_icon_button_request {
     char text[256];
 } openos_gui_icon_button_request_t;
 
+typedef struct openos_gui_iconview_request {
+    unsigned int window_id;
+    unsigned int widget_id;
+    int x;
+    int y;
+    int w;
+    int h;
+    int selected_index;
+    unsigned int flags;
+    char items[256];
+} openos_gui_iconview_request_t;
+
 typedef struct openos_gui_text_request {
     unsigned int window_id;
     unsigned int widget_id;
@@ -1199,6 +1218,60 @@ static inline int openos_gui_add_icon_button(int window_id, int x, int y, int w,
     req.h = h;
     openos_gui_copy_text256(req.text, text);
     return openos_syscall_result(openos_syscall1(SYS_GUI_ADD_ICON_BUTTON, (int)&req));
+}
+
+static inline int openos_gui_add_iconview(int window_id, int x, int y, int w, int h, const char *items, int selected_index, unsigned int flags)
+{
+    openos_gui_iconview_request_t req;
+    req.window_id = (unsigned int)window_id;
+    req.widget_id = 0;
+    req.x = x;
+    req.y = y;
+    req.w = w;
+    req.h = h;
+    req.selected_index = selected_index;
+    req.flags = flags;
+    openos_gui_copy_text256(req.items, items);
+    return openos_syscall_result(openos_syscall1(SYS_GUI_ADD_ICONVIEW, (int)&req));
+}
+
+static inline int openos_gui_set_iconview_items(int window_id, int widget_id, const char *items)
+{
+    openos_gui_iconview_request_t req;
+    req.window_id = (unsigned int)window_id;
+    req.widget_id = (unsigned int)widget_id;
+    req.x = req.y = req.w = req.h = 0;
+    req.selected_index = -1;
+    req.flags = 0;
+    openos_gui_copy_text256(req.items, items);
+    return openos_syscall_result(openos_syscall1(SYS_GUI_SET_ICONVIEW_ITEMS, (int)&req));
+}
+
+static inline int openos_gui_set_iconview_selected(int window_id, int widget_id, int selected_index)
+{
+    openos_gui_iconview_request_t req;
+    req.window_id = (unsigned int)window_id;
+    req.widget_id = (unsigned int)widget_id;
+    req.x = req.y = req.w = req.h = 0;
+    req.selected_index = selected_index;
+    req.flags = 0;
+    req.items[0] = 0;
+    return openos_syscall_result(openos_syscall1(SYS_GUI_SET_ICONVIEW_SELECTED, (int)&req));
+}
+
+static inline int openos_gui_get_iconview_selected(int window_id, int widget_id)
+{
+    openos_gui_iconview_request_t req;
+    int rc;
+    req.window_id = (unsigned int)window_id;
+    req.widget_id = (unsigned int)widget_id;
+    req.x = req.y = req.w = req.h = 0;
+    req.selected_index = -1;
+    req.flags = 0;
+    req.items[0] = 0;
+    rc = openos_syscall_result(openos_syscall1(SYS_GUI_GET_ICONVIEW_SELECTED, (int)&req));
+    if (rc < 0) return rc;
+    return req.selected_index;
 }
 
 static inline int openos_gui_add_textbox(int window_id, int x, int y, int w, int h, const char *text)
