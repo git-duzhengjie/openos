@@ -465,6 +465,16 @@ if [ -f $USR/guiprobe.c ]; then
     echo "  Embedded: guiprobe.elf"
 fi
 
+if [ -f $USR/guicomponenttest.c ]; then
+    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+        -fno-stack-protector -fno-builtin \
+        -c $USR/guicomponenttest.c -o $BUILD/guicomponenttest.o
+    ld -m elf_i386 -T $USR/user.ld -o $BUILD/guicomponenttest.elf $BUILD/crt0.o $BUILD/guicomponenttest.o
+    verify_user_start $BUILD/guicomponenttest.elf guicomponenttest.elf
+    python3 _embed_elf.py $BUILD/guicomponenttest.elf $SRC/include/embed_guicomponenttest.h guicomponenttest_elf
+    echo "  Embedded: guicomponenttest.elf"
+fi
+
 if [ -f $USR/skia_demo.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \

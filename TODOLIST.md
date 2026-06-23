@@ -631,9 +631,9 @@
 - [x] 补齐文本输入 ABI
   - [x] 区分物理按键 KeyDown 与文本输入 TextInput
   - [x] 为 UTF-8 / 中文输入法预留接口
-- [ ] 建立 GUI 组件 smoke 测试
-  - [ ] 新增 `/bin/guicomponenttest` 覆盖 TextInput/Button/List/Dialog 等基础交互
-  - [ ] `./build.sh test` 纳入组件事件和 ABI 回归
+- [x] 建立 GUI 组件 smoke 测试
+  - [x] 新增 `/bin/guicomponenttest` 覆盖 TextInput/Button/List/Dialog 等基础交互
+  - [x] `./build.sh test` 纳入组件事件和 ABI 回归
 
 ### 17.1 桌面增强（File Preview / 窗口管理 / 启动器）
 

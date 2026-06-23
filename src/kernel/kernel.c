@@ -343,6 +343,13 @@
 #define OPENOS_HAS_GUIPROBE 0
 #endif
 
+#if __has_include("embed_guicomponenttest.h")
+#include "embed_guicomponenttest.h"  /* GUI component smoke test */
+#define OPENOS_HAS_GUICOMPONENTTEST 1
+#else
+#define OPENOS_HAS_GUICOMPONENTTEST 0
+#endif
+
 #if __has_include("embed_skia_demo.h")
 #include "embed_skia_demo.h"  /* Skia-style software raster demo */
 #define OPENOS_HAS_SKIA_DEMO 1
@@ -1379,6 +1386,17 @@ void kernel_main(void) {
         serial_write("[OK] Installed /bin/guiprobe user ELF\n");
     } else {
         serial_write("[WARN] Failed to install /bin/guiprobe\n");
+    }
+#endif
+
+#if OPENOS_HAS_GUICOMPONENTTEST
+    fd = vfs_open("/bin/guicomponenttest", O_CREAT | O_RDWR, 0755);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)guicomponenttest_elf, guicomponenttest_elf_size);
+        vfs_close(fd);
+        serial_write("[OK] Installed /bin/guicomponenttest user ELF\n");
+    } else {
+        serial_write("[WARN] Failed to install /bin/guicomponenttest\n");
     }
 #endif
 
