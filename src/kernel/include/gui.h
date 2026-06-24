@@ -526,6 +526,13 @@ typedef struct gui_system {
     int desktop_start_menu_scroll;
     int desktop_start_menu_scroll_dragging;
     int desktop_start_menu_scroll_drag_offset_y;
+    int desktop_note_x;
+    int desktop_note_y;
+    int desktop_note_position_initialized;
+    int desktop_note_dragging;
+    int desktop_note_drag_offset_x;
+    int desktop_note_drag_offset_y;
+    gui_rect_t desktop_note_stack_rect;
     gui_rect_t desktop_taskbar_rect;
     gui_rect_t desktop_start_button_rect;
     gui_rect_t desktop_start_menu_rect;

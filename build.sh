@@ -542,6 +542,17 @@ if [ -f $USR/browser.c ]; then
     echo "  Embedded: browser.elf"
 fi
 
+if [ -f $USR/stickynote.c ]; then
+    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+        -fno-stack-protector -fno-builtin \
+        -I $SRC/include \
+        -c $USR/stickynote.c -o $BUILD/stickynote.o
+    ld -m elf_i386 -T $USR/user.ld -o $BUILD/stickynote.elf $BUILD/crt0.o $BUILD/stickynote.o
+    verify_user_start $BUILD/stickynote.elf stickynote.elf
+    python3 _embed_elf.py $BUILD/stickynote.elf $SRC/include/embed_stickynote.h stickynote_elf
+    echo "  Embedded: stickynote.elf"
+fi
+
 if [ -f $USR/chromium.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \

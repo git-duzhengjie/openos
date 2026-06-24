@@ -147,6 +147,7 @@ static browser_load_context_t g_browser_load;
 #define GUI_DESKTOP_ACTION_FILES    5u
 #define GUI_DESKTOP_ACTION_RECYCLE  6u
 #define GUI_DESKTOP_ACTION_BROWSER  7u
+#define GUI_DESKTOP_ACTION_STICKY   11u
 #define GUI_DESKTOP_ACTION_THEME    8u
 #define GUI_DESKTOP_ACTION_NOTIF    9u
 #define GUI_DESKTOP_ACTION_SETTINGS 10u
@@ -5711,6 +5712,7 @@ typedef struct gui_taskbar_layout {
     gui_rect_t start_button;
     gui_rect_t search_box;
     gui_rect_t terminal_button;
+    gui_rect_t sticky_button;
     int first_window_x;
     int item_y;
     int item_h;
@@ -5754,7 +5756,7 @@ static int gui_taskbar_text_y(gui_rect_t rect, int text_h) {
 
 static int gui_taskbar_content_width(void) {
     uint32_t i;
-    int width = GUI_TASKBAR_START_W + 6 + GUI_TASKBAR_START_W;
+    int width = GUI_TASKBAR_START_W + 6 + GUI_TASKBAR_START_W + 6 + GUI_TASKBAR_START_W;
     for (i = 0; i < g_gui.window_count; i++) {
         uint32_t idx = g_gui.z_order[i];
         gui_window_t *w;
@@ -5781,8 +5783,8 @@ static void gui_taskbar_get_layout(gui_taskbar_layout_t *layout) {
     if (max_w < 0) max_w = (int)g_gui.width;
     bar_w = content_w + padding * 2;
     if (bar_w > max_w) bar_w = max_w;
-    if (bar_w < GUI_TASKBAR_START_W * 2 + 6 + padding * 2) {
-        bar_w = GUI_TASKBAR_START_W * 2 + 6 + padding * 2;
+    if (bar_w < GUI_TASKBAR_START_W * 3 + 12 + padding * 2) {
+        bar_w = GUI_TASKBAR_START_W * 3 + 12 + padding * 2;
     }
     if (bar_w > (int)g_gui.width) bar_w = (int)g_gui.width;
 
@@ -5803,7 +5805,11 @@ static void gui_taskbar_get_layout(gui_taskbar_layout_t *layout) {
     layout->terminal_button.h = GUI_TASKBAR_HEIGHT - 6;
     layout->terminal_button.y = gui_taskbar_item_y();
     layout->terminal_button.w = GUI_TASKBAR_START_W;
-    layout->first_window_x = layout->terminal_button.x + layout->terminal_button.w + 6;
+    layout->sticky_button.x = layout->terminal_button.x + layout->terminal_button.w + 6;
+    layout->sticky_button.h = GUI_TASKBAR_HEIGHT - 6;
+    layout->sticky_button.y = gui_taskbar_item_y();
+    layout->sticky_button.w = GUI_TASKBAR_START_W;
+    layout->first_window_x = layout->sticky_button.x + layout->sticky_button.w + 6;
     layout->item_h = GUI_TASKBAR_HEIGHT - 6;
     layout->item_y = gui_taskbar_item_y();
 }
@@ -5812,6 +5818,12 @@ static int gui_taskbar_terminal_button_at(int x, int y) {
     gui_taskbar_layout_t layout;
     gui_taskbar_get_layout(&layout);
     return gui_rect_contains(&layout.terminal_button, x, y);
+}
+
+static int gui_taskbar_sticky_button_at(int x, int y) {
+    gui_taskbar_layout_t layout;
+    gui_taskbar_get_layout(&layout);
+    return gui_rect_contains(&layout.sticky_button, x, y);
 }
 
 static int gui_is_taskbar_at(int x, int y) {
@@ -5877,6 +5889,7 @@ static void gui_taskbar_invalidate_hover_changes(int old_x, int old_y, int new_x
     gui_taskbar_get_layout(&layout);
     gui_taskbar_invalidate_icon_hover_change(layout.start_button, old_x, old_y, new_x, new_y);
     gui_taskbar_invalidate_icon_hover_change(layout.terminal_button, old_x, old_y, new_x, new_y);
+    gui_taskbar_invalidate_icon_hover_change(layout.sticky_button, old_x, old_y, new_x, new_y);
     gui_taskbar_invalidate_icon_hover_change(g_network_widget_rect, old_x, old_y, new_x, new_y);
     bx = layout.first_window_x;
     for (i = 0; i < g_gui.window_count; i++) {
@@ -6088,6 +6101,9 @@ void gui_terminal_view_end_selection(gui_terminal_view_t *view) {
     view->selecting = 0;
 }
 
+static int gui_desktop_note_begin_drag(int x, int y);
+static void gui_desktop_note_drag_to(int x, int y);
+
 static void gui_terminal_update_selection(uint32_t col, uint32_t row) {
     gui_terminal_view_update_selection(&g_gui.terminal.view, col, row);
     gui_terminal_invalidate_body();
@@ -6216,6 +6232,10 @@ static void gui_handle_mouse_down(int x, int y) {
         }
     }
 
+    if (!event_window && gui_desktop_note_begin_drag(x, y)) {
+        return;
+    }
+
     if (gui_desktop_handle_click(x, y)) {
         gui_set_focused_widget(0);
         return;
@@ -6224,6 +6244,12 @@ static void gui_handle_mouse_down(int x, int y) {
     if (gui_taskbar_terminal_button_at(x, y)) {
         gui_set_focused_widget(0);
         gui_terminal_open();
+        return;
+    }
+
+    if (gui_taskbar_sticky_button_at(x, y)) {
+        gui_set_focused_widget(0);
+        gui_desktop_run_action(GUI_DESKTOP_ACTION_STICKY);
         return;
     }
 
@@ -6472,6 +6498,10 @@ static void gui_handle_mouse_up(int x, int y) {
         g_gui.desktop_start_menu_scroll_dragging = 0;
         gui_invalidate_all();
     }
+    if (g_gui.desktop_note_dragging) {
+        g_gui.desktop_note_dragging = 0;
+        gui_invalidate_all();
+    }
     if (g_gui.splitview_widget) {
         g_gui.splitview_widget->pressed = 0;
         g_gui.splitview_widget = 0;
@@ -6514,6 +6544,10 @@ static void gui_handle_mouse_move(int x, int y) {
         gui_user_post_mouse_event(event_window, GUI_USER_EVENT_MOUSE_MOVE, x, y, 0, 0);
         last_user_move_x = x;
         last_user_move_y = y;
+    }
+    if (g_gui.desktop_note_dragging) {
+        gui_desktop_note_drag_to(x, y);
+        return;
     }
     if (g_gui.text_select_widget) {
         gui_widget_t *tw = g_gui.text_select_widget;
@@ -7674,6 +7708,236 @@ static void gui_desktop_draw_start_menu(void) {
     }
 }
 
+#define GUI_DESKTOP_NOTE_FILE "/home/stickynotes.txt"
+#define GUI_DESKTOP_NOTE_LEGACY_FILE "/home/stickynote.txt"
+#define GUI_DESKTOP_NOTE_MAX_COUNT 5
+#define GUI_DESKTOP_NOTE_MAX_TEXT 96
+#define GUI_DESKTOP_NOTE_CARD_W 240
+#define GUI_DESKTOP_NOTE_CARD_H 76
+#define GUI_DESKTOP_NOTE_GAP 12
+
+typedef struct gui_desktop_note_store {
+    char items[GUI_DESKTOP_NOTE_MAX_COUNT][GUI_DESKTOP_NOTE_MAX_TEXT + 1];
+    int count;
+} gui_desktop_note_store_t;
+
+static int gui_desktop_note_is_space(char ch) {
+    return ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n';
+}
+
+static void gui_desktop_note_trim(char *text) {
+    int len = 0;
+    int start = 0;
+    int i;
+    if (!text) return;
+    while (text[len]) len++;
+    while (start < len && gui_desktop_note_is_space(text[start])) start++;
+    if (start > 0) {
+        for (i = 0; i <= len - start; i++) text[i] = text[i + start];
+        len = 0;
+        while (text[len]) len++;
+    }
+    while (len > 0 && gui_desktop_note_is_space(text[len - 1])) {
+        text[len - 1] = '\0';
+        len--;
+    }
+}
+
+static void gui_desktop_note_add(gui_desktop_note_store_t *store, const char *line, int len) {
+    int i;
+    if (!store || !line || len <= 0 || store->count >= GUI_DESKTOP_NOTE_MAX_COUNT) return;
+    if (len > GUI_DESKTOP_NOTE_MAX_TEXT) len = GUI_DESKTOP_NOTE_MAX_TEXT;
+    for (i = 0; i < len; i++) {
+        char ch = line[i];
+        store->items[store->count][i] = (ch == '\r' || ch == '\n') ? ' ' : ch;
+    }
+    store->items[store->count][len] = '\0';
+    gui_desktop_note_trim(store->items[store->count]);
+    if (store->items[store->count][0]) store->count++;
+}
+
+static void gui_desktop_notes_load_from_file(gui_desktop_note_store_t *store, const char *path) {
+    int fd;
+    int n;
+    int start = 0;
+    int i;
+    char content[(GUI_DESKTOP_NOTE_MAX_TEXT + 2) * GUI_DESKTOP_NOTE_MAX_COUNT + 1];
+    if (!store || !path) return;
+    fd = vfs_open(path, 0, 0);
+    if (fd < 0) return;
+    n = vfs_read(fd, content, sizeof(content) - 1);
+    vfs_close(fd);
+    if (n <= 0) return;
+    content[n] = '\0';
+    for (i = 0; i < n && store->count < GUI_DESKTOP_NOTE_MAX_COUNT; i++) {
+        if (content[i] == '\n') {
+            gui_desktop_note_add(store, content + start, i - start);
+            start = i + 1;
+        }
+    }
+    if (start < n && store->count < GUI_DESKTOP_NOTE_MAX_COUNT) {
+        gui_desktop_note_add(store, content + start, n - start);
+    }
+}
+
+static void gui_desktop_notes_load(gui_desktop_note_store_t *store) {
+    if (!store) return;
+    store->count = 0;
+    gui_desktop_notes_load_from_file(store, GUI_DESKTOP_NOTE_FILE);
+    if (store->count <= 0) {
+        gui_desktop_notes_load_from_file(store, GUI_DESKTOP_NOTE_LEGACY_FILE);
+    }
+}
+
+static void gui_desktop_draw_note_wrapped_text(const char *text, int x, int y, int w, int h, uint32_t color) {
+    const char *p = text ? text : "";
+    int line_h = gui_text_line_height_px();
+    int max_lines;
+    int line;
+    if (w <= 0 || h <= 0) return;
+    if (line_h <= 0) line_h = 12;
+    max_lines = h / line_h;
+    if (max_lines <= 0) return;
+    if (max_lines > 8) max_lines = 8;
+    for (line = 0; line < max_lines && p && *p; line++) {
+        char line_buf[256];
+        uint32_t src_len = gui_text_len_until_break(p);
+        uint32_t consume_len;
+        int hard_wrap;
+        int last_line = (line == max_lines - 1);
+        if (src_len == 0) {
+            p++;
+            continue;
+        }
+        consume_len = gui_utf8_prefix_for_width(p, src_len, w);
+        if (consume_len == 0) {
+            consume_len = gui_utf8_step_bytes(p);
+            if (consume_len > src_len) consume_len = src_len;
+        }
+        hard_wrap = consume_len < src_len;
+        if (last_line && (hard_wrap || p[consume_len])) {
+            gui_make_ellipsis_line_px(line_buf, sizeof(line_buf), p, src_len, w, 1);
+        } else {
+            if (consume_len >= sizeof(line_buf)) consume_len = sizeof(line_buf) - 1;
+            memcpy(line_buf, p, consume_len);
+            line_buf[consume_len] = 0;
+        }
+        gui_draw_text(x, y + line * line_h, line_buf, color);
+        p += consume_len;
+        if (!hard_wrap && *p == '\n') p++;
+    }
+}
+
+static void gui_desktop_draw_note_card(const char *text, int x, int y, int w, int h, int index) {
+    char title[24];
+    int text_x;
+    int text_y;
+    int text_w;
+    int text_h;
+    gui_raw_fill_rect_alpha(x + 4, y + 5, w, h, gui_rgb(0, 0, 0), 52u);
+    gui_raw_fill_rect(x, y, w, h, gui_rgb(255, 244, 176));
+    gui_raw_fill_rect(x, y, w, 24, gui_rgb(255, 226, 111));
+    gui_raw_line(x, y, x + w - 1, y, gui_rgb(255, 248, 204));
+    gui_raw_line(x, y, x, y + h - 1, gui_rgb(255, 248, 204));
+    gui_raw_line(x + w - 1, y, x + w - 1, y + h - 1, gui_rgb(196, 158, 62));
+    gui_raw_line(x, y + h - 1, x + w - 1, y + h - 1, gui_rgb(196, 158, 62));
+    title[0] = '#';
+    title[1] = (char)('1' + index);
+    title[2] = ' ';
+    title[3] = 'N';
+    title[4] = 'o';
+    title[5] = 't';
+    title[6] = 'e';
+    title[7] = '\0';
+    gui_draw_text(x + 10, y + 6, title, gui_rgb(94, 73, 28));
+    text_x = x + 10;
+    text_y = y + 32;
+    text_w = w - 20;
+    text_h = h - 38;
+    gui_desktop_draw_note_wrapped_text(text, text_x, text_y, text_w, text_h, gui_rgb(72, 58, 26));
+}
+
+static void gui_desktop_note_default_position(int *out_x, int *out_y) {
+    int x = (int)g_gui.width - GUI_DESKTOP_NOTE_CARD_W - 24;
+    int y = 72;
+    if (x < 24) x = 24;
+    if (y < 16) y = 16;
+    if (out_x) *out_x = x;
+    if (out_y) *out_y = y;
+}
+
+static void gui_desktop_note_clamp_position(void) {
+    int max_x = (int)g_gui.width - GUI_DESKTOP_NOTE_CARD_W;
+    int max_y = (int)g_gui.height - GUI_TASKBAR_HEIGHT - GUI_DESKTOP_NOTE_CARD_H;
+    if (!g_gui.desktop_note_position_initialized) {
+        gui_desktop_note_default_position(&g_gui.desktop_note_x, &g_gui.desktop_note_y);
+        g_gui.desktop_note_position_initialized = 1;
+    }
+    if (max_x < 0) max_x = 0;
+    if (max_y < 0) max_y = 0;
+    if (g_gui.desktop_note_x < 0) g_gui.desktop_note_x = 0;
+    if (g_gui.desktop_note_y < 0) g_gui.desktop_note_y = 0;
+    if (g_gui.desktop_note_x > max_x) g_gui.desktop_note_x = max_x;
+    if (g_gui.desktop_note_y > max_y) g_gui.desktop_note_y = max_y;
+}
+
+static int gui_desktop_note_begin_drag(int x, int y) {
+    if (!g_gui.desktop_enabled) return 0;
+    if (g_gui.desktop_note_stack_rect.w <= 0 || g_gui.desktop_note_stack_rect.h <= 0) return 0;
+    if (!gui_rect_contains(&g_gui.desktop_note_stack_rect, x, y)) return 0;
+    g_gui.desktop_note_dragging = 1;
+    g_gui.desktop_note_drag_offset_x = x - g_gui.desktop_note_x;
+    g_gui.desktop_note_drag_offset_y = y - g_gui.desktop_note_y;
+    gui_set_focused_widget(0);
+    gui_invalidate_all();
+    return 1;
+}
+
+static void gui_desktop_note_drag_to(int x, int y) {
+    if (!g_gui.desktop_note_dragging) return;
+    g_gui.desktop_note_x = x - g_gui.desktop_note_drag_offset_x;
+    g_gui.desktop_note_y = y - g_gui.desktop_note_drag_offset_y;
+    gui_desktop_note_clamp_position();
+    gui_invalidate_all();
+}
+
+static void gui_desktop_draw_notes(void) {
+    gui_desktop_note_store_t store;
+    int i;
+    int x;
+    int y;
+    int drawn = 0;
+    if (!g_gui.desktop_enabled) return;
+    gui_desktop_notes_load(&store);
+    if (store.count <= 0) {
+        g_gui.desktop_note_stack_rect.x = 0;
+        g_gui.desktop_note_stack_rect.y = 0;
+        g_gui.desktop_note_stack_rect.w = 0;
+        g_gui.desktop_note_stack_rect.h = 0;
+        return;
+    }
+    gui_desktop_note_clamp_position();
+    x = g_gui.desktop_note_x;
+    y = g_gui.desktop_note_y;
+    for (i = 0; i < store.count; i++) {
+        if (y + GUI_DESKTOP_NOTE_CARD_H > (int)g_gui.height - GUI_TASKBAR_HEIGHT - 12) break;
+        gui_desktop_draw_note_card(store.items[i], x, y, GUI_DESKTOP_NOTE_CARD_W, GUI_DESKTOP_NOTE_CARD_H, i);
+        y += GUI_DESKTOP_NOTE_CARD_H + GUI_DESKTOP_NOTE_GAP;
+        drawn++;
+    }
+    if (drawn > 0) {
+        g_gui.desktop_note_stack_rect.x = x;
+        g_gui.desktop_note_stack_rect.y = g_gui.desktop_note_y;
+        g_gui.desktop_note_stack_rect.w = GUI_DESKTOP_NOTE_CARD_W;
+        g_gui.desktop_note_stack_rect.h = drawn * GUI_DESKTOP_NOTE_CARD_H + (drawn - 1) * GUI_DESKTOP_NOTE_GAP;
+    } else {
+        g_gui.desktop_note_stack_rect.x = 0;
+        g_gui.desktop_note_stack_rect.y = 0;
+        g_gui.desktop_note_stack_rect.w = 0;
+        g_gui.desktop_note_stack_rect.h = 0;
+    }
+}
+
 static void gui_desktop_draw(void) {
     uint32_t i;
     /* center the 3-line welcome block on screen (above taskbar) */
@@ -7715,6 +7979,7 @@ static void gui_desktop_draw(void) {
     for (i = 0; i < g_gui.desktop_icon_count && i < GUI_DESKTOP_MAX_ICONS; i++) {
         gui_desktop_draw_icon(&g_gui.desktop_icons[i]);
     }
+    gui_desktop_draw_notes();
 }
 
 static int gui_ascii_case_equal_prefix(const char *text, const char *query) {
@@ -8022,6 +8287,16 @@ static void gui_desktop_run_action(uint32_t action) {
             gui_browser_open();
         } else {
             serial_write("[GUI] launched /bin/browser\n");
+        }
+        return;
+    }
+    if (action == GUI_DESKTOP_ACTION_STICKY) {
+        char *argv[] = { "/bin/stickynote", 0 };
+        int pid = spawn_user_process("/bin/stickynote", argv);
+        if (pid < 0) {
+            serial_write("[GUI] /bin/stickynote unavailable\n");
+        } else {
+            serial_write("[GUI] launched /bin/stickynote\n");
         }
         return;
     }
@@ -10216,6 +10491,34 @@ static void gui_draw_taskbar_terminal_icon(gui_rect_t rect) {
     gui_raw_line(x + 13, y + 15, x + 21, y + 15, text);
 }
 
+static void gui_draw_taskbar_sticky_icon(gui_rect_t rect) {
+    int hover = gui_taskbar_icon_hovered(rect);
+    int x = rect.x + (rect.w - 24) / 2;
+    int y = gui_taskbar_icon_y(rect, 24);
+    uint32_t paper = hover ? gui_rgb(255, 237, 127) : gui_rgb(255, 221, 92);
+    uint32_t fold = hover ? gui_rgb(255, 250, 185) : gui_rgb(255, 241, 150);
+    uint32_t edge = hover ? gui_rgb(210, 165, 58) : gui_rgb(190, 145, 44);
+    uint32_t line = hover ? gui_rgb(116, 94, 52) : gui_rgb(92, 76, 44);
+
+    if (hover) {
+        y -= gui_taskbar_icon_hover_lift(rect);
+        gui_taskbar_draw_icon_shadow(x, y, 24, 24);
+    }
+
+    gui_raw_fill_rect(x, y, 24, 24, paper);
+    gui_raw_line(x, y, x + 23, y, edge);
+    gui_raw_line(x, y, x, y + 23, edge);
+    gui_raw_line(x + 23, y, x + 23, y + 23, edge);
+    gui_raw_line(x, y + 23, x + 23, y + 23, edge);
+    gui_raw_fill_rect(x + 16, y + 16, 7, 7, fold);
+    gui_raw_line(x + 16, y + 16, x + 23, y + 16, edge);
+    gui_raw_line(x + 16, y + 16, x + 16, y + 23, edge);
+    gui_raw_line(x + 5, y + 7, x + 18, y + 7, line);
+    gui_raw_line(x + 5, y + 12, x + 16, y + 12, line);
+    gui_raw_line(x + 5, y + 17, x + 12, y + 17, line);
+}
+
+
 static gui_window_t *fp_window;
 
 static void gui_draw_taskbar_window_icon(gui_rect_t rect, gui_window_t *w) {
@@ -10649,6 +10952,7 @@ static void gui_draw_taskbar(void) {
     gui_draw_taskbar_search_box(layout.search_box);
 
     gui_draw_taskbar_terminal_icon(layout.terminal_button);
+    gui_draw_taskbar_sticky_icon(layout.sticky_button);
 
     for (i = 0; i < g_gui.window_count; i++) {
         uint32_t idx = g_gui.z_order[i];

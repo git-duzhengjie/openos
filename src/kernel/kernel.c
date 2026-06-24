@@ -385,6 +385,13 @@
 #define OPENOS_HAS_USER_BROWSER 0
 #endif
 
+#if __has_include("embed_stickynote.h")
+#include "embed_stickynote.h"  /* desktop sticky note user command */
+#define OPENOS_HAS_USER_STICKYNOTE 1
+#else
+#define OPENOS_HAS_USER_STICKYNOTE 0
+#endif
+
 #if __has_include("embed_chromium.h")
 #include "embed_chromium.h"  /* Chromium-like single-window browser */
 #define OPENOS_HAS_USER_CHROMIUM 1
@@ -1452,6 +1459,17 @@ void kernel_main(void) {
         serial_write("[OK] Installed /bin/browser user ELF\n");
     } else {
         serial_write("[WARN] Failed to install /bin/browser\n");
+    }
+#endif
+
+#if OPENOS_HAS_USER_STICKYNOTE
+    fd = vfs_open("/bin/stickynote", O_CREAT | O_RDWR, 0755);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)stickynote_elf, stickynote_elf_size);
+        vfs_close(fd);
+        serial_write("[OK] Installed /bin/stickynote user ELF\n");
+    } else {
+        serial_write("[WARN] Failed to install /bin/stickynote\n");
     }
 #endif
 
