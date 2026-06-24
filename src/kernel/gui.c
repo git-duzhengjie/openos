@@ -7791,6 +7791,10 @@ static void gui_desktop_notes_load(gui_desktop_note_store_t *store) {
     if (store->count <= 0) {
         gui_desktop_notes_load_from_file(store, GUI_DESKTOP_NOTE_LEGACY_FILE);
     }
+    if (store->count <= 0) {
+        gui_desktop_note_add(store, "欢迎使用桌面便签，点击任务栏便签图标添加便签。",
+                             sizeof("欢迎使用桌面便签，点击任务栏便签图标添加便签。") - 1);
+    }
 }
 
 static void gui_desktop_draw_note_wrapped_text(const char *text, int x, int y, int w, int h, uint32_t color) {

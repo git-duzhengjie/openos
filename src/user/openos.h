@@ -4039,6 +4039,51 @@ static inline void openos_format_emit_padded(char *buf, int size, int *pos, int 
     }
 }
 
+
+static inline int openos_format_strnlen(const char *s, int max_len)
+{
+    int len = 0;
+
+    if (!s)
+        return 0;
+    while (s[len] && (max_len < 0 || len < max_len))
+        len++;
+    return len;
+}
+
+static inline void openos_format_emit_nstr(char *buf, int size, int *pos, int *total, int fd,
+                                           const char *s, int len)
+{
+    int i;
+
+    if (!s)
+        s = "(null)";
+    for (i = 0; s[i] && (len < 0 || i < len); i++)
+        openos_format_emit_char(buf, size, pos, total, fd, s[i]);
+}
+
+static inline void openos_format_emit_padded_n(char *buf, int size, int *pos, int *total, int fd,
+                                               const char *s, int precision, int width,
+                                               int left_align, char pad)
+{
+    int len;
+    int pad_count;
+
+    if (!s)
+        s = "(null)";
+    len = openos_format_strnlen(s, precision);
+    pad_count = width > len ? width - len : 0;
+    if (!left_align) {
+        while (pad_count-- > 0)
+            openos_format_emit_char(buf, size, pos, total, fd, pad);
+    }
+    openos_format_emit_nstr(buf, size, pos, total, fd, s, precision);
+    if (left_align) {
+        while (pad_count-- > 0)
+            openos_format_emit_char(buf, size, pos, total, fd, ' ');
+    }
+}
+
 static inline void openos_utoa_base(unsigned int value, char *buf, int base)
 {
     char tmp[33];
@@ -4062,6 +4107,64 @@ static inline void openos_utoa_base(unsigned int value, char *buf, int base)
     buf[j] = 0;
 }
 
+static inline unsigned long long openos_udivmod_u64_u32(unsigned long long value, unsigned int divisor, unsigned int *rem)
+{
+    unsigned long long quotient = 0;
+    unsigned int remainder = 0;
+    int bit;
+
+    if (divisor == 0) {
+        if (rem)
+            *rem = 0;
+        return 0;
+    }
+    for (bit = 63; bit >= 0; bit--) {
+        remainder = (unsigned int)((remainder << 1) | ((value >> bit) & 1ULL));
+        if (remainder >= divisor) {
+            remainder -= divisor;
+            quotient |= (1ULL << bit);
+        }
+    }
+    if (rem)
+        *rem = remainder;
+    return quotient;
+}
+
+static inline void openos_ulltoa_base(unsigned long long value, char *buf, int base, int upper)
+{
+    char tmp[65];
+    int i = 0;
+    int j = 0;
+
+    if (!buf || base < 2 || base > 16)
+        return;
+    if (value == 0) {
+        buf[0] = '0';
+        buf[1] = 0;
+        return;
+    }
+    while (value > 0 && i < (int)sizeof(tmp)) {
+        unsigned int rem = 0;
+        value = openos_udivmod_u64_u32(value, (unsigned int)base, &rem);
+        tmp[i++] = (char)(rem < 10 ? '0' + rem : (upper ? 'A' : 'a') + rem - 10);
+    }
+    while (i > 0)
+        buf[j++] = tmp[--i];
+    buf[j] = 0;
+}
+
+static inline void openos_lltoa_base(long long value, char *buf, int base)
+{
+    if (!buf)
+        return;
+    if (value < 0) {
+        buf[0] = '-';
+        openos_ulltoa_base((unsigned long long)(-value), buf + 1, base, 0);
+    } else {
+        openos_ulltoa_base((unsigned long long)value, buf, base, 0);
+    }
+}
+
 static inline int openos_vformat(char *buf, int size, int fd, const char *fmt, __builtin_va_list ap)
 {
     int pos = 0;
@@ -4078,6 +4181,8 @@ static inline int openos_vformat(char *buf, int size, int fd, const char *fmt, _
         int left_align = 0;
         int zero_pad = 0;
         int width = 0;
+        int precision = -1;
+        int length_mod = 0; /* 0=int, 1=long, 2=long long */
         char spec;
 
         if (*fmt != '%') {
@@ -4089,17 +4194,65 @@ static inline int openos_vformat(char *buf, int size, int fd, const char *fmt, _
         if (*fmt == 0)
             break;
 
-        if (*fmt == '-') {
-            left_align = 1;
+        while (*fmt == '-' || *fmt == '+' || *fmt == ' ' || *fmt == '#' || *fmt == '0') {
+            if (*fmt == '-')
+                left_align = 1;
+            else if (*fmt == '0')
+                zero_pad = 1;
             fmt++;
         }
-        if (*fmt == '0') {
-            zero_pad = 1;
+        if (left_align)
+            zero_pad = 0;
+
+        if (*fmt == '*') {
+            width = __builtin_va_arg(ap, int);
+            if (width < 0) {
+                left_align = 1;
+                zero_pad = 0;
+                width = -width;
+            }
             fmt++;
+        } else {
+            while (*fmt >= '0' && *fmt <= '9') {
+                width = width * 10 + (*fmt - '0');
+                fmt++;
+            }
         }
-        while (*fmt >= '0' && *fmt <= '9') {
-            width = width * 10 + (*fmt - '0');
+
+        if (*fmt == '.') {
             fmt++;
+            precision = 0;
+            zero_pad = 0;
+            if (*fmt == '*') {
+                precision = __builtin_va_arg(ap, int);
+                fmt++;
+            } else {
+                while (*fmt >= '0' && *fmt <= '9') {
+                    precision = precision * 10 + (*fmt - '0');
+                    fmt++;
+                }
+            }
+            if (precision < 0)
+                precision = -1;
+        }
+
+        if (*fmt == 'l') {
+            length_mod = 1;
+            fmt++;
+            if (*fmt == 'l') {
+                length_mod = 2;
+                fmt++;
+            }
+        } else if (*fmt == 'j') {
+            length_mod = 2;
+            fmt++;
+        } else if (*fmt == 'z' || *fmt == 't') {
+            length_mod = 1;
+            fmt++;
+        } else if (*fmt == 'h') {
+            fmt++;
+            if (*fmt == 'h')
+                fmt++;
         }
 
         spec = *fmt;
@@ -4110,35 +4263,47 @@ static inline int openos_vformat(char *buf, int size, int fd, const char *fmt, _
             openos_format_emit_char(buf, size, &pos, &total, fd, '%');
         } else if (spec == 's') {
             const char *value = __builtin_va_arg(ap, const char *);
-            openos_format_emit_padded(buf, size, &pos, &total, fd, value, width, left_align, ' ');
+            openos_format_emit_padded_n(buf, size, &pos, &total, fd, value, precision, width, left_align, ' ');
         } else if (spec == 'c') {
             char cbuf[2];
             cbuf[0] = (char)__builtin_va_arg(ap, int);
             cbuf[1] = 0;
             openos_format_emit_padded(buf, size, &pos, &total, fd, cbuf, width, left_align, ' ');
         } else if (spec == 'd' || spec == 'i') {
-            char nbuf[16];
-            openos_itoa(__builtin_va_arg(ap, int), nbuf, 10);
+            char nbuf[32];
+            if (length_mod >= 2)
+                openos_lltoa_base(__builtin_va_arg(ap, long long), nbuf, 10);
+            else if (length_mod == 1)
+                openos_lltoa_base((long)__builtin_va_arg(ap, long), nbuf, 10);
+            else
+                openos_itoa(__builtin_va_arg(ap, int), nbuf, 10);
             openos_format_emit_padded(buf, size, &pos, &total, fd, nbuf, width, left_align, zero_pad ? '0' : ' ');
         } else if (spec == 'u') {
-            char nbuf[16];
-            openos_utoa_base(__builtin_va_arg(ap, unsigned int), nbuf, 10);
+            char nbuf[32];
+            if (length_mod >= 2)
+                openos_ulltoa_base(__builtin_va_arg(ap, unsigned long long), nbuf, 10, 0);
+            else if (length_mod == 1)
+                openos_ulltoa_base((unsigned long)__builtin_va_arg(ap, unsigned long), nbuf, 10, 0);
+            else
+                openos_ulltoa_base(__builtin_va_arg(ap, unsigned int), nbuf, 10, 0);
             openos_format_emit_padded(buf, size, &pos, &total, fd, nbuf, width, left_align, zero_pad ? '0' : ' ');
-        } else if (spec == 'x') {
-            char nbuf[16];
-            openos_utoa_base(__builtin_va_arg(ap, unsigned int), nbuf, 16);
+        } else if (spec == 'x' || spec == 'X') {
+            char nbuf[32];
+            if (length_mod >= 2)
+                openos_ulltoa_base(__builtin_va_arg(ap, unsigned long long), nbuf, 16, spec == 'X');
+            else if (length_mod == 1)
+                openos_ulltoa_base((unsigned long)__builtin_va_arg(ap, unsigned long), nbuf, 16, spec == 'X');
+            else
+                openos_ulltoa_base(__builtin_va_arg(ap, unsigned int), nbuf, 16, spec == 'X');
+            openos_format_emit_padded(buf, size, &pos, &total, fd, nbuf, width, left_align, zero_pad ? '0' : ' ');
+        } else if (spec == 'p') {
+            char nbuf[34];
+            nbuf[0] = '0';
+            nbuf[1] = 'x';
+            openos_ulltoa_base((unsigned int)__builtin_va_arg(ap, void *), nbuf + 2, 16, 0);
             openos_format_emit_padded(buf, size, &pos, &total, fd, nbuf, width, left_align, zero_pad ? '0' : ' ');
         } else {
             openos_format_emit_char(buf, size, &pos, &total, fd, '%');
-            if (left_align)
-                openos_format_emit_char(buf, size, &pos, &total, fd, '-');
-            if (zero_pad)
-                openos_format_emit_char(buf, size, &pos, &total, fd, '0');
-            if (width > 0) {
-                char wbuf[16];
-                openos_itoa(width, wbuf, 10);
-                openos_format_emit_str(buf, size, &pos, &total, fd, wbuf);
-            }
             openos_format_emit_char(buf, size, &pos, &total, fd, spec);
         }
         fmt++;
@@ -4387,9 +4552,18 @@ typedef struct openos_heap_block {
 
 static openos_heap_block_t *openos_heap_head = 0;
 
-static inline void *openos_heap_alloc_page(void)
+static inline void *openos_heap_alloc_pages(int pages)
 {
-    void *ret = openos_sbrk(OPENOS_HEAP_PAGE_SIZE);
+    void *ret;
+    int bytes;
+
+    if (pages <= 0)
+        return 0;
+    bytes = pages * OPENOS_HEAP_PAGE_SIZE;
+    if (bytes / OPENOS_HEAP_PAGE_SIZE != pages)
+        return 0;
+
+    ret = openos_sbrk(bytes);
     if ((int)ret == -1)
         return 0;
     openos_clear_errno();
@@ -4457,14 +4631,11 @@ static inline openos_heap_block_t *openos_heap_add_page(int min_size)
     while (pages * OPENOS_HEAP_PAGE_SIZE < min_size + (int)sizeof(openos_heap_block_t))
         pages++;
 
-    if (pages != 1)
-        return 0;
-
-    page = (char *)openos_heap_alloc_page();
+    page = (char *)openos_heap_alloc_pages(pages);
     if (!page)
         return 0;
 
-    payload = OPENOS_HEAP_PAGE_SIZE - (int)sizeof(openos_heap_block_t);
+    payload = pages * OPENOS_HEAP_PAGE_SIZE - (int)sizeof(openos_heap_block_t);
     block = (openos_heap_block_t *)page;
     block->magic = OPENOS_HEAP_MAGIC;
     block->size = (unsigned int)payload;

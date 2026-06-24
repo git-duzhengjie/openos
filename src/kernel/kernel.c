@@ -228,6 +228,12 @@
 #else
 #define OPENOS_HAS_TCC 0
 #endif
+#if __has_include("embed_tcc_resources.h")
+#include "embed_tcc_resources.h"  /* TinyCC OPENOS sysroot resources */
+#define OPENOS_HAS_TCC_RESOURCES 1
+#else
+#define OPENOS_HAS_TCC_RESOURCES 0
+#endif
 #if __has_include("embed_ai.h")
 #include "embed_ai.h"  /* ai user command */
 #define OPENOS_HAS_AI_CMD 1
@@ -854,7 +860,12 @@ void kernel_main(void) {
     vfs_mkdir("/home/browser/certs", 0755);
     vfs_mkdir("/home/browser/profiles", 0755);
     vfs_mkdir("/home/browser/downloads", 0755);
+    vfs_mkdir("/home/examples", 0755);
     vfs_mkdir("/usr", 0755);
+    vfs_mkdir("/usr/include", 0755);
+    vfs_mkdir("/usr/include/tcc", 0755);
+    vfs_mkdir("/usr/lib", 0755);
+    vfs_mkdir("/usr/lib/tcc", 0755);
     vfs_mkdir("/usr/share", 0755);
     vfs_mkdir("/usr/share/openos", 0755);
     vfs_mkdir("/usr/share/openos/browser", 0755);
@@ -1197,12 +1208,60 @@ void kernel_main(void) {
 #if OPENOS_HAS_TCC
     fd = vfs_open("/bin/tcc", O_CREAT | O_RDWR, 0755);
     if (fd >= 0) {
-        vfs_write(fd, (const char *)tcc_elf, tcc_elf_size);
+        int written = vfs_write(fd, (const char *)tcc_elf, tcc_elf_size);
         vfs_close(fd);
-        serial_write("[OK] Installed /bin/tcc user ELF\n");
+        if (written == (int)tcc_elf_size) {
+            serial_write("[OK] Installed /bin/tcc user ELF\n");
+        } else {
+            serial_write("[ERR] Failed to write complete /bin/tcc user ELF\n");
+        }
     } else {
         serial_write("[WARN] Failed to install /bin/tcc\n");
     }
+#endif
+
+#if OPENOS_HAS_TCC_RESOURCES
+    fd = vfs_open("/usr/include/openos.h", O_CREAT | O_RDWR, 0644);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)tcc_res_openos_h, tcc_res_openos_h_len);
+        vfs_close(fd);
+    }
+    fd = vfs_open("/usr/include/tcc/openos.h", O_CREAT | O_RDWR, 0644);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)tcc_res_openos_h, tcc_res_openos_h_len);
+        vfs_close(fd);
+    }
+    fd = vfs_open("/usr/include/tccdefs.h", O_CREAT | O_RDWR, 0644);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)tcc_res_tccdefs_h, tcc_res_tccdefs_h_len);
+        vfs_close(fd);
+    }
+    fd = vfs_open("/usr/include/tcc/tccdefs.h", O_CREAT | O_RDWR, 0644);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)tcc_res_tccdefs_h, tcc_res_tccdefs_h_len);
+        vfs_close(fd);
+    }
+    fd = vfs_open("/usr/lib/tcc/user.ld", O_CREAT | O_RDWR, 0644);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)tcc_res_user_ld, tcc_res_user_ld_len);
+        vfs_close(fd);
+    }
+    fd = vfs_open("/usr/lib/tcc/crt0.o", O_CREAT | O_RDWR, 0644);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)tcc_res_crt0_o, tcc_res_crt0_o_len);
+        vfs_close(fd);
+    }
+    fd = vfs_open("/usr/lib/tcc/openos_runtime.c", O_CREAT | O_RDWR, 0644);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)tcc_res_runtime_c, tcc_res_runtime_c_len);
+        vfs_close(fd);
+    }
+    fd = vfs_open("/home/examples/hello.c", O_CREAT | O_RDWR, 0644);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)tcc_res_example_hello_c, tcc_res_example_hello_c_len);
+        vfs_close(fd);
+    }
+    serial_write("[OK] Installed TinyCC OPENOS sysroot resources\n");
 #endif
 
 #if OPENOS_HAS_AI_CMD

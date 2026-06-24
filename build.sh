@@ -953,7 +953,19 @@ if [ -f $USR/tcc.c ]; then
     ld -m elf_i386 -T $USR/user.ld -o $BUILD/tcc.elf $BUILD/crt0.o $BUILD/tcc.o
     verify_user_start $BUILD/tcc.elf tcc.elf
     python3 _embed_elf.py $BUILD/tcc.elf $SRC/include/embed_tcc.h tcc_elf
-    echo "  Embedded: tcc.elf"
+
+    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+        -fno-stack-protector -fno-builtin \
+        -I $USR -I $SRC/include \
+        -c $USR/openos_tcc_runtime.c -o $BUILD/tcc_crt0.o
+    python3 tools/gen_embed_resources.py $SRC/include/embed_tcc_resources.h \
+        tcc_res_openos_h=$USR/openos.h \
+        tcc_res_tccdefs_h=ports/tinycc/include/tccdefs.h \
+        tcc_res_user_ld=$USR/user.ld \
+        tcc_res_crt0_o=$BUILD/tcc_crt0.o \
+        tcc_res_example_hello_c=$USR/tcc_examples/hello.c \
+        tcc_res_runtime_c=$USR/openos_tcc_runtime.c
+    echo "  Embedded: tcc.elf and OPENOS TinyCC sysroot resources"
 fi
 
 if [ -f $USR/ai.c ]; then

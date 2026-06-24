@@ -104,7 +104,18 @@ static inline int openos_tcc_fstat(int fd, struct stat *st)
 
 #define stat(path, st) openos_tcc_stat((path), (st))
 #define fstat(fd, st) openos_tcc_fstat((fd), (st))
-#define open(path, flags, ...) openos_open((path), (flags), 0644)
+static inline int openos_tcc_open(const char *path, int flags, ...)
+{
+    mode_t mode = 0644;
+    if (flags & O_CREAT) {
+        __builtin_va_list ap;
+        __builtin_va_start(ap, flags);
+        mode = (mode_t)__builtin_va_arg(ap, int);
+        __builtin_va_end(ap);
+    }
+    return openos_open(path, flags, mode);
+}
+#define open openos_tcc_open
 #define close(fd) openos_close((fd))
 #define read(fd, buf, len) openos_read((fd), (buf), (len))
 #define write(fd, buf, len) openos_write((fd), (buf), (len))
@@ -150,9 +161,16 @@ struct tm { int tm_sec, tm_min, tm_hour, tm_mday, tm_mon, tm_year, tm_wday, tm_y
 struct timeval { long tv_sec; long tv_usec; };
 struct timezone { int tz_minuteswest; int tz_dsttime; };
 #endif
-static inline int gettimeofday(struct timeval *tv, struct timezone *tz) { if (tv) { tv->tv_sec = (long)openos_time(0); tv->tv_usec = 0; } if (tz) { tz->tz_minuteswest = 0; tz->tz_dsttime = 0; } return 0; }
-static inline time_t time(time_t *out) { openos_time_t now = openos_time(0); if (out) *out = (time_t)now; return (time_t)now; }
-static inline struct tm *localtime(const time_t *timer) { static struct tm tm; unsigned int t = timer ? (unsigned int)*timer : openos_time(0); tm.tm_sec = t % 60; tm.tm_min = (t / 60) % 60; tm.tm_hour = (t / 3600) % 24; tm.tm_mday = 1; tm.tm_mon = 0; tm.tm_year = 70; tm.tm_wday = 4; tm.tm_yday = 0; tm.tm_isdst = 0; return &tm; }
+/*
+ * TinyCC uses time()/localtime() mainly to expand __DATE__ and __TIME__.
+ * OPENOS does not yet provide a full calendar API. Keep this compatibility
+ * layer deterministic and, most importantly, do not dereference localtime()'s
+ * input pointer because TinyCC can reach it through freestanding ABI paths
+ * where that pointer is not reliable.
+ */
+static inline int gettimeofday(struct timeval *tv, struct timezone *tz) { if (tv) { tv->tv_sec = 0; tv->tv_usec = 0; } if (tz) { tz->tz_minuteswest = 0; tz->tz_dsttime = 0; } return 0; }
+static inline time_t time(time_t *out) { if (out) *out = (time_t)0; return (time_t)0; }
+static inline struct tm *localtime(const time_t *timer) { static struct tm tm; (void)timer; tm.tm_sec = 0; tm.tm_min = 0; tm.tm_hour = 0; tm.tm_mday = 1; tm.tm_mon = 0; tm.tm_year = 70; tm.tm_wday = 4; tm.tm_yday = 0; tm.tm_isdst = 0; return &tm; }
 static inline long double ldexpl(long double x, int exp) { while (exp > 0) { x *= 2.0L; exp--; } while (exp < 0) { x *= 0.5L; exp++; } return x; }
 static inline double strtod(const char *nptr, char **endptr) { long v = strtol(nptr, endptr, 10); return (double)v; }
 static inline float strtof(const char *nptr, char **endptr) { return (float)strtod(nptr, endptr); }

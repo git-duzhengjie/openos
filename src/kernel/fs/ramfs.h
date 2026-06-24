@@ -12,7 +12,8 @@
 /* ramfs 文件系统标识和文件数据块 */
 #define RAMFS_MAGIC       0x858458F6u
 #define RAMFS_BLOCK_SIZE  4096
-#define RAMFS_MAX_BLOCKS  64   /* 每文件最大 256KB */
+/* 每文件最大 2MB。ramfs_file_t 由单页保存元数据，512 个块指针仍小于 4KB。 */
+#define RAMFS_MAX_BLOCKS  512
 
 typedef struct ramfs_file {
     uint32_t blocks[RAMFS_MAX_BLOCKS];  /* 物理页地址 */
