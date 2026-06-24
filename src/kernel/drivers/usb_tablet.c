@@ -474,6 +474,7 @@ void usb_tablet_poll(int screen_width, int screen_height) {
     int y_raw;
     int x;
     int y;
+    int wheel;
     uint8_t buttons;
 
     if (!g_tab.ready || screen_width <= 0 || screen_height <= 0) return;
@@ -525,6 +526,7 @@ void usb_tablet_poll(int screen_width, int screen_height) {
 
     memcpy(g_tab.last_report, report, 16);
     buttons = report[0] & 0x07;
+    wheel = (g_tab.poll_len >= 6) ? (int8_t)report[5] : 0;
 
     /* QEMU usb-tablet 常见 HID report: buttons, x16, y16, wheel... */
     x_raw = report[1] | ((int)report[2] << 8);
@@ -538,7 +540,7 @@ void usb_tablet_poll(int screen_width, int screen_height) {
     x = (x_raw * (screen_width - 1)) / USB_TABLET_AXIS_MAX;
     y = (y_raw * (screen_height - 1)) / USB_TABLET_AXIS_MAX;
 
-    mouse_set_absolute_position(x, y, buttons);
+    mouse_set_absolute_position_with_wheel(x, y, buttons, wheel);
     g_tab.reports++;
 }
 

@@ -897,6 +897,14 @@ int tls12_handshake_set_rsa_pre_master_secret(
     ctx->pre_master_secret_len = TLS12_RSA_PRE_MASTER_SECRET_SIZE;
     ctx->has_pre_master_secret = 1;
 
+    if (ctx->server_has_extended_master_secret) {
+        ctx->has_master_secret = 0;
+        ctx->has_key_block = 0;
+        ctx->has_record_layer = 0;
+        tls12_aes128_gcm_record_layer_init(&ctx->record_layer);
+        return 1;
+    }
+
     if (tls12_derive_master_secret_sha256(ctx->pre_master_secret,
                                           TLS12_RSA_PRE_MASTER_SECRET_SIZE,
                                           ctx->client_random,
@@ -929,6 +937,14 @@ int tls12_handshake_set_ecdhe_pre_master_secret(
     tls_copy(ctx->pre_master_secret, shared_secret, TLS12_ECDHE_PRE_MASTER_SECRET_SIZE);
     ctx->pre_master_secret_len = TLS12_ECDHE_PRE_MASTER_SECRET_SIZE;
     ctx->has_pre_master_secret = 1;
+
+    if (ctx->server_has_extended_master_secret) {
+        ctx->has_master_secret = 0;
+        ctx->has_key_block = 0;
+        ctx->has_record_layer = 0;
+        tls12_aes128_gcm_record_layer_init(&ctx->record_layer);
+        return 1;
+    }
 
     if (tls12_derive_master_secret_sha256(ctx->pre_master_secret,
                                           ctx->pre_master_secret_len,
@@ -1422,6 +1438,23 @@ int tls12_handshake_on_client_key_exchange_sent(tls12_handshake_context_t* ctx,
     if (!body_ok || !tls12_transcript_add(ctx, handshake_message, handshake_message_len)) {
         ctx->state = TLS12_HANDSHAKE_STATE_ERROR;
         return 0;
+    }
+
+    if (ctx->server_has_extended_master_secret) {
+        uint8_t session_hash[TLS_SHA256_DIGEST_SIZE];
+        if (!ctx->has_pre_master_secret ||
+            tls12_handshake_transcript_hash_sha256(&ctx->transcript, session_hash) != 0 ||
+            tls12_derive_extended_master_secret_sha256(ctx->pre_master_secret,
+                                                       ctx->pre_master_secret_len,
+                                                       session_hash,
+                                                       ctx->master_secret) != 0) {
+            ctx->state = TLS12_HANDSHAKE_STATE_ERROR;
+            return 0;
+        }
+        ctx->has_master_secret = 1;
+        ctx->has_key_block = 0;
+        ctx->has_record_layer = 0;
+        tls12_aes128_gcm_record_layer_init(&ctx->record_layer);
     }
 
     ctx->state = TLS12_HANDSHAKE_STATE_CLIENT_KEY_EXCHANGE_SENT;

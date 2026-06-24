@@ -1951,6 +1951,8 @@ static int browser_check_load_timeout(browser_load_context_t *load, int win, int
         return 0;
 
     load->timed_out = 1;
+    load->active = 0;
+    load->done = 0;
     load->result = -1;
     snprintf(load->status, sizeof(load->status), "Timeout");
     snprintf(load->http_status, sizeof(load->http_status), "Load timeout");
@@ -2115,6 +2117,14 @@ static void browser_load_worker(void *arg)
             snprintf(ctx->location, sizeof(ctx->location), "%s", headers.location);
         }
     }
+    if (ctx->timed_out) {
+        __sync_synchronize();
+        ctx->done = 1;
+        __sync_synchronize();
+        printf("browser: load worker finished after timeout host=%s path=%s\n", ctx->host, ctx->path);
+        return;
+    }
+
     ctx->result = rc;
     ctx->home_visible = 0;
     if (rc < 0) {

@@ -45,10 +45,11 @@
 #define GUI_LABEL_ALIGN_CENTER    1u
 #define GUI_LABEL_ALIGN_RIGHT     2u
 
-#define GUI_BUTTON_FLAG_DEFAULT   0x00000001u
-#define GUI_BUTTON_FLAG_DANGER    0x00000002u
-#define GUI_BUTTON_FLAG_FLAT      0x00000004u
-#define GUI_TOGGLE_FLAG_ON        0x00000008u
+#define GUI_BUTTON_FLAG_DEFAULT     0x00000001u
+#define GUI_BUTTON_FLAG_DANGER      0x00000002u
+#define GUI_BUTTON_FLAG_FLAT        0x00000004u
+#define GUI_BUTTON_FLAG_TRANSPARENT 0x00000020u
+#define GUI_TOGGLE_FLAG_ON          0x00000008u
 #define GUI_CHECKBOX_FLAG_CHECKED 0x00000008u
 #define GUI_RADIOBUTTON_FLAG_CHECKED 0x00000010u
 
@@ -523,6 +524,8 @@ typedef struct gui_system {
     int desktop_enabled;
     int desktop_start_menu_open;
     int desktop_start_menu_scroll;
+    int desktop_start_menu_scroll_dragging;
+    int desktop_start_menu_scroll_drag_offset_y;
     gui_rect_t desktop_taskbar_rect;
     gui_rect_t desktop_start_button_rect;
     gui_rect_t desktop_start_menu_rect;

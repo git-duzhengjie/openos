@@ -44,6 +44,7 @@ void mouse_set_position(int x, int y);
 
 /* 注入绝对坐标，供 USB Tablet / 绝对指针设备使用 */
 void mouse_set_absolute_position(int x, int y, uint8_t buttons);
+void mouse_set_absolute_position_with_wheel(int x, int y, uint8_t buttons, int wheel);
 
 void mouse_print_info(void);
 

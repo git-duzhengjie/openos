@@ -185,6 +185,8 @@ typedef struct ob_default_style_resolver {
     ob_style_resolver_i_t iface;
 } ob_default_style_resolver_t;
 
+static int ob_style_resolver_safe_display_for_tag(ob_style_resolver_i_t *iface, const char *tag);
+
 typedef struct ob_dom_text_renderer_i ob_dom_text_renderer_i_t;
 struct ob_dom_text_renderer_i {
     int (*render)(ob_dom_text_renderer_i_t *self, const ob_dom_document_t *doc, char *out, int out_size);
@@ -266,6 +268,12 @@ static void ob_default_style_resolver_init(ob_default_style_resolver_t *resolver
     resolver->iface.display_for_tag = ob_default_display_for_tag;
 }
 
+static int ob_style_resolver_safe_display_for_tag(ob_style_resolver_i_t *iface, const char *tag)
+{
+    if (!iface || !iface->display_for_tag) return ob_default_display_for_tag(iface, tag);
+    return iface->display_for_tag(iface, tag);
+}
+
 static int ob_cstr_len(const char *s)
 {
     int n = 0;
@@ -341,6 +349,12 @@ static int ob_is_void_tag(const char *tag)
            ob_token_eq_ci(tag, "link") || ob_token_eq_ci(tag, "meta") ||
            ob_token_eq_ci(tag, "param") || ob_token_eq_ci(tag, "source") ||
            ob_token_eq_ci(tag, "track") || ob_token_eq_ci(tag, "wbr");
+}
+
+static int ob_html_tokenizer_safe_next(ob_html_tokenizer_i_t *iface, ob_html_token_t *out)
+{
+    if (!iface || !iface->next) return -1;
+    return iface->next(iface, out);
 }
 
 static int ob_tokenizer_next_impl(ob_html_tokenizer_i_t *iface, ob_html_token_t *out)
@@ -927,6 +941,10 @@ static int ob_html_parse_impl(ob_html_parser_i_t *iface, const char *html, ob_do
     int current;
     (void)iface;
     if (!doc) return -1;
+    memset(&tokenizer, 0, sizeof(tokenizer));
+    memset(&styles, 0, sizeof(styles));
+    memset(&tok, 0, sizeof(tok));
+    memset(&stylesheet, 0, sizeof(stylesheet));
     doc->count = 0;
     doc->root = ob_dom_add_node(doc, OB_DOM_NODE_DOCUMENT, "#document", 0, 0, -1, OB_DISPLAY_BLOCK);
     if (doc->root < 0) return -1;
@@ -936,7 +954,7 @@ static int ob_html_parse_impl(ob_html_parser_i_t *iface, const char *html, ob_do
     ob_html_collect_embedded_code(html ? html : "", "script", ob_html_parser_embedded_js, sizeof(ob_html_parser_embedded_js));
     ob_css_parse_stylesheet(&stylesheet, ob_html_parser_embedded_css);
     ob_html_tokenizer_base_init(&tokenizer, html);
-    while (tokenizer.iface.next(&tokenizer.iface, &tok) == 0 && tok.type != OB_HTML_TOKEN_EOF) {
+    while (ob_html_tokenizer_safe_next(&tokenizer.iface, &tok) == 0 && tok.type != OB_HTML_TOKEN_EOF) {
         if (skip_depth > 0) {
             if (tok.type == OB_HTML_TOKEN_TAG && tok.name[0]) {
                 if (tok.closing) {
@@ -961,7 +979,7 @@ static int ob_html_parse_impl(ob_html_parser_i_t *iface, const char *html, ob_do
                     if (!tok.self_closing && !ob_is_void_tag(tok.name)) skip_depth = 1;
                     continue;
                 }
-                display = styles.iface.display_for_tag(&styles.iface, tok.name);
+                display = ob_style_resolver_safe_display_for_tag(&styles.iface, tok.name);
                 id = ob_dom_add_node(doc, OB_DOM_NODE_ELEMENT, tok.name, 0, 0, current, display);
                 if (id >= 0 && ob_token_eq_ci(tok.name, "a"))
                     ob_extract_attr_value(tok.attrs, tok.attrs_len, "href", doc->nodes[id].href, sizeof(doc->nodes[id].href));

@@ -109,6 +109,12 @@ int tls12_derive_master_secret_sha256(const uint8_t* pre_master_secret,
                                       const uint8_t server_random[TLS12_RANDOM_SIZE],
                                       uint8_t master_secret[TLS12_MASTER_SECRET_SIZE]);
 
+int tls12_derive_extended_master_secret_sha256(
+    const uint8_t* pre_master_secret,
+    size_t pre_master_secret_len,
+    const uint8_t session_hash[TLS_SHA256_DIGEST_SIZE],
+    uint8_t master_secret[TLS12_MASTER_SECRET_SIZE]);
+
 int tls12_derive_key_block_sha256(const uint8_t master_secret[TLS12_MASTER_SECRET_SIZE],
                                   const uint8_t server_random[TLS12_RANDOM_SIZE],
                                   const uint8_t client_random[TLS12_RANDOM_SIZE],

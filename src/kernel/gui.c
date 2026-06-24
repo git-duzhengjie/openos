@@ -494,6 +494,10 @@ static void gui_title_rect_px(int x, int y, int w, int h, uint32_t color, const 
 static void gui_menu_draw_item_fill(int x, int y, int w, int h, int selected, uint32_t bg, uint32_t selected_bg);
 static void gui_update_start_menu_layout(void);
 static void gui_start_menu_scroll_by(int delta_items);
+static void gui_start_menu_clamp_scroll(void);
+static int gui_start_menu_scrollbar_rects(gui_rect_t *track, gui_rect_t *thumb);
+static int gui_start_menu_scrollbar_begin_drag(int x, int y);
+static void gui_start_menu_scrollbar_drag_to(int y);
 
 static uint8_t gui_glyph5x7_row(char ch, int row) {
     if (ch >= 'a' && ch <= 'z') {
@@ -4354,6 +4358,7 @@ static void gui_draw_widget(gui_widget_t *wg) {
     if (wg->type == GUI_WIDGET_LABEL) {
         gui_draw_label_widget(wg, ax, ay);
     } else if (wg->type == GUI_WIDGET_BUTTON || wg->type == GUI_WIDGET_ICON_BUTTON) {
+        if (wg->button_flags & GUI_BUTTON_FLAG_TRANSPARENT) return;
         uint32_t light = g_gui.colors.button_border;
         uint32_t shadow = gui_rgb(20, 20, 20);
         int flat = (wg->button_flags & GUI_BUTTON_FLAG_FLAT) != 0;
@@ -5539,6 +5544,7 @@ void gui_alt_tab_cycle(void) {
 
 void gui_toggle_start_menu(void) {
     g_gui.desktop_start_menu_open = g_gui.desktop_start_menu_open ? 0 : 1;
+    g_gui.desktop_start_menu_scroll_dragging = 0;
     if (g_gui.desktop_start_menu_open) {
         g_gui.desktop_start_menu_scroll = 0;
         gui_launcher_scan_bin(2);
@@ -6462,6 +6468,10 @@ static void gui_handle_mouse_up(int x, int y) {
         g_gui.scrollbar_widget = 0;
         gui_invalidate_all();
     }
+    if (g_gui.desktop_start_menu_scroll_dragging) {
+        g_gui.desktop_start_menu_scroll_dragging = 0;
+        gui_invalidate_all();
+    }
     if (g_gui.splitview_widget) {
         g_gui.splitview_widget->pressed = 0;
         g_gui.splitview_widget = 0;
@@ -6528,6 +6538,10 @@ static void gui_handle_mouse_move(int x, int y) {
     if (g_gui.scrollbar_widget) {
         gui_set_hovered_widget(g_gui.scrollbar_widget);
         gui_scrollbar_apply_screen(g_gui.scrollbar_widget, x, y);
+        return;
+    }
+    if (g_gui.desktop_start_menu_scroll_dragging) {
+        gui_start_menu_scrollbar_drag_to(y);
         return;
     }
     if (g_gui.splitview_widget) {
@@ -6661,8 +6675,14 @@ void gui_process_events(void) {
         } else if (ev.type == GUI_EVENT_MOUSE_MOVE) {
             gui_handle_mouse_move(ev.x, ev.y);
         } else if (ev.type == GUI_EVENT_MOUSE_WHEEL) {
-            gui_window_t *wheel_window = gui_window_at(ev.x, ev.y);
-            gui_widget_t *wheel_widget = gui_widget_at_screen(ev.x, ev.y);
+            gui_window_t *wheel_window;
+            gui_widget_t *wheel_widget;
+            if (g_gui.desktop_start_menu_open && gui_rect_contains(&g_gui.desktop_start_menu_rect, ev.x, ev.y)) {
+                gui_start_menu_scroll_by(ev.dy > 0 ? -1 : 1);
+                continue;
+            }
+            wheel_window = gui_window_at(ev.x, ev.y);
+            wheel_widget = gui_widget_at_screen(ev.x, ev.y);
             if (wheel_window) gui_user_post_mouse_event(wheel_window, GUI_USER_EVENT_MOUSE_WHEEL, ev.x, ev.y, 0, ev.dy);
             if (wheel_widget && wheel_widget->type == GUI_WIDGET_TEXTAREA) {
                 gui_textarea_scroll_lines(wheel_widget, ev.dy > 0 ? -1 : 1);
@@ -7324,6 +7344,89 @@ static int gui_start_menu_has_scrollbar(void) {
     return gui_start_menu_max_scroll() > 0;
 }
 
+static int gui_start_menu_scrollbar_rects(gui_rect_t *track, gui_rect_t *thumb) {
+    gui_rect_t *r = &g_gui.desktop_start_menu_rect;
+    int header_h;
+    int visible;
+    int track_h;
+    int thumb_h;
+    int thumb_y;
+    int max_scroll;
+
+    if (!g_gui.desktop_start_menu_open || !gui_start_menu_has_scrollbar()) return 0;
+    header_h = gui_start_menu_header_height();
+    visible = gui_start_menu_visible_count();
+    track_h = r->h - header_h - 8;
+    if (track_h <= 0 || visible <= 0 || g_gui.launcher_app_count == 0) return 0;
+
+    thumb_h = (visible * track_h) / (int)g_gui.launcher_app_count;
+    if (thumb_h < 12) thumb_h = 12;
+    if (thumb_h > track_h) thumb_h = track_h;
+
+    thumb_y = r->y + header_h;
+    max_scroll = gui_start_menu_max_scroll();
+    if (max_scroll > 0 && track_h > thumb_h) {
+        thumb_y += (g_gui.desktop_start_menu_scroll * (track_h - thumb_h)) / max_scroll;
+    }
+
+    if (track) {
+        track->x = r->x + r->w - 12;
+        track->y = r->y + header_h;
+        track->w = 6;
+        track->h = track_h;
+    }
+    if (thumb) {
+        thumb->x = r->x + r->w - 11;
+        thumb->y = thumb_y;
+        thumb->w = 4;
+        thumb->h = thumb_h;
+    }
+    return 1;
+}
+
+static void gui_start_menu_scrollbar_drag_to(int y) {
+    gui_rect_t track;
+    gui_rect_t thumb;
+    int max_scroll;
+    int range;
+    int pos;
+
+    if (!gui_start_menu_scrollbar_rects(&track, &thumb)) return;
+    max_scroll = gui_start_menu_max_scroll();
+    range = track.h - thumb.h;
+    if (max_scroll <= 0 || range <= 0) return;
+
+    pos = y - g_gui.desktop_start_menu_scroll_drag_offset_y - track.y;
+    if (pos < 0) pos = 0;
+    if (pos > range) pos = range;
+    g_gui.desktop_start_menu_scroll = (pos * max_scroll + range / 2) / range;
+    gui_start_menu_clamp_scroll();
+    gui_invalidate_all();
+}
+
+static int gui_start_menu_scrollbar_begin_drag(int x, int y) {
+    gui_rect_t track;
+    gui_rect_t thumb;
+    int visible;
+
+    if (!gui_start_menu_scrollbar_rects(&track, &thumb)) return 0;
+    if (!gui_rect_contains(&track, x, y)) return 0;
+
+    visible = gui_start_menu_visible_count();
+    if (gui_rect_contains(&thumb, x, y)) {
+        g_gui.desktop_start_menu_scroll_dragging = 1;
+        g_gui.desktop_start_menu_scroll_drag_offset_y = y - thumb.y;
+    } else {
+        gui_start_menu_scroll_by(y < thumb.y ? -visible : visible);
+        if (gui_start_menu_scrollbar_rects(&track, &thumb) && gui_rect_contains(&thumb, x, y)) {
+            g_gui.desktop_start_menu_scroll_dragging = 1;
+            g_gui.desktop_start_menu_scroll_drag_offset_y = y - thumb.y;
+        }
+    }
+    gui_invalidate_all();
+    return 1;
+}
+
 static void gui_start_menu_clamp_scroll(void) {
     int max = gui_start_menu_max_scroll();
     if (g_gui.desktop_start_menu_scroll < 0) g_gui.desktop_start_menu_scroll = 0;
@@ -7359,8 +7462,8 @@ static void gui_update_start_menu_layout(void) {
 
     content_h = header_h + 8 + (int)g_gui.launcher_app_count * item_h;
     desired_h = content_h + 8;
-    max_h = (int)g_gui.height - GUI_TASKBAR_HEIGHT - 12;
-    if (max_h < header_h + item_h + 12) max_h = header_h + item_h + 12;
+    max_h = (int)g_gui.height / 3;
+    if (max_h < 1) max_h = 1;
     if (desired_h > max_h) desired_h = max_h;
     if (desired_h < header_h + item_h + 12 && g_gui.launcher_app_count > 0) {
         desired_h = header_h + item_h + 12;
@@ -7368,6 +7471,7 @@ static void gui_update_start_menu_layout(void) {
     if (line_h > 0 && desired_h < line_h + item_h + 28) {
         desired_h = line_h + item_h + 28;
     }
+    if (desired_h > max_h) desired_h = max_h;
 
     g_gui.desktop_start_menu_rect.x = 6;
     g_gui.desktop_start_menu_rect.w = desired_w;
@@ -7558,21 +7662,15 @@ static void gui_desktop_draw_start_menu(void) {
     }
 
     if (gui_start_menu_has_scrollbar()) {
-        int track_x = r->x + r->w - 12;
-        int track_y = r->y + header_h;
-        int track_h = r->h - header_h - 8;
-        int thumb_h;
-        int thumb_y;
-        int max_scroll = gui_start_menu_max_scroll();
-        gui_raw_fill_rect(track_x, track_y, 6, track_h, gui_rgb(18, 24, 36));
-        thumb_h = (visible * track_h) / (int)g_gui.launcher_app_count;
-        if (thumb_h < 12) thumb_h = 12;
-        if (thumb_h > track_h) thumb_h = track_h;
-        thumb_y = track_y;
-        if (max_scroll > 0 && track_h > thumb_h) {
-            thumb_y += (g_gui.desktop_start_menu_scroll * (track_h - thumb_h)) / max_scroll;
+        gui_rect_t track;
+        gui_rect_t thumb;
+        if (gui_start_menu_scrollbar_rects(&track, &thumb)) {
+            uint32_t thumb_color = g_gui.desktop_start_menu_scroll_dragging
+                ? gui_rgb(146, 180, 232)
+                : gui_rgb(112, 146, 198);
+            gui_raw_fill_rect(track.x, track.y, track.w, track.h, gui_rgb(18, 24, 36));
+            gui_raw_fill_rect(thumb.x, thumb.y, thumb.w, thumb.h, thumb_color);
         }
-        gui_raw_fill_rect(track_x + 1, thumb_y, 4, thumb_h, gui_rgb(112, 146, 198));
     }
 }
 
@@ -7949,6 +8047,7 @@ static void gui_desktop_run_action(uint32_t action) {
     }
     if (action == GUI_DESKTOP_ACTION_MENU) {
         g_gui.desktop_start_menu_open = !g_gui.desktop_start_menu_open;
+        g_gui.desktop_start_menu_scroll_dragging = 0;
         if (g_gui.desktop_start_menu_open) {
             g_gui.desktop_start_menu_scroll = 0;
             /* refresh /bin entries every time menu opens (lazy scan) */
@@ -7985,6 +8084,7 @@ static int gui_desktop_handle_click(int x, int y) {
         gui_rect_contains(&g_taskbar_search_rect, x, y)) {
         g_gui.taskbar_search_focused = 1;
         g_gui.desktop_start_menu_open = 0;
+        g_gui.desktop_start_menu_scroll_dragging = 0;
         gui_set_focused_widget(0);
         gui_taskbar_search_refresh_results();
         gui_invalidate_all();
@@ -8016,8 +8116,12 @@ static int gui_desktop_handle_click(int x, int y) {
     }
     if (g_gui.desktop_start_menu_open && gui_rect_contains(&g_gui.desktop_start_menu_rect, x, y)) {
         uint32_t launcher_index;
+        if (gui_start_menu_scrollbar_begin_drag(x, y)) {
+            return 1;
+        }
         if (gui_start_menu_item_at(x, y, &launcher_index)) {
             g_gui.desktop_start_menu_open = 0;
+            g_gui.desktop_start_menu_scroll_dragging = 0;
             gui_launcher_launch(launcher_index);
             gui_invalidate_all();
             return 1;
@@ -8026,6 +8130,7 @@ static int gui_desktop_handle_click(int x, int y) {
     }
     if (g_gui.desktop_start_menu_open) {
         g_gui.desktop_start_menu_open = 0;
+        g_gui.desktop_start_menu_scroll_dragging = 0;
         gui_invalidate_all();
     }
     for (i = 0; i < g_gui.desktop_icon_count && i < GUI_DESKTOP_MAX_ICONS; i++) {
@@ -13136,9 +13241,9 @@ static void gui_table_view_draw_row(gui_table_view_t *table, int row, int global
     border = (row == table->selected_row) ? gui_rgb(90, 130, 190) : gui_rgb(210, 218, 228);
     gui_raw_fill_rect(table->x, y, table->w, table->row_h - 1, bg);
     gui_raw_line(table->x, y + table->row_h - 1, table->x + table->w, y + table->row_h - 1, border);
-    gui_add_button(table->window, table->x, y, table->w, table->row_h - 1,
-                   "", table->on_row, (void*)(intptr_t)global_index);
+    (void)global_index;
 }
+
 
 static void gui_table_view_draw_text_cell(gui_table_view_t *table, int col, int y, const char *text, uint32_t color) {
     if (!table || col < 0 || col >= table->column_count) return;
@@ -13901,37 +14006,44 @@ static void gui_file_preview_render_list(void) {
             fp_format_mtime(mt, mtimebuf);
         }
 
-        /* One click target spans the row; individual columns are clipped labels.
-         * This avoids the old fixed-character table string overlapping when the
-         * default font is scaled up or CJK glyphs are wider than ASCII glyphs. */
+        /* Keep file rows persistent across window redraws.  The previous
+         * implementation drew row contents with gui_raw_* only; a later window
+         * redraw cleared those pixels and left the directory body blank even
+         * though the entry count was correct.  Add real widgets for the row
+         * background and labels, then put a transparent hit target on top. */
         line[0] = 0;
         gui_table_view_draw_row(&table, slot, slot);
         (void)line;
 
         {
-            gui_rect_t icon_cell;
-            int bottom_pad = font_scale_value(2);
-            int label_h = gui_text_glyph_height_px();
-            int label_y;
-            if (bottom_pad < 1) bottom_pad = 1;
-            if (label_h > row_h - 2) label_h = row_h - 2;
+            gui_widget_t *name_label;
+            gui_widget_t *mtime_label;
+            gui_widget_t *type_label;
+            gui_widget_t *size_label;
+            gui_widget_t *hit;
+            int label_y = y + 1;
+            int label_h = row_h - 2;
             if (label_h < 1) label_h = 1;
-            label_y = y + row_h - label_h - bottom_pad;
-            if (label_y < y + 1) label_y = y + 1;
 
-            /* File rows intentionally place text close to the lower edge.
-             * This matches the visual baseline of the bitmap font better than
-             * mathematical vertical centering in the tall row background. */
-            icon_cell.x = layout.name_x;
-            icon_cell.y = y + 1;
-            icon_cell.w = layout.name_w;
-            icon_cell.h = row_h - 2;
-            gui_draw_file_icon_cell(&icon_cell, display_name, icon,
-                                    selected, hover,
-                                    gui_rgb(24, 28, 34));
-            gui_table_view_draw_text_cell(&table, 1, label_y, mtimebuf, gui_rgb(42, 46, 54));
-            gui_table_view_draw_text_cell(&table, 2, label_y, type_str, gui_rgb(42, 46, 54));
-            gui_table_view_draw_text_cell(&table, 3, label_y, sizebuf, gui_rgb(42, 46, 54));
+            name_label = gui_add_label(fp_window, layout.name_x, label_y,
+                                       layout.name_w, label_h, display_name);
+            if (name_label) {
+                name_label->fg_color = gui_rgb(24, 28, 34);
+                name_label->icon = icon;
+            }
+            mtime_label = gui_add_label(fp_window, layout.mtime_x + 4, label_y,
+                                        layout.mtime_w - 8, label_h, mtimebuf);
+            if (mtime_label) mtime_label->fg_color = gui_rgb(42, 46, 54);
+            type_label = gui_add_label(fp_window, layout.type_x + 4, label_y,
+                                       layout.type_w - 8, label_h, type_str);
+            if (type_label) type_label->fg_color = gui_rgb(42, 46, 54);
+            size_label = gui_add_label(fp_window, layout.size_x + 4, label_y,
+                                       layout.size_w - 8, label_h, sizebuf);
+            if (size_label) size_label->fg_color = gui_rgb(42, 46, 54);
+
+            hit = gui_add_button(fp_window, table.x, y, table.w, row_h - 1,
+                                 "", fp_on_entry, (void*)(intptr_t)slot);
+            if (hit) hit->button_flags |= GUI_BUTTON_FLAG_TRANSPARENT;
         }
 
         y += row_h;

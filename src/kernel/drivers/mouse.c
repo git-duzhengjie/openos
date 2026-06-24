@@ -232,7 +232,7 @@ void mouse_set_position(int x, int y) {
     mouse_clamp_position();
 }
 
-void mouse_set_absolute_position(int x, int y, uint8_t buttons) {
+void mouse_set_absolute_position_with_wheel(int x, int y, uint8_t buttons, int wheel) {
     uint32_t flags;
     __asm__ volatile("pushfl; popl %0; cli" : "=r"(flags) :: "memory");
 
@@ -243,13 +243,18 @@ void mouse_set_absolute_position(int x, int y, uint8_t buttons) {
     mouse_clamp_position();
     g_mouse.dx = g_mouse.x - old_x;
     g_mouse.dy = g_mouse.y - old_y;
-    g_mouse.wheel = 0;
+    g_mouse.wheel = wheel;
+    g_mouse.z += wheel;
     g_mouse.buttons = buttons & 0x07;
     g_mouse.present = 1;
     g_mouse.absolute_mode = 1;
     g_mouse.packet_count++;
 
     __asm__ volatile("pushl %0; popfl" :: "r"(flags) : "memory", "cc");
+}
+
+void mouse_set_absolute_position(int x, int y, uint8_t buttons) {
+    mouse_set_absolute_position_with_wheel(x, y, buttons, 0);
 }
 
 void mouse_print_info(void) {
