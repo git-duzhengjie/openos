@@ -870,6 +870,7 @@ void kernel_main(void) {
         vfs_close(fd);
     }
 
+
     fd = vfs_open("/bin/fault", O_CREAT | O_RDWR, 0755);
     if (fd >= 0) {
         vfs_write(fd, (const char *)fault_elf, fault_elf_size);

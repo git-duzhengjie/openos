@@ -1,0 +1,21 @@
+{
+  "name": "openoshub",
+  "version": "0.1.0",
+  "description": "OPENOS application hub for registering application URLs, browsing, editing, deleting and rating user applications.",
+  "private": true,
+  "type": "commonjs",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "check": "node --check src/server.js && node scripts/check-syntax.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "openos",
+    "hub",
+    "apps"
+  ],
+  "license": "MIT"
+}

@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>openoshub</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="hero">
+    <div>
+      <p class="eyebrow">OPENOS 应用中心</p>
+      <h1>openoshub</h1>
+      <p>通过应用 URL 管理用户自定义应用，支持登记、浏览、修改、删除和评分。</p>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="panel">
+      <h2 id="form-title">登记应用 URL</h2>
+      <form id="app-form" class="form">
+        <input type="hidden" id="app-id">
+        <label>
+          应用名称
+          <input id="name" required maxlength="80" placeholder="例如：记事本增强版">
+        </label>
+        <label>
+          版本
+          <input id="version" required maxlength="32" placeholder="例如：1.0.0">
+        </label>
+        <label>
+          作者
+          <input id="author" maxlength="80" placeholder="开发者名称">
+        </label>
+        <label>
+          应用 URL
+          <input id="appUrl" required type="url" placeholder="https://example.com/my-app.openosapp">
+        </label>
+        <label>
+          描述
+          <textarea id="description" rows="4" maxlength="500" placeholder="介绍这个应用的功能"></textarea>
+        </label>
+        <div class="actions">
+          <button type="submit" id="submit-button">登记应用</button>
+          <button type="button" id="cancel-edit" class="secondary hidden">取消编辑</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="panel list-panel">
+      <div class="section-title">
+        <h2>应用列表</h2>
+        <button id="refresh" class="secondary">刷新</button>
+      </div>
+      <div id="message" class="message hidden"></div>
+      <div id="app-list" class="app-list"></div>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>
