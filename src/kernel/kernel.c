@@ -234,6 +234,18 @@
 #else
 #define OPENOS_HAS_TCC_RESOURCES 0
 #endif
+#if __has_include("embed_tccsmoke.h")
+#include "embed_tccsmoke.h"  /* TinyCC in-system smoke test */
+#define OPENOS_HAS_TCCSMOKE 1
+#else
+#define OPENOS_HAS_TCCSMOKE 0
+#endif
+#ifndef OPENOS_TCC_SMOKE_AUTORUN
+#define OPENOS_TCC_SMOKE_AUTORUN 0
+#endif
+#if OPENOS_TCC_SMOKE_AUTORUN && !OPENOS_HAS_TCCSMOKE
+#error "OPENOS_TCC_SMOKE_AUTORUN requires embed_tccsmoke.h"
+#endif
 #if __has_include("embed_ai.h")
 #include "embed_ai.h"  /* ai user command */
 #define OPENOS_HAS_AI_CMD 1
@@ -672,6 +684,22 @@ static int kernel_start_init_thread(void) {
     serial_write("[INIT] Init thread scheduled.\n");
     return 0;
 }
+
+#if OPENOS_TCC_SMOKE_AUTORUN
+static void kernel_tccsmoke_thread(void)
+{
+    extern int spawn_user_process(const char *path, char *const argv[]);
+    char *argv[] = { "/bin/tccsmoke", NULL };
+    serial_write("[tccsmoke] AUTORUN spawning /bin/tccsmoke\n");
+    int pid = spawn_user_process("/bin/tccsmoke", argv);
+    serial_write("[tccsmoke] AUTORUN spawn result ");
+    serial_write_hex((uint32_t)pid);
+    serial_write("\n");
+    for (;;) {
+        sched_yield();
+    }
+}
+#endif
 
 void kernel_main(void) {
     serial_init();
@@ -1220,6 +1248,21 @@ void kernel_main(void) {
     }
 #endif
 
+#if OPENOS_HAS_TCCSMOKE
+    fd = vfs_open("/bin/tccsmoke", O_CREAT | O_RDWR, 0755);
+    if (fd >= 0) {
+        int written = vfs_write(fd, (const char *)tccsmoke_elf, tccsmoke_elf_size);
+        vfs_close(fd);
+        if (written == (int)tccsmoke_elf_size) {
+            serial_write("[OK] Installed /bin/tccsmoke user ELF\n");
+        } else {
+            serial_write("[ERR] Failed to write complete /bin/tccsmoke user ELF\n");
+        }
+    } else {
+        serial_write("[WARN] Failed to install /bin/tccsmoke\n");
+    }
+#endif
+
 #if OPENOS_HAS_TCC_RESOURCES
     fd = vfs_open("/usr/include/openos.h", O_CREAT | O_RDWR, 0644);
     if (fd >= 0) {
@@ -1695,6 +1738,19 @@ void kernel_main(void) {
     }
 
     /* Shell is launched on demand from the GUI Terminal tool, or as a fallback if GUI/init fails. */
+
+#if OPENOS_TCC_SMOKE_AUTORUN
+    {
+        uint32_t tccsmoke_stack = (uint32_t)pmm_alloc_page() + 4096;
+        thread_t *tccsmoke_thread = thread_create(1, "tccsmoke", (uint32_t)kernel_tccsmoke_thread, tccsmoke_stack);
+        if (tccsmoke_thread) {
+            sched_add_thread(tccsmoke_thread);
+            serial_write("[tccsmoke] AUTORUN scheduled /bin/tccsmoke\n");
+        } else {
+            serial_write("[tccsmoke] AUTORUN failed to create thread\n");
+        }
+    }
+#endif
 
     /* 自动测试 ELF 加载 - 已禁用，避免干扰键盘输入
     {

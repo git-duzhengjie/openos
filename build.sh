@@ -13,6 +13,11 @@ fi
 BUILD=target
 SRC=src/kernel
 BUILD_ARCH="${ARCH:-i386}"
+OPENOS_TCC_SMOKE=${OPENOS_TCC_SMOKE:-0}
+KERNEL_EXTRA_CFLAGS="${KERNEL_EXTRA_CFLAGS:-}"
+if [ "$OPENOS_TCC_SMOKE" = "1" ]; then
+    KERNEL_EXTRA_CFLAGS="$KERNEL_EXTRA_CFLAGS -DOPENOS_TCC_SMOKE_AUTORUN=1"
+fi
 OPENOS_CJK_RESOURCE=${OPENOS_CJK_RESOURCE:-1}
 OPENOS_CJK_RESOURCE_PATH=${OPENOS_CJK_RESOURCE_PATH:-$BUILD/cjk.ofnt}
 # Default to a real Chinese coverage resource instead of the tiny UI subset.
@@ -968,6 +973,19 @@ if [ -f $USR/tcc.c ]; then
     echo "  Embedded: tcc.elf and OPENOS TinyCC sysroot resources"
 fi
 
+if [ "$OPENOS_TCC_SMOKE" = "1" ] && [ -f $USR/tccsmoke.c ]; then
+    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+        -fno-stack-protector -fno-builtin \
+        -I $USR -I $SRC/include \
+        -c $USR/tccsmoke.c -o $BUILD/tccsmoke.o
+    ld -m elf_i386 -T $USR/user.ld -o $BUILD/tccsmoke.elf $BUILD/crt0.o $BUILD/tccsmoke.o
+    verify_user_start $BUILD/tccsmoke.elf tccsmoke.elf
+    python3 _embed_elf.py $BUILD/tccsmoke.elf $SRC/include/embed_tccsmoke.h tccsmoke_elf
+    echo "  Embedded: tccsmoke.elf"
+else
+    rm -f $SRC/include/embed_tccsmoke.h $BUILD/tccsmoke.o $BUILD/tccsmoke.elf
+fi
+
 if [ -f $USR/ai.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \
@@ -1216,6 +1234,7 @@ done
 echo "[3/5] Compiling kernel C files..."
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
+    $KERNEL_EXTRA_CFLAGS \
     -I $SRC/include \
     -c $SRC/kernel.c -o $BUILD/kernel.o
 

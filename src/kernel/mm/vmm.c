@@ -18,6 +18,12 @@
 #define VMM_DEBUG_LOG 0
 #endif
 
+static void vmm_flush_tlb(void) {
+    uint32_t cr3;
+    __asm__ volatile ("mov %%cr3, %0" : "=r"(cr3));
+    __asm__ volatile ("mov %0, %%cr3" : : "r"(cr3) : "memory");
+}
+
 /* 页目录（链接器放置在 0x1CAE0） */
 static uint32_t kernel_pgd[1024] __attribute__((aligned(4096)));
 
@@ -102,7 +108,7 @@ void vmm_init(void) {
 /* ============================================================
  * 映射一个页（核心函数，v10 修复：动态分配缺失的 PDE）
  * ============================================================ */
-void vmm_map_page(uint32_t vaddr, uint32_t paddr, uint32_t flags) {
+int vmm_map_page_checked(uint32_t vaddr, uint32_t paddr, uint32_t flags) {
     vaddr &= ~0xFFF;
     paddr &= ~0xFFF;
 
@@ -110,6 +116,8 @@ void vmm_map_page(uint32_t vaddr, uint32_t paddr, uint32_t flags) {
     uint32_t pte_idx = (vaddr >> 12) & 0x3FF;
 
     uint32_t *pgd_rec = (uint32_t *)(0xFFFFF000 + (pgd_idx << 2));
+
+    uint32_t pt_phys = 0;
 
     /* 如果当前地址空间 PDE 不存在，动态分配页表 */
     if ((*pgd_rec & PTE_PRESENT) == 0) {
@@ -120,21 +128,24 @@ void vmm_map_page(uint32_t vaddr, uint32_t paddr, uint32_t flags) {
 #endif
 
         /* 分配新的页表 */
-        uint32_t pt_phys = (uint32_t)pmm_alloc_page();
+        pt_phys = (uint32_t)pmm_alloc_page();
         if (!pt_phys) {
             serial_write("[VMM] FAILED: cannot alloc page table!\n");
-            return;
+            return 0;
         }
 
-        /* 清空页表 */
-        uint32_t *pt = (uint32_t *)pt_phys;
+        /* 通过递归页目录窗口设置当前地址空间 PDE。 */
+        *pgd_rec = (pt_phys & ~0xFFFu) | (flags & 0x07u) | PTE_PRESENT;
+        vmm_flush_tlb();
+
+        /*
+         * 新用户地址空间不应依赖低端物理页恒等映射来访问页表。
+         * PDE 生效后，通过递归页表窗口清空刚分配的页表页。
+         */
+        uint32_t *pt = (uint32_t *)(0xFFC00000u + (pgd_idx << 12));
         for (int i = 0; i < 1024; i++) {
             pt[i] = 0;
         }
-
-        /* 通过递归映射设置当前地址空间 PDE */
-        *pgd_rec = pt_phys | (flags & 0x07) | 1;  /* inherit U/S from flags */
-        __asm__ volatile ("invlpg (%0)" : : "r"((void *)(0xFFC00000 + (pgd_idx << 12))));
 
 #if VMM_DEBUG_LOG
         serial_write("[VMM] PDE[");
@@ -145,17 +156,23 @@ void vmm_map_page(uint32_t vaddr, uint32_t paddr, uint32_t flags) {
 #endif
     } else {
         /* PDE 已存在，确保权限包含后续映射需要的用户/写权限 */
+        uint32_t new_pde = *pgd_rec;
         if (flags & PTE_USER) {
-            *pgd_rec |= PTE_USER;  /* 设置 U/S 位 */
+            new_pde |= PTE_USER;  /* 设置 U/S 位 */
         }
         if (flags & PTE_RW) {
-            *pgd_rec |= PTE_RW;    /* 设置 R/W 位 */
+            new_pde |= PTE_RW;    /* 设置 R/W 位 */
         }
+        if (new_pde != *pgd_rec) {
+            *pgd_rec = new_pde;
+            vmm_flush_tlb();
+        }
+        pt_phys = *pgd_rec & ~0xFFFu;
     }
 
-    /* 通过递归映射访问页表并设置 PTE */
-    uint32_t *pte = (uint32_t *)(0xFFC00000 + (pgd_idx << 12));
-    pte[pte_idx] = (paddr & ~0xFFF) | (flags & 0xFFF);
+    /* 通过递归页表窗口写当前地址空间 PTE，避免把物理地址误当虚拟地址。 */
+    uint32_t *pte = (uint32_t *)(0xFFC00000u + (pgd_idx << 12));
+    pte[pte_idx] = (paddr & ~0xFFFu) | (flags & 0xFFFu);
 
 #if VMM_DEBUG_LOG
     /* 调试：打印 PTE 值 */
@@ -168,7 +185,12 @@ void vmm_map_page(uint32_t vaddr, uint32_t paddr, uint32_t flags) {
     serial_write("\n");
 #endif
 
-    __asm__ volatile ("invlpg (%0)" : : "r"(vaddr));
+    vmm_flush_tlb();
+    return 1;
+}
+
+void vmm_map_page(uint32_t vaddr, uint32_t paddr, uint32_t flags) {
+    (void)vmm_map_page_checked(vaddr, paddr, flags);
 }
 
 /* ============================================================
@@ -181,32 +203,14 @@ void vmm_map_range(uint32_t vaddr, uint32_t paddr, uint32_t size, uint32_t flags
     uint32_t end = (vaddr + size + 0xFFFu) & ~0xFFFu;
 
     while (va < end) {
-        uint32_t pgd_idx = va >> 22;
-        uint32_t pte_idx = (va >> 12) & 0x3FF;
-
-        uint32_t *pgd_rec = (uint32_t *)(0xFFFFF000 + (pgd_idx << 2));
-
-        if ((*pgd_rec & PTE_PRESENT) == 0) {
-            uint32_t pt_phys = (uint32_t)pmm_alloc_page();
-            if (!pt_phys) {
-                serial_write("[VMM] map_range failed: no page table\n");
-                return;
-            }
-
-            uint32_t *pt = (uint32_t *)pt_phys;
-            for (int i = 0; i < 1024; i++) {
-                pt[i] = 0;
-            }
-
-            *pgd_rec = (pt_phys & ~0xFFFu) | (flags & 0x07u) | PTE_PRESENT;
-            __asm__ volatile ("invlpg (%0)" : : "r"((void *)(0xFFC00000 + (pgd_idx << 12))));
-        } else if (flags & PTE_USER) {
-            *pgd_rec |= PTE_USER;
+        if (!vmm_map_page_checked(va, pa, flags)) {
+            serial_write("[VMM] map_range failed va=");
+            serial_write_hex(va);
+            serial_write(" pa=");
+            serial_write_hex(pa);
+            serial_write("\n");
+            return;
         }
-
-        uint32_t *pte = (uint32_t *)(0xFFC00000 + (pgd_idx << 12));
-        pte[pte_idx] = (pa & ~0xFFFu) | (flags & 0xFFFu);
-        __asm__ volatile ("invlpg (%0)" : : "r"(va));
 
         va += PAGE_SIZE;
         pa += PAGE_SIZE;
@@ -220,13 +224,13 @@ uint32_t vmm_get_mapping(uint32_t vaddr) {
     vaddr &= ~0xFFFu;
     uint32_t pgd_idx = vaddr >> 22;
     uint32_t pte_idx = (vaddr >> 12) & 0x3FF;
-    uint32_t *pgd_rec = (uint32_t *)0xFFFFF000;
-    uint32_t *pte;
 
-    if ((pgd_rec[pgd_idx] & PTE_PRESENT) == 0)
+    uint32_t *pgd = (uint32_t *)0xFFFFF000u;
+    if ((pgd[pgd_idx] & PTE_PRESENT) == 0) {
         return 0;
+    }
 
-    pte = (uint32_t *)(0xFFC00000 + (pgd_idx << 12));
+    uint32_t *pte = (uint32_t *)(0xFFC00000u + (pgd_idx << 12));
     return pte[pte_idx];
 }
 
@@ -234,33 +238,34 @@ void vmm_update_page_flags(uint32_t vaddr, uint32_t flags) {
     vaddr &= ~0xFFFu;
     uint32_t pgd_idx = vaddr >> 22;
     uint32_t pte_idx = (vaddr >> 12) & 0x3FF;
-    uint32_t *pgd_rec = (uint32_t *)0xFFFFF000;
-    uint32_t *pte;
 
-    if ((pgd_rec[pgd_idx] & PTE_PRESENT) == 0)
+    uint32_t *pgd = (uint32_t *)0xFFFFF000u;
+    if ((pgd[pgd_idx] & PTE_PRESENT) == 0) {
         return;
+    }
 
-    pte = (uint32_t *)(0xFFC00000 + (pgd_idx << 12));
-    if ((pte[pte_idx] & PTE_PRESENT) == 0)
+    uint32_t *pte = (uint32_t *)(0xFFC00000u + (pgd_idx << 12));
+    if ((pte[pte_idx] & PTE_PRESENT) == 0) {
         return;
+    }
 
     pte[pte_idx] = (pte[pte_idx] & PAGE_MASK) | (flags & 0xFFFu);
-    __asm__ volatile ("invlpg (%0)" : : "r"(vaddr));
+    vmm_flush_tlb();
 }
 
 void vmm_unmap_page(uint32_t vaddr) {
     vaddr &= ~0xFFFu;
     uint32_t pgd_idx = vaddr >> 22;
     uint32_t pte_idx = (vaddr >> 12) & 0x3FF;
-    uint32_t *pgd_rec = (uint32_t *)0xFFFFF000;
-    uint32_t *pte;
 
-    if ((pgd_rec[pgd_idx] & PTE_PRESENT) == 0)
+    uint32_t *pgd = (uint32_t *)0xFFFFF000u;
+    if ((pgd[pgd_idx] & PTE_PRESENT) == 0) {
         return;
+    }
 
-    pte = (uint32_t *)(0xFFC00000 + (pgd_idx << 12));
+    uint32_t *pte = (uint32_t *)(0xFFC00000u + (pgd_idx << 12));
     pte[pte_idx] = 0;
-    __asm__ volatile ("invlpg (%0)" : : "r"(vaddr));
+    vmm_flush_tlb();
 }
 
 /* ============================================================

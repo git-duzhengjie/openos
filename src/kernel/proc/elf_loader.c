@@ -13,6 +13,7 @@
 #include "process.h"
 #include "usermode.h"
 #include <stddef.h>
+#include <stdint.h>
 #include <string.h>
 
 #ifndef NULL
@@ -22,6 +23,50 @@
 #define ELF_USER_MIN USER_SPACE_START
 #define ELF_USER_MAX USER_SPACE_END
 #define ELF_MAX_PHNUM 64u
+
+static int elf_copy_to_user_mapped(uint32_t dst, const uint8_t *src, uint32_t size) {
+    uint32_t copied = 0;
+    while (copied < size) {
+        uint32_t va = dst + copied;
+        uint32_t pte = vmm_get_mapping(va);
+        if ((pte & PTE_PRESENT) == 0) {
+            uint32_t cr3;
+            __asm__ volatile ("mov %%cr3, %0" : "=r"(cr3));
+            uint32_t pgd_idx = va >> 22;
+            uint32_t *pgd = (uint32_t *)0xFFFFF000u;
+            uint32_t pde = pgd[pgd_idx];
+            serial_write("[ELF] Missing mapped page while copying va=");
+            serial_write_hex(va);
+            serial_write(" cr3=");
+            serial_write_hex(cr3);
+            serial_write(" pde=");
+            serial_write_hex(pde);
+            if (pde & PTE_PRESENT) {
+                uint32_t *pt = (uint32_t *)(0xFFC00000u + (pgd_idx << 12));
+                serial_write(" pt0=");
+                serial_write_hex(pt[0]);
+                serial_write(" pt1=");
+                serial_write_hex(pt[1]);
+                serial_write(" pt2=");
+                serial_write_hex(pt[2]);
+            }
+            serial_write("\n");
+            return 0;
+        }
+
+        uint32_t page_off = va & (PAGE_SIZE - 1u);
+        uint32_t chunk = PAGE_SIZE - page_off;
+        if (chunk > size - copied) {
+            chunk = size - copied;
+        }
+
+        (void)pte;
+        uint8_t *mapped_dst = (uint8_t *)va;
+        memcpy(mapped_dst, src + copied, chunk);
+        copied += chunk;
+    }
+    return 1;
+}
 
 /* ============================================================
  * 验证 ELF 头
@@ -153,14 +198,31 @@ elf_load_result_t elf_load(int fd) {
             return result;
         }
 
-        /* 分配并映射页面 */
+        /* 计算加载阶段/最终阶段权限。加载阶段必须临时可写，便于内核写入段内容。 */
+        uint32_t final_flags = PTE_PRESENT | PTE_USER;
+        if (ph->p_flags & PF_W) {
+            final_flags |= PTE_RW;
+        }
+        uint32_t load_flags = final_flags | PTE_RW;
+
+        /*
+         * 分配并映射页面。
+         *
+         * TCC 生成的 ELF 可能让相邻 PT_LOAD 段共享同一页，例如只读 text 段的
+         * 最后一页与 data 段的第一页重叠。遇到这种情况必须复用已有映射，不能
+         * 重新分配物理页，也不能整页 memset 清零，否则会擦掉前一个段已经读入
+         * 的代码/数据，随后运行生成程序时会跳到 0x00 或无效指令崩溃。
+         */
         for (uint32_t page = 0; page < num_pages; page++) {
-            uint32_t vaddr = start + page * PAGE_SIZE;
+            uint32_t vaddr = (start + page * PAGE_SIZE) & PAGE_MASK;
+            uint32_t existing = vmm_get_mapping(vaddr);
 
-            /* 确保页对齐 */
-            vaddr &= PAGE_MASK;
+            if (existing & PTE_PRESENT) {
+                /* 共享页：只临时提升为可写，保留已有物理页内容。 */
+                vmm_update_page_flags(vaddr, load_flags);
+                continue;
+            }
 
-            /* 分配物理页 */
             uint32_t phys = (uint32_t)pmm_alloc_page();
             if (!phys) {
                 serial_write("[ELF] Cannot allocate page\n");
@@ -168,15 +230,30 @@ elf_load_result_t elf_load(int fd) {
                 return result;
             }
 
-            /* 映射页面 */
-            uint32_t flags = PTE_PRESENT | PTE_USER;
-            if (ph->p_flags & PF_W) {
-                flags |= PTE_RW;
+            if (!vmm_map_page_checked(vaddr, phys, load_flags)) {
+                serial_write("[ELF] Cannot map page va=");
+                serial_write_hex(vaddr);
+                serial_write(" pa=");
+                serial_write_hex(phys);
+                serial_write("\n");
+                pmm_free_page((void *)phys);
+                pmm_free_page((void *)phdrs);
+                return result;
             }
-
-            vmm_map_page(vaddr, phys, flags);
-
-            /* 清零页面 */
+            uint32_t mapped = vmm_get_mapping(vaddr);
+            if ((mapped & PTE_PRESENT) == 0) {
+                serial_write("[ELF] Mapping disappeared va=");
+                serial_write_hex(vaddr);
+                serial_write(" pa=");
+                serial_write_hex(phys);
+                serial_write(" pte=");
+                serial_write_hex(mapped);
+                serial_write("\n");
+                pmm_free_page((void *)phys);
+                pmm_free_page((void *)phdrs);
+                return result;
+            }
+            /* 当前 ELF 加载发生在目标进程地址空间内，直接清零已映射的用户 VA。 */
             memset((void *)vaddr, 0, PAGE_SIZE);
         }
 
@@ -184,16 +261,41 @@ elf_load_result_t elf_load(int fd) {
         vfs_seek(fd, ph->p_offset, SEEK_SET);
 
         if (ph->p_filesz > 0) {
-            ret = vfs_read(fd, (void *)ph->p_vaddr, ph->p_filesz);
-            if ((uint32_t)ret != ph->p_filesz) {
-                serial_write("[ELF] Segment read incomplete: got ");
-                serial_write_hex(ret);
-                serial_write(" expected ");
-                serial_write_hex(ph->p_filesz);
-                serial_write("\n");
-                pmm_free_page((void *)phdrs);
-                return result;
+            uint32_t remaining = ph->p_filesz;
+            uint32_t dst = ph->p_vaddr;
+            uint8_t segment_buf[512];
+
+            while (remaining > 0) {
+                uint32_t chunk = remaining;
+                if (chunk > sizeof(segment_buf)) {
+                    chunk = sizeof(segment_buf);
+                }
+
+                ret = vfs_read(fd, segment_buf, chunk);
+                if ((uint32_t)ret != chunk) {
+                    serial_write("[ELF] Segment read incomplete: got ");
+                    serial_write_hex(ret);
+                    serial_write(" expected ");
+                    serial_write_hex(chunk);
+                    serial_write("\n");
+                    pmm_free_page((void *)phdrs);
+                    return result;
+                }
+
+                if (!elf_copy_to_user_mapped(dst, segment_buf, chunk)) {
+                    pmm_free_page((void *)phdrs);
+                    return result;
+                }
+
+                dst += chunk;
+                remaining -= chunk;
             }
+        }
+
+        /* 段内容写入完成后恢复 ELF 声明的最终页面权限。 */
+        for (uint32_t page = 0; page < num_pages; page++) {
+            uint32_t vaddr = (start + page * PAGE_SIZE) & PAGE_MASK;
+            vmm_update_page_flags(vaddr, final_flags);
         }
 
         if (ehdr.e_entry >= ph->p_vaddr && ehdr.e_entry < end)

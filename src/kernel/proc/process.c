@@ -180,23 +180,48 @@ static uint32_t setup_user_args_stack(uint32_t stack_top, const user_spawn_args_
 static void proc_free_cloned_address_space(uint32_t *pgd) {
     if (!pgd) return;
 
-    for (uint32_t pdi = 0; pdi < 1023; pdi++) {
-        if ((pgd[pdi] & PTE_PRESENT) == 0) continue;
-        if ((pgd[pdi] & PTE_USER) == 0) continue;
+    uint32_t target_cr3 = ((uint32_t)pgd) & PAGE_MASK;
+    uint32_t old_cr3;
+    __asm__ volatile ("mov %%cr3, %0" : "=r"(old_cr3));
+    old_cr3 &= PAGE_MASK;
 
-        uint32_t *pt = (uint32_t *)(pgd[pdi] & PAGE_MASK);
+    /*
+     * pgd/pt entries store physical addresses.  Once PMM starts handing out
+     * pages above the small low-memory identity map, treating those physical
+     * addresses as C pointers corrupts unrelated virtual memory.  Free through
+     * the recursive page-table window after temporarily activating the target
+     * address space, where 0xFFFFF000 exposes its page directory and
+     * 0xFFC00000 + pdi*PAGE_SIZE exposes each page table.
+     */
+    if (old_cr3 != target_cr3) {
+        vmm_load_cr3(target_cr3);
+    }
+
+    uint32_t *active_pgd = (uint32_t *)0xFFFFF000u;
+    for (uint32_t pdi = 0; pdi < 1023; pdi++) {
+        uint32_t pde = active_pgd[pdi];
+        if ((pde & PTE_PRESENT) == 0) continue;
+        if ((pde & PTE_USER) == 0) continue;
+
+        uint32_t *pt = (uint32_t *)(0xFFC00000u + (pdi * PAGE_SIZE));
         for (uint32_t pti = 0; pti < 1024; pti++) {
-            if ((pt[pti] & PTE_PRESENT) == 0) continue;
-            if ((pt[pti] & PTE_USER) == 0) continue;
-            pmm_free_page((void *)(pt[pti] & PAGE_MASK));
+            uint32_t pte = pt[pti];
+            if ((pte & PTE_PRESENT) == 0) continue;
+            if ((pte & PTE_USER) == 0) continue;
+            pmm_free_page((void *)(pte & PAGE_MASK));
             pt[pti] = 0;
         }
 
-        pmm_free_page(pt);
-        pgd[pdi] = 0;
+        active_pgd[pdi] = 0;
+        pmm_free_page((void *)(pde & PAGE_MASK));
     }
 
-    pmm_free_page(pgd);
+    if (old_cr3 != target_cr3) {
+        vmm_load_cr3(old_cr3);
+        pmm_free_page((void *)target_cr3);
+    } else {
+        serial_write("[PROC] Refusing to free active address space\n");
+    }
 }
 
 void proc_table_init(void) {
@@ -808,6 +833,14 @@ int sys_exec_env(const char *path, char *const argv[], char *const envp[]) {
         return -1;
     }
 
+    /*
+     * Loading an ELF can be interrupted while this thread remains runnable.
+     * Keep process bookkeeping synchronized with the active CR3; otherwise the
+     * scheduler may restore the old proc->cr3 mid-load and the loader will
+     * fault when writing user pages it just mapped in new_cr3.
+     */
+    proc->cr3 = new_cr3;
+    proc->owns_address_space = 1;
     vmm_load_cr3(new_cr3);
 
     elf_load_result_t load_result = elf_load(fd);
@@ -815,6 +848,8 @@ int sys_exec_env(const char *path, char *const argv[], char *const envp[]) {
 
     if (load_result.entry == 0 || load_result.num_segments <= 0 || load_result.brk_start == 0) {
         serial_write("[EXEC] ELF load failed\n");
+        proc->cr3 = old_cr3;
+        proc->owns_address_space = old_owned;
         vmm_load_cr3(old_cr3);
         proc_free_cloned_address_space((uint32_t *)new_cr3);
         return -1;
@@ -823,6 +858,8 @@ int sys_exec_env(const char *path, char *const argv[], char *const envp[]) {
     uint32_t stack_top = alloc_user_stack_randomized(aslr_pick_main_stack_slot(proc->pid));
     if (!stack_top) {
         serial_write("[EXEC] user stack allocation failed\n");
+        proc->cr3 = old_cr3;
+        proc->owns_address_space = old_owned;
         vmm_load_cr3(old_cr3);
         proc_free_cloned_address_space((uint32_t *)new_cr3);
         return -1;
@@ -831,6 +868,8 @@ int sys_exec_env(const char *path, char *const argv[], char *const envp[]) {
     uint32_t user_sp = setup_user_args_stack(stack_top, &exec_args);
     if (!user_sp) {
         serial_write("[EXEC] argv stack setup failed\n");
+        proc->cr3 = old_cr3;
+        proc->owns_address_space = old_owned;
         vmm_load_cr3(old_cr3);
         proc_free_cloned_address_space((uint32_t *)new_cr3);
         return -1;
@@ -839,8 +878,6 @@ int sys_exec_env(const char *path, char *const argv[], char *const envp[]) {
     /* Commit: from here the new image is current. Keep the existing process,
      * pid, parent relationship, cwd/fd table, and kernel stack; replace only
      * the user address space and executable metadata. */
-    proc->cr3 = new_cr3;
-    proc->owns_address_space = 1;
 
     uint32_t randomized_brk = aslr_apply_heap_gap(load_result.brk_start, proc->pid);
     proc->code_addr = load_result.brk_start;  /* actually brk start */

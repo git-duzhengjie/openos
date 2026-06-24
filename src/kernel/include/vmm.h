@@ -33,6 +33,7 @@
  * ============================================================ */
 void vmm_init(void);                              /* 初始化虚拟内存 */
 void vmm_map_page(uint32_t vaddr, uint32_t paddr, uint32_t flags);  /* 映射单个页 */
+int  vmm_map_page_checked(uint32_t vaddr, uint32_t paddr, uint32_t flags); /* 映射单个页，失败返回 0 */
 void vmm_map_range(uint32_t vaddr, uint32_t paddr, uint32_t size, uint32_t flags);  /* 静默映射连续物理区域 */
 uint32_t vmm_get_mapping(uint32_t vaddr);        /* 查询当前地址空间 PTE */
 void vmm_update_page_flags(uint32_t vaddr, uint32_t flags);
