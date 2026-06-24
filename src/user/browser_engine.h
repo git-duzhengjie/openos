@@ -214,6 +214,15 @@ typedef struct ob_http_headers {
     char location[OB_MAX_HEADER_VALUE];
 } ob_http_headers_t;
 
+/*
+ * Keep large HTML parser scratch buffers out of the user stack.
+ * OpenOS user processes start with a small demand-mapped stack; two 4 KiB
+ * automatic arrays in ob_html_parse_impl can cross an unmapped stack page
+ * before normal browser startup finishes.
+ */
+static char ob_html_parser_embedded_css[OB_HTML_LIMIT_BYTES];
+static char ob_html_parser_embedded_js[OB_HTML_LIMIT_BYTES];
+
 static int ob_ascii_equal_ci(char a, char b)
 {
     if (a >= 'A' && a <= 'Z') a = (char)(a - 'A' + 'a');
@@ -912,8 +921,6 @@ static int ob_html_parse_impl(ob_html_parser_i_t *iface, const char *html, ob_do
     ob_default_style_resolver_t styles;
     ob_html_token_t tok;
     ob_css_stylesheet_t stylesheet;
-    char embedded_css[OB_HTML_LIMIT_BYTES];
-    char embedded_js[OB_HTML_LIMIT_BYTES];
     int stack[OB_MAX_DOM_NODES];
     int depth = 0;
     int skip_depth = 0;
@@ -925,9 +932,9 @@ static int ob_html_parse_impl(ob_html_parser_i_t *iface, const char *html, ob_do
     if (doc->root < 0) return -1;
     stack[depth++] = doc->root;
     ob_default_style_resolver_init(&styles);
-    ob_html_collect_embedded_code(html ? html : "", "style", embedded_css, sizeof(embedded_css));
-    ob_html_collect_embedded_code(html ? html : "", "script", embedded_js, sizeof(embedded_js));
-    ob_css_parse_stylesheet(&stylesheet, embedded_css);
+    ob_html_collect_embedded_code(html ? html : "", "style", ob_html_parser_embedded_css, sizeof(ob_html_parser_embedded_css));
+    ob_html_collect_embedded_code(html ? html : "", "script", ob_html_parser_embedded_js, sizeof(ob_html_parser_embedded_js));
+    ob_css_parse_stylesheet(&stylesheet, ob_html_parser_embedded_css);
     ob_html_tokenizer_base_init(&tokenizer, html);
     while (tokenizer.iface.next(&tokenizer.iface, &tok) == 0 && tok.type != OB_HTML_TOKEN_EOF) {
         if (skip_depth > 0) {
@@ -980,7 +987,7 @@ static int ob_html_parse_impl(ob_html_parser_i_t *iface, const char *html, ob_do
         }
     }
     ob_css_apply_stylesheet(doc, &stylesheet);
-    ob_js_execute_inline(doc, embedded_js);
+    ob_js_execute_inline(doc, ob_html_parser_embedded_js);
     return doc->count;
 }
 
