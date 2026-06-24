@@ -5754,6 +5754,13 @@ static int gui_taskbar_text_y(gui_rect_t rect, int text_h) {
     return rect.y + (rect.h - text_h) / 2;
 }
 
+static int gui_taskbar_should_list_window(gui_window_t *w) {
+    if (!w || !w->used || !w->visible) return 0;
+    if (w->flags & GUI_WINDOW_FLAG_TERMINAL) return 0;
+    if (strcmp(w->title, "桌面便签") == 0) return 0;
+    return 1;
+}
+
 static int gui_taskbar_content_width(void) {
     uint32_t i;
     int width = GUI_TASKBAR_START_W + 6 + GUI_TASKBAR_START_W + 6 + GUI_TASKBAR_START_W;
@@ -5762,8 +5769,7 @@ static int gui_taskbar_content_width(void) {
         gui_window_t *w;
         if (idx >= GUI_MAX_WINDOWS) continue;
         w = &g_gui.windows[idx];
-        if (!w->used || !w->visible) continue;
-        if (w->flags & GUI_WINDOW_FLAG_TERMINAL) continue;
+        if (!gui_taskbar_should_list_window(w)) continue;
         width += 6 + gui_taskbar_button_width(w);
     }
     return width;
@@ -5846,8 +5852,7 @@ static gui_window_t *gui_taskbar_window_at(int x, int y) {
         gui_rect_t button;
         if (idx >= GUI_MAX_WINDOWS) continue;
         w = &g_gui.windows[idx];
-        if (!w->used || !w->visible) continue;
-        if (w->flags & GUI_WINDOW_FLAG_TERMINAL) continue;
+        if (!gui_taskbar_should_list_window(w)) continue;
         button.x = bx;
         button.y = layout.item_y;
         button.w = gui_taskbar_button_width(w);
@@ -5898,8 +5903,7 @@ static void gui_taskbar_invalidate_hover_changes(int old_x, int old_y, int new_x
         gui_rect_t button;
         if (idx >= GUI_MAX_WINDOWS) continue;
         w = &g_gui.windows[idx];
-        if (!w->used || !w->visible) continue;
-        if (w->flags & GUI_WINDOW_FLAG_TERMINAL) continue;
+        if (!gui_taskbar_should_list_window(w)) continue;
         button.x = bx;
         button.y = layout.item_y;
         button.w = gui_taskbar_button_width(w);
@@ -10960,8 +10964,7 @@ static void gui_draw_taskbar(void) {
         gui_rect_t button;
         if (idx >= GUI_MAX_WINDOWS) continue;
         w = &g_gui.windows[idx];
-        if (!w->used || !w->visible) continue;
-        if (w->flags & GUI_WINDOW_FLAG_TERMINAL) continue;
+        if (!gui_taskbar_should_list_window(w)) continue;
         button.x = bx;
         button.y = layout.item_y;
         button.w = gui_taskbar_button_width(w);
