@@ -8499,7 +8499,7 @@ static int gui_menu_height(const gui_menu_t *menu) {
 
 static void gui_menu_reset(gui_menu_t *menu) {
     if (!menu) return;
-    menu->item_count = 0;
+    memset(menu, 0, sizeof(*menu));
     menu->w = GUI_CTXMENU_W;
     menu->item_h = gui_text_line_height_px() + 10;
     if (menu->item_h < GUI_CTXMENU_ITEM_H) menu->item_h = GUI_CTXMENU_ITEM_H;
@@ -8715,19 +8715,30 @@ static void gui_ctxmenu_wallpaper_action(int id, void *user) {
 
 static void gui_ctxmenu_open_wallpaper_submenu(int x, int y) {
     gui_ctxmenu_reset();
-    gui_ctxmenu_add_ex("Default", "", 0, 1, 0);
-    gui_ctxmenu_add_ex("Day",     "", 1, 1, 0);
-    gui_ctxmenu_add_ex("Solid",   "", 2, 1, 0);
+    gui_ctxmenu_add_ex(i18n_t(I18N_KEY_WALLPAPER_DEFAULT), "", 0, 1, 0);
+    gui_ctxmenu_add_ex(i18n_t(I18N_KEY_WALLPAPER_DAY),     "", 1, 1, 0);
+    gui_ctxmenu_add_ex(i18n_t(I18N_KEY_WALLPAPER_SOLID),   "", 2, 1, 0);
     gui_ctxmenu_open_at(x, y, gui_ctxmenu_wallpaper_action, 0);
 }
 
 /* Handlers for desktop right-click menu */
+typedef struct gui_desktop_menu_state {
+    int wallpaper_x;
+    int wallpaper_y;
+} gui_desktop_menu_state_t;
+
+static gui_desktop_menu_state_t g_desktop_menu_state;
+
 static void gui_ctxmenu_desktop_action(int id, void *user) {
-    (void)user;
+    gui_desktop_menu_state_t *state = (gui_desktop_menu_state_t *)user;
     switch (id) {
         case 1: gui_file_preview_open(); break;        /* Open Files */
         case 2: gui_desktop_run_action(GUI_DESKTOP_ACTION_TERMINAL); break;
-        case 3: gui_ctxmenu_open_wallpaper_submenu(g_ctxmenu.x + g_ctxmenu.w - 8, g_ctxmenu.y + 58); break;
+        case 3:
+            if (state) {
+                gui_ctxmenu_open_wallpaper_submenu(state->wallpaper_x, state->wallpaper_y);
+            }
+            break;
         case 4: gui_notify(i18n_t(I18N_KEY_NOTIFY_DESKTOP_REFRESHED)); gui_invalidate_all(); break;
         case 5: gui_about_open(); break;
         case 6: gui_desktop_run_action(GUI_DESKTOP_ACTION_SETTINGS); break;
@@ -8780,7 +8791,11 @@ static void gui_handle_mouse_right_down(int x, int y) {
     gui_ctxmenu_add_separator();
     gui_ctxmenu_add_ex(i18n_t(I18N_KEY_CTXMENU_ABOUT),            "",      5, 1, 0);
     gui_ctxmenu_add_ex(i18n_t(I18N_KEY_CTXMENU_SETTINGS),         "",      6, 1, 0);
-    gui_ctxmenu_open_at(x, y, gui_ctxmenu_desktop_action, 0);
+    g_desktop_menu_state.wallpaper_x = x + GUI_CTXMENU_W - 8;
+    g_desktop_menu_state.wallpaper_y = y + GUI_CTXMENU_PADDING +
+                                       (GUI_CTXMENU_ITEM_H * 2) +
+                                       (GUI_CTXMENU_ITEM_H / 2);
+    gui_ctxmenu_open_at(x, y, gui_ctxmenu_desktop_action, &g_desktop_menu_state);
 }
 
 int gui_start_desktop(void) {
