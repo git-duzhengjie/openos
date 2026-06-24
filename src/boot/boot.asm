@@ -8,7 +8,7 @@
 
 KERNEL_LOAD_ADDR equ 0x00100000
 KERNEL_LBA       equ 1
-KERNEL_SECTORS   equ 2816
+KERNEL_SECTORS   equ 4096
 
 ; ----------------------------------------------------------
 ; 第一阶段：实模式启动

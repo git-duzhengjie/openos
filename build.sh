@@ -945,6 +945,17 @@ if [ -f $USR/echo.c ]; then
     echo "  Embedded: echo.elf"
 fi
 
+if [ -f $USR/tcc.c ]; then
+    gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
+        -fno-stack-protector -fno-builtin \
+        -I $USR/tcc_shim -I $USR -I $SRC/include \
+        -c $USR/tcc.c -o $BUILD/tcc.o
+    ld -m elf_i386 -T $USR/user.ld -o $BUILD/tcc.elf $BUILD/crt0.o $BUILD/tcc.o
+    verify_user_start $BUILD/tcc.elf tcc.elf
+    python3 _embed_elf.py $BUILD/tcc.elf $SRC/include/embed_tcc.h tcc_elf
+    echo "  Embedded: tcc.elf"
+fi
+
 if [ -f $USR/ai.c ]; then
     gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
         -fno-stack-protector -fno-builtin \
@@ -1621,7 +1632,7 @@ objcopy -O binary $BUILD/kernel.elf $BUILD/kernel.bin
 
 KERNEL_BYTES=$(stat -c%s "$BUILD/kernel.bin")
 KERNEL_SECTORS=$(( (KERNEL_BYTES + 511) / 512 ))
-BOOT_LOAD_SECTORS=2816
+BOOT_LOAD_SECTORS=4096
 if [ "$KERNEL_SECTORS" -gt "$BOOT_LOAD_SECTORS" ]; then
     echo "ERROR: kernel.bin is ${KERNEL_SECTORS} sectors, but bootloader loads only ${BOOT_LOAD_SECTORS} sectors."
     echo "Increase bootloader high-memory load chunks or move to a larger disk image before building the image."
@@ -1630,7 +1641,7 @@ fi
 echo "  kernel.bin: ${KERNEL_BYTES} bytes (${KERNEL_SECTORS}/${BOOT_LOAD_SECTORS} sectors loaded by bootloader)"
 
 echo "[5/5] Generating disk image..."
-dd if=/dev/zero of=$BUILD/openos.img bs=512 count=2880 2>/dev/null
+dd if=/dev/zero of=$BUILD/openos.img bs=512 count=8192 2>/dev/null
 dd if=$BUILD/boot.bin of=$BUILD/openos.img bs=512 count=1 conv=notrunc 2>/dev/null
 dd if=$BUILD/kernel.bin of=$BUILD/openos.img bs=512 seek=1 conv=notrunc 2>/dev/null
 

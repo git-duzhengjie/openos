@@ -64,6 +64,6 @@ SECTIONS
     /* 结束地址 (调试用) */
     __kernel_end = .;
 
-    ASSERT(__kernel_image_end <= 0x260000, "kernel image exceeds bootloader high-memory load window")
+    ASSERT(__kernel_image_end <= 0x300000, "kernel image exceeds bootloader high-memory load window")
     ASSERT(kernel_stack_bottom >= 0x100000, "kernel stack below high-memory area")
 }

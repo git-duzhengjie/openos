@@ -222,6 +222,12 @@
 #else
 #define OPENOS_HAS_ECHO 0
 #endif
+#if __has_include("embed_tcc.h")
+#include "embed_tcc.h"  /* TinyCC C compiler command */
+#define OPENOS_HAS_TCC 1
+#else
+#define OPENOS_HAS_TCC 0
+#endif
 #if __has_include("embed_ai.h")
 #include "embed_ai.h"  /* ai user command */
 #define OPENOS_HAS_AI_CMD 1
@@ -1185,6 +1191,17 @@ void kernel_main(void) {
         serial_write("[OK] Installed /bin/echo user ELF\n");
     } else {
         serial_write("[WARN] Failed to install /bin/echo\n");
+    }
+#endif
+
+#if OPENOS_HAS_TCC
+    fd = vfs_open("/bin/tcc", O_CREAT | O_RDWR, 0755);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)tcc_elf, tcc_elf_size);
+        vfs_close(fd);
+        serial_write("[OK] Installed /bin/tcc user ELF\n");
+    } else {
+        serial_write("[WARN] Failed to install /bin/tcc\n");
     }
 #endif
 
