@@ -265,20 +265,20 @@
 
 ### A10：不建议当前立即执行的事项
 
-- [ ] A10.1：暂不直接适配真实手机真机
-  - [ ] 先完成 aarch64 QEMU virt
-  - [ ] 再考虑 ARM64 开发板
-  - [ ] 最后再考虑半开放移动设备或真实手机
-- [ ] A10.2：暂不继续把 i386 作为长期产品主线
-  - [ ] i386 保留为 legacy / regression
-  - [ ] x86_64 作为 PC 产品主线
-  - [ ] aarch64 作为 Mobile 产品主线
-- [ ] A10.3：暂不把 Mobile Shell 塞入当前内核 GUI
-  - [ ] Mobile Shell 应为用户态 Shell
-  - [ ] 当前 kernel GUI 保持兼容，不作为移动端基础架构
-- [ ] A10.4：暂不把 AI Agent 写进内核
-  - [ ] AI Agent 应作为系统服务
-  - [ ] 内核只做隔离、授权、审计和资源控制
+- [x] A10.1：暂不直接适配真实手机真机
+  - [x] 先完成 aarch64 QEMU virt
+  - [x] 再考虑 ARM64 开发板
+  - [x] 最后再考虑半开放移动设备或真实手机
+- [x] A10.2：暂不继续把 i386 作为长期产品主线
+  - [x] i386 保留为 legacy / regression
+  - [x] x86_64 作为 PC 产品主线
+  - [x] aarch64 作为 Mobile 产品主线
+- [x] A10.3：暂不把 Mobile Shell 塞入当前内核 GUI
+  - [x] Mobile Shell 应为用户态 Shell
+  - [x] 当前 kernel GUI 保持兼容，不作为移动端基础架构
+- [x] A10.4：暂不把 AI Agent 写进内核
+  - [x] AI Agent 应作为系统服务
+  - [x] 内核只做隔离、授权、审计和资源控制
 
 ### A11：阶段验收里程碑
 
