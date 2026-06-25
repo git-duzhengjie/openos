@@ -9,7 +9,7 @@
 #include "../include/serial.h"
 #include "../include/gui.h"
 #include "../include/devmgr.h"
-#include "../fs/vfs.h"
+#include "../core/fs/vfs.h"
 
 static chardev_t chardev_table[CHARDEV_MAX];
 static uint32_t chardev_table_count = 0;

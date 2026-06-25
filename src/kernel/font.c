@@ -5,7 +5,7 @@
 #include "font.h"
 #include "heap.h"
 #include "string.h"
-#include "fs/vfs.h"
+#include "core/fs/vfs.h"
 
 #define FONT_ROW8(r0, r1, r2, r3, r4, r5, r6, r7) \
     do { \

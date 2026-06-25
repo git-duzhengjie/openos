@@ -1,6 +1,6 @@
 #include "net_config.h"
 #include "dhcp.h"
-#include "../fs/vfs.h"
+#include "../core/fs/vfs.h"
 #include "string.h"
 
 #define NET_CONFIG_PATH "/etc/network.conf"

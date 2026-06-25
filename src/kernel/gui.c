@@ -15,7 +15,7 @@
 #include "string.h"
 #include "heap.h"
 #include "input_buffer.h"
-#include "fs/vfs.h"
+#include "core/fs/vfs.h"
 #include "i18n.h"
 #include "net/net.h"
 #include "net/dhcp.h"

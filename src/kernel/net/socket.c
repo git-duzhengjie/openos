@@ -8,7 +8,7 @@
 
 #include "socket.h"
 #include "net.h"
-#include "../fs/vfs.h"
+#include "../core/fs/vfs.h"
 #include "../include/fd.h"
 #include "../include/heap.h"
 #include "../include/pmm.h"

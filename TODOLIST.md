@@ -258,10 +258,10 @@
   - [x] `src/kernel/platform/`
   - [x] `src/kernel/drivers/bus/`
   - [x] `src/kernel/drivers/virtio/`
-- [ ] A9.3：逐步迁移架构无关逻辑
-  - [ ] 通用调度、进程、内存、VFS、IPC 迁移到 `src/kernel/core/`
-  - [ ] 架构相关逻辑保留在 `src/arch/i386`、`src/arch/x86_64`、`src/arch/aarch64`
-  - [ ] 平台相关逻辑保留在 `src/kernel/platform/*`
+- [x] A9.3：逐步迁移架构无关逻辑
+  - [x] 通用调度、进程、内存、VFS、IPC 迁移到 `src/kernel/core/`
+  - [x] 架构相关逻辑保留在 `src/arch/i386`、`src/arch/x86_64`、`src/arch/aarch64`
+  - [x] 平台相关逻辑保留在 `src/kernel/platform/*`
 
 ### A10：不建议当前立即执行的事项
 

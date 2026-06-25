@@ -42,13 +42,13 @@ require_grep 'USERMEM_PTR_MAX[[:space:]]+USER_SPACE_END' src/kernel/include/user
 require_grep 'PTE_USER' src/kernel/usermem.c \
     'user memory copy verifies page user bit'
 
-require_grep 'aslr_pick_main_stack_slot' src/kernel/proc/process.c \
+require_grep 'aslr_pick_main_stack_slot' src/kernel/core/proc/process.c \
     'exec main stack uses ASLR slot'
-require_grep 'aslr_pick_next_thread_stack_slot' src/kernel/proc/process.c \
+require_grep 'aslr_pick_next_thread_stack_slot' src/kernel/core/proc/process.c \
     'thread stack slot base is randomized'
-require_grep 'aslr_apply_heap_gap' src/kernel/proc/process.c \
+require_grep 'aslr_apply_heap_gap' src/kernel/core/proc/process.c \
     'heap/brk base has ASLR gap'
-require_grep 'aslr_pick_mmap_base' src/kernel/ipc/syscall.c \
+require_grep 'aslr_pick_mmap_base' src/kernel/core/ipc/syscall.c \
     'mmap base is randomized'
 
 require_grep 'PHDRS' src/user/user.ld \
@@ -57,14 +57,14 @@ require_grep 'FLAGS\(5\)' src/user/user.ld \
     'user text segment is read/execute'
 require_grep 'FLAGS\(6\)' src/user/user.ld \
     'user data segment is read/write'
-require_grep 'Rejecting RWX load segment' src/kernel/proc/elf_loader.c \
+require_grep 'Rejecting RWX load segment' src/kernel/core/proc/elf_loader.c \
     'ELF loader rejects writable executable LOAD segments'
 require_grep 'W\^X violation' build.sh \
     'build fails on RWX user ELF segments'
 
-require_grep 'sandboxed' src/kernel/proc/process.c \
+require_grep 'sandboxed' src/kernel/core/proc/process.c \
     'process model tracks sandbox state'
-require_grep 'OPENOS_CAP_ALL' src/kernel/proc/process.c \
+require_grep 'OPENOS_CAP_ALL' src/kernel/core/proc/process.c \
     'capability model avoids unconditional all-cap restore'
 require_grep 'kaddrtest' build.sh \
     'kernel address protection regression is built in test mode'

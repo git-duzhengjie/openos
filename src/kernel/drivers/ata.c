@@ -3,7 +3,7 @@
  * ============================================================ */
 #include "../include/ata.h"
 #include "../include/blockdev.h"
-#include "../fs/vfs.h"
+#include "../core/fs/vfs.h"
 #include "../include/io.h"
 #include "../include/serial.h"
 #include "../include/string.h"

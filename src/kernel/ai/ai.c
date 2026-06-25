@@ -1,7 +1,7 @@
 #include "ai.h"
 #include "serial.h"
 #include "string.h"
-#include "../fs/vfs.h"
+#include "../core/fs/vfs.h"
 
 #define AI_LOCAL_TOKEN_MAX 32
 #define AI_LOCAL_TOKEN_TEXT_MAX 24

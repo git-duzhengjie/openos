@@ -8,7 +8,7 @@
 #include "../include/pci.h"
 #include "../include/serial.h"
 #include "../include/string.h"
-#include "../fs/vfs.h"
+#include "../core/fs/vfs.h"
 
 #define VIRTIO_BLK_SECTOR_SIZE 512u
 #define VIRTIO_BLK_MAX_DEVICES 8u

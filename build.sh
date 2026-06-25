@@ -1445,22 +1445,22 @@ gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
     -I $SRC/include \
-    -c $SRC/mm/pmm.c -o $BUILD/pmm.o
+    -c $SRC/core/mm/pmm.c -o $BUILD/pmm.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
     -I $SRC/include \
-    -c $SRC/mm/vmm.c -o $BUILD/vmm.o
+    -c $SRC/core/mm/vmm.c -o $BUILD/vmm.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
     -I $SRC/include \
-    -c $SRC/mm/heap.c -o $BUILD/heap.o
+    -c $SRC/core/mm/heap.c -o $BUILD/heap.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
     -I $SRC/include \
-    -c $SRC/sched/scheduler.c -o $BUILD/scheduler.o
+    -c $SRC/core/sched/scheduler.c -o $BUILD/scheduler.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
@@ -1470,7 +1470,7 @@ gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
     -I $SRC/include \
-    -c $SRC/ipc/syscall.c -o $BUILD/syscall.o
+    -c $SRC/core/ipc/syscall.c -o $BUILD/syscall.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
@@ -1699,43 +1699,43 @@ gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
-    -I $SRC/include -I $SRC/fs -I $SRC/proc \
-    -c $SRC/proc/process.c -o $BUILD/process.o
+    -I $SRC/include -I $SRC/core/fs -I $SRC/core/proc \
+    -c $SRC/core/proc/process.c -o $BUILD/process.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
-    -I $SRC/include -I $SRC/proc -I $SRC/fs \
-    -c $SRC/proc/elf_loader.c -o $BUILD/elf_loader.o
+    -I $SRC/include -I $SRC/core/proc -I $SRC/core/fs \
+    -c $SRC/core/proc/elf_loader.c -o $BUILD/elf_loader.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
-    -I $SRC/include -I $SRC/fs \
-    -c $SRC/fs/vfs.c -o $BUILD/vfs.o
+    -I $SRC/include -I $SRC/core/fs \
+    -c $SRC/core/fs/vfs.c -o $BUILD/vfs.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
     -I $SRC/include \
-    -c $SRC/fs/ramfs.c -o $BUILD/ramfs.o
+    -c $SRC/core/fs/ramfs.c -o $BUILD/ramfs.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
-    -I $SRC/include -I $SRC/fs \
-    -c $SRC/fs/tmpfs.c -o $BUILD/tmpfs.o
+    -I $SRC/include -I $SRC/core/fs \
+    -c $SRC/core/fs/tmpfs.c -o $BUILD/tmpfs.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
-    -I $SRC/include -I $SRC/fs \
-    -c $SRC/fs/ext4.c -o $BUILD/ext4.o
+    -I $SRC/include -I $SRC/core/fs \
+    -c $SRC/core/fs/ext4.c -o $BUILD/ext4.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
-    -I $SRC/include -I $SRC/fs \
-    -c $SRC/fs/pfs.c -o $BUILD/pfs.o
+    -I $SRC/include -I $SRC/core/fs \
+    -c $SRC/core/fs/pfs.c -o $BUILD/pfs.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
-    -I $SRC/include -I $SRC/fs \
-    -c $SRC/fs/fat32.c -o $BUILD/fat32.o
+    -I $SRC/include -I $SRC/core/fs \
+    -c $SRC/core/fs/fat32.c -o $BUILD/fat32.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \

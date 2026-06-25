@@ -7,7 +7,7 @@
 #include "../include/serial.h"
 #include "../include/pmm.h"
 #include "../include/devmgr.h"
-#include "../fs/vfs.h"
+#include "../core/fs/vfs.h"
 
 static blockdev_t blockdev_table[BLOCKDEV_MAX];
 static uint32_t blockdev_table_count = 0;

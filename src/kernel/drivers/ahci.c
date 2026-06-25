@@ -6,7 +6,7 @@
 #include "../include/pci.h"
 #include "../include/serial.h"
 #include "../include/string.h"
-#include "../fs/vfs.h"
+#include "../core/fs/vfs.h"
 
 #define AHCI_SECTOR_SIZE 512u
 #define AHCI_MAX_CONTROLLERS 4u
