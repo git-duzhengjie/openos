@@ -12,6 +12,7 @@
 #define OPENOS_X86_64_GDT_TSS         0x30
 
 void arch_x86_64_gdt_init(void);
+void arch_x86_64_gdt_print_status(void);
 uint16_t arch_x86_64_gdt_kernel_code_selector(void);
 uint16_t arch_x86_64_gdt_kernel_data_selector(void);
 uint16_t arch_x86_64_gdt_user_code_selector(void);

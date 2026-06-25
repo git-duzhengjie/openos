@@ -1,5 +1,6 @@
 #include "../include/gdt64.h"
 #include "../include/tss64.h"
+#include "../include/early_console64.h"
 
 static struct x86_64_tss tss64 __attribute__((aligned(16)));
 static uint8_t tss64_rsp0_stack[OPENOS_X86_64_TSS_RSP0_STACK_SIZE] __attribute__((aligned(16)));
@@ -52,4 +53,16 @@ x86_64_stack_ptr_t arch_x86_64_tss_ist(uint8_t ist_index) {
         return 0;
     }
     return tss64.ist[ist_index - 1u];
+}
+
+void arch_x86_64_tss_print_status(void) {
+    early_console64_write("[x86_64][tss] rsp0=");
+    early_console64_write_hex64(tss64.rsp[0]);
+    early_console64_write(" ist1=");
+    early_console64_write_hex64(tss64.ist[0]);
+    early_console64_write(" ist2=");
+    early_console64_write_hex64(tss64.ist[1]);
+    early_console64_write(" iomap=");
+    early_console64_write_hex64(tss64.iomap_base);
+    early_console64_write("\n");
 }

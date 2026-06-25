@@ -36,6 +36,7 @@ struct x86_64_exception_frame {
 } __attribute__((packed));
 
 void arch_x86_64_idt_init(void);
+void arch_x86_64_idt_print_status(void);
 void arch_x86_64_exception_dispatch(const struct x86_64_exception_frame *frame);
 
 #endif /* OPENOS_ARCH_X86_64_IDT64_H */

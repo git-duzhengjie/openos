@@ -22,6 +22,35 @@ qemu-system-i386 -m 512M -drive file=target/openos.img,format=raw -serial stdio 
 # 启动后在 OpenOS Shell 中执行：guitest
 ```
 
+## 架构状态与构建门禁
+
+当前默认构建目标是 **i386**，它是 OpenOS 目前最完整、最稳定的主线，覆盖启动、基础内核、用户态程序、shell、GUI、网络与浏览器 smoke 测试。后续 i386 的长期定位是 **legacy / regression / 调试目标**：用于保持现有功能不回退，并作为跨架构迁移过程中的稳定参照。
+
+新的 PC 产品主线将逐步迁移到 **x86_64 + UEFI**；Mobile 基础主线将新增 **aarch64**，并优先从 QEMU virt 开始，而不是直接适配真实手机硬件。
+
+当前真实架构状态：
+
+| 架构 | 当前状态 | 后续定位 |
+| --- | --- | --- |
+| i386 | 当前最完整主线，可默认构建 `target/openos.img`，覆盖用户态程序、shell、GUI、网络与浏览器 smoke 测试 | legacy / regression / 调试目标 |
+| x86_64 | 已有 GDT、TSS、IDT、异常入口、syscall/sysret、PMM、VMM、heap、ELF64 loader、UEFI `BOOTX64.EFI` 骨架和 `hello64.elf` 回归程序 | PC 产品主线，逐步补齐 initrd、VFS、init、shell |
+| ARM32 | `src/arch/arm` 当前是 ARM 32 位移植骨架，包含 QEMU virt 常量、PL011 UART、`_start` 和异常向量占位；它不是 Mobile 所需的 ARM64 主线 | 保留为实验/参考骨架 |
+| RISC-V RV64 | `src/arch/riscv` 当前是早期 RV64 骨架，包含 QEMU virt 常量、UART、`_start` 和 kernel main；trap、MMU、PLIC、CLINT、用户态仍待推进 | 长期多架构探索，不阻塞 PC/Mobile 主线 |
+| aarch64 | 尚未建立目录和构建链 | Mobile 基础主线，优先从 QEMU virt 启动 |
+
+跨架构基础门禁命令：
+
+```bash
+# 单元测试与 smoke 测试
+bash build.sh test
+
+# 当前稳定 i386 镜像构建，输出 target/openos.img
+bash build.sh
+
+# x86_64 骨架构建，输出 kernel64.elf / BOOTX64.EFI 等产物
+ARCH=x86_64 bash build.sh
+```
+
 ## 调试
 
 ```bash

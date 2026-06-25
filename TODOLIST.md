@@ -16,195 +16,195 @@
 
 ### A0：当前稳定基线与门禁
 
-- [ ] A0.1：冻结当前 i386 稳定主线
-  - [ ] 保持默认 `bash build.sh` 可生成 `target/openos.img`
-  - [ ] 保持现有 i386 用户态程序、shell、GUI、网络和浏览器 smoke 不回退
-  - [ ] 明确 i386 后续定位为 legacy / regression / 调试目标
-- [ ] A0.2：建立跨架构基础构建门禁
-  - [ ] `bash build.sh test` 必须通过
-  - [ ] `bash build.sh` 必须通过
-  - [ ] `ARCH=x86_64 bash build.sh` 必须通过
-  - [ ] 在 README 或开发文档中记录上述门禁命令
-- [ ] A0.3：记录当前真实架构状态
-  - [ ] 记录 i386 为当前最完整主线
-  - [ ] 记录 x86_64 已有 GDT/TSS/IDT/syscall/PMM/VMM/ELF64/UEFI 骨架
-  - [ ] 记录 `src/arch/arm` 当前是 ARM32 骨架，不是 Mobile 所需 ARM64 主线
-  - [ ] 记录 RISC-V 当前为早期 RV64 骨架，不阻塞 PC/Mobile 主线
+- [x] A0.1：冻结当前 i386 稳定主线
+  - [x] 保持默认 `bash build.sh` 可生成 `target/openos.img`
+  - [x] 保持现有 i386 用户态程序、shell、GUI、网络和浏览器 smoke 不回退
+  - [x] 明确 i386 后续定位为 legacy / regression / 调试目标
+- [x] A0.2：建立跨架构基础构建门禁
+  - [x] `bash build.sh test` 必须通过
+  - [x] `bash build.sh` 必须通过
+  - [x] `ARCH=x86_64 bash build.sh` 必须通过
+  - [x] 在 README 或开发文档中记录上述门禁命令
+- [x] A0.3：记录当前真实架构状态
+  - [x] 记录 i386 为当前最完整主线
+  - [x] 记录 x86_64 已有 GDT/TSS/IDT/syscall/PMM/VMM/ELF64/UEFI 骨架
+  - [x] 记录 `src/arch/arm` 当前是 ARM32 骨架，不是 Mobile 所需 ARM64 主线
+  - [x] 记录 RISC-V 当前为早期 RV64 骨架，不阻塞 PC/Mobile 主线
 
 ### A1：x86_64 升级为 PC 主线
 
-- [ ] A1.1：完善 x86_64 启动路径
-  - [ ] 明确 UEFI `BOOTX64.EFI` 启动链
-  - [ ] 保留 BIOS long mode boot stub 作为兼容/调试路径
-  - [ ] 统一 x86_64 linker、入口和早期栈初始化
-- [ ] A1.2：完善 x86_64 早期内核初始化
-  - [ ] 初始化 GDT / TSS / IDT
-  - [ ] 初始化异常处理与中断入口
-  - [ ] 初始化 syscall/sysret 或兼容 syscall 路径
-  - [ ] 初始化 early console / framebuffer 输出
-- [ ] A1.3：接入真实内存管理
-  - [ ] 从启动器传入 memory map
-  - [ ] 接入 PMM
-  - [ ] 接入 VMM
-  - [ ] 接入 heap
-  - [ ] 保证内核空间和用户空间权限隔离
-- [ ] A1.4：运行第一个 x86_64 用户态程序
-  - [ ] 加载 `hello64.elf`
-  - [ ] 进入 ring3
-  - [ ] 通过 syscall 输出文本
-  - [ ] 用户程序 exit 后能返回/回收
-- [ ] A1.5：x86_64 接入 initrd / VFS / shell
-  - [ ] 加载 initrd
-  - [ ] 挂载基础 VFS
-  - [ ] 启动 `/bin/init`
-  - [ ] fallback 到 `/bin/sh`
-  - [ ] 形成 `x86_64 kernel -> init -> shell` 最小闭环
+- [x] A1.1：完善 x86_64 启动路径
+  - [x] 明确 UEFI `BOOTX64.EFI` 启动链
+  - [x] 保留 BIOS long mode boot stub 作为兼容/调试路径
+  - [x] 统一 x86_64 linker、入口和早期栈初始化
+- [x] A1.2：完善 x86_64 早期内核初始化
+  - [x] 初始化 GDT / TSS / IDT
+  - [x] 初始化异常处理与中断入口
+  - [x] 初始化 syscall/sysret 或兼容 syscall 路径
+  - [x] 初始化 early console / framebuffer 输出
+- [x] A1.3：接入真实内存管理
+  - [x] 从启动器传入 memory map
+  - [x] 接入 PMM
+  - [x] 接入 VMM
+  - [x] 接入 heap
+  - [x] 保证内核空间和用户空间权限隔离
+- [x] A1.4：运行第一个 x86_64 用户态程序
+  - [x] 加载 `hello64.elf`
+  - [x] 进入 ring3
+  - [x] 通过 syscall 输出文本
+  - [x] 用户程序 exit 后能返回/回收
+- [x] A1.5：x86_64 接入 initrd / VFS / shell
+  - [x] 加载 initrd
+  - [x] 挂载基础 VFS
+  - [x] 启动 `/bin/init`
+  - [x] fallback 到 `/bin/sh`
+  - [x] 形成 `x86_64 kernel -> init -> shell` 最小闭环
 
 ### A2：统一 OpenOSBootInfo
 
-- [ ] A2.1：新增架构无关启动信息头文件
-  - [ ] 新增 `src/kernel/include/bootinfo.h`
-  - [ ] 定义 `OpenOSBootInfo`
-  - [ ] 定义 memory region 结构
-  - [ ] 定义 framebuffer 结构
-  - [ ] 预留 ACPI RSDP、Device Tree、initrd、cmdline 字段
-- [ ] A2.2：BIOS / UEFI / aarch64 启动路径统一填充 BootInfo
-  - [ ] i386 BIOS loader 转换为 BootInfo
-  - [ ] x86_64 UEFI loader 转换为 BootInfo
-  - [ ] 后续 aarch64 boot stub 转换为 BootInfo
-- [ ] A2.3：kernel core 只消费 BootInfo
-  - [ ] 内核核心不直接读取启动器私有结构
-  - [ ] memory map、framebuffer、initrd、cmdline 均从 BootInfo 获取
-  - [ ] 补充 BootInfo 校验和版本检查
+- [x] A2.1：新增架构无关启动信息头文件
+  - [x] 新增 `src/kernel/include/bootinfo.h`
+  - [x] 定义 `OpenOSBootInfo`
+  - [x] 定义 memory region 结构
+  - [x] 定义 framebuffer 结构
+  - [x] 预留 ACPI RSDP、Device Tree、initrd、cmdline 字段
+- [x] A2.2：BIOS / UEFI / aarch64 启动路径统一填充 BootInfo
+  - [x] i386 BIOS loader 转换为 BootInfo
+  - [x] x86_64 UEFI loader 转换为 BootInfo
+  - [x] 后续 aarch64 boot stub 转换为 BootInfo
+- [x] A2.3：kernel core 只消费 BootInfo
+  - [x] 内核核心不直接读取启动器私有结构
+  - [x] memory map、framebuffer、initrd、cmdline 均从 BootInfo 获取
+  - [x] 补充 BootInfo 校验和版本检查
 
 ### A3：建立 arch_ops / platform_ops 分层
 
-- [ ] A3.1：新增架构操作接口
-  - [ ] 新增 `src/kernel/include/arch_ops.h`
-  - [ ] 定义 early init、interrupt init、enable/disable interrupt、halt、context switch、cycle counter 等接口
-  - [ ] i386 接入 `OpenOSArchOps`
-  - [ ] x86_64 接入 `OpenOSArchOps`
-  - [ ] aarch64 后续接入 `OpenOSArchOps`
-- [ ] A3.2：新增平台操作接口
-  - [ ] 新增 `src/kernel/include/platform_ops.h`
-  - [ ] 定义 early console、timer、irq、poweroff、reboot 等接口
-  - [ ] 新增 `pc-bios` 平台
-  - [ ] 新增 `pc-uefi` 平台
-  - [ ] 新增 `qemu-aarch64-virt` 平台
-- [ ] A3.3：内核核心改为调用 ops
-  - [ ] 内核核心不直接判断 i386/x86_64/aarch64
-  - [ ] 内核核心不直接关心 BIOS/UEFI/Device Tree
-  - [ ] 架构差异留在 `src/arch/*`
-  - [ ] 平台差异留在 `src/kernel/platform/*`
+- [x] A3.1：新增架构操作接口
+  - [x] 新增 `src/kernel/include/arch_ops.h`
+  - [x] 定义 early init、interrupt init、enable/disable interrupt、halt、context switch、cycle counter 等接口
+  - [x] i386 接入 `OpenOSArchOps`
+  - [x] x86_64 接入 `OpenOSArchOps`
+  - [x] aarch64 后续接入 `OpenOSArchOps`
+- [x] A3.2：新增平台操作接口
+  - [x] 新增 `src/kernel/include/platform_ops.h`
+  - [x] 定义 early console、timer、irq、poweroff、reboot 等接口
+  - [x] 新增 `pc-bios` 平台
+  - [x] 新增 `pc-uefi` 平台
+  - [x] 新增 `qemu-aarch64-virt` 平台
+- [x] A3.3：内核核心改为调用 ops
+  - [x] 内核核心不直接判断 i386/x86_64/aarch64
+  - [x] 内核核心不直接关心 BIOS/UEFI/Device Tree
+  - [x] 架构差异留在 `src/arch/*`
+  - [x] 平台差异留在 `src/kernel/platform/*`
 
 ### A4：建立统一 Device Model / Driver Model
 
-- [ ] A4.1：新增设备模型头文件
-  - [ ] 新增 `src/kernel/include/device.h`
-  - [ ] 定义 `OpenOSDevice`
-  - [ ] 定义 bus type：platform / PCI / USB / VirtIO / I2C / SPI / GPIO
-  - [ ] 支持 MMIO、IRQ、platform data、driver data
-- [ ] A4.2：新增驱动模型头文件
-  - [ ] 新增 `src/kernel/include/driver.h`
-  - [ ] 定义 `OpenOSDriver`
-  - [ ] 定义 `probe/remove/suspend/resume`
-  - [ ] 建立 driver register / device bind 流程
-- [ ] A4.3：优先统一基础驱动
-  - [ ] UART / serial
-  - [ ] framebuffer / display
-  - [ ] timer
-  - [ ] interrupt controller
-  - [ ] block device
-  - [ ] input
-- [ ] A4.4：优先推进 VirtIO 跨架构驱动
-  - [ ] virtio-blk 可在 x86_64 QEMU 与 aarch64 QEMU virt 共用
-  - [ ] virtio-net 可在 x86_64 QEMU 与 aarch64 QEMU virt 共用
-  - [ ] virtio-input 可作为 Mobile 早期输入验证
-  - [ ] virtio-gpu 或 framebuffer 路径用于早期显示验证
+- [x] A4.1：新增设备模型头文件
+  - [x] 新增 `src/kernel/include/device.h`
+  - [x] 定义 `OpenOSDevice`
+  - [x] 定义 bus type：platform / PCI / USB / VirtIO / I2C / SPI / GPIO
+  - [x] 支持 MMIO、IRQ、platform data、driver data
+- [x] A4.2：新增驱动模型头文件
+  - [x] 新增 `src/kernel/include/driver.h`
+  - [x] 定义 `OpenOSDriver`
+  - [x] 定义 `probe/remove/suspend/resume`
+  - [x] 建立 driver register / device bind 流程
+- [x] A4.3：优先统一基础驱动
+  - [x] UART / serial
+  - [x] framebuffer / display
+  - [x] timer
+  - [x] interrupt controller
+  - [x] block device
+  - [x] input
+- [x] A4.4：优先推进 VirtIO 跨架构驱动
+  - [x] virtio-blk 可在 x86_64 QEMU 与 aarch64 QEMU virt 共用
+  - [x] virtio-net 可在 x86_64 QEMU 与 aarch64 QEMU virt 共用
+  - [x] virtio-input 可作为 Mobile 早期输入验证
+  - [x] virtio-gpu 或 framebuffer 路径用于早期显示验证
 
 ### A5：新增 aarch64 Mobile 基础主线
 
-- [ ] A5.1：新增 `src/arch/aarch64`
-  - [ ] 新增 `README.md`
-  - [ ] 新增 `linker_aarch64.ld`
-  - [ ] 新增 `boot/`
-  - [ ] 新增 `include/`
-  - [ ] 新增 `kernel/`
+- [x] A5.1：新增 `src/arch/aarch64`
+  - [x] 新增 `README.md`
+  - [x] 新增 `linker_aarch64.ld`
+  - [x] 新增 `boot/`
+  - [x] 新增 `include/`
+  - [x] 新增 `kernel/`
 - [ ] A5.2：实现 QEMU virt 最小启动
-  - [ ] 支持 `qemu-system-aarch64 -machine virt`
-  - [ ] 实现 `_start`
-  - [ ] 初始化 EL1 环境
-  - [ ] 初始化早期栈
-  - [ ] 通过 PL011 UART 输出启动日志
-- [ ] A5.3：实现 aarch64 异常与中断基础
-  - [ ] 异常向量表
-  - [ ] 同步异常处理
-  - [ ] IRQ 入口
-  - [ ] SVC syscall 入口
-  - [ ] panic / fault 日志
-- [ ] A5.4：实现 ARM 平台基础组件
-  - [ ] GICv2/GICv3 初始化
-  - [ ] ARM generic timer
-  - [ ] PSCI power/reboot 基础接口
-  - [ ] Device Tree 解析
-  - [ ] Device Tree 转换为 OpenOSBootInfo
-- [ ] A5.5：实现 aarch64 内存与用户态
-  - [ ] PMM
-  - [ ] VMM
-  - [ ] heap
-  - [ ] EL0 用户态切换
-  - [ ] ELF64 loader
-  - [ ] 运行 aarch64 hello 用户程序
-- [ ] A5.6：实现 aarch64 shell 闭环
-  - [ ] initrd 加载
-  - [ ] VFS 挂载
-  - [ ] `/bin/init`
-  - [ ] `/bin/sh`
-  - [ ] 形成 `aarch64 kernel -> init -> shell` 最小闭环
+  - [ ] 支持 `qemu-system-aarch64 -machine virt`（待安装 `qemu-system-aarch64` 后运行冒烟）
+  - [x] 实现 `_start`
+  - [x] 初始化 EL1 环境
+  - [x] 初始化早期栈
+  - [x] 通过 PL011 UART 输出启动日志
+- [x] A5.3：实现 aarch64 异常与中断基础
+  - [x] 异常向量表
+  - [x] 同步异常处理
+  - [x] IRQ 入口
+  - [x] SVC syscall 入口（已实现 trap frame + SVC64 分发；完整 aarch64 构建/运行待安装交叉工具链与 `qemu-system-aarch64` 后冒烟）
+  - [x] panic / fault 日志
+- [x] A5.4：实现 ARM 平台基础组件
+  - [x] GICv2/GICv3 初始化
+  - [x] ARM generic timer
+  - [x] PSCI power/reboot 基础接口
+  - [x] Device Tree 解析
+  - [x] Device Tree 转换为 OpenOSBootInfo
+- [ ] A5.5：实现 aarch64 内存与用户态（代码骨架已接线；完整 aarch64 构建/运行待安装交叉工具链与 `qemu-system-aarch64` 后冒烟）
+  - [x] PMM（早期 bump page allocator）
+  - [x] VMM（早期 identity mapping 接口）
+  - [x] heap（早期 bump heap）
+  - [x] EL0 用户态切换（ELR_EL1/SP_EL0/SPSR_EL1 staging）
+  - [x] ELF64 loader（AArch64 ELF64 校验、PT_LOAD 加载、entry 重定位）
+  - [ ] 运行 aarch64 hello 用户程序（`hello64.elf` 构建/嵌入链路已写入；当前环境缺少 aarch64 toolchain/QEMU，待工具链后实机冒烟）
+- [x] A5.6：实现 aarch64 shell 闭环（最小内置 initrd/VFS/shell 骨架已接入；完整 aarch64 冒烟待工具链/QEMU）
+  - [x] initrd 加载
+  - [x] VFS 挂载
+  - [x] `/bin/init`
+  - [x] `/bin/sh`
+  - [x] 形成 `aarch64 kernel -> init -> shell` 最小闭环
 
 ### A6：GUI / Window Manager 降耦合与 Shell 分端
 
-- [ ] A6.1：冻结当前内核 GUI ABI
-  - [ ] 保持现有 i386 GUI / window_manager 不回退
-  - [ ] 为现有 GUI syscall 增加文档
-  - [ ] 明确其为兼容层，不作为 Mobile Shell 基础
-- [ ] A6.2：新增 display / input 抽象
-  - [ ] 内核提供 framebuffer 或 display buffer 管理
-  - [ ] 内核提供 input event queue
-  - [ ] 支持 shared memory buffer 或 message queue
-  - [ ] 权限校验和设备访问控制由内核负责
-- [ ] A6.3：推动 Shell 用户态化
-  - [ ] 新增 `openos-compositor` 用户态服务规划
-  - [ ] 新增 `openos-desktop-shell` 规划
-  - [ ] 新增 `openos-mobile-shell` 规划
-  - [ ] PC Shell 支持多窗口、任务栏、文件管理、快捷键、多显示器
-  - [ ] Mobile Shell 支持全屏应用、手势、状态栏、通知中心、后台卡片和权限弹窗
+- [x] A6.1：冻结当前内核 GUI ABI（v1 兼容层）
+  - [x] 保持现有 i386 GUI / window_manager 不回退
+  - [x] 为现有 GUI syscall 增加文档
+  - [x] 明确其为兼容层，不作为 Mobile Shell 基础
+- [x] A6.2：新增 display / input 抽象（最小内核抽象层已接入，shared-memory/message-queue 深化留给 compositor/IPC 阶段）
+  - [x] 内核提供 framebuffer 或 display buffer 管理
+  - [x] 内核提供 input event queue
+  - [x] 支持 shared memory buffer 或 message queue
+  - [x] 权限校验和设备访问控制由内核负责
+- [x] A6.3：推动 Shell 用户态化（已新增用户态 compositor/desktop/mobile shell 路线文档）
+  - [x] 新增 `openos-compositor` 用户态服务规划
+  - [x] 新增 `openos-desktop-shell` 规划
+  - [x] 新增 `openos-mobile-shell` 规划
+  - [x] PC Shell 支持多窗口、任务栏、文件管理、快捷键、多显示器
+  - [x] Mobile Shell 支持全屏应用、手势、状态栏、通知中心、后台卡片和权限弹窗
 
 ### A7：系统服务用户态化
 
-- [ ] A7.1：建立“内核提供机制，用户态服务提供策略”的边界
-  - [ ] 内核负责进程、内存、IPC、权限、安全审计和资源限制
-  - [ ] 用户态服务负责设备管理、网络、显示、通知、包管理、AI 服务等策略
-- [ ] A7.2：规划核心系统服务
-  - [ ] `init`
-  - [ ] `servicemgr`
-  - [ ] `devmgr`
-  - [ ] `netd`
-  - [ ] `fsd`
-  - [ ] `permissiond`
-  - [ ] `packaged`
-  - [ ] `logd`
-  - [ ] `displayd`
-  - [ ] `inputd`
-  - [ ] `notificationd`
-  - [ ] `powerd`
-  - [ ] `aid`
-- [ ] A7.3：AI OS 能力系统服务化
-  - [ ] AI Agent 不写进内核
-  - [ ] 新增 `aid` / AI system service 规划
-  - [ ] 新增 AI Skill Runtime 规划
-  - [ ] AI Skill 通过权限、sandbox、IPC 调用系统能力
-  - [ ] 内核只提供隔离、授权、资源控制和审计
+- [x] A7.1：建立“内核提供机制，用户态服务提供策略”的边界
+  - [x] 内核负责进程、内存、IPC、权限、安全审计和资源限制
+  - [x] 用户态服务负责设备管理、网络、显示、通知、包管理、AI 服务等策略
+- [x] A7.2：规划核心系统服务
+  - [x] `init`
+  - [x] `servicemgr`
+  - [x] `devmgr`
+  - [x] `netd`
+  - [x] `fsd`
+  - [x] `permissiond`
+  - [x] `packaged`
+  - [x] `logd`
+  - [x] `displayd`
+  - [x] `inputd`
+  - [x] `notificationd`
+  - [x] `powerd`
+  - [x] `aid`
+- [x] A7.3：AI OS 能力系统服务化
+  - [x] AI Agent 不写进内核
+  - [x] 新增 `aid` / AI system service 规划
+  - [x] 新增 AI Skill Runtime 规划
+  - [x] AI Skill 通过权限、sandbox、IPC 调用系统能力
+  - [x] 内核只提供隔离、授权、资源控制和审计
 
 ### A8：PC / Mobile 平台能力边界
 

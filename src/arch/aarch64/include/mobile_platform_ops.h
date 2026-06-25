@@ -1,0 +1,6 @@
+#ifndef OPENOS_PLATFORM_MOBILE_PLATFORM_OPS_H
+#define OPENOS_PLATFORM_MOBILE_PLATFORM_OPS_H
+
+void openos_mobile_platform_ops_init(void);
+
+#endif /* OPENOS_PLATFORM_MOBILE_PLATFORM_OPS_H */

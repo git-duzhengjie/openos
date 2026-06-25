@@ -4,6 +4,7 @@
  */
 
 #include "types.h"
+#include "bootinfo.h"
 #include "../include/syscall.h"
 #include "../include/usermode.h"
 #include "serial.h"
@@ -32,6 +33,8 @@
 #include "ahci.h"
 #include "virtio_blk.h"
 #include "virtio_net.h"
+#include "virtio_input.h"
+#include "virtio_gpu.h"
 #include "e1000.h"
 #include "rtl8139.h"
 #include "acpi.h"
@@ -41,6 +44,8 @@
 #include "power.h"
 #include "vga.h"
 #include "framebuffer.h"
+#include "display.h"
+#include "input.h"
 #include "gui.h"
 #include "window_manager.h"
 #include "font.h"
@@ -49,6 +54,13 @@
 #include "usb.h"
 #include "sound.h"
 #include "pmm.h"
+#include "arch_ops.h"
+#include "platform_ops.h"
+#include "i386_arch_ops.h"
+#include "pc_bios_platform_ops.h"
+#include "basic_devices.h"
+#include "device.h"
+#include "driver.h"
 #include "embed_hello.h"  /* 嵌入的用户程�?*/
 #include "embed_fault.h"  /* 用户异常隔离测试程序 */
 #ifndef OPENOS_EMBED_TESTS
@@ -701,9 +713,38 @@ static void kernel_tccsmoke_thread(void)
 }
 #endif
 
+static const openos_bootinfo_t *kernel_bootinfo_legacy(void) {
+    static openos_bootinfo_t bootinfo;
+
+    for (uint32_t i = 0; i < sizeof(bootinfo); ++i) {
+        ((uint8_t *)&bootinfo)[i] = 0;
+    }
+
+    bootinfo.kernel_phys_start = 0x00100000u;
+    bootinfo.kernel_phys_end = (uint32_t)__kernel_end;
+    openos_bootinfo_finalize(&bootinfo);
+    return &bootinfo;
+}
+
 void kernel_main(void) {
+    openos_i386_arch_ops_init();
+    openos_pc_bios_platform_ops_init();
     serial_init();
     serial_write("\n[OpenOS] Phase 2.5 - Preemptive Scheduler\n");
+    serial_write("[OpenOS] arch_ops=");
+    serial_write(openos_arch_ops_name());
+    serial_write(" platform_ops=");
+    serial_write(openos_platform_ops_name());
+    serial_write("\n");
+    openos_basic_devices_register();
+    serial_write("[OpenOS] device_model initialized\n");
+
+    const openos_bootinfo_t *bootinfo = kernel_bootinfo_legacy();
+    if (openos_bootinfo_is_valid(bootinfo)) {
+        serial_write("[OK] OpenOSBootInfo legacy adapter\n");
+    } else {
+        serial_write("[WARN] OpenOSBootInfo legacy adapter invalid\n");
+    }
 
     /* 初始化硬�?*/
     pmm_init((uint32_t)__kernel_end);
@@ -741,6 +782,9 @@ void kernel_main(void) {
     /* 初始化键盘驱�?*/
     keyboard_init();
 
+    /* 初始化统一输入抽象层，供后续 PC/Mobile compositor 使用 */
+    input_init();
+
     /* 初始化 PS/2 鼠标驱动 */
     mouse_init();
 
@@ -752,6 +796,9 @@ void kernel_main(void) {
 
     /* 探测图形 framebuffer；默认不切图形模式，避免影响文本 Shell */
     framebuffer_init();
+
+    /* 初始化统一显示抽象层；v1 包装 legacy framebuffer，不改变旧 GUI 行为 */
+    display_init();
 
     /* 初始化窗口管理器/GUI 对象池；默认不切图形模式 */
     window_manager_init();
@@ -833,6 +880,11 @@ void kernel_main(void) {
     ahci_init();
     virtio_blk_init();
     serial_write("[OK] BLOCKDEV + ram0 + ATA + AHCI + virtio-blk\n");
+
+    /* 初始化 VirtIO 跨架构输入/显示探测骨架 */
+    virtio_input_init();
+    virtio_gpu_init();
+    serial_write("[OK] VIRTIO input/gpu probe\n");
 
     /* 初始化最�?TCP/IP 网络�?*/
     net_init();

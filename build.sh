@@ -35,8 +35,8 @@ if [ "$OPENOS_CJK_COVERAGE" != "ui" ] && [ "$OPENOS_CJK_EMBED" != "1" ] && [ "$O
 fi
 
 usage() {
-    echo "Usage: ARCH=i386|x86_64 ./build.sh [clean|test|cppsmoke|sdk|sdk-smoke|chromium-source-check|chromium-gn-check|chromium-engine-gate|chromium-real-switch-gate|skia-official-check|v8-official-check|host-tools-check]"
-    echo "       ./build.sh [i386|x86_64] [clean|test|cppsmoke|sdk|sdk-smoke]"
+    echo "Usage: ARCH=i386|x86_64|aarch64 ./build.sh [clean|test|cppsmoke|sdk|sdk-smoke|chromium-source-check|chromium-gn-check|chromium-engine-gate|chromium-real-switch-gate|skia-official-check|v8-official-check|host-tools-check]"
+    echo "       ./build.sh [i386|x86_64|aarch64] [clean|test|cppsmoke|sdk|sdk-smoke]"
     echo "       ./build.sh cppsmoke    # probe OpenOS userland C++ toolchain"
     echo "       ./build.sh sdk         # export OpenOS userland SDK/sysroot for Chromium ports"
     echo "       ./build.sh sdk-smoke   # verify SDK can build a minimal OpenOS user ELF"
@@ -152,7 +152,7 @@ case "${1:-}" in
     host-tools-bootstrap|bootstrap-host-tools)
         exec bash scripts/bootstrap-host-tools.sh --download
         ;;
-    i386|x86_64)
+    i386|x86_64|aarch64)
         BUILD_ARCH="$1"
         shift
         ;;
@@ -184,7 +184,7 @@ if [ "${1:-}" = "sdk-smoke" ] || [ "${1:-}" = "smoke-sdk" ]; then
 fi
 
 case "$BUILD_ARCH" in
-    i386|x86_64)
+    i386|x86_64|aarch64)
         ;;
     *)
         echo "Unsupported ARCH=$BUILD_ARCH" >&2
@@ -210,6 +210,136 @@ if [ -x scripts/gen-version-header.sh ]; then
     echo "Version header: $OPENOS_VERSION_HEADER"
 fi
 
+if [ "$BUILD_ARCH" = "aarch64" ]; then
+    echo "===== Building openos aarch64 QEMU virt minimal boot ====="
+    AARCH64_SRC=src/arch/aarch64
+    AARCH64_BUILD="$BUILD/aarch64"
+    AARCH64_USER_BUILD="$AARCH64_BUILD/user"
+    AARCH64_USER_BIN="$AARCH64_BUILD/bin"
+    AARCH64_QEMU="${AARCH64_QEMU:-qemu-system-aarch64}"
+
+    # Toolchain selection order:
+    #   1. Explicit AARCH64_CC/AARCH64_LD/AARCH64_OBJCOPY from the environment.
+    #   2. GNU cross tools: aarch64-linux-gnu-gcc/ld/objcopy.
+    #   3. LLVM cross mode: clang --target=aarch64-none-elf + ld.lld + llvm-objcopy.
+    AARCH64_TOOLCHAIN="custom"
+    AARCH64_CC="${AARCH64_CC:-}"
+    AARCH64_LD="${AARCH64_LD:-}"
+    AARCH64_OBJCOPY="${AARCH64_OBJCOPY:-}"
+    AARCH64_CC_TARGET_FLAGS="${AARCH64_CC_TARGET_FLAGS:-}"
+    AARCH64_LD_TARGET_FLAGS="${AARCH64_LD_TARGET_FLAGS:-}"
+
+    if [ -z "$AARCH64_CC" ] && [ -z "$AARCH64_LD" ] && [ -z "$AARCH64_OBJCOPY" ]; then
+        if command -v aarch64-linux-gnu-gcc >/dev/null 2>&1 && \
+           command -v aarch64-linux-gnu-ld >/dev/null 2>&1 && \
+           command -v aarch64-linux-gnu-objcopy >/dev/null 2>&1; then
+            AARCH64_TOOLCHAIN="gnu"
+            AARCH64_CC=aarch64-linux-gnu-gcc
+            AARCH64_LD=aarch64-linux-gnu-ld
+            AARCH64_OBJCOPY=aarch64-linux-gnu-objcopy
+        elif command -v clang >/dev/null 2>&1 && \
+             command -v ld.lld >/dev/null 2>&1 && \
+             command -v llvm-objcopy >/dev/null 2>&1; then
+            AARCH64_TOOLCHAIN="llvm"
+            AARCH64_CC=clang
+            AARCH64_LD=ld.lld
+            AARCH64_OBJCOPY=llvm-objcopy
+            AARCH64_CC_TARGET_FLAGS="--target=aarch64-none-elf $AARCH64_CC_TARGET_FLAGS"
+            AARCH64_LD_TARGET_FLAGS="-m aarch64elf $AARCH64_LD_TARGET_FLAGS"
+        else
+            echo "ERROR: no usable aarch64 toolchain found." >&2
+            echo "Tried GNU:  aarch64-linux-gnu-gcc, aarch64-linux-gnu-ld, aarch64-linux-gnu-objcopy" >&2
+            echo "Tried LLVM: clang, ld.lld, llvm-objcopy" >&2
+            echo "Install gcc-aarch64-linux-gnu/binutils-aarch64-linux-gnu, install LLVM tools, or set:" >&2
+            echo "  AARCH64_CC=/path/to/compiler AARCH64_LD=/path/to/linker AARCH64_OBJCOPY=/path/to/objcopy" >&2
+            exit 1
+        fi
+    fi
+
+    for tool in "$AARCH64_CC" "$AARCH64_LD" "$AARCH64_OBJCOPY"; do
+        if [ -z "$tool" ] || ! command -v "$tool" >/dev/null 2>&1; then
+            echo "ERROR: missing aarch64 build tool: ${tool:-<unset>}" >&2
+            echo "Install gcc-aarch64-linux-gnu/binutils-aarch64-linux-gnu, install LLVM tools, or set AARCH64_CC/AARCH64_LD/AARCH64_OBJCOPY." >&2
+            exit 1
+        fi
+    done
+
+    mkdir -p "$AARCH64_BUILD" "$AARCH64_USER_BUILD" "$AARCH64_USER_BIN"
+    rm -f "$AARCH64_BUILD"/*.o "$AARCH64_BUILD"/*.elf "$AARCH64_BUILD"/*.bin \
+          "$AARCH64_USER_BUILD"/*.o "$AARCH64_USER_BIN"/*.elf
+    AARCH64_CFLAGS="$AARCH64_CC_TARGET_FLAGS -ffreestanding -nostdlib -Wall -Wextra -O2 -mgeneral-regs-only -fno-stack-protector -fno-builtin -fno-pic -fno-pie -I$AARCH64_SRC/include -Isrc/kernel/include"
+    AARCH64_USER_CFLAGS="$AARCH64_CC_TARGET_FLAGS -ffreestanding -nostdlib -Wall -Wextra -O2 -fno-stack-protector -fno-builtin -fno-pic -fno-pie -I$AARCH64_SRC/include"
+    AARCH64_USER_LDFLAGS="-Ttext=0x400000 -nostdlib"
+
+    echo "Using aarch64 toolchain: $AARCH64_TOOLCHAIN"
+    echo "  CC:      $AARCH64_CC $AARCH64_CC_TARGET_FLAGS"
+    echo "  LD:      $AARCH64_LD $AARCH64_LD_TARGET_FLAGS"
+    echo "  OBJCOPY: $AARCH64_OBJCOPY"
+
+    echo "[1/5] Building aarch64 /bin/hello64 ELF..."
+    "$AARCH64_CC" $AARCH64_USER_CFLAGS -c "$AARCH64_SRC/user/hello64.c" -o "$AARCH64_USER_BUILD/hello64.o"
+    "$AARCH64_LD" $AARCH64_LD_TARGET_FLAGS $AARCH64_USER_LDFLAGS -o "$AARCH64_USER_BIN/hello64.elf" "$AARCH64_USER_BUILD/hello64.o"
+    (
+        cd "$AARCH64_USER_BIN"
+        "$AARCH64_OBJCOPY" -I binary -O elf64-littleaarch64 -B aarch64 \
+            --rename-section .data=.rodata.aarch64_hello64_elf,alloc,load,readonly,data,contents \
+            --set-section-alignment .rodata.aarch64_hello64_elf=16 \
+            --redefine-sym _binary_hello64_elf_start=__aarch64_hello64_elf_start \
+            --redefine-sym _binary_hello64_elf_end=__aarch64_hello64_elf_end \
+            --redefine-sym _binary_hello64_elf_size=__aarch64_hello64_elf_size \
+            "hello64.elf" "../hello64_elf.o"
+    )
+
+    echo "[2/5] Assembling aarch64 boot and exception vectors..."
+    "$AARCH64_CC" $AARCH64_CFLAGS -c "$AARCH64_SRC/boot/boot.S" -o "$AARCH64_BUILD/boot.o"
+    "$AARCH64_CC" $AARCH64_CFLAGS -c "$AARCH64_SRC/boot/exception_vectors.S" -o "$AARCH64_BUILD/exception_vectors.o"
+
+    echo "[3/5] Compiling aarch64 C files..."
+    "$AARCH64_CC" $AARCH64_CFLAGS -c "$AARCH64_SRC/src/aarch64_uart.c" -o "$AARCH64_BUILD/aarch64_uart.o"
+    "$AARCH64_CC" $AARCH64_CFLAGS -c "$AARCH64_SRC/src/aarch64_syscall.c" -o "$AARCH64_BUILD/aarch64_syscall.o"
+    "$AARCH64_CC" $AARCH64_CFLAGS -c "$AARCH64_SRC/src/aarch64_exception.c" -o "$AARCH64_BUILD/aarch64_exception.o"
+    "$AARCH64_CC" $AARCH64_CFLAGS -c "$AARCH64_SRC/src/aarch64_memory.c" -o "$AARCH64_BUILD/aarch64_memory.o"
+    "$AARCH64_CC" $AARCH64_CFLAGS -c "$AARCH64_SRC/src/aarch64_elf64.c" -o "$AARCH64_BUILD/aarch64_elf64.o"
+    "$AARCH64_CC" $AARCH64_CFLAGS -c "$AARCH64_SRC/src/aarch64_usermode.c" -o "$AARCH64_BUILD/aarch64_usermode.o"
+    "$AARCH64_CC" $AARCH64_CFLAGS -c "$AARCH64_SRC/src/aarch64_platform.c" -o "$AARCH64_BUILD/aarch64_platform.o"
+    "$AARCH64_CC" $AARCH64_CFLAGS -c "$AARCH64_SRC/src/aarch64_initrd.c" -o "$AARCH64_BUILD/aarch64_initrd.o"
+    "$AARCH64_CC" $AARCH64_CFLAGS -c "$AARCH64_SRC/src/aarch64_vfs.c" -o "$AARCH64_BUILD/aarch64_vfs.o"
+    "$AARCH64_CC" $AARCH64_CFLAGS -c "$AARCH64_SRC/src/aarch64_shell.c" -o "$AARCH64_BUILD/aarch64_shell.o"
+    "$AARCH64_CC" $AARCH64_CFLAGS -c "$AARCH64_SRC/kernel/aarch64_bootinfo.c" -o "$AARCH64_BUILD/aarch64_bootinfo.o"
+    "$AARCH64_CC" $AARCH64_CFLAGS -c "$AARCH64_SRC/src/aarch64_kernel.c" -o "$AARCH64_BUILD/aarch64_kernel.o"
+
+    echo "[4/5] Linking aarch64 kernel..."
+    "$AARCH64_LD" $AARCH64_LD_TARGET_FLAGS -T "$AARCH64_SRC/linker_aarch64.ld" -nostdlib \
+        "$AARCH64_BUILD/boot.o" \
+        "$AARCH64_BUILD/exception_vectors.o" \
+        "$AARCH64_BUILD/aarch64_uart.o" \
+        "$AARCH64_BUILD/aarch64_syscall.o" \
+        "$AARCH64_BUILD/aarch64_exception.o" \
+        "$AARCH64_BUILD/aarch64_memory.o" \
+        "$AARCH64_BUILD/aarch64_elf64.o" \
+        "$AARCH64_BUILD/aarch64_usermode.o" \
+        "$AARCH64_BUILD/aarch64_platform.o" \
+        "$AARCH64_BUILD/aarch64_initrd.o" \
+        "$AARCH64_BUILD/aarch64_vfs.o" \
+        "$AARCH64_BUILD/aarch64_shell.o" \
+        "$AARCH64_BUILD/aarch64_bootinfo.o" \
+        "$AARCH64_BUILD/aarch64_kernel.o" \
+        "$AARCH64_BUILD/hello64_elf.o" \
+        -o "$AARCH64_BUILD/openos-aarch64.elf"
+    "$AARCH64_OBJCOPY" -O binary "$AARCH64_BUILD/openos-aarch64.elf" "$AARCH64_BUILD/openos-aarch64.bin"
+
+    echo "[5/5] aarch64 minimal boot image ready."
+    echo "  ELF: $AARCH64_BUILD/openos-aarch64.elf"
+    echo "  BIN: $AARCH64_BUILD/openos-aarch64.bin"
+    echo "  USER: $AARCH64_USER_BIN/hello64.elf"
+    if command -v "$AARCH64_QEMU" >/dev/null 2>&1; then
+        echo "  Smoke run: $AARCH64_QEMU -M virt -cpu cortex-a57 -nographic -kernel $AARCH64_BUILD/openos-aarch64.elf"
+    else
+        echo "  QEMU not found; install qemu-system-aarch64 or set AARCH64_QEMU to run smoke boot."
+    fi
+    exit 0
+fi
+
 if [ "$BUILD_ARCH" = "x86_64" ]; then
     echo "===== Building openos Phase 2 (x86_64 kernel + hello64 regression) ====="
     ARCH64_SRC=src/arch/x86_64
@@ -217,8 +347,8 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
     ARCH64_USER_BUILD="$ARCH64_BUILD/user"
     ARCH64_BOOT_BUILD="$ARCH64_BUILD/boot"
     ARCH64_BIN_BUILD="$ARCH64_BUILD/bin"
-    ARCH64_CFLAGS="-m64 -mcmodel=kernel -mno-red-zone -ffreestanding -nostdlib -Wall -Wextra -O2 -fno-pic -fno-pie -fno-PIE -fno-stack-protector -fno-builtin -I$ARCH64_SRC/include"
-    ARCH64_ASFLAGS="-m64 -mcmodel=kernel -mno-red-zone -fno-pic -fno-pie -fno-PIE -I$ARCH64_SRC/include"
+    ARCH64_CFLAGS="-m64 -mcmodel=kernel -mno-red-zone -ffreestanding -nostdlib -Wall -Wextra -O2 -fno-pic -fno-pie -fno-PIE -fno-stack-protector -fno-builtin -I$ARCH64_SRC/include -Isrc/kernel/include"
+    ARCH64_ASFLAGS="-m64 -mcmodel=kernel -mno-red-zone -fno-pic -fno-pie -fno-PIE -I$ARCH64_SRC/include -Isrc/kernel/include"
     ARCH64_USER_CFLAGS="-m64 -ffreestanding -nostdlib -Wall -Wextra -O2 -fno-pic -fno-pie -fno-PIE -fno-stack-protector -fno-builtin -I$ARCH64_SRC/user"
     ARCH64_USER_ASFLAGS="-m64 -fno-pic -fno-pie -fno-PIE -I$ARCH64_SRC/user"
     ARCH64_LDFLAGS="-m elf_x86_64 -T $ARCH64_SRC/linker64.ld -nostdlib"
@@ -230,7 +360,20 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
     mkdir -p "$ARCH64_BUILD" "$ARCH64_USER_BUILD" "$ARCH64_BOOT_BUILD" "$ARCH64_BIN_BUILD"
     rm -f "$ARCH64_BUILD"/*.o "$ARCH64_BUILD"/*.elf "$ARCH64_USER_BUILD"/*.o "$ARCH64_BOOT_BUILD"/*.o "$ARCH64_BOOT_BUILD"/*.elf "$ARCH64_BOOT_BUILD"/*.EFI "$ARCH64_BOOT_BUILD"/*.efi "$ARCH64_BIN_BUILD"/*.elf
 
-    echo "[1/4] Compiling x86_64 C files..."
+    echo "[1/5] Building x86_64 /bin/hello64 regression ELF..."
+    gcc $ARCH64_USER_CFLAGS -c "$ARCH64_SRC/user/crt0.c" -o "$ARCH64_USER_BUILD/crt0.o"
+    gcc $ARCH64_USER_CFLAGS -c "$ARCH64_SRC/user/hello64.c" -o "$ARCH64_USER_BUILD/hello64.o"
+    gcc $ARCH64_USER_ASFLAGS -c "$ARCH64_SRC/user/crt0.S" -o "$ARCH64_USER_BUILD/start.o"
+    ld $ARCH64_USER_LDFLAGS -o "$ARCH64_BIN_BUILD/hello64.elf" \
+        "$ARCH64_USER_BUILD/start.o" \
+        "$ARCH64_USER_BUILD/crt0.o" \
+        "$ARCH64_USER_BUILD/hello64.o"
+    readelf -h "$ARCH64_BIN_BUILD/hello64.elf" | grep -q 'Class:.*ELF64'
+    readelf -h "$ARCH64_BIN_BUILD/hello64.elf" | grep -q 'Machine:.*X86-64'
+    nm "$ARCH64_BIN_BUILD/hello64.elf" | grep -q ' openos64_main$'
+    python3 _embed_elf.py "$ARCH64_BIN_BUILD/hello64.elf" "$ARCH64_SRC/include/embed_hello64.h" hello64_elf
+
+    echo "[2/5] Compiling x86_64 C files..."
     for cfile in \
         kernel/kernel64.c \
         kernel/gdt64.c \
@@ -238,7 +381,11 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         kernel/idt64.c \
         kernel/sched64.c \
         kernel/syscall64.c \
+        kernel/initrd64.c \
+        kernel/vfs64.c \
+        kernel/shell64.c \
         kernel/compat32.c \
+        kernel/handoff64.c \
         kernel/pmm64.c \
         kernel/vmm64.c \
         kernel/heap64.c \
@@ -248,8 +395,19 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         obj="$ARCH64_BUILD/$(basename "${cfile%.c}").o"
         gcc $ARCH64_CFLAGS -c "$ARCH64_SRC/$cfile" -o "$obj"
     done
+    for cfile in \
+        src/kernel/arch_ops.c \
+        src/kernel/platform_ops.c \
+        src/kernel/device.c \
+        src/kernel/driver.c \
+        src/kernel/basic_devices.c \
+        src/arch/x86_64/src/x86_64_arch_ops.c \
+        src/kernel/platform/pc_uefi_platform_ops.c; do
+        obj="$ARCH64_BUILD/$(basename "${cfile%.c}").o"
+        gcc $ARCH64_CFLAGS -c "$cfile" -o "$obj"
+    done
 
-    echo "[2/4] Assembling x86_64 entry files..."
+    echo "[3/5] Assembling x86_64 entry files..."
     for sfile in \
         kernel/entry64.S \
         kernel/isr64.S \
@@ -266,7 +424,7 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         gcc $ARCH64_ASFLAGS -c "$ARCH64_SRC/$sfile" -o "$obj"
     done
 
-    echo "[3/4] Linking x86_64 kernel..."
+    echo "[4/5] Linking x86_64 kernel..."
     ld $ARCH64_LDFLAGS -o "$ARCH64_BUILD/kernel64.elf" \
         "$ARCH64_BUILD/entry64.o" \
         "$ARCH64_BUILD/kernel64.o" \
@@ -277,7 +435,11 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         "$ARCH64_BUILD/sched64.o" \
         "$ARCH64_BUILD/context_switch64.o" \
         "$ARCH64_BUILD/syscall64.o" \
+        "$ARCH64_BUILD/initrd64.o" \
+        "$ARCH64_BUILD/vfs64.o" \
+        "$ARCH64_BUILD/shell64.o" \
         "$ARCH64_BUILD/compat32.o" \
+        "$ARCH64_BUILD/handoff64.o" \
         "$ARCH64_BUILD/syscall_int80_compat64.o" \
         "$ARCH64_BUILD/syscall_sysret64.o" \
         "$ARCH64_BUILD/pmm64.o" \
@@ -286,19 +448,16 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         "$ARCH64_BUILD/elf64_loader.o" \
         "$ARCH64_BUILD/usermode64.o" \
         "$ARCH64_BUILD/usermode64_asm.o" \
-        "$ARCH64_BUILD/early_console64.o"
+        "$ARCH64_BUILD/early_console64.o" \
+        "$ARCH64_BUILD/arch_ops.o" \
+        "$ARCH64_BUILD/platform_ops.o" \
+        "$ARCH64_BUILD/device.o" \
+        "$ARCH64_BUILD/driver.o" \
+        "$ARCH64_BUILD/basic_devices.o" \
+        "$ARCH64_BUILD/x86_64_arch_ops.o" \
+        "$ARCH64_BUILD/pc_uefi_platform_ops.o"
 
-    echo "[4/4] Building x86_64 /bin/hello64 regression ELF..."
-    gcc $ARCH64_USER_CFLAGS -c "$ARCH64_SRC/user/crt0.c" -o "$ARCH64_USER_BUILD/crt0.o"
-    gcc $ARCH64_USER_CFLAGS -c "$ARCH64_SRC/user/hello64.c" -o "$ARCH64_USER_BUILD/hello64.o"
-    gcc $ARCH64_USER_ASFLAGS -c "$ARCH64_SRC/user/crt0.S" -o "$ARCH64_USER_BUILD/start.o"
-    ld $ARCH64_USER_LDFLAGS -o "$ARCH64_BIN_BUILD/hello64.elf" \
-        "$ARCH64_USER_BUILD/start.o" \
-        "$ARCH64_USER_BUILD/crt0.o" \
-        "$ARCH64_USER_BUILD/hello64.o"
-    readelf -h "$ARCH64_BIN_BUILD/hello64.elf" | grep -q 'Class:.*ELF64'
-    readelf -h "$ARCH64_BIN_BUILD/hello64.elf" | grep -q 'Machine:.*X86-64'
-    nm "$ARCH64_BIN_BUILD/hello64.elf" | grep -q ' openos64_main$'
+    echo "[5/5] x86_64 kernel and hello64 user ELF linked."
 
     echo "[UEFI] Building x86_64 BOOTX64.EFI skeleton..."
     gcc $ARCH64_UEFI_CFLAGS -c "$ARCH64_SRC/boot/uefi64.c" -o "$ARCH64_BOOT_BUILD/uefi64.o"
@@ -1251,6 +1410,41 @@ gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
     -I $SRC/include \
+    -c $SRC/arch_ops.c -o $BUILD/arch_ops.o
+
+gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
+    -I $SRC/include \
+    -c $SRC/platform_ops.c -o $BUILD/platform_ops.o
+
+gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
+    -I $SRC/include \
+    -c $SRC/device.c -o $BUILD/device.o
+
+gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
+    -I $SRC/include \
+    -c $SRC/driver.c -o $BUILD/driver.o
+
+gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
+    -I $SRC/include \
+    -c $SRC/basic_devices.c -o $BUILD/basic_devices.o
+
+gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
+    -I $SRC/include \
+    -c $SRC/i386_arch_ops.c -o $BUILD/i386_arch_ops.o
+
+gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
+    -I $SRC/include \
+    -c $SRC/platform/pc_bios_platform_ops.c -o $BUILD/pc_bios_platform_ops.o
+
+gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
+    -I $SRC/include \
     -c $SRC/mm/pmm.c -o $BUILD/pmm.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
@@ -1336,12 +1530,27 @@ gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
     -I $SRC/include \
+    -c $SRC/drivers/virtio.c -o $BUILD/virtio.o
+
+gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
+    -I $SRC/include \
     -c $SRC/drivers/virtio_blk.c -o $BUILD/virtio_blk.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
     -I $SRC/include \
     -c $SRC/drivers/virtio_net.c -o $BUILD/virtio_net.o
+
+gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
+    -I $SRC/include \
+    -c $SRC/drivers/virtio_input.c -o $BUILD/virtio_input.o
+
+gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
+    -I $SRC/include \
+    -c $SRC/drivers/virtio_gpu.c -o $BUILD/virtio_gpu.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
@@ -1392,6 +1601,16 @@ gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -Os \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
     -I $SRC/include \
     -c $SRC/framebuffer.c -o $BUILD/framebuffer.o
+
+gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
+    -I $SRC/include \
+    -c $SRC/display.c -o $BUILD/display.o
+
+gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
+    -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
+    -I $SRC/include \
+    -c $SRC/input.c -o $BUILD/input.o
 
 gcc -m32 -ffreestanding -nostdlib -Wall -Wextra -O2 \
     -fno-pie -fno-stack-protector -fno-builtin -fno-pic -fno-jump-tables \
@@ -1591,6 +1810,13 @@ ld -m elf_i386 -T $SRC/linker.ld \
     $BUILD/kernel.o \
     $BUILD/idt.o \
     $BUILD/gdt.o \
+    $BUILD/arch_ops.o \
+    $BUILD/platform_ops.o \
+    $BUILD/device.o \
+    $BUILD/driver.o \
+    $BUILD/basic_devices.o \
+    $BUILD/i386_arch_ops.o \
+    $BUILD/pc_bios_platform_ops.o \
     $BUILD/pmm.o \
     $BUILD/vmm.o \
     $BUILD/heap.o \
@@ -1601,6 +1827,8 @@ ld -m elf_i386 -T $SRC/linker.ld \
     $BUILD/panic.o \
     $BUILD/vga.o \
     $BUILD/framebuffer.o \
+    $BUILD/display.o \
+    $BUILD/input.o \
     $BUILD/i18n.o \
     $BUILD/tls_crypto.o \
     $BUILD/tls_parser.o \
@@ -1625,8 +1853,11 @@ ld -m elf_i386 -T $SRC/linker.ld \
     $BUILD/blockdev.o \
     $BUILD/ata.o \
     $BUILD/ahci.o \
+    $BUILD/virtio.o \
     $BUILD/virtio_blk.o \
     $BUILD/virtio_net.o \
+    $BUILD/virtio_input.o \
+    $BUILD/virtio_gpu.o \
     $BUILD/e1000.o \
     $BUILD/rtl8139.o \
     $BUILD/pci.o \

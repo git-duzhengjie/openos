@@ -10,6 +10,21 @@
 typedef struct gui_window gui_window_t;
 typedef struct gui_widget gui_widget_t;
 
+/*
+ * OpenOS User GUI ABI v1.0.0 frozen compatibility layer.
+ *
+ * This header describes the existing kernel GUI bridge used by the
+ * i386/PC window_manager stack. Keep syscall numbers and public structure
+ * layouts backward compatible. New PC/Mobile shells should be built on the
+ * display/input abstraction instead of extending this compatibility ABI.
+ */
+#define OPENOS_GUI_USER_ABI_VERSION_MAJOR 1u
+#define OPENOS_GUI_USER_ABI_VERSION_MINOR 0u
+#define OPENOS_GUI_USER_ABI_VERSION_PATCH 0u
+#define OPENOS_GUI_USER_ABI_FROZEN 1u
+#define OPENOS_GUI_USER_SYSCALL_FIRST 320u
+#define OPENOS_GUI_USER_SYSCALL_LAST 457u
+
 #define GUI_USER_DRAW_FILL_RECT 1u
 #define GUI_USER_DRAW_TEXT      2u
 #define GUI_USER_DRAW_BLIT_RGBA32 3u

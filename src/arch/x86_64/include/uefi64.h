@@ -11,6 +11,9 @@
 
 #define EFIAPI __attribute__((ms_abi))
 
+#define EFI_SUCCESS 0ULL
+#define EFI_BUFFER_TOO_SMALL 0x8000000000000005ULL
+
 typedef void *efi_handle_t;
 typedef uint64_t efi_status_t;
 typedef uint16_t efi_char16_t;
@@ -25,9 +28,16 @@ typedef struct efi_table_header64 {
 
 typedef struct efi_simple_text_output_protocol64 efi_simple_text_output_protocol64_t;
 typedef struct efi_system_table64 efi_system_table64_t;
+typedef struct efi_boot_services64 efi_boot_services64_t;
+typedef struct efi_memory_descriptor64 efi_memory_descriptor64_t;
 
 typedef efi_status_t (EFIAPI *efi_text_string64_t)(efi_simple_text_output_protocol64_t *self,
                                                    const efi_char16_t *string);
+typedef efi_status_t (EFIAPI *efi_get_memory_map64_t)(uint64_t *memory_map_size,
+                                                      efi_memory_descriptor64_t *memory_map,
+                                                      uint64_t *map_key,
+                                                      uint64_t *descriptor_size,
+                                                      uint32_t *descriptor_version);
 
 struct efi_simple_text_output_protocol64 {
     void *reset;
@@ -42,6 +52,24 @@ struct efi_simple_text_output_protocol64 {
     void *mode;
 };
 
+struct efi_memory_descriptor64 {
+    uint32_t type;
+    uint32_t pad;
+    uint64_t physical_start;
+    uint64_t virtual_start;
+    uint64_t number_of_pages;
+    uint64_t attribute;
+};
+
+struct efi_boot_services64 {
+    efi_table_header64_t hdr;
+    void *raise_tpl;
+    void *restore_tpl;
+    void *allocate_pages;
+    void *free_pages;
+    efi_get_memory_map64_t get_memory_map;
+};
+
 struct efi_system_table64 {
     efi_table_header64_t hdr;
     efi_char16_t *firmware_vendor;
@@ -53,7 +81,7 @@ struct efi_system_table64 {
     efi_handle_t standard_error_handle;
     efi_simple_text_output_protocol64_t *std_err;
     void *runtime_services;
-    void *boot_services;
+    efi_boot_services64_t *boot_services;
     uint64_t number_of_table_entries;
     void *configuration_table;
 };

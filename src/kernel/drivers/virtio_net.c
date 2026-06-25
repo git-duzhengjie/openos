@@ -2,6 +2,7 @@
  * openos - virtio-net legacy PCI network driver
  * ============================================================ */
 #include "../include/virtio_net.h"
+#include "../include/virtio.h"
 #include "../include/idt.h"
 #include "../include/io.h"
 #include "../include/pci.h"
@@ -17,31 +18,6 @@
 
 #define PCI_CLASS_NETWORK      0x02u
 #define PCI_SUBCLASS_ETHERNET  0x00u
-
-#define VIRTIO_VENDOR_ID       0x1AF4u
-#define VIRTIO_DEVICE_NET_BASE 0x1000u
-#define VIRTIO_DEVICE_NET_MIN  0x1040u
-#define VIRTIO_DEVICE_NET_MAX  0x107Fu
-#define VIRTIO_DEVICE_NET_ID   0x0001u
-
-#define VIRTIO_PCI_HOST_FEATURES    0x00u
-#define VIRTIO_PCI_GUEST_FEATURES   0x04u
-#define VIRTIO_PCI_QUEUE_PFN        0x08u
-#define VIRTIO_PCI_QUEUE_NUM        0x0Cu
-#define VIRTIO_PCI_QUEUE_SEL        0x0Eu
-#define VIRTIO_PCI_QUEUE_NOTIFY     0x10u
-#define VIRTIO_PCI_STATUS           0x12u
-#define VIRTIO_PCI_ISR              0x13u
-#define VIRTIO_PCI_CONFIG           0x14u
-
-#define VIRTIO_STATUS_ACKNOWLEDGE   0x01u
-#define VIRTIO_STATUS_DRIVER        0x02u
-#define VIRTIO_STATUS_DRIVER_OK     0x04u
-#define VIRTIO_STATUS_FEATURES_OK   0x08u
-#define VIRTIO_STATUS_FAILED        0x80u
-
-#define VIRTQ_DESC_F_NEXT           1u
-#define VIRTQ_DESC_F_WRITE          2u
 
 #define VIRTIO_NET_F_MAC            5u
 
@@ -118,42 +94,24 @@ static virtio_net_queue_t virtio_net_txq[VIRTIO_NET_MAX_DEVICES] __attribute__((
 static uint8_t virtio_net_rx_buffers[VIRTIO_NET_MAX_DEVICES][VIRTIO_NET_RX_BUFS][VIRTIO_NET_FRAME_BUF] __attribute__((aligned(16)));
 static uint8_t virtio_net_tx_buffers[VIRTIO_NET_MAX_DEVICES][VIRTIO_NET_FRAME_BUF] __attribute__((aligned(16)));
 
-static void virtio_mb(void) {
-    __asm__ volatile ("" ::: "memory");
-}
-
-static uint32_t virtio_ptr32(const void *ptr) {
-    return (uint32_t)(uintptr_t)ptr;
-}
-
-static uint32_t virtio_bar_addr(uint8_t bus, uint8_t dev, uint8_t func, uint8_t off, int want_io) {
-    uint32_t bar = pci_read32(bus, dev, func, off);
-    if (bar == 0u || bar == 0xFFFFFFFFu) return 0u;
-    if ((bar & 0x1u) != 0u) return want_io ? (bar & 0xFFFFFFFCu) : 0u;
-    return want_io ? 0u : (bar & 0xFFFFFFF0u);
-}
-
 static void virtio_net_set_status(virtio_net_device_t *vdev, uint8_t status) {
-    outb((uint16_t)(vdev->io_base + VIRTIO_PCI_STATUS), status);
+    virtio_pci_set_status_legacy(vdev->io_base, status);
 }
 
 static void virtio_net_fail(virtio_net_device_t *vdev) {
-    if (vdev && vdev->io_base) virtio_net_set_status(vdev, VIRTIO_STATUS_FAILED);
+    if (vdev) virtio_pci_fail_legacy(vdev->io_base);
 }
 
 static int virtio_net_is_legacy(uint16_t vendor, uint16_t device,
                                 uint8_t class_code, uint8_t subclass) {
-    return vendor == VIRTIO_VENDOR_ID &&
-           device == VIRTIO_DEVICE_NET_BASE &&
+    return vendor == VIRTIO_PCI_VENDOR_ID &&
+           device == VIRTIO_LEGACY_NET_DEVICE &&
            class_code == PCI_CLASS_NETWORK &&
            subclass == PCI_SUBCLASS_ETHERNET;
 }
 
 static int virtio_net_is_modern(uint16_t vendor, uint16_t device) {
-    uint16_t modern_id;
-    if (vendor != VIRTIO_VENDOR_ID || device < VIRTIO_DEVICE_NET_MIN || device > VIRTIO_DEVICE_NET_MAX) return 0;
-    modern_id = (uint16_t)(device - VIRTIO_DEVICE_NET_MIN);
-    return modern_id == VIRTIO_DEVICE_NET_ID;
+    return virtio_pci_is_modern_device(vendor, device, VIRTIO_MODERN_NET_ID);
 }
 
 static void virtio_net_make_name(char *out, uint32_t index) {
@@ -189,11 +147,11 @@ static int virtio_net_setup_queue(virtio_net_device_t *vdev, uint16_t queue_inde
                                   virtio_net_queue_t *queue) {
     uint16_t queue_num;
     memset(queue, 0, sizeof(*queue));
-    outw((uint16_t)(vdev->io_base + VIRTIO_PCI_QUEUE_SEL), queue_index);
-    queue_num = inw((uint16_t)(vdev->io_base + VIRTIO_PCI_QUEUE_NUM));
-    if (queue_num == 0u || queue_num < VIRTIO_NET_QUEUE_SIZE) return -1;
-    outl((uint16_t)(vdev->io_base + VIRTIO_PCI_QUEUE_PFN), virtio_ptr32(queue) >> 12);
-    return inl((uint16_t)(vdev->io_base + VIRTIO_PCI_QUEUE_PFN)) == 0u ? -1 : 0;
+    if (virtio_pci_setup_queue_legacy(vdev->io_base, queue_index, queue,
+                                      VIRTIO_NET_QUEUE_SIZE, &queue_num) != 0) {
+        return -1;
+    }
+    return 0;
 }
 
 static void virtio_net_rx_post(virtio_net_device_t *vdev, uint16_t desc_id) {
@@ -241,7 +199,7 @@ static void virtio_net_poll_rx_device(virtio_net_device_t *vdev) {
         virtio_net_rx_post(vdev, desc_id);
     }
     virtio_mb();
-    outw((uint16_t)(vdev->io_base + VIRTIO_PCI_QUEUE_NOTIFY), 0u);
+    virtio_pci_notify_queue_legacy(vdev->io_base, 0u);
 }
 
 static int virtio_net_transmit(net_device_t *dev, const uint8_t *frame, uint16_t len) {
@@ -273,7 +231,7 @@ static int virtio_net_transmit(net_device_t *dev, const uint8_t *frame, uint16_t
     virtio_mb();
     q->avail.idx++;
     virtio_mb();
-    outw((uint16_t)(vdev->io_base + VIRTIO_PCI_QUEUE_NOTIFY), 1u);
+    virtio_pci_notify_queue_legacy(vdev->io_base, 1u);
 
     for (i = 0; i < VIRTIO_NET_WAIT_LIMIT; i++) {
         if (q->used.idx != start_used) {
@@ -307,14 +265,14 @@ static int virtio_net_hw_init(virtio_net_device_t *vdev, uint32_t index) {
 
     if (vdev->io_base == 0u) return -1;
 
-    outb((uint16_t)(vdev->io_base + VIRTIO_PCI_STATUS), 0u);
+    virtio_pci_reset_legacy(vdev->io_base);
     status = VIRTIO_STATUS_ACKNOWLEDGE;
     virtio_net_set_status(vdev, status);
     status |= VIRTIO_STATUS_DRIVER;
     virtio_net_set_status(vdev, status);
 
     virtio_net_read_mac(vdev);
-    outl((uint16_t)(vdev->io_base + VIRTIO_PCI_GUEST_FEATURES), 0u);
+    virtio_pci_write_features_legacy(vdev->io_base, 0u);
     status |= VIRTIO_STATUS_FEATURES_OK;
     virtio_net_set_status(vdev, status);
 
@@ -332,7 +290,7 @@ static int virtio_net_hw_init(virtio_net_device_t *vdev, uint32_t index) {
         virtio_net_rx_post(vdev, (uint16_t)i);
     }
     virtio_mb();
-    outw((uint16_t)(vdev->io_base + VIRTIO_PCI_QUEUE_NOTIFY), 0u);
+    virtio_pci_notify_queue_legacy(vdev->io_base, 0u);
 
     status |= VIRTIO_STATUS_DRIVER_OK;
     virtio_net_set_status(vdev, status);
@@ -369,9 +327,9 @@ static void virtio_net_register(uint8_t bus, uint8_t dev, uint8_t func,
     vdev->vendor_id = vendor;
     vdev->device_id = device;
     vdev->kind = kind;
-    vdev->io_base = virtio_bar_addr(bus, dev, func, PCI_OFFSET_BAR0, 1);
-    vdev->mmio_base = virtio_bar_addr(bus, dev, func, PCI_OFFSET_BAR0, 0);
-    if (vdev->mmio_base == 0u) vdev->mmio_base = virtio_bar_addr(bus, dev, func, PCI_OFFSET_BAR1, 0);
+    vdev->io_base = virtio_pci_bar_base(bus, dev, func, 0u, 1u);
+    vdev->mmio_base = virtio_pci_bar_base(bus, dev, func, 0u, 0u);
+    if (vdev->mmio_base == 0u) vdev->mmio_base = virtio_pci_bar_base(bus, dev, func, 1u, 0u);
     virtio_net_make_name(vdev->name, index);
 
     netdev = &vdev->netdev;

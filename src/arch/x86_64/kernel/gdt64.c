@@ -1,4 +1,5 @@
 #include "../include/gdt64.h"
+#include "../include/early_console64.h"
 #include "../include/tss64.h"
 
 #define GDT64_ENTRY_COUNT 8u
@@ -75,6 +76,22 @@ void arch_x86_64_gdt_init(void) {
         :
         : "m"(gdt64_ptr), [data] "i"(OPENOS_X86_64_GDT_KERNEL_DATA)
         : "rax", "memory");
+}
+
+void arch_x86_64_gdt_print_status(void) {
+    early_console64_write("[x86_64][gdt] entries=");
+    early_console64_write_hex64(GDT64_ENTRY_COUNT);
+    early_console64_write(" kernel_cs=");
+    early_console64_write_hex64(OPENOS_X86_64_GDT_KERNEL_CODE);
+    early_console64_write(" kernel_ds=");
+    early_console64_write_hex64(OPENOS_X86_64_GDT_KERNEL_DATA);
+    early_console64_write(" user_cs=");
+    early_console64_write_hex64(OPENOS_X86_64_GDT_USER_CODE | 3u);
+    early_console64_write(" user32_cs=");
+    early_console64_write_hex64(OPENOS_X86_64_GDT_USER32_CODE | 3u);
+    early_console64_write(" tss=");
+    early_console64_write_hex64(OPENOS_X86_64_GDT_TSS);
+    early_console64_write("\n");
 }
 
 uint16_t arch_x86_64_gdt_kernel_code_selector(void) {

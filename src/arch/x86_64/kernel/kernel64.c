@@ -2,15 +2,25 @@
 #include "../include/compat32.h"
 #include "../include/early_console64.h"
 #include "../include/elf64_loader.h"
+#include "../include/embed_hello64.h"
 #include "../include/gdt64.h"
 #include "../include/heap64.h"
+#include "../include/handoff64.h"
 #include "../include/idt64.h"
+#include "../include/initrd64.h"
 #include "../include/pmm64.h"
 #include "../include/sched64.h"
+#include "../include/shell64.h"
 #include "../include/syscall64.h"
 #include "../include/tss64.h"
 #include "../include/usermode64.h"
+#include "../include/vfs64.h"
 #include "../include/vmm64.h"
+#include "arch_ops.h"
+#include "platform_ops.h"
+#include "x86_64_arch_ops.h"
+#include "pc_uefi_platform_ops.h"
+#include "basic_devices.h"
 
 static const char x86_64_boot_log[] = "[x86_64] OpenOS entered kernel_main64\n";
 static const char x86_64_console_log[] = "[x86_64] early console: serial + VGA ready\n";
@@ -19,27 +29,71 @@ static const char x86_64_vmm_log[] = "[x86_64] 4-level virtual memory manager re
 static const char x86_64_heap_log[] = "[x86_64] kernel heap allocator ready\n";
 static const char x86_64_elf64_log[] = "[x86_64] ELF64 loader ready\n";
 static const char x86_64_usermode_log[] = "[x86_64] usermode iretq return ready\n";
+static const char x86_64_initrd_log[] = "[x86_64] initrd/VFS/shell bootstrap ready\n";
 static const char x86_64_compat32_log[] = "[x86_64] compat32 evaluation ready\n";
 
-void arch_x86_64_early_init(void) {
+void arch_x86_64_early_init(const openos_bootinfo_t *bootinfo) {
+    openos_x86_64_arch_ops_init();
+    openos_pc_uefi_platform_ops_init();
     arch_x86_64_tss_init();
     arch_x86_64_gdt_init();
     arch_x86_64_tss_load();
     arch_x86_64_idt_init();
     early_console64_init();
+    early_console64_write("[x86_64] arch_ops=");
+    early_console64_write(openos_arch_ops_name());
+    early_console64_write(" platform_ops=");
+    early_console64_write(openos_platform_ops_name());
+    early_console64_write("\n");
+    openos_basic_devices_register();
+    early_console64_write("[x86_64] device_model initialized\n");
+
+    if (openos_bootinfo_is_valid(bootinfo) &&
+        (bootinfo->flags & OPENOS_BOOTINFO_FLAG_FRAMEBUFFER_VALID)) {
+        early_framebuffer64_info_t framebuffer;
+        framebuffer.base = bootinfo->framebuffer.base;
+        framebuffer.width = bootinfo->framebuffer.width;
+        framebuffer.height = bootinfo->framebuffer.height;
+        framebuffer.pitch = bootinfo->framebuffer.pitch;
+        framebuffer.bpp = bootinfo->framebuffer.bpp;
+        framebuffer.format = OPENOS_X86_64_EARLY_FB_FORMAT_XRGB8888;
+        framebuffer.available = 1u;
+        early_framebuffer64_init(&framebuffer);
+        early_console64_write("[x86_64] OpenOSBootInfo framebuffer active\n");
+    } else {
+        early_console64_write("[x86_64] OpenOSBootInfo framebuffer missing\n");
+    }
+
     arch_x86_64_sched_init();
     arch_x86_64_syscall_init();
-    arch_x86_64_pmm_init(0, 0);
+    arch_x86_64_memory_init_from_bootinfo(bootinfo);
     arch_x86_64_vmm_init();
     arch_x86_64_heap_init();
     arch_x86_64_elf64_loader_init();
     arch_x86_64_usermode_init();
+    arch_x86_64_initrd_init(bootinfo);
+    arch_x86_64_vfs_init();
+    arch_x86_64_shell_init();
     arch_x86_64_compat32_init();
 }
 
-void kernel_main64(void) {
-    arch_x86_64_early_init();
+void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
+    const openos_bootinfo_t *bootinfo = arch_x86_64_bootinfo_from_uefi_handoff(handoff);
+
+    arch_x86_64_early_init(bootinfo);
     early_console64_write(x86_64_boot_log);
+    if (openos_bootinfo_is_valid(bootinfo) &&
+        (bootinfo->flags & OPENOS_BOOTINFO_FLAG_CMDLINE_VALID)) {
+        early_console64_write("[x86_64] OpenOSBootInfo cmdline base=");
+        early_console64_write_hex64(bootinfo->cmdline);
+        early_console64_write(" size=");
+        early_console64_write_hex64(bootinfo->cmdline_size);
+        early_console64_write("\n");
+    }
+    arch_x86_64_gdt_print_status();
+    arch_x86_64_tss_print_status();
+    arch_x86_64_idt_print_status();
+    arch_x86_64_handoff_print_status();
     early_console64_write(x86_64_console_log);
     arch_x86_64_sched_print_status();
     arch_x86_64_syscall_print_status();
@@ -52,10 +106,46 @@ void kernel_main64(void) {
     early_console64_write(x86_64_elf64_log);
     arch_x86_64_elf64_loader_print_status();
     early_console64_write(x86_64_usermode_log);
+
+    early_console64_write("[x86_64][user] loading embedded hello64.elf size=");
+    early_console64_write_hex64((uint64_t)hello64_elf_size);
+    early_console64_write("\n");
+    elf64_load_result_t hello64 = arch_x86_64_elf64_load_image(hello64_elf, (x86_64_size_t)hello64_elf_size);
+    if (hello64.status == ELF64_LOADER_OK) {
+        early_console64_write("[x86_64][user] entering ring3 hello64 entry=");
+        early_console64_write_hex64((uint64_t)hello64.entry);
+        early_console64_write("\n");
+        (void)arch_x86_64_usermode_run(hello64.entry);
+        early_console64_write("[x86_64][user] hello64 returned exit_code=");
+        early_console64_write_hex64((uint64_t)(uint32_t)arch_x86_64_usermode_exit_code());
+        early_console64_write(" exited=");
+        early_console64_write_hex64(arch_x86_64_usermode_has_exited());
+        early_console64_write("\n");
+    } else {
+        early_console64_write("[x86_64][user] hello64 load failed status=");
+        early_console64_write_hex64((uint64_t)(uint32_t)hello64.status);
+        early_console64_write("\n");
+    }
+    arch_x86_64_elf64_loader_print_status();
     arch_x86_64_usermode_print_status();
+
+    early_console64_write(x86_64_initrd_log);
+    int initrd_mount_status = arch_x86_64_vfs_mount_initrd(arch_x86_64_initrd_get_image());
+    early_console64_write("[x86_64][initrd] mount_status=");
+    early_console64_write_hex64((uint64_t)(uint32_t)initrd_mount_status);
+    early_console64_write("\n");
+    arch_x86_64_initrd_print_status();
+    arch_x86_64_vfs_print_status();
+    arch_x86_64_shell_run_init();
+    arch_x86_64_shell_print_status();
+    arch_x86_64_vfs_print_status();
     early_console64_write(x86_64_compat32_log);
     arch_x86_64_compat32_print_status();
     for (;;) {
         __asm__ __volatile__("hlt");
     }
+}
+
+void kernel_main64(void) {
+    kernel_main64_with_handoff(0);
 }

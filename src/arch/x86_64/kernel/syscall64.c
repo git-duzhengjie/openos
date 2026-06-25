@@ -4,13 +4,38 @@
 
 #include "../include/early_console64.h"
 #include "../include/gdt64.h"
+#include "../include/usermode64.h"
 
 extern void x86_64_syscall_entry(void);
+extern void arch_x86_64_usermode_syscall_return_trampoline(void);
 
 static uint32_t syscall64_current_abi;
 static uint64_t int80_dispatch_count;
 static uint64_t syscall_dispatch_count;
 static uint8_t syscall_sysret_enabled;
+
+#define OPENOS_X86_64_SYS_EXIT 1u
+#define OPENOS_X86_64_SYS_WRITE 4u
+#define OPENOS_X86_64_SYS_GETPID 20u
+
+static uint64_t syscall64_write(uint64_t fd, const char *buf, uint64_t len) {
+    uint64_t i;
+
+    if (fd != 1u && fd != 2u) {
+        return (uint64_t)-1;
+    }
+    if (buf == NULL) {
+        return (uint64_t)-1;
+    }
+    for (i = 0; i < len; ++i) {
+        char ch = buf[i];
+        if (ch == 0) {
+            break;
+        }
+        early_console64_putc(ch);
+    }
+    return i;
+}
 
 static uint64_t rdmsr64(uint32_t msr) {
     uint32_t lo;
@@ -63,7 +88,12 @@ uint64_t arch_x86_64_int80_dispatch(x86_64_int80_frame_t *frame) {
      * is implemented separately.
      */
     switch (syscall_no) {
-    case 20u: /* SYS_GETPID */
+    case OPENOS_X86_64_SYS_WRITE:
+        return syscall64_write(frame->rbx, (const char *)(uintptr_t)frame->rcx, frame->rdx);
+    case OPENOS_X86_64_SYS_GETPID:
+        return 1;
+    case OPENOS_X86_64_SYS_EXIT:
+        arch_x86_64_usermode_mark_exited((int)frame->rbx);
         return 0;
     default:
         return (uint64_t)-1;
@@ -80,7 +110,14 @@ uint64_t arch_x86_64_syscall_dispatch(x86_64_syscall_frame_t *frame) {
 
     syscall_no = frame->rax;
     switch (syscall_no) {
-    case 20u: /* SYS_GETPID */
+    case OPENOS_X86_64_SYS_WRITE:
+        return syscall64_write(frame->rdi, (const char *)(uintptr_t)frame->rsi, frame->rdx);
+    case OPENOS_X86_64_SYS_GETPID:
+        return 1;
+    case OPENOS_X86_64_SYS_EXIT:
+        arch_x86_64_usermode_mark_exited((int)frame->rdi);
+        frame->rcx = (uint64_t)(uintptr_t)arch_x86_64_usermode_syscall_return_trampoline;
+        frame->r11 = 0x202ULL;
         return 0;
     default:
         return (uint64_t)-1;

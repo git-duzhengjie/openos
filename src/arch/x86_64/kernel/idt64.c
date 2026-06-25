@@ -1,5 +1,6 @@
 #include "../include/gdt64.h"
 #include "../include/idt64.h"
+#include "../include/early_console64.h"
 
 struct idt64_entry {
     uint16_t offset_low;
@@ -115,6 +116,18 @@ void arch_x86_64_idt_init(void) {
     idt64_ptr.limit = (uint16_t)(sizeof(idt64) - 1u);
     idt64_ptr.base = (x86_64_virt_addr_t)(uintptr_t)&idt64[0];
     __asm__ __volatile__("lidt %0" : : "m"(idt64_ptr) : "memory");
+}
+
+void arch_x86_64_idt_print_status(void) {
+    early_console64_write("[x86_64][idt] entries=");
+    early_console64_write_hex64(OPENOS_X86_64_IDT_ENTRY_COUNT);
+    early_console64_write(" exceptions=");
+    early_console64_write_hex64(OPENOS_X86_64_EXCEPTION_COUNT);
+    early_console64_write(" int80_dpl=3 base=");
+    early_console64_write_hex64(idt64_ptr.base);
+    early_console64_write(" limit=");
+    early_console64_write_hex64(idt64_ptr.limit);
+    early_console64_write("\n");
 }
 
 void arch_x86_64_exception_dispatch(const struct x86_64_exception_frame *frame) {

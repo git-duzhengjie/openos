@@ -13,11 +13,49 @@
 
 当前状态：目录骨架已建立，已支持 64 位 GDT、TSS、`rsp0`、IST 栈、IDT、32 个异常入口、`int 0x80` syscall 兼容入口、`syscall/sysret` MSR 配置与 LSTAR 入口、串口/VGA 早期控制台、framebuffer 描述/像素输出接口、64 位 `rsp/rip/rflags/r8-r15` 调度上下文、64 位 PMM、4 级分页 VMM、内核堆分配器、ELF64 loader、用户态 `iretq` 返回 frame、x86_64 用户态 `crt0/syscall` wrapper、`/bin/hello64` 回归 ELF 构建、32 位用户程序兼容性评估骨架与 UEFI `BOOTX64.EFI` 启动骨架，默认 i386 构建仍保持稳定。
 
+## x86_64 启动路径约定
+
+### UEFI `BOOTX64.EFI` 启动链
+
+`ARCH=x86_64 bash build.sh` 会构建 UEFI 骨架加载器：
+
+```text
+src/arch/x86_64/boot/uefi64_crt0.S
+→ efi_main() in src/arch/x86_64/boot/uefi64.c
+→ target/x86_64/boot/uefi64_loader.elf
+→ objcopy -O pei-x86-64 --subsystem=10
+→ target/x86_64/boot/BOOTX64.EFI
+```
+
+当前 `BOOTX64.EFI` 负责验证 PE/COFF UEFI 入口、输出 `OpenOS x86_64 UEFI loader ready`，并填充早期 `uefi64_handoff_info_t` 骨架。后续应在该路径继续接入 memory map、framebuffer、ACPI RSDP、initrd、cmdline，并转换为统一 `OpenOSBootInfo` 后再跳转 64 位内核入口。
+
+### BIOS long mode boot stub
+
+`src/arch/x86_64/boot/boot64.asm` 是兼容/调试用的 BIOS long mode 自举骨架，构建产物为：
+
+```text
+target/x86_64/boot/boot64.bin
+```
+
+该 stub 当前覆盖 16-bit real mode → 32-bit protected mode → PAE/PML4/2MiB identity map → EFER.LME → paging → 64-bit code segment 的基本切换链路，并校验 512 字节 MBR 大小和 `0x55AA` 启动签名。它不替代稳定 i386 启动路径，也暂不作为 x86_64 产品主启动路径。
+
+### linker、入口和早期栈
+
+x86_64 内核统一使用：
+
+```text
+linker: src/arch/x86_64/linker64.ld
+entry : _start64 in src/arch/x86_64/kernel/entry64.S
+stack : kernel64_stack_bottom/kernel64_stack_top from .bss
+```
+
+`linker64.ld` 规定 2MiB 物理加载基址、higher-half 虚拟基址 `0xFFFFFFFF80000000`、入口符号 `_start64`，并在 `.bss` 中预留 64KiB 早期内核栈。`entry64.S` 在进入 `kernel_main64()` 前关闭中断、设置 `rsp = kernel64_stack_top` 并做 16 字节对齐。
+
 推荐验证方式：
 
 ```bash
 ARCH=x86_64 bash build.sh
-# 输出 target/x86_64/kernel64.elf、target/x86_64/bin/hello64.elf 与 target/x86_64/boot/BOOTX64.EFI
+# 输出 target/x86_64/kernel64.elf、target/x86_64/bin/hello64.elf、target/x86_64/boot/BOOTX64.EFI 与 target/x86_64/boot/boot64.bin
 ```
 
 手动验证 64 位骨架时应使用内核代码模型和禁用 red-zone，例如：

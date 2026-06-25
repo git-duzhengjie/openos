@@ -2,6 +2,7 @@
  * openos - virtio-blk legacy PCI block driver
  * ============================================================ */
 #include "../include/virtio_blk.h"
+#include "../include/virtio.h"
 #include "../include/blockdev.h"
 #include "../include/io.h"
 #include "../include/pci.h"
@@ -14,31 +15,6 @@
 #define VIRTIO_BLK_MAJOR 5u
 #define VIRTIO_BLK_QUEUE_SIZE 8u
 #define VIRTIO_BLK_WAIT_LIMIT 1000000u
-
-#define VIRTIO_PCI_VENDOR_ID        0x1AF4u
-#define VIRTIO_LEGACY_BLK_DEVICE   0x1001u
-#define VIRTIO_MODERN_DEVICE_MIN   0x1040u
-#define VIRTIO_MODERN_DEVICE_MAX   0x107Fu
-#define VIRTIO_MODERN_BLK_ID       2u
-
-#define VIRTIO_PCI_HOST_FEATURES    0x00u
-#define VIRTIO_PCI_GUEST_FEATURES   0x04u
-#define VIRTIO_PCI_QUEUE_PFN        0x08u
-#define VIRTIO_PCI_QUEUE_NUM        0x0Cu
-#define VIRTIO_PCI_QUEUE_SEL        0x0Eu
-#define VIRTIO_PCI_QUEUE_NOTIFY     0x10u
-#define VIRTIO_PCI_STATUS           0x12u
-#define VIRTIO_PCI_ISR              0x13u
-#define VIRTIO_PCI_CONFIG           0x14u
-
-#define VIRTIO_STATUS_ACKNOWLEDGE   0x01u
-#define VIRTIO_STATUS_DRIVER        0x02u
-#define VIRTIO_STATUS_DRIVER_OK     0x04u
-#define VIRTIO_STATUS_FEATURES_OK   0x08u
-#define VIRTIO_STATUS_FAILED        0x80u
-
-#define VIRTQ_DESC_F_NEXT           1u
-#define VIRTQ_DESC_F_WRITE          2u
 
 #define VIRTIO_BLK_F_RO             5u
 #define VIRTIO_BLK_T_IN             0u
@@ -110,37 +86,16 @@ static blockdev_ops_t virtio_blk_ops;
 static uint32_t virtio_blk_count;
 static virtio_blk_queue_t virtio_blk_queues[VIRTIO_BLK_MAX_DEVICES] __attribute__((aligned(4096)));
 
-static void virtio_mb(void) {
-    __asm__ volatile ("" ::: "memory");
-}
-
-static uint32_t virtio_ptr32(const void *ptr) {
-    return (uint32_t)(uintptr_t)ptr;
-}
-
-static uint64_t virtio_io_read64(uint16_t port) {
-    uint32_t lo = inl(port);
-    uint32_t hi = inl((uint16_t)(port + 4u));
-    return ((uint64_t)hi << 32) | lo;
-}
-
 static uint32_t virtio_blk_config_read32(virtio_blk_device_t *vdev, uint16_t offset) {
-    return inl((uint16_t)(vdev->io_base + VIRTIO_PCI_CONFIG + offset));
+    return virtio_pci_config_read32_legacy(vdev->io_base, offset);
 }
 
 static uint64_t virtio_blk_config_read64(virtio_blk_device_t *vdev, uint16_t offset) {
-    return virtio_io_read64((uint16_t)(vdev->io_base + VIRTIO_PCI_CONFIG + offset));
+    return virtio_pci_config_read64_legacy(vdev->io_base, offset);
 }
 
 static int virtio_blk_read_blocks(blockdev_t *dev, uint32_t lba, uint32_t count, void *buf);
 static int virtio_blk_write_blocks(blockdev_t *dev, uint32_t lba, uint32_t count, const void *buf);
-
-static uint32_t virtio_blk_bar_base(uint8_t bus, uint8_t dev, uint8_t func, uint8_t bar_index, uint8_t want_io) {
-    uint32_t bar = pci_read32(bus, dev, func, (uint8_t)(PCI_OFFSET_BAR0 + (bar_index * 4u)));
-    if (bar == 0u || bar == 0xFFFFFFFFu) return 0u;
-    if ((bar & 0x1u) != 0u) return want_io ? (bar & ~0x3u) : 0u;
-    return want_io ? 0u : (bar & ~0xFu);
-}
 
 static uint8_t virtio_blk_is_supported(uint16_t vendor, uint16_t device, virtio_blk_kind_t *kind) {
     uint16_t modern_id;
@@ -171,25 +126,19 @@ static void virtio_blk_make_dev_path(char *out, const char *name) {
 }
 
 static void virtio_blk_fail_device(virtio_blk_device_t *vdev) {
-    if (vdev && vdev->io_base) {
-        outb((uint16_t)(vdev->io_base + VIRTIO_PCI_STATUS), VIRTIO_STATUS_FAILED);
-    }
+    if (vdev) virtio_pci_fail_legacy(vdev->io_base);
 }
 
 static int virtio_blk_setup_legacy_queue(virtio_blk_device_t *vdev, uint32_t index) {
     uint16_t queue_num;
-    uint32_t queue_pfn;
 
     vdev->queue = &virtio_blk_queues[index];
     memset(vdev->queue, 0, sizeof(*vdev->queue));
 
-    outw((uint16_t)(vdev->io_base + VIRTIO_PCI_QUEUE_SEL), 0u);
-    queue_num = inw((uint16_t)(vdev->io_base + VIRTIO_PCI_QUEUE_NUM));
-    if (queue_num == 0u || queue_num < VIRTIO_BLK_QUEUE_SIZE) return -1;
-
-    queue_pfn = virtio_ptr32(vdev->queue) >> 12;
-    outl((uint16_t)(vdev->io_base + VIRTIO_PCI_QUEUE_PFN), queue_pfn);
-    if (inl((uint16_t)(vdev->io_base + VIRTIO_PCI_QUEUE_PFN)) == 0u) return -1;
+    if (virtio_pci_setup_queue_legacy(vdev->io_base, 0u, vdev->queue,
+                                      VIRTIO_BLK_QUEUE_SIZE, &queue_num) != 0) {
+        return -1;
+    }
 
     vdev->last_used_idx = 0u;
     return 0;
@@ -203,16 +152,16 @@ static int virtio_blk_setup_legacy(virtio_blk_device_t *vdev, uint32_t index) {
 
     if (vdev->io_base == 0u) return -1;
 
-    outb((uint16_t)(vdev->io_base + VIRTIO_PCI_STATUS), 0u);
-    outb((uint16_t)(vdev->io_base + VIRTIO_PCI_STATUS), VIRTIO_STATUS_ACKNOWLEDGE);
-    outb((uint16_t)(vdev->io_base + VIRTIO_PCI_STATUS), VIRTIO_STATUS_ACKNOWLEDGE | VIRTIO_STATUS_DRIVER);
+    virtio_pci_reset_legacy(vdev->io_base);
+    virtio_pci_set_status_legacy(vdev->io_base, VIRTIO_STATUS_ACKNOWLEDGE);
+    virtio_pci_set_status_legacy(vdev->io_base, VIRTIO_STATUS_ACKNOWLEDGE | VIRTIO_STATUS_DRIVER);
 
-    host_features = inl((uint16_t)(vdev->io_base + VIRTIO_PCI_HOST_FEATURES));
+    host_features = virtio_pci_read_features_legacy(vdev->io_base);
     if ((host_features & (1u << VIRTIO_BLK_F_RO)) != 0u) vdev->readonly = 1u;
-    outl((uint16_t)(vdev->io_base + VIRTIO_PCI_GUEST_FEATURES), guest_features);
+    virtio_pci_write_features_legacy(vdev->io_base, guest_features);
 
     status = (uint8_t)(VIRTIO_STATUS_ACKNOWLEDGE | VIRTIO_STATUS_DRIVER | VIRTIO_STATUS_FEATURES_OK);
-    outb((uint16_t)(vdev->io_base + VIRTIO_PCI_STATUS), status);
+    virtio_pci_set_status_legacy(vdev->io_base, status);
 
     if (virtio_blk_setup_legacy_queue(vdev, index) != 0) {
         virtio_blk_fail_device(vdev);
@@ -229,8 +178,8 @@ static int virtio_blk_setup_legacy(virtio_blk_device_t *vdev, uint32_t index) {
         return -1;
     }
 
-    outb((uint16_t)(vdev->io_base + VIRTIO_PCI_STATUS),
-         (uint8_t)(status | VIRTIO_STATUS_DRIVER_OK));
+    virtio_pci_set_status_legacy(vdev->io_base,
+                                  (uint8_t)(status | VIRTIO_STATUS_DRIVER_OK));
     return 0;
 }
 
@@ -272,7 +221,7 @@ static int virtio_blk_request(virtio_blk_device_t *vdev, uint32_t type,
     start_used = q->used.idx;
     q->avail.idx++;
     virtio_mb();
-    outw((uint16_t)(vdev->io_base + VIRTIO_PCI_QUEUE_NOTIFY), 0u);
+    virtio_pci_notify_queue_legacy(vdev->io_base, 0u);
 
     for (i = 0; i < VIRTIO_BLK_WAIT_LIMIT; i++) {
         if (q->used.idx != start_used) {
@@ -326,8 +275,8 @@ static void virtio_blk_probe_function(uint8_t bus, uint8_t dev, uint8_t func) {
     vdev->func = func;
     vdev->device_id = device;
     vdev->kind = kind;
-    vdev->io_base = virtio_blk_bar_base(bus, dev, func, 0, 1);
-    vdev->mmio_base = virtio_blk_bar_base(bus, dev, func, 0, 0);
+    vdev->io_base = virtio_pci_bar_base(bus, dev, func, 0u, 1u);
+    vdev->mmio_base = virtio_pci_bar_base(bus, dev, func, 0u, 0u);
     virtio_blk_make_name(vdev->name, index);
 
     if (virtio_blk_setup_legacy(vdev, index) != 0) {

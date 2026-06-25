@@ -94,9 +94,13 @@ static vmm64_table_t *alloc_table(x86_64_phys_addr_t *phys_out) {
     return table;
 }
 
-static vmm64_table_t *walk_create(x86_64_virt_addr_t virt_addr) {
+static vmm64_table_t *walk_create_with_flags(x86_64_virt_addr_t virt_addr, uint64_t flags) {
     x86_64_phys_addr_t phys;
     uint64_t entry_flags = OPENOS_X86_64_PTE_PRESENT | OPENOS_X86_64_PTE_RW;
+
+    if ((flags & OPENOS_X86_64_PTE_USER) != 0) {
+        entry_flags |= OPENOS_X86_64_PTE_USER;
+    }
     vmm64_table_t *pdpt;
     vmm64_table_t *pd;
     vmm64_table_t *pt;
@@ -164,7 +168,7 @@ int arch_x86_64_vmm_map_page(x86_64_virt_addr_t virt_addr, x86_64_phys_addr_t ph
 
     virt_addr = align_down_virt(virt_addr);
     phys_addr = align_down_virt(phys_addr);
-    pt = walk_create(virt_addr);
+    pt = walk_create_with_flags(virt_addr, flags);
     if (!pt) {
         return -1;
     }

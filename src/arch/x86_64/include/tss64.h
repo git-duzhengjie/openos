@@ -22,6 +22,7 @@ struct x86_64_tss {
 
 void arch_x86_64_tss_init(void);
 void arch_x86_64_tss_load(void);
+void arch_x86_64_tss_print_status(void);
 
 const struct x86_64_tss *arch_x86_64_tss_get(void);
 x86_64_virt_addr_t arch_x86_64_tss_base(void);
