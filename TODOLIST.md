@@ -247,12 +247,12 @@
 
 ### A9：推荐目录演进
 
-- [ ] A9.1：先新增公共头文件，不破坏旧路径
-  - [ ] `src/kernel/include/bootinfo.h`
-  - [ ] `src/kernel/include/arch_ops.h`
-  - [ ] `src/kernel/include/platform_ops.h`
-  - [ ] `src/kernel/include/device.h`
-  - [ ] `src/kernel/include/driver.h`
+- [x] A9.1：先新增公共头文件，不破坏旧路径
+  - [x] `src/kernel/include/bootinfo.h`
+  - [x] `src/kernel/include/arch_ops.h`
+  - [x] `src/kernel/include/platform_ops.h`
+  - [x] `src/kernel/include/device.h`
+  - [x] `src/kernel/include/driver.h`
 - [ ] A9.2：逐步新增公共实现目录
   - [ ] `src/kernel/core/`
   - [ ] `src/kernel/platform/`
@@ -282,10 +282,10 @@
 
 ### A11：阶段验收里程碑
 
-- [ ] M1：当前主线稳定
-  - [ ] `bash build.sh test` 通过
-  - [ ] `bash build.sh` 通过
-  - [ ] `ARCH=x86_64 bash build.sh` 通过
+- [x] M1：当前主线稳定
+  - [x] `bash build.sh test` 通过
+  - [x] `bash build.sh` 通过
+  - [x] `ARCH=x86_64 bash build.sh` 通过
 - [ ] M2：x86_64 能运行第一个用户态程序
   - [ ] `kernel64.elf` 启动
   - [ ] 初始化 GDT / IDT / TSS / syscall
