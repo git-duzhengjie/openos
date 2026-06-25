@@ -36,7 +36,7 @@ qemu-system-i386 -m 512M -drive file=target/openos.img,format=raw -serial stdio 
 | x86_64 | 已有 GDT、TSS、IDT、异常入口、syscall/sysret、PMM、VMM、heap、ELF64 loader、UEFI `BOOTX64.EFI` 骨架和 `hello64.elf` 回归程序 | PC 产品主线，逐步补齐 initrd、VFS、init、shell |
 | ARM32 | `src/arch/arm` 当前是 ARM 32 位移植骨架，包含 QEMU virt 常量、PL011 UART、`_start` 和异常向量占位；它不是 Mobile 所需的 ARM64 主线 | 保留为实验/参考骨架 |
 | RISC-V RV64 | `src/arch/riscv` 当前是早期 RV64 骨架，包含 QEMU virt 常量、UART、`_start` 和 kernel main；trap、MMU、PLIC、CLINT、用户态仍待推进 | 长期多架构探索，不阻塞 PC/Mobile 主线 |
-| aarch64 | 尚未建立目录和构建链 | Mobile 基础主线，优先从 QEMU virt 启动 |
+| aarch64 | 已建立 QEMU virt 最小主线，支持 PL011 串口、EL1 启动、异常向量、ELF64 loader、hello64 staged、initrd -> VFS -> /bin/init -> /bin/sh 冒烟 | Mobile 基础主线，继续补齐真实 EL0 运行、系统服务和移动平台能力 |
 
 跨架构基础门禁命令：
 
@@ -49,7 +49,16 @@ bash build.sh
 
 # x86_64 骨架构建，输出 kernel64.elf / BOOTX64.EFI 等产物
 ARCH=x86_64 bash build.sh
+
+# aarch64 QEMU virt 最小主线构建，输出 target/aarch64/openos-aarch64.elf / .bin
+ARCH=aarch64 bash build.sh
 ```
+
+## 路线文档
+
+- [GUI ABI v1 与用户态 GUI 边界](docs/user-gui-abi.md)
+- [Shell 用户态化路线](docs/shell-userspace-roadmap.md)
+- [系统服务用户态化路线](docs/system-services-userspace-roadmap.md)
 
 ## 调试
 
