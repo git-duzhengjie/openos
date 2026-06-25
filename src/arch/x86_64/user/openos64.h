@@ -3,11 +3,18 @@
 
 #include <stdint.h>
 
-#define OPENOS64_SYS_EXIT   1ULL
-#define OPENOS64_SYS_READ   63ULL
-#define OPENOS64_SYS_WRITE  4ULL
-#define OPENOS64_SYS_GETPID 20ULL
-#define OPENOS64_SYS_YIELD  201ULL
+/* 系统调用号与内核 src/kernel/include/syscall.h 保持一致。
+ * x86_64 与 i386 共享同一套 SYS_* ABI，仅入口指令不同（int 0x80 / syscall）。 */
+#define OPENOS64_SYS_EXIT    1ULL
+#define OPENOS64_SYS_GETPID  20ULL
+#define OPENOS64_SYS_GETTID  21ULL
+#define OPENOS64_SYS_READ    63ULL
+#define OPENOS64_SYS_WRITE   64ULL
+#define OPENOS64_SYS_MALLOC  73ULL
+#define OPENOS64_SYS_FREE    74ULL
+#define OPENOS64_SYS_YIELD   201ULL
+#define OPENOS64_SYS_OPEN    225ULL
+#define OPENOS64_SYS_CLOSE   226ULL
 
 #define OPENOS64_STDIN_FILENO  0
 #define OPENOS64_STDOUT_FILENO 1
@@ -85,6 +92,14 @@ static inline openos64_ssize_t openos64_write(int fd, const void *buf, openos64_
 
 static inline openos64_ssize_t openos64_read(int fd, void *buf, openos64_size_t len) {
     return (openos64_ssize_t)openos64_syscall3(OPENOS64_SYS_READ, (uint64_t)fd, (uint64_t)(uintptr_t)buf, len);
+}
+
+static inline int openos64_open(const char *path, int flags, int mode) {
+    return (int)openos64_syscall3(OPENOS64_SYS_OPEN, (uint64_t)(uintptr_t)path, (uint64_t)flags, (uint64_t)mode);
+}
+
+static inline int openos64_close(int fd) {
+    return (int)openos64_syscall1(OPENOS64_SYS_CLOSE, (uint64_t)fd);
 }
 
 static inline long openos64_getpid(void) {

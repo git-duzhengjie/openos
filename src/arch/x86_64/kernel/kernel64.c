@@ -13,6 +13,7 @@
 #include "../include/sched64.h"
 #include "../include/shell64.h"
 #include "../include/syscall64.h"
+#include "../include/syscall_selftest64.h"
 #include "../include/tss64.h"
 #include "../include/usermode64.h"
 #include "../include/vfs64.h"
@@ -109,6 +110,23 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
     arch_x86_64_elf64_loader_print_status();
     early_console64_write(x86_64_usermode_log);
 
+    early_console64_write(x86_64_initrd_log);
+    int initrd_mount_status = arch_x86_64_vfs_mount_initrd(arch_x86_64_initrd_get_image());
+    early_console64_write("[x86_64][initrd] mount_status=");
+    early_console64_write_hex64((uint64_t)(uint32_t)initrd_mount_status);
+    early_console64_write("\n");
+    arch_x86_64_initrd_print_status();
+    arch_x86_64_vfs_print_status();
+
+    /* Step C kernel-side selftest — 不依赖 OVMF/ring3 跳转，直接验证 dispatch→VFS→initrd 链路。 */
+    {
+        int selftest_rv = arch_x86_64_syscall_selftest_run();
+        early_console64_write("[x86_64][selftest] result=");
+        early_console64_write_hex64((uint64_t)(uint32_t)selftest_rv);
+        early_console64_write("\n");
+    }
+
+    /* Step C: initrd & fdtable 就绪后再跳 ring3 hello64，否则 open(/hello.txt) 会看不到文件。 */
     early_console64_write("[x86_64][user] loading embedded hello64.elf size=");
     early_console64_write_hex64((uint64_t)hello64_elf_size);
     early_console64_write("\n");
@@ -131,13 +149,6 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
     arch_x86_64_elf64_loader_print_status();
     arch_x86_64_usermode_print_status();
 
-    early_console64_write(x86_64_initrd_log);
-    int initrd_mount_status = arch_x86_64_vfs_mount_initrd(arch_x86_64_initrd_get_image());
-    early_console64_write("[x86_64][initrd] mount_status=");
-    early_console64_write_hex64((uint64_t)(uint32_t)initrd_mount_status);
-    early_console64_write("\n");
-    arch_x86_64_initrd_print_status();
-    arch_x86_64_vfs_print_status();
     arch_x86_64_shell_run_init();
     arch_x86_64_shell_print_status();
     arch_x86_64_vfs_print_status();

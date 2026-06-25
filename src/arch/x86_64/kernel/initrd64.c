@@ -16,10 +16,16 @@ static const uint8_t shell_profile[] =
     "PATH=/bin\n"
     "PROMPT=openos64> \n";
 
+/* Step C：x86_64 用户态 read regression 专用文件。
+ * 内容刻意与 /etc/motd 不同，便于在串口/VGA 中肉眼区分。 */
+static const uint8_t hello_txt[] =
+    "hello from x86_64 initrd via syscall read\n";
+
 static const x86_64_initrd_file_t initrd_files[] = {
     { .name = "/init", .data = init_script, .size = sizeof(init_script) - 1u, .mode = 0755u },
     { .name = "/etc/motd", .data = motd, .size = sizeof(motd) - 1u, .mode = 0644u },
     { .name = "/etc/profile", .data = shell_profile, .size = sizeof(shell_profile) - 1u, .mode = 0644u },
+    { .name = "/hello.txt", .data = hello_txt, .size = sizeof(hello_txt) - 1u, .mode = 0644u },
 };
 
 static const x86_64_initrd_image_t builtin_initrd = {
