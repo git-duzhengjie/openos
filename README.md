@@ -60,6 +60,7 @@ ARCH=aarch64 bash build.sh
 - [Shell 用户态化路线](docs/shell-userspace-roadmap.md)
 - [系统服务用户态化路线](docs/system-services-userspace-roadmap.md)
 - [PC / Mobile 平台能力边界](docs/platform-capability-boundary.md)
+- [阶段验收记录](docs/stage-acceptance-record.md)
 
 ## 调试
 
