@@ -15,6 +15,7 @@ git clone https://github.com/git-duzhengjie/openos.git
 cd openos
 
 # 构建
+ARCH=x86_64 ./build.sh
 ./build.sh
 
 # 运行（需要 QEMU）

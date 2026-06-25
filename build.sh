@@ -353,9 +353,14 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
     ARCH64_USER_ASFLAGS="-m64 -fno-pic -fno-pie -fno-PIE -I$ARCH64_SRC/user"
     ARCH64_LDFLAGS="-m elf_x86_64 -T $ARCH64_SRC/linker64.ld -nostdlib"
     ARCH64_USER_LDFLAGS="-m elf_x86_64 -T $ARCH64_SRC/user/user64.ld -nostdlib"
-    ARCH64_UEFI_CFLAGS="-m64 -ffreestanding -fshort-wchar -mno-red-zone -Wall -Wextra -O2 -fno-pic -fno-pie -fno-PIE -fno-stack-protector -fno-builtin -I$ARCH64_SRC/include"
-    ARCH64_UEFI_ASFLAGS="-m64 -fno-pic -fno-pie -fno-PIE"
-    ARCH64_UEFI_LDFLAGS="-m elf_x86_64 -T $ARCH64_SRC/boot/uefi64.ld -nostdlib"
+    # UEFI 编译链：使用 mingw-w64 直接产出标准 PE/COFF 格式 BOOTX64.EFI
+    # 这样 EntryPoint/Subsystem/Characteristics 等 PE 头字段会被正确填充，
+    # 避免 objcopy 转换 ELF->PE 时关键字段为 0 导致 UEFI 加载器拒绝执行。
+    UEFI_CC="x86_64-w64-mingw32-gcc"
+    ARCH64_UEFI_CFLAGS="-ffreestanding -fshort-wchar -mno-red-zone -Wall -Wextra -O2 -fno-stack-protector -fno-builtin -I$ARCH64_SRC/include"
+    ARCH64_UEFI_ASFLAGS="-ffreestanding -fno-stack-protector"
+    # -shared 输出 DLL，UEFI 应用本质上是 PE32+ DLL；--subsystem 10 = EFI Application
+    ARCH64_UEFI_LDFLAGS="-nostdlib -nostartfiles -Wl,--subsystem,10 -Wl,-e,_start -shared -Wl,-Bsymbolic"
 
     mkdir -p "$ARCH64_BUILD" "$ARCH64_USER_BUILD" "$ARCH64_BOOT_BUILD" "$ARCH64_BIN_BUILD"
     rm -f "$ARCH64_BUILD"/*.o "$ARCH64_BUILD"/*.elf "$ARCH64_USER_BUILD"/*.o "$ARCH64_BOOT_BUILD"/*.o "$ARCH64_BOOT_BUILD"/*.elf "$ARCH64_BOOT_BUILD"/*.EFI "$ARCH64_BOOT_BUILD"/*.efi "$ARCH64_BIN_BUILD"/*.elf
@@ -459,14 +464,20 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
 
     echo "[5/5] x86_64 kernel and hello64 user ELF linked."
 
-    echo "[UEFI] Building x86_64 BOOTX64.EFI skeleton..."
-    gcc $ARCH64_UEFI_CFLAGS -c "$ARCH64_SRC/boot/uefi64.c" -o "$ARCH64_BOOT_BUILD/uefi64.o"
-    gcc $ARCH64_UEFI_ASFLAGS -c "$ARCH64_SRC/boot/uefi64_crt0.S" -o "$ARCH64_BOOT_BUILD/uefi64_crt0.o"
-    ld $ARCH64_UEFI_LDFLAGS -o "$ARCH64_BOOT_BUILD/uefi64_loader.elf" \
+    echo "[UEFI] Building x86_64 BOOTX64.EFI via mingw-w64 (native PE)..."
+    $UEFI_CC $ARCH64_UEFI_CFLAGS -c "$ARCH64_SRC/boot/uefi64.c" -o "$ARCH64_BOOT_BUILD/uefi64.o"
+    $UEFI_CC $ARCH64_UEFI_ASFLAGS -c "$ARCH64_SRC/boot/uefi64_crt0.S" -o "$ARCH64_BOOT_BUILD/uefi64_crt0.o"
+    $UEFI_CC $ARCH64_UEFI_LDFLAGS \
         "$ARCH64_BOOT_BUILD/uefi64_crt0.o" \
-        "$ARCH64_BOOT_BUILD/uefi64.o"
-    objcopy -O pei-x86-64 --subsystem=10 "$ARCH64_BOOT_BUILD/uefi64_loader.elf" "$ARCH64_BOOT_BUILD/BOOTX64.EFI"
+        "$ARCH64_BOOT_BUILD/uefi64.o" \
+        -o "$ARCH64_BOOT_BUILD/BOOTX64.EFI"
+    # 校验产物为合法 PE32+ EFI Application
     objdump -f "$ARCH64_BOOT_BUILD/BOOTX64.EFI" | grep -q 'pei-x86-64'
+    objdump -p "$ARCH64_BOOT_BUILD/BOOTX64.EFI" | grep -qiE 'Subsystem[[:space:]]+0*a[[:space:]]*\(EFI' || {
+        echo "[UEFI] ERROR: PE Subsystem != 10 (EFI Application)" >&2
+        objdump -p "$ARCH64_BOOT_BUILD/BOOTX64.EFI" | grep -i 'subsystem' >&2
+        exit 1
+    }
 
     echo "[BIOS] Assembling x86_64 BIOS long-mode boot stub (boot64.asm)..."
     # 21.1 BIOS long-mode 自举骨架：16->32->64 切换链路。
@@ -503,17 +514,52 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
     TMP_MNT=$(mktemp -d)
     TMP_ESP=$(mktemp -d)
 
-    # 创建 FAT 文件系统镜像
-    dd if=/dev/zero of="$BUILD/esp.img" bs=512 count=$ESP_SECTORS 2>/dev/null
-    mkfs.vfat -F 32 -n "OPENOS_ESP" "$BUILD/esp.img" 2>/dev/null
+    # 使用 mtools 创建 FAT32 ESP 镜像并复制文件
+    echo "  使用 mtools 创建 FAT32 ESP 镜像..."
+    truncate -s ${ESP_SIZE_MB}M "$BUILD/esp.img"
+    mkfs.vfat -F 32 -n "ESP" -S 512 -s 1 -R 32 "$BUILD/esp.img" >/dev/null
+    mmd -i "$BUILD/esp.img" ::/EFI
+    mmd -i "$BUILD/esp.img" ::/EFI/BOOT
+    mcopy -i "$BUILD/esp.img" "$ARCH64_BOOT_BUILD/BOOTX64.EFI" ::/EFI/BOOT/BOOTX64.EFI
+    mcopy -i "$BUILD/esp.img" "$ARCH64_BUILD/kernel64.elf" ::/kernel64.elf
+    # 创建 startup.nsh 自动启动脚本（UEFI Shell 模式下需要）
+    # 使用顺序检测，避免for循环语法问题
+    cat > "$BUILD/startup.nsh" << 'EOF'
+@echo -off
+set StartupDelay 0
+echo Starting OpenOS UEFI Boot...
 
-    # 复制 UEFI 文件
-    mkdir -p "$TMP_ESP/EFI/BOOT"
-    cp "$ARCH64_BOOT_BUILD/BOOTX64.EFI" "$TMP_ESP/EFI/BOOT/BOOTX64.EFI"
-    cp "$ARCH64_BUILD/kernel64.elf" "$TMP_ESP/kernel64.elf"
+FS0:
+if exist \EFI\BOOT\BOOTX64.EFI then
+    \EFI\BOOT\BOOTX64.EFI
+    goto end
+endif
 
-    # 复制到 FAT 镜像
-    mcopy -i "$BUILD/esp.img" -s "$TMP_ESP"/* ::/ 2>/dev/null
+FS1:
+if exist \EFI\BOOT\BOOTX64.EFI then
+    \EFI\BOOT\BOOTX64.EFI
+    goto end
+endif
+
+FS2:
+if exist \EFI\BOOT\BOOTX64.EFI then
+    \EFI\BOOT\BOOTX64.EFI
+    goto end
+endif
+
+echo ERROR: Bootloader not found on FS0, FS1, FS2
+echo Mappings:
+map -r
+pause
+:end
+EOF
+    mcopy -i "$BUILD/esp.img" "$BUILD/startup.nsh" ::/startup.nsh
+    rm -f "$BUILD/startup.nsh"
+
+    # 验证镜像内容
+    echo "  验证镜像内容:"
+    file "$BUILD/esp.img"
+    mdir -i "$BUILD/esp.img" ::/EFI/BOOT/
 
     # 将 ESP 分区写入磁盘镜像
     dd if="$BUILD/esp.img" of="$UEFI_IMG" bs=512 seek=2048 conv=notrunc 2>/dev/null

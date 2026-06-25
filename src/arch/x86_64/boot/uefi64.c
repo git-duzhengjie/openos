@@ -51,14 +51,20 @@ static const efi_char16_t openos_uefi64_banner[] = {
 static void uefi64_load_kernel(efi_system_table64_t *system_table,
                                efi_handle_t image_handle)
 {
+    efi_guid_t loaded_image_guid = {
+        0x5b1b31a1, 0x9562, 0x11d2,
+        {0x8e, 0x3f, 0x00, 0xa0, 0xc9, 0x69, 0x72, 0x3b}
+    };
     efi_guid_t simple_file_system_guid = {
         0x964e5b22, 0x6459, 0x11d2,
         {0x8e, 0x39, 0x00, 0xa0, 0xc9, 0x69, 0x72, 0x3b}
     };
     efi_guid_t file_info_guid = {
-        0x9576e92, 0x6d3f, 0x11d2,
+        0x09576e92, 0x6d3f, 0x11d2,
         {0x8e, 0x39, 0x00, 0xa0, 0xc9, 0x69, 0x72, 0x3b}
     };
+    efi_loaded_image_protocol_t *loaded_image = 0;
+    efi_simple_file_system_protocol_t *sfs = 0;
     efi_file_protocol_t *root = 0;
     efi_file_protocol_t *kernel_file = 0;
     efi_status_t status;
@@ -69,14 +75,31 @@ static void uefi64_load_kernel(efi_system_table64_t *system_table,
     uint64_t info_size = sizeof(info_buffer);
     efi_file_info_t *file_info = 0;
 
-    /* Open ESP root */
+    /* Step 1: get LoadedImage protocol from image_handle */
     status = system_table->boot_services->handle_protocol(
-        image_handle, &simple_file_system_guid, (void **)&root);
-    if (status != EFI_SUCCESS || !root) {
-        uefi64_serial_write("[UEFI] ERROR: Cannot open ESP filesystem\n");
+        image_handle, &loaded_image_guid, (void **)&loaded_image);
+    if (status != EFI_SUCCESS || !loaded_image) {
+        uefi64_serial_write("[UEFI] ERROR: Cannot get LoadedImage protocol\n");
         return;
     }
-    uefi64_serial_write("[UEFI] ESP filesystem opened\n");
+    uefi64_serial_write("[UEFI] LoadedImage protocol acquired\n");
+
+    /* Step 2: get SimpleFileSystem from device_handle */
+    status = system_table->boot_services->handle_protocol(
+        loaded_image->device_handle, &simple_file_system_guid, (void **)&sfs);
+    if (status != EFI_SUCCESS || !sfs) {
+        uefi64_serial_write("[UEFI] ERROR: Cannot get SimpleFileSystem protocol\n");
+        return;
+    }
+    uefi64_serial_write("[UEFI] SimpleFileSystem protocol acquired\n");
+
+    /* Step 3: open volume to get root File protocol */
+    status = sfs->open_volume(sfs, &root);
+    if (status != EFI_SUCCESS || !root) {
+        uefi64_serial_write("[UEFI] ERROR: Cannot open volume\n");
+        return;
+    }
+    uefi64_serial_write("[UEFI] ESP volume opened\n");
 
     /* Open kernel file */
     status = root->open(root, &kernel_file, (efi_char16_t *)L"\\kernel64.elf",

@@ -218,6 +218,23 @@ typedef struct efi_gop {
     efi_gop_mode_t *mode;
 } efi_gop_t;
 
+/* Loaded Image Protocol */
+typedef struct efi_loaded_image_protocol {
+    uint32_t revision;
+    efi_handle_t parent_handle;
+    efi_system_table64_t *system_table;
+    efi_handle_t device_handle;
+    void *file_path;
+    void *reserved;
+    uint32_t load_options_size;
+    void *load_options;
+    void *image_base;
+    uint64_t image_size;
+    uint32_t image_code_type;
+    uint32_t image_data_type;
+    void *unload;
+} efi_loaded_image_protocol_t;
+
 /* EFI File Info */
 typedef struct efi_file_info {
     uint64_t size;
