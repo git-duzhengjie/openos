@@ -253,11 +253,11 @@
   - [x] `src/kernel/include/platform_ops.h`
   - [x] `src/kernel/include/device.h`
   - [x] `src/kernel/include/driver.h`
-- [ ] A9.2：逐步新增公共实现目录
-  - [ ] `src/kernel/core/`
-  - [ ] `src/kernel/platform/`
-  - [ ] `src/kernel/drivers/bus/`
-  - [ ] `src/kernel/drivers/virtio/`
+- [x] A9.2：逐步新增公共实现目录
+  - [x] `src/kernel/core/`
+  - [x] `src/kernel/platform/`
+  - [x] `src/kernel/drivers/bus/`
+  - [x] `src/kernel/drivers/virtio/`
 - [ ] A9.3：逐步迁移架构无关逻辑
   - [ ] 通用调度、进程、内存、VFS、IPC 迁移到 `src/kernel/core/`
   - [ ] 架构相关逻辑保留在 `src/arch/i386`、`src/arch/x86_64`、`src/arch/aarch64`
