@@ -3,6 +3,7 @@
 #include "../include/early_console64.h"
 #include "../include/elf64_loader.h"
 #include "../include/embed_hello64.h"
+#include "../include/fdtable64.h"
 #include "../include/gdt64.h"
 #include "../include/heap64.h"
 #include "../include/handoff64.h"
@@ -73,6 +74,7 @@ void arch_x86_64_early_init(const openos_bootinfo_t *bootinfo) {
     arch_x86_64_usermode_init();
     arch_x86_64_initrd_init(bootinfo);
     arch_x86_64_vfs_init();
+    arch_x86_64_fd_init();
     arch_x86_64_shell_init();
     arch_x86_64_compat32_init();
 }
