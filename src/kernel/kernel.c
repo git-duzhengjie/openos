@@ -470,6 +470,20 @@
 #define OPENOS_HAS_NETSTAT 0
 #endif
 
+#if __has_include("embed_wget.h")
+#include "embed_wget.h"  /* wget user command */
+#define OPENOS_HAS_WGET 1
+#else
+#define OPENOS_HAS_WGET 0
+#endif
+
+#if __has_include("embed_curl.h")
+#include "embed_curl.h"  /* curl user command */
+#define OPENOS_HAS_CURL 1
+#else
+#define OPENOS_HAS_CURL 0
+#endif
+
 #if __has_include("embed_firewall.h")
 #include "embed_firewall.h"  /* firewall user command */
 #define OPENOS_HAS_FIREWALL 1
@@ -1709,6 +1723,28 @@ void kernel_main(void) {
         serial_write("[OK] Installed /bin/netstat user ELF\n");
     } else {
         serial_write("[WARN] Failed to install /bin/netstat\n");
+    }
+#endif
+
+#if OPENOS_HAS_WGET
+    fd = vfs_open("/bin/wget", O_CREAT | O_RDWR, 0755);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)wget_elf, wget_elf_size);
+        vfs_close(fd);
+        serial_write("[OK] Installed /bin/wget user ELF\n");
+    } else {
+        serial_write("[WARN] Failed to install /bin/wget\n");
+    }
+#endif
+
+#if OPENOS_HAS_CURL
+    fd = vfs_open("/bin/curl", O_CREAT | O_RDWR, 0755);
+    if (fd >= 0) {
+        vfs_write(fd, (const char *)curl_elf, curl_elf_size);
+        vfs_close(fd);
+        serial_write("[OK] Installed /bin/curl user ELF\n");
+    } else {
+        serial_write("[WARN] Failed to install /bin/curl\n");
     }
 #endif
 

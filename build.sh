@@ -1426,7 +1426,7 @@ gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
     -I $SRC/include \
     -c $USR/crt0.c -o $BUILD/crt0.o
 
-for app in ping ifconfig netstat; do
+for app in ping ifconfig netstat wget curl; do
     if [ -f $USR/$app.c ]; then
         gcc -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -O2 \
             -fno-stack-protector -fno-builtin \
