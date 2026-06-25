@@ -12,8 +12,13 @@
   - syscall 框架：`arch_x86_64_usermode_syscall_return_trampoline`
 - [x] UEFI loader 增加 COM1 串口输出（`src/arch/x86_64/boot/uefi64.c`）
 
+## UEFI 镜像构建完成（已验证）
+- [x] `target/openos-uefi.img` UEFI GPT 磁盘镜像已生成（32MB ESP 分区）
+- [x] BOOTX64.EFI 已正确放置于 ESP:/EFI/BOOT/ 目录
+- [x] kernel64.elf 已嵌入 ESP 分区根目录
+- [x] UEFI loader 完整实现：串口日志、ELF64 解析、帧缓冲设置、ExitBootServices、内核跳转
+
 ## 待运行时验证（需要 QEMU 日志证明）
-- [ ] `target/openos.img` 尚未生成：x86_64 构建目前仅输出独立 ELF 文件，缺少 UEFI ESP 镜像组装步骤
 - [ ] kernel64 实际启动并初始化 GDT/IDT/TSS/PMM/VMM
 - [ ] hello64.elf 运行时加载成功
 - [ ] 实际进入 ring3

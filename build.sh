@@ -485,9 +485,49 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
     fi
     echo "  boot64.bin: $BOOT64_BYTES bytes, signature 0x$BOOT64_SIG OK"
 
+    # 创建 UEFI 磁盘镜像
+    echo "[UEFI] Creating UEFI disk image..."
+    UEFI_IMG="$BUILD/openos-uefi.img"
+    ESP_SIZE_MB=32
+    ESP_SECTORS=$((ESP_SIZE_MB * 1024 * 1024 / 512))
+    TOTAL_SECTORS=$((ESP_SECTORS + 2048 + 33))  # GPT + ESP + backup
+
+    # 创建空磁盘镜像
+    dd if=/dev/zero of="$UEFI_IMG" bs=512 count=$TOTAL_SECTORS 2>/dev/null
+
+    # 创建 GPT 分区表
+    sgdisk -Z "$UEFI_IMG" 2>/dev/null || true
+    sgdisk -n 1:2048:+$ESP_SECTORS -t 1:ef00 -c 1:"ESP" "$UEFI_IMG" 2>/dev/null
+
+    # 创建临时挂载目录
+    TMP_MNT=$(mktemp -d)
+    TMP_ESP=$(mktemp -d)
+
+    # 创建 FAT 文件系统镜像
+    dd if=/dev/zero of="$BUILD/esp.img" bs=512 count=$ESP_SECTORS 2>/dev/null
+    mkfs.vfat -F 32 -n "OPENOS_ESP" "$BUILD/esp.img" 2>/dev/null
+
+    # 复制 UEFI 文件
+    mkdir -p "$TMP_ESP/EFI/BOOT"
+    cp "$ARCH64_BOOT_BUILD/BOOTX64.EFI" "$TMP_ESP/EFI/BOOT/BOOTX64.EFI"
+    cp "$ARCH64_BUILD/kernel64.elf" "$TMP_ESP/kernel64.elf"
+
+    # 复制到 FAT 镜像
+    mcopy -i "$BUILD/esp.img" -s "$TMP_ESP"/* ::/ 2>/dev/null
+
+    # 将 ESP 分区写入磁盘镜像
+    dd if="$BUILD/esp.img" of="$UEFI_IMG" bs=512 seek=2048 conv=notrunc 2>/dev/null
+
+    # 清理
+    rm -rf "$TMP_MNT" "$TMP_ESP" "$BUILD/esp.img"
+
+    echo "  UEFI disk image: $UEFI_IMG"
+    echo "  ESP size: ${ESP_SIZE_MB}MB"
+
     echo "x86_64 Build Successful!"
     echo "Output: $ARCH64_BUILD/kernel64.elf"
     echo "Regression: $ARCH64_BIN_BUILD/hello64.elf"
+    echo "UEFI Image: $UEFI_IMG"
     echo "UEFI: $ARCH64_BOOT_BUILD/BOOTX64.EFI"
     exit 0
 fi
