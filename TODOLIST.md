@@ -208,42 +208,42 @@
 
 ### A8：PC / Mobile 平台能力边界
 
-- [ ] A8.1：明确 PC 侧能力
-  - [ ] x86_64
-  - [ ] UEFI
-  - [ ] ACPI
-  - [ ] PCIe
-  - [ ] NVMe / SATA / USB
-  - [ ] 键盘鼠标
-  - [ ] 多显示器
-  - [ ] Desktop Shell
-- [ ] A8.2：明确 Mobile 侧能力
-  - [ ] aarch64
-  - [ ] Device Tree
-  - [ ] GIC
-  - [ ] PSCI
-  - [ ] I2C / SPI / GPIO
-  - [ ] 触摸屏
-  - [ ] 电池 / 温控 / 电源管理
-  - [ ] 传感器
-  - [ ] 摄像头
-  - [ ] 蜂窝网络能力边界说明
-  - [ ] Mobile Shell
-  - [ ] 应用生命周期与后台限制
-- [ ] A8.3：明确共享能力
-  - [ ] kernel core
-  - [ ] syscall ABI
-  - [ ] 进程 / 线程
-  - [ ] 内存管理
-  - [ ] VFS
-  - [ ] IPC
-  - [ ] 权限模型
-  - [ ] sandbox
-  - [ ] 网络协议栈基础
-  - [ ] 包管理格式
-  - [ ] 应用 Manifest
-  - [ ] AI Skill Runtime
-  - [ ] 日志与系统更新框架
+- [x] A8.1：明确 PC 侧能力
+  - [x] x86_64
+  - [x] UEFI
+  - [x] ACPI
+  - [x] PCIe
+  - [x] NVMe / SATA / USB
+  - [x] 键盘鼠标
+  - [x] 多显示器
+  - [x] Desktop Shell
+- [x] A8.2：明确 Mobile 侧能力
+  - [x] aarch64
+  - [x] Device Tree
+  - [x] GIC
+  - [x] PSCI
+  - [x] I2C / SPI / GPIO
+  - [x] 触摸屏
+  - [x] 电池 / 温控 / 电源管理
+  - [x] 传感器
+  - [x] 摄像头
+  - [x] 蜂窝网络能力边界说明
+  - [x] Mobile Shell
+  - [x] 应用生命周期与后台限制
+- [x] A8.3：明确共享能力
+  - [x] kernel core
+  - [x] syscall ABI
+  - [x] 进程 / 线程
+  - [x] 内存管理
+  - [x] VFS
+  - [x] IPC
+  - [x] 权限模型
+  - [x] sandbox
+  - [x] 网络协议栈基础
+  - [x] 包管理格式
+  - [x] 应用 Manifest
+  - [x] AI Skill Runtime
+  - [x] 日志与系统更新框架
 
 ### A9：推荐目录演进
 

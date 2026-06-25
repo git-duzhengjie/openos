@@ -59,6 +59,7 @@ ARCH=aarch64 bash build.sh
 - [GUI ABI v1 与用户态 GUI 边界](docs/user-gui-abi.md)
 - [Shell 用户态化路线](docs/shell-userspace-roadmap.md)
 - [系统服务用户态化路线](docs/system-services-userspace-roadmap.md)
+- [PC / Mobile 平台能力边界](docs/platform-capability-boundary.md)
 
 ## 调试
 
