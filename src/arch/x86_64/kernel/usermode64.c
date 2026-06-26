@@ -142,15 +142,30 @@ int arch_x86_64_usermode_run(x86_64_entry_t entry) {
      */
     int exited_local = 0;
     int code_local = 0;
+    /*
+     * Step D.4: stack layout (low -> high) right before iretq_enter_user:
+     *   [rsp+ 0] = label-1 RIP   <-- saved_rsp points here
+     *   [rsp+ 8] = r15
+     *   [rsp+16] = r14
+     *   [rsp+24] = r13
+     *   [rsp+32] = r12
+     *   [rsp+40] = rbx
+     *   [rsp+48] = rbp
+     * arch_x86_64_usermode_return_to_kernel does `mov saved,%rsp; ret`,
+     * which pops the RIP slot and lands at label 1. Then we pop the six
+     * callee-saved registers in reverse-push order and fall through to
+     * the function epilogue. Previously saved_rsp pointed at the r15 slot
+     * so `ret` popped r15's value as RIP -> #UD.
+     */
     __asm__ __volatile__ (
-        "leaq 1f(%%rip), %%rax\n\t"
-        "pushq %%rax\n\t"             /* return address for `ret` */
         "pushq %%rbp\n\t"
         "pushq %%rbx\n\t"
         "pushq %%r12\n\t"
         "pushq %%r13\n\t"
         "pushq %%r14\n\t"
         "pushq %%r15\n\t"
+        "leaq 1f(%%rip), %%rax\n\t"
+        "pushq %%rax\n\t"             /* RIP slot on top -- ret target */
         "movq %%rsp, %0\n\t"          /* publish kernel return rsp */
         "movq %3, %%rdi\n\t"
         "call arch_x86_64_iretq_enter_user\n\t"
@@ -163,7 +178,6 @@ int arch_x86_64_usermode_run(x86_64_entry_t entry) {
         "popq %%r12\n\t"
         "popq %%rbx\n\t"
         "popq %%rbp\n\t"
-        "addq $8, %%rsp\n\t"          /* discard the saved RIP slot */
         : "=m"(usermode_kernel_return_rsp),
           "=m"(exited_local),
           "=m"(code_local)
