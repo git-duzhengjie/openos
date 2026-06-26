@@ -122,10 +122,16 @@ uint64_t arch_x86_64_syscall_dispatch(x86_64_syscall_frame_t *frame) {
         frame->r9);
 
     /* Post-dispatch fixup for SYS_EXIT taken via syscall instruction:
-     * redirect sysret to the usermode-exit trampoline with sane RFLAGS. */
+     * spin in kernel after dispatch instead of sysretting -- the previous
+     * approach pointed RCX at a kernel-address trampoline which ring3 cannot
+     * fetch. Since SYS_EXIT semantically does not return to userspace, we
+     * just halt here; arch_x86_64_usermode_run will observe usermode_exited
+     * from the dispatch backend on its next poll. */
     if (frame->rax == SYS_EXIT) {
-        frame->rcx = (uint64_t)(uintptr_t)arch_x86_64_usermode_syscall_return_trampoline;
-        frame->r11 = 0x202ULL;
+        early_console64_write("[x86_64][usermode] SYS_EXIT taken via syscall; halting\n");
+        for (;;) {
+            __asm__ __volatile__("cli; hlt");
+        }
     }
 
     return result;

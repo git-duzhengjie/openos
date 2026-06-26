@@ -123,7 +123,15 @@ static uint64_t do_close(uint64_t fd) {
  */
 static uint64_t do_exit(uint64_t status) {
     arch_x86_64_usermode_mark_exited((int)status);
-    return 0;
+    /*
+     * Step D.3 fix: do NOT return -- otherwise dispatch_common returns,
+     * the syscall entry path does sysretq, and ring3 keeps executing the
+     * instruction after 'syscall' (a 'hlt' in the _start epilogue), which
+     * #GP's at CPL=3.  Instead, unwind back to the kernel stack saved by
+     * usermode_run() and let it observe usermode_exited=1.
+     */
+    arch_x86_64_usermode_return_to_kernel();
+    return 0;  /* unreachable */
 }
 
 /*

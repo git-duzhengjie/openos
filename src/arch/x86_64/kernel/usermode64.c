@@ -4,10 +4,23 @@
 
 #include "../include/early_console64.h"
 #include "../include/gdt64.h"
+#include "../include/pmm64.h"
 
 extern void arch_x86_64_iretq_enter_user(const x86_64_user_iretq_frame_t *frame);
 
-#define OPENOS_X86_64_USER_STACK_SIZE 0x4000U
+/*
+ * Step D.2: the bootstrap user stack must live in memory that ring3 can
+ * actually access through the active page tables.  Putting it in kernel .bss
+ * lands it in the higher-half mapping, whose boot-time PD entries are
+ * kernel-only -- ring3 takes a #PF on the very first 'and rsp / call' pair
+ * even though the user code page itself is mapped U=1.
+ *
+ * Allocate a low-memory page from PMM and use it as the bootstrap stack.
+ * PMM returns identity-mapped 4 KiB pages within the early identity range
+ * (0..4 GiB in our boot tables), which is U-readable/writable.
+ */
+#define OPENOS_X86_64_USER_STACK_PAGES 4U
+#define OPENOS_X86_64_USER_STACK_SIZE (OPENOS_X86_64_USER_STACK_PAGES * 0x1000U)
 
 static x86_64_user_iretq_frame_t prepared_user_frame;
 static uint8_t usermode_ready;
@@ -17,7 +30,26 @@ static int usermode_last_exit_code;
 static uint64_t usermode_run_count;
 static uint64_t usermode_exit_count;
 static uintptr_t usermode_kernel_return_rsp;
-static uint8_t bootstrap_user_stack[OPENOS_X86_64_USER_STACK_SIZE] __attribute__((aligned(16)));
+static x86_64_phys_addr_t bootstrap_user_stack_base;  /* phys == virt (identity) */
+
+static uintptr_t bootstrap_user_stack_top(void) {
+    if (bootstrap_user_stack_base == 0) {
+        x86_64_phys_addr_t p = 0;
+        for (unsigned i = 0; i < OPENOS_X86_64_USER_STACK_PAGES; ++i) {
+            x86_64_phys_addr_t one = arch_x86_64_pmm_alloc_page();
+            if (one == 0) {
+                early_console64_write("[x86_64][usermode] PMM out of pages for user stack\n");
+                return 0;
+            }
+            if (i == 0) {
+                p = one;
+            }
+            /* PMM is bump-allocator; pages come back in order, so contiguous. */
+        }
+        bootstrap_user_stack_base = p;
+    }
+    return (uintptr_t)(bootstrap_user_stack_base + OPENOS_X86_64_USER_STACK_SIZE);
+}
 
 void arch_x86_64_usermode_init(void) {
     usermode_ready = 1;
@@ -30,7 +62,7 @@ void arch_x86_64_usermode_init(void) {
     prepared_user_frame.rip = 0;
     prepared_user_frame.cs = (uint64_t)(OPENOS_X86_64_GDT_USER_CODE | 3u);
     prepared_user_frame.rflags = 0x202ULL;
-    prepared_user_frame.rsp = (uint64_t)(uintptr_t)(bootstrap_user_stack + OPENOS_X86_64_USER_STACK_SIZE);
+    prepared_user_frame.rsp = (uint64_t)bootstrap_user_stack_top();
     prepared_user_frame.ss = (uint64_t)(OPENOS_X86_64_GDT_USER_DATA | 3u);
 }
 
@@ -83,7 +115,7 @@ int arch_x86_64_usermode_run(x86_64_entry_t entry) {
 
     arch_x86_64_usermode_prepare_iretq(&prepared_user_frame,
                                        entry,
-                                       (x86_64_virt_addr_t)(uintptr_t)(bootstrap_user_stack + OPENOS_X86_64_USER_STACK_SIZE));
+                                       (x86_64_virt_addr_t)bootstrap_user_stack_top());
     if (!arch_x86_64_usermode_validate_frame(&prepared_user_frame)) {
         return -2;
     }
@@ -93,8 +125,54 @@ int arch_x86_64_usermode_run(x86_64_entry_t entry) {
     usermode_running = 1;
     ++usermode_run_count;
 
-    __asm__ __volatile__("movq %%rsp, %0" : "=m"(usermode_kernel_return_rsp) : : "memory");
-    arch_x86_64_iretq_enter_user(&prepared_user_frame);
+    /*
+     * Step D.3: save a real longjmp-style return context.
+     *
+     * Earlier we did `movq %rsp, saved; ...; iretq_enter_user(...)` and
+     * relied on the syscall path to `mov saved, rsp; ret` back. But that
+     * `saved` rsp pointed at the *current* frame's locals (the inline-asm
+     * was emitted in the middle of the function), so the `ret` popped
+     * a stack slot that was never a return address -- ring3 looked like
+     * it kept running and #GP'd on the post-syscall `hlt`.
+     *
+     * Fix: stash rbx/rbp/r12-r15 + a real RIP label ("1:") on the stack,
+     * record that exact rsp, then enter ring3. When ring3 SYS_EXIT calls
+     * arch_x86_64_usermode_return_to_kernel(), we restore rsp and `ret`
+     * straight to label 1, which falls through to the function epilogue.
+     */
+    int exited_local = 0;
+    int code_local = 0;
+    __asm__ __volatile__ (
+        "leaq 1f(%%rip), %%rax\n\t"
+        "pushq %%rax\n\t"             /* return address for `ret` */
+        "pushq %%rbp\n\t"
+        "pushq %%rbx\n\t"
+        "pushq %%r12\n\t"
+        "pushq %%r13\n\t"
+        "pushq %%r14\n\t"
+        "pushq %%r15\n\t"
+        "movq %%rsp, %0\n\t"          /* publish kernel return rsp */
+        "movq %3, %%rdi\n\t"
+        "call arch_x86_64_iretq_enter_user\n\t"
+        /* Should never fall through here -- iretq goes to ring3. */
+        "ud2\n\t"
+        "1:\n\t"                       /* return target from SYS_EXIT */
+        "popq %%r15\n\t"
+        "popq %%r14\n\t"
+        "popq %%r13\n\t"
+        "popq %%r12\n\t"
+        "popq %%rbx\n\t"
+        "popq %%rbp\n\t"
+        "addq $8, %%rsp\n\t"          /* discard the saved RIP slot */
+        : "=m"(usermode_kernel_return_rsp),
+          "=m"(exited_local),
+          "=m"(code_local)
+        : "r"(&prepared_user_frame)
+        : "rax", "rcx", "rdx", "rsi", "rdi",
+          "r8", "r9", "r10", "r11",
+          "memory", "cc"
+    );
+    (void)exited_local; (void)code_local;
 
     usermode_running = 0;
     return usermode_exited ? usermode_last_exit_code : -3;

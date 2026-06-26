@@ -11,7 +11,17 @@
  * syscall number in rax and arguments in rdi/rsi/rdx/r10/r8/r9.
  */
 x86_64_syscall_entry:
-    swapgs
+    /*
+     * Step D.2: removed swapgs pair. We had no %gs: accesses anywhere in the
+     * kernel and KERNEL_GS_BASE was never wrmsr'd, so the swapgs/swapgs
+     * dance only loaded a random GS_BASE during dispatch -- and, more
+     * importantly, on the very first syscall the CPU's IA32_KERNEL_GS_BASE
+     * was still zero, so the post-swapgs %gs:0 layout was garbage. We
+     * currently run on the user stack throughout the syscall (single-stack
+     * model); push/pop happens on the user-stack page mapped U=1, which is
+     * safe for ring0 because CPL trumps U on supervisor accesses. A proper
+     * per-CPU TSS RSP0 switch is tracked as Step D.3.
+     */
     pushq %r11
     pushq %rcx
     pushq %r10
@@ -36,7 +46,6 @@ x86_64_syscall_entry:
     popq %r10
     popq %rcx
     popq %r11
-    swapgs
     sysretq
 
 /*

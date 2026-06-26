@@ -98,10 +98,10 @@ _get_rip:
     movq $512, %rcx
     rep stosq
 
-    /* PML4[0]   = pdpt_lo | P | RW   (identity)
-     * PML4[511] = pdpt_hi | P | RW   (higher-half) */
+    /* PML4[0]   = pdpt_lo | P | RW | U   (identity; U so ring3 may walk)
+     * PML4[511] = pdpt_hi | P | RW       (higher-half, kernel only) */
     movq %r14, %rax
-    orq  $0x3, %rax
+    orq  $0x7, %rax
     movq %rax, 0(%r11)
     movq %r12, %rax
     orq  $0x3, %rax
@@ -112,28 +112,28 @@ _get_rip:
     orq  $0x3, %rax
     movq %rax, 4080(%r12)               /* slot 510 */
 
-    /* pdpt_lo[0..3] = pd_lo{0..3} | P | RW   (identity 0..4 GiB).
+    /* pdpt_lo[0..3] = pd_lo{0..3} | P | RW | U   (identity 0..4 GiB; U for ring3).
      *
      * UEFI is free to relocate us anywhere in the 32-bit phys range, so
      * cover all of it.  Each PDPT entry maps 1 GiB, so we need 4 distinct
      * PDs. */
     movq %rbx, %rax                     /* pd_lo0 */
-    orq  $0x3, %rax
+    orq  $0x7, %rax
     movq %rax, 0(%r14)
 
     movq %rbx, %rax
     addq $0x1000, %rax                  /* pd_lo1 = pd_lo0 + 4 KiB */
-    orq  $0x3, %rax
+    orq  $0x7, %rax
     movq %rax, 8(%r14)
 
     movq %rbx, %rax
     addq $0x2000, %rax                  /* pd_lo2 */
-    orq  $0x3, %rax
+    orq  $0x7, %rax
     movq %rax, 16(%r14)
 
     movq %rbx, %rax
     addq $0x3000, %rax                  /* pd_lo3 */
-    orq  $0x3, %rax
+    orq  $0x7, %rax
     movq %rax, 24(%r14)
 
     /* Fill pd_hi[i] = (kernel_phys_base + i * 2 MiB) | P | RW | PS, for i in 0..511.
@@ -148,6 +148,15 @@ _get_rip:
     movabsq $_start64, %rax
     subq %r10, %rax                     /* rax = phys(_start64) = kernel_phys_base */
     andq $-0x200000, %rax               /* belt-and-suspenders 2 MiB align */
+
+    /* Stash kernel_phys_base into a global so C code (vmm64.c) can recompute
+     * virt<->phys translations consistently with the boot trampoline.  We do
+     * this _before_ folding in the page-table flag bits below.  Use a
+     * RIP-relative store while we are still executing at the low identity
+     * mapping; the symbol resolves to its higher-half vaddr but the active
+     * CR3 already covers both. */
+    movq %rax, kernel64_phys_base(%rip)
+
     orq  $0x83, %rax                    /* P | RW | PS */
 
     movq %r13, %rdi
@@ -161,9 +170,10 @@ _get_rip:
     /* Fill pd_lo0..pd_lo3: contiguous identity map of phys 0..4 GiB,
      * 2 MiB entries.  Total of 4*512 = 2048 entries.  Since pd_lo0..3 are
      * declared contiguously in .bss, we just stream from rbx for 2048
-     * iterations. */
+     * iterations.  Leaf flags: P|RW|U|PS so ring3 can read/write/exec
+     * anywhere in low 4 GiB (we have no SMEP/SMAP enabled). */
     movq %rbx, %rdi
-    movq $0x00000083, %rax              /* P | RW | PS, phys=0 */
+    movq $0x00000087, %rax              /* P | RW | U | PS, phys=0 */
     movq $2048, %rcx
 2:  movq %rax, (%rdi)
     addq $0x200000, %rax                /* +2 MiB */
@@ -203,3 +213,9 @@ _get_rip:
 
 4:  hlt
     jmp 4b
+
+.section .bss,"aw",@nobits
+.global kernel64_phys_base
+.align 8
+kernel64_phys_base:
+    .quad 0

@@ -1351,6 +1351,36 @@
 - [√] 支持 64 位用户程序 `/bin/hello64` 回归测试
 - [√] 后续评估兼容 32 位用户程序
 
+#### 21.1.X x86_64 syscall 主线推进（Step B / C / D）
+
+> 单点原则：所有「号→实现」映射只在 `src/arch/x86_64/kernel/syscall_dispatch64.c` 里增改；用户头 `src/user/openos64.h` 必须与内核 `syscall_nums.h` 对齐。
+
+- [√] **Step B**：x86_64 syscall 覆盖 3/247 → **15/247（6.1%）**
+  - [√] 新增极简 fd 表 `fdtable64.{c,h}`（16 槽）
+  - [√] 挂接 vfs64 / heap64 / sched64 / initrd64 / usermode 五个子系统
+  - [√] I/O：READ / OPEN / CLOSE / WRITE（走 fdtable64 + vfs64 + initrd64）
+  - [√] 内存：MALLOC / FREE（走 heap64）
+  - [√] 进程桩：GETTID / GETPPID / GETUID / GETGID / YIELD（标 TODO: proc64/sched64）
+  - [√] 标识：GETPID / EXIT
+  - [√] 时间：UPTIME_MS（rdtsc>>20，TODO: PIT/HPET 标定）
+- [√] **Step C**：ABI 修复 + 启动序修复 + 内核态 selftest
+  - [√] 修复 `OPENOS64_SYS_WRITE` 4→64 等 ABI 错位，对齐用户头与内核头
+  - [√] 启动序：`vfs_init → fd_init → initrd_mount → ring3 hello64`
+  - [√] initrd 新增 `/hello.txt`（与 motd 区分内容）
+  - [√] 重写 `hello64.c`：open(/hello.txt) → read → write → close → exit
+  - [√] 新增 `syscall_selftest64.{h,c}`：内核态走 `arch_x86_64_syscall_dispatch_common` 与 ring3 同路径
+  - [√] 暴露 `dispatch_total_count / dispatch_enosys_count` 便于量化回归
+- [√] **Step D**：修复 UEFI / ring3 通路，端到端跑通 hello64
+  - [√] 修复 syscall 入口 swapgs/IA32_KERNEL_GS_BASE 未初始化导致的随机 GS_BASE
+  - [√] **修复 `x86_64_syscall_frame_t` 字段顺序错位**（push 反序 → 结构低到高，原先把 r11/RFLAGS=0x46 当成 num，导致全部 ENOSYS 后 ring3 撞 hlt #GP）
+  - [√] 端到端 ring3 hello64 在 UEFI/OVMF 下完整跑通：WRITE → OPEN → READ → WRITE → CLOSE → WRITE → EXIT 全部正确分派
+  - [ ] 清理 SYS_EXIT 之后 `usermode_return_to_kernel` 栈恢复路径残留的内核态 #UD（次要，不影响 ring3 业务，单独跟踪）
+- [ ] **Step E（待开工）**：覆盖率继续上探
+  - [ ] 桥接 proc64 / sched64 真实实现，落地 getpid/gettid/yield
+  - [ ] 桥接 net64（socket/bind/sendto/recvfrom）
+  - [ ] TSC → PIT/HPET 标定，替换 UPTIME_MS 临时实现
+  - [ ] `build.sh` 默认 ARCH 切换为 x86_64
+
 #### 21.2 其他平台与启动能力
 
 - [√] UEFI 启动

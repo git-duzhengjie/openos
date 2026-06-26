@@ -131,7 +131,33 @@ void arch_x86_64_idt_print_status(void) {
 }
 
 void arch_x86_64_exception_dispatch(const struct x86_64_exception_frame *frame) {
-    (void)frame;
+    /*
+     * Step D.2: be loud about exceptions instead of silently halting. Without
+     * this, a ring3 #PF on the boot page tables produces zero output and looks
+     * exactly like "the user program never executed". Print enough state to
+     * tell the two cases apart, then halt as before.
+     */
+    early_console64_write("\n[x86_64][exception] vector=");
+    early_console64_write_hex64(frame ? frame->vector : 0xFFFFFFFFFFFFFFFFULL);
+    if (frame) {
+        uint64_t cr2 = 0;
+        __asm__ __volatile__("mov %%cr2, %0" : "=r"(cr2));
+        early_console64_write(" err=");
+        early_console64_write_hex64(frame->error_code);
+        early_console64_write(" rip=");
+        early_console64_write_hex64((uint64_t)frame->rip);
+        early_console64_write(" cs=");
+        early_console64_write_hex64(frame->cs);
+        early_console64_write(" rflags=");
+        early_console64_write_hex64(frame->rflags);
+        early_console64_write(" rsp=");
+        early_console64_write_hex64((uint64_t)frame->rsp);
+        early_console64_write(" ss=");
+        early_console64_write_hex64(frame->ss);
+        early_console64_write(" cr2=");
+        early_console64_write_hex64(cr2);
+    }
+    early_console64_write("\n");
     for (;;) {
         __asm__ __volatile__("cli; hlt");
     }

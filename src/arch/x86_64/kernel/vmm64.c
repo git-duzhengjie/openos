@@ -4,8 +4,17 @@
 #include "../include/vmm64.h"
 
 #define VMM64_EARLY_IDENTITY_SIZE (64ULL * 1024ULL * 1024ULL)
-#define VMM64_EARLY_KERNEL_PHYS_BASE 0x200000ULL
 #define VMM64_EARLY_KERNEL_MAP_SIZE (64ULL * 1024ULL * 1024ULL)
+
+/*
+ * Step D.2: kernel_phys_base is published by entry64.S after UEFI hands us
+ * control; it is the 2 MiB-aligned phys address where the loader actually
+ * placed our image (which is *not* the ELF static link base when running
+ * from UEFI).  vmm64 must use this for every virt<->phys translation,
+ * otherwise the page tables it builds point at the wrong physical pages and
+ * any access through them (kernel high-half OR ring3) takes a #PF.
+ */
+extern uint64_t kernel64_phys_base;
 
 extern char __kernel64_start[];
 extern char __kernel64_end[];
@@ -43,7 +52,7 @@ static uint16_t pt_index(x86_64_virt_addr_t virt) {
 
 static x86_64_phys_addr_t virt_to_phys_addr(x86_64_virt_addr_t virt) {
     if (virt >= OPENOS_X86_64_KERNEL_BASE) {
-        return virt - OPENOS_X86_64_KERNEL_BASE + VMM64_EARLY_KERNEL_PHYS_BASE;
+        return virt - OPENOS_X86_64_KERNEL_BASE + (x86_64_phys_addr_t)kernel64_phys_base;
     }
     return virt;
 }
@@ -96,11 +105,23 @@ static vmm64_table_t *alloc_table(x86_64_phys_addr_t *phys_out) {
 
 static vmm64_table_t *walk_create_with_flags(x86_64_virt_addr_t virt_addr, uint64_t flags) {
     x86_64_phys_addr_t phys;
-    uint64_t entry_flags = OPENOS_X86_64_PTE_PRESENT | OPENOS_X86_64_PTE_RW;
+    /*
+     * Step D.2: x86_64 page-walk permission is the AND of every level. If any
+     * upper-level entry (PML4 / PDPT / PD) on the path is missing the U bit,
+     * ring3 takes a #PF even when the leaf PTE has U=1. We can't know in
+     * advance whether a later mapping under the same upper-level entry will
+     * be a user mapping, and downgrading kernel-only intermediates after the
+     * fact would require a rewalk.
+     *
+     * The standard fix (used by Linux/xv6 etc.) is: always set U+RW on
+     * upper-level entries; let the *leaf* PTE alone decide the effective
+     * permission. Ring0 keeps full access because CPL trumps U on supervisor
+     * accesses, and the leaf still gates ring3 correctly.
+     */
+    (void)flags;
+    const uint64_t entry_flags =
+        OPENOS_X86_64_PTE_PRESENT | OPENOS_X86_64_PTE_RW | OPENOS_X86_64_PTE_USER;
 
-    if ((flags & OPENOS_X86_64_PTE_USER) != 0) {
-        entry_flags |= OPENOS_X86_64_PTE_USER;
-    }
     vmm64_table_t *pdpt;
     vmm64_table_t *pd;
     vmm64_table_t *pt;
@@ -269,7 +290,7 @@ void arch_x86_64_vmm_init(void) {
         return;
     }
     if (arch_x86_64_vmm_map_range(OPENOS_X86_64_KERNEL_BASE,
-                                  VMM64_EARLY_KERNEL_PHYS_BASE,
+                                  (x86_64_phys_addr_t)kernel64_phys_base,
                                   VMM64_EARLY_KERNEL_MAP_SIZE,
                                   OPENOS_X86_64_VMM_KERNEL_FLAGS) != 0) {
         early_console64_write("[x86_64][VMM] higher-half map failed\n");

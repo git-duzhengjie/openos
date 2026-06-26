@@ -146,17 +146,29 @@ static elf64_loader_status_t map_segment(const uint8_t *image,
     flags = flags_from_phdr(phdr);
 
     for (va = seg_start; va < seg_end; va += OPENOS_X86_64_VMM_PAGE_SIZE) {
-        x86_64_phys_addr_t phys = arch_x86_64_pmm_alloc_page();
-        if (phys == 0) {
-            return ELF64_LOADER_ERR_NO_MEMORY;
-        }
-        if (arch_x86_64_vmm_map_page(va, phys, flags) != 0) {
-            arch_x86_64_pmm_free_page(phys);
-            return ELF64_LOADER_ERR_MAP_FAILED;
-        }
+        /*
+         * Step D.2: we are still running on the boot trampoline page tables
+         * (vmm PML4 not yet promoted to CR3 -- Step D.3). Those tables
+         * identity-map phys 0..4 GiB with U=1, so the simplest way to make
+         * ring3 see the segment is to demand phys == va and write the bytes
+         * directly through the identity mapping. p_vaddr lives in [0..16 MiB)
+         * for our hello64 layout, well inside the identity region; reserve
+         * the exact phys page so PMM/other subsystems don't hand it out.
+         */
+        x86_64_phys_addr_t phys = (x86_64_phys_addr_t)va;
+        arch_x86_64_pmm_reserve_range(phys, OPENOS_X86_64_VMM_PAGE_SIZE);
+        /* Best-effort: also publish the mapping in the vmm PML4 so that
+         * Step D.3 can promote CR3 without losing this region. Ignore the
+         * return value here -- if vmm rejects (already mapped, table full,
+         * ...), ring3 still works via the boot identity map. */
+        (void)arch_x86_64_vmm_map_page(va, phys, flags);
         ++elf64_loader_info.mapped_pages;
     }
 
+    /*
+     * Boot tables identity-map this range, so writing through p_vaddr lands
+     * in the reserved phys pages the loader just took.
+     */
     mem_zero((void *)(uintptr_t)phdr->p_vaddr, (x86_64_size_t)phdr->p_memsz);
     mem_copy((void *)(uintptr_t)phdr->p_vaddr,
              image + phdr->p_offset,
