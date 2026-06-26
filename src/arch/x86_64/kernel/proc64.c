@@ -19,6 +19,7 @@
 #include <stddef.h>
 
 #include "../include/early_console64.h"
+#include "../include/sched64.h"
 
 #define OPENOS_X86_64_PROC_INVALID_INDEX 0xFFFFu
 
@@ -120,10 +121,11 @@ uint32_t arch_x86_64_proc_current_gid(void)  { return proc_table[current_index].
 
 int arch_x86_64_proc_yield(void) {
     ++yield_count;
-    /* No other runnable thread on x86_64 yet. Cooperative yield is a
-     * counted no-op; sched64 will replace this when it gains a real
-     * runqueue. */
-    return 0;
+    /* Hand off to the cooperative kthread runqueue. If no other
+     * kthread is READY, sched_yield() returns 0 and we behave as a
+     * counted no-op — preserving the legacy ring3 path. */
+    uint32_t switched_to = arch_x86_64_sched_yield();
+    return (int)switched_to;
 }
 
 /* ------------------------------------------------------------------- */

@@ -1377,7 +1377,7 @@
   - [ ] 清理 SYS_EXIT 之后 `usermode_return_to_kernel` 栈恢复路径残留的内核态 #UD（次要，不影响 ring3 业务，单独跟踪）
 - [ ] **Step E（进行中）**：覆盖率继续上探
   - [√] **E.1 proc64 接入**：新增 `proc64.{h,c}`（8 槽 PCB，slot 0=kernel pid=1），dispatch 的 `GETPID/GETTID/GETPPID/GETUID/GETGID/YIELD` 改为读 proc64 当前 PCB；`kernel64.c` ring3 启动前 `proc_spawn_user("hello64")` → pid=2/tid=2/ppid=1；`usermode64.c` `mark_exited` 调 `proc_exit` 回退到内核 PCB。`hello64` 加 step E 验证段：`[hello64] step E: pid=2 tid=2 ppid=1 yield=0` 精确字串作回归探针。
-  - [ ] **E.2 sched64 真实化**：proc64.yield 接入 sched64 runqueue（多任务），实现 `arch_x86_64_sched_yield()`。
+  - [√] **E.2 sched64 真实化**：`sched64.c` 新增 8 槽协作式 runqueue（slot 0 = bootstrap/kmain，slot 1..N = 动态 spawn 的 kthread，每个 8KB 堆栈）。新增 `arch_x86_64_sched_spawn_kthread()` / `arch_x86_64_sched_yield()`（round-robin 选下一个 READY 槽，无可调度时 no-op）/ `arch_x86_64_sched_exit_self()`（kthread 自回收）；`proc64.yield()` 改为转发到 `sched64.yield()`；trampoline 在 entry 返回后调用 `sched_exit_self`。`context_switch64.S` 复用 `from==NULL` 跳过 save 分支处理首次进入与 exit-self。新增 `sched_selftest64.{h,c}`：spawn 两个 kthread (A/B 各迭代 3 次)，boot context 协同 yield，预期 12 次 context switch、两个 kthread 全部 done。OVMF 下一次性 PASS：`A_iters=3 B_iters=3 switches=0xC PASS`，hello64 ring3 链路无回归，干净返回 kmain。
   - [ ] **E.3 net64 桥接**：socket/bind/sendto/recvfrom 上挂 dispatch。
   - [ ] **E.4 TSC → PIT/HPET 标定**：替换 `UPTIME_MS` 用 `rdtsc>>20` 的临时实现。
   - [√] **E.5 build.sh 默认 ARCH 切换为 x86_64**：`build.sh` `BUILD_ARCH=${ARCH:-x86_64}`、Usage 调整为 `ARCH=x86_64|i386|aarch64`；`CMakeLists.txt` `OPENOS_DEFAULT_ARCH=x86_64`；`CMakePresets.json` `image` build preset 切到 `ninja-x86_64`。`./build.sh`（无环境变量）默认产出 `target/openos-uefi.img`，OVMF 启动 hello64 + proc64 step E 探针 + 干净返回 kmain；`ARCH=i386 ./build.sh` 同步无回归（仍产出 `target/openos.img`）。

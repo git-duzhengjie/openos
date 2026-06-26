@@ -1,8 +1,10 @@
 #include "../include/sched64.h"
 
 #include <stddef.h>
+#include <stdint.h>
 
 #include "../include/early_console64.h"
+#include "../include/heap64.h"
 
 static x86_64_context_t bootstrap_context;
 static x86_64_context_t *current_context = &bootstrap_context;
@@ -22,6 +24,9 @@ static void sched64_thread_trampoline(void) {
     if (entry != NULL) {
         entry(arg);
     }
+
+    /* Kthread fell out of its entry -- self-reap via cooperative scheduler. */
+    arch_x86_64_sched_exit_self();
 
     for (;;) {
         __asm__ __volatile__("hlt");
@@ -67,11 +72,177 @@ void arch_x86_64_sched_note_switch(x86_64_context_t *next) {
     }
 }
 
+/* =================================================================
+ * Step E.2 — cooperative kernel-thread runqueue.
+ *
+ * One ring buffer of slots. Slot 0 is the bootstrap (kmain) context.
+ * Slots 1..N-1 are dynamically-spawned kthreads. Round-robin pick.
+ * ================================================================= */
+
+typedef enum {
+    SCHED_SLOT_FREE = 0,
+    SCHED_SLOT_READY,
+    SCHED_SLOT_RUNNING,
+    SCHED_SLOT_EXITED,
+} sched_slot_state_t;
+
+typedef struct {
+    sched_slot_state_t  state;
+    x86_64_context_t    ctx;          /* slot 0 mirrors bootstrap_context */
+    void               *stack_base;   /* heap-allocated stack (slot >=1) */
+    uint32_t            id;           /* 1-based slot id; 0 == bootstrap */
+} sched_slot_t;
+
+static sched_slot_t  sched_slots[OPENOS_X86_64_SCHED_MAX_KTHREADS];
+static uint32_t      sched_current_idx;
+static uint64_t      sched_switch_count;
+
+static void sched_ensure_bootstrap_slot(void) {
+    if (sched_slots[0].state != SCHED_SLOT_FREE) {
+        return;
+    }
+    sched_slots[0].state = SCHED_SLOT_RUNNING;
+    sched_slots[0].id    = 0u;
+    /* slot 0 "ctx" is unused for save; bootstrap_context handles that. */
+    sched_current_idx    = 0u;
+}
+
+static uint32_t sched_alloc_slot(void) {
+    sched_ensure_bootstrap_slot();
+    for (uint32_t i = 1u; i < OPENOS_X86_64_SCHED_MAX_KTHREADS; ++i) {
+        if (sched_slots[i].state == SCHED_SLOT_FREE
+            || sched_slots[i].state == SCHED_SLOT_EXITED) {
+            if (sched_slots[i].state == SCHED_SLOT_EXITED
+                && sched_slots[i].stack_base != NULL) {
+                arch_x86_64_kfree(sched_slots[i].stack_base);
+                sched_slots[i].stack_base = NULL;
+            }
+            sched_slots[i].state = SCHED_SLOT_FREE;
+            sched_slots[i].id    = i;
+            return i;
+        }
+    }
+    return 0u;
+}
+
+static uint32_t sched_pick_next(uint32_t from_idx) {
+    /* Round-robin: scan slots starting after `from_idx`. */
+    for (uint32_t step = 1u; step <= OPENOS_X86_64_SCHED_MAX_KTHREADS; ++step) {
+        uint32_t i = (from_idx + step) % OPENOS_X86_64_SCHED_MAX_KTHREADS;
+        if (i == 0u) {
+            if (sched_slots[0].state == SCHED_SLOT_RUNNING
+                || sched_slots[0].state == SCHED_SLOT_READY) {
+                return 0u;
+            }
+            continue;
+        }
+        if (sched_slots[i].state == SCHED_SLOT_READY) {
+            return i;
+        }
+    }
+    return from_idx;
+}
+
+uint32_t arch_x86_64_sched_spawn_kthread(x86_64_thread_entry_t entry, void *arg) {
+    if (entry == NULL) {
+        return 0u;
+    }
+    uint32_t idx = sched_alloc_slot();
+    if (idx == 0u) {
+        return 0u;
+    }
+
+    void *stack = arch_x86_64_kmalloc(OPENOS_X86_64_SCHED_KSTACK_BYTES);
+    if (stack == NULL) {
+        sched_slots[idx].state = SCHED_SLOT_FREE;
+        return 0u;
+    }
+    sched_slots[idx].stack_base = stack;
+
+    uintptr_t stack_top = (uintptr_t)stack + OPENOS_X86_64_SCHED_KSTACK_BYTES;
+    x86_64_thread_context_t tctx;
+    arch_x86_64_context_init(&tctx, entry, arg, (x86_64_stack_ptr_t)stack_top);
+
+    sched_slots[idx].ctx       = tctx.regs;
+    sched_slots[idx].state     = SCHED_SLOT_READY;
+    sched_slots[idx].id        = idx;
+    return idx;
+}
+
+uint32_t arch_x86_64_sched_yield(void) {
+    sched_ensure_bootstrap_slot();
+    uint32_t cur = sched_current_idx;
+    uint32_t nxt = sched_pick_next(cur);
+    if (nxt == cur) {
+        return 0u;
+    }
+
+    /* Mark current READY (unless it just exited). */
+    if (sched_slots[cur].state == SCHED_SLOT_RUNNING) {
+        sched_slots[cur].state = SCHED_SLOT_READY;
+    }
+    sched_slots[nxt].state    = SCHED_SLOT_RUNNING;
+    sched_current_idx         = nxt;
+    ++sched_switch_count;
+
+    x86_64_context_t *from = (cur == 0u) ? &bootstrap_context : &sched_slots[cur].ctx;
+    x86_64_context_t *to   = (nxt == 0u) ? &bootstrap_context : &sched_slots[nxt].ctx;
+    arch_x86_64_context_switch(from, to);
+    /* When we resume here, sched_current_idx points back to `cur`. */
+    return nxt;
+}
+
+void arch_x86_64_sched_exit_self(void) {
+    uint32_t cur = sched_current_idx;
+    if (cur == 0u) {
+        /* Bootstrap must not exit through here. */
+        return;
+    }
+    sched_slots[cur].state = SCHED_SLOT_EXITED;
+
+    /* Find next runnable; if none, fall back to slot 0 (bootstrap). */
+    uint32_t nxt = sched_pick_next(cur);
+    if (nxt == cur) {
+        nxt = 0u;
+    }
+    sched_slots[nxt].state = SCHED_SLOT_RUNNING;
+    sched_current_idx      = nxt;
+    ++sched_switch_count;
+
+    x86_64_context_t *to = (nxt == 0u) ? &bootstrap_context : &sched_slots[nxt].ctx;
+    /* `from == NULL` tells context_switch64.S to skip saving. */
+    arch_x86_64_context_switch(NULL, to);
+
+    /* Should not return. */
+    for (;;) {
+        __asm__ __volatile__("hlt");
+    }
+}
+
+uint32_t arch_x86_64_sched_kthread_count(void) {
+    uint32_t n = 0u;
+    for (uint32_t i = 1u; i < OPENOS_X86_64_SCHED_MAX_KTHREADS; ++i) {
+        if (sched_slots[i].state != SCHED_SLOT_FREE) {
+            ++n;
+        }
+    }
+    return n;
+}
+
+uint32_t arch_x86_64_sched_current_slot(void)   { return sched_current_idx; }
+uint64_t arch_x86_64_sched_switch_count(void)   { return sched_switch_count; }
+
 void arch_x86_64_sched_print_status(void) {
     early_console64_write("[x86_64][sched] context switch supports rsp/rip/rflags and r8-r15\n");
     early_console64_write("[x86_64][sched] ready=");
     early_console64_write_hex64(sched64_ready);
     early_console64_write(" current=");
     early_console64_write_hex64((uint64_t)(uintptr_t)current_context);
+    early_console64_write(" slot=");
+    early_console64_write_hex64((uint64_t)sched_current_idx);
+    early_console64_write(" switches=");
+    early_console64_write_hex64(sched_switch_count);
+    early_console64_write(" kthreads=");
+    early_console64_write_hex64((uint64_t)arch_x86_64_sched_kthread_count());
     early_console64_write("\n");
 }

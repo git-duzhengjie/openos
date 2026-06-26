@@ -15,6 +15,7 @@
 #include "../include/shell64.h"
 #include "../include/syscall64.h"
 #include "../include/syscall_selftest64.h"
+#include "../include/sched_selftest64.h"
 #include "../include/tss64.h"
 #include "../include/usermode64.h"
 #include "../include/vfs64.h"
@@ -127,6 +128,17 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
         early_console64_write("[x86_64][selftest] result=");
         early_console64_write_hex64((uint64_t)(uint32_t)selftest_rv);
         early_console64_write("\n");
+    }
+
+    /* Step E.2 cooperative scheduler selftest — must run before we drop
+     * into ring3, otherwise the bootstrap context's stack starts being
+     * shared with the user-mode trampoline path. */
+    {
+        int sched_rv = arch_x86_64_sched_selftest_run();
+        early_console64_write("[x86_64][sched-selftest] result=");
+        early_console64_write_hex64((uint64_t)(uint32_t)sched_rv);
+        early_console64_write("\n");
+        arch_x86_64_sched_print_status();
     }
 
     /* Step C: initrd & fdtable 就绪后再跳 ring3 hello64，否则 open(/hello.txt) 会看不到文件。 */
