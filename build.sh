@@ -359,8 +359,11 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
     UEFI_CC="x86_64-w64-mingw32-gcc"
     ARCH64_UEFI_CFLAGS="-ffreestanding -fshort-wchar -mno-red-zone -Wall -Wextra -O2 -fno-stack-protector -fno-builtin -I$ARCH64_SRC/include"
     ARCH64_UEFI_ASFLAGS="-ffreestanding -fno-stack-protector"
-    # -shared 输出 DLL，UEFI 应用本质上是 PE32+ DLL；--subsystem 10 = EFI Application
-    ARCH64_UEFI_LDFLAGS="-nostdlib -nostartfiles -Wl,--subsystem,10 -Wl,-e,_start -shared -Wl,-Bsymbolic"
+    # UEFI 应用是 PE32+；--subsystem 10 = EFI Application。
+    # 关键：不能同时使用 -shared / --dynamicbase 但又缺 .reloc 表，否则 OVMF LoadImage
+    # 会拒绝（表现为 Not Found）。采用静态镀接 + 固定 ImageBase=0x100000，交由 PE
+    # loader 按 ImageBase 加载，不需要动态重定位。
+    ARCH64_UEFI_LDFLAGS="-nostdlib -nostartfiles -Wl,--subsystem,10 -Wl,-e,_start -Wl,--image-base,0x100000 -Wl,--disable-dynamicbase"
 
     mkdir -p "$ARCH64_BUILD" "$ARCH64_USER_BUILD" "$ARCH64_BOOT_BUILD" "$ARCH64_BIN_BUILD"
     rm -f "$ARCH64_BUILD"/*.o "$ARCH64_BUILD"/*.elf "$ARCH64_USER_BUILD"/*.o "$ARCH64_BOOT_BUILD"/*.o "$ARCH64_BOOT_BUILD"/*.elf "$ARCH64_BOOT_BUILD"/*.EFI "$ARCH64_BOOT_BUILD"/*.efi "$ARCH64_BIN_BUILD"/*.elf
@@ -484,6 +487,17 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         objdump -p "$ARCH64_BOOT_BUILD/BOOTX64.EFI" | grep -i 'subsystem' >&2
         exit 1
     }
+    # 检查：若 DllCharacteristics 包含 DYNAMIC_BASE（0x40），则必须存在 .reloc。
+    # 注：grep -c 零匹配会返回 exit 1，set -e 下需 || true 徽收
+    DLLCHAR=$(objdump -p "$ARCH64_BOOT_BUILD/BOOTX64.EFI" | awk '/DllCharacteristics/ {print $2; exit}' || true)
+    HAS_RELOC=$(objdump -h "$ARCH64_BOOT_BUILD/BOOTX64.EFI" | grep -cE '\.reloc' || true)
+    DYN_BIT=$(( 0x${DLLCHAR:-0} & 0x40 ))
+    if [ "$DYN_BIT" -ne 0 ] && [ "${HAS_RELOC:-0}" -eq 0 ]; then
+        echo "[UEFI] ERROR: DllCharacteristics=0x$DLLCHAR 含 DYNAMIC_BASE 但缺 .reloc -> OVMF 会拒绝" >&2
+        objdump -p "$ARCH64_BOOT_BUILD/BOOTX64.EFI" | grep -i 'characteristics\|imagebase\|subsystem' >&2
+        exit 1
+    fi
+    echo "[UEFI] BOOTX64.EFI OK: DllChar=0x$DLLCHAR, .reloc=$HAS_RELOC, ImageBase=0x100000"
 
     echo "[BIOS] Assembling x86_64 BIOS long-mode boot stub (boot64.asm)..."
     # 21.1 BIOS long-mode 自举骨架：16->32->64 切换链路。
@@ -503,78 +517,30 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
     echo "  boot64.bin: $BOOT64_BYTES bytes, signature 0x$BOOT64_SIG OK"
 
     # 创建 UEFI 磁盘镜像
-    echo "[UEFI] Creating UEFI disk image..."
+    # 设计：采用裸 FAT32（不加 GPT/MBR）作为 UEFI 启动镜像。OVMF 可直接识别
+    # 裸 FAT 卷为 EFI System Volume。之前采用 GPT+ESP 方案时 OVMF 未能
+    # 识别到 ESP（LoadImage 返回 Not Found），原因未定，裸 FAT 绕过问题。
+    # 后续产品发表可在裸 FAT 能跳后再探索 GPT 路径。
+    echo "[UEFI] Creating UEFI disk image (raw FAT32, no GPT)..."
     UEFI_IMG="$BUILD/openos-uefi.img"
-    ESP_SIZE_MB=32
-    ESP_SECTORS=$((ESP_SIZE_MB * 1024 * 1024 / 512))
-    TOTAL_SECTORS=$((ESP_SECTORS + 2048 + 33))  # GPT + ESP + backup
+    ESP_SIZE_MB=33
 
-    # 创建空磁盘镜像
-    dd if=/dev/zero of="$UEFI_IMG" bs=512 count=$TOTAL_SECTORS 2>/dev/null
-
-    # 创建 GPT 分区表
-    sgdisk -Z "$UEFI_IMG" 2>/dev/null || true
-    sgdisk -n 1:2048:+$ESP_SECTORS -t 1:ef00 -c 1:"ESP" "$UEFI_IMG" 2>/dev/null
-
-    # 创建临时挂载目录
-    TMP_MNT=$(mktemp -d)
-    TMP_ESP=$(mktemp -d)
-
-    # 使用 mtools 创建 FAT32 ESP 镜像并复制文件
-    echo "  使用 mtools 创建 FAT32 ESP 镜像..."
-    truncate -s ${ESP_SIZE_MB}M "$BUILD/esp.img"
-    mkfs.vfat -F 32 -n "ESP" -S 512 -s 1 -R 32 "$BUILD/esp.img" >/dev/null
-    mmd -i "$BUILD/esp.img" ::/EFI
-    mmd -i "$BUILD/esp.img" ::/EFI/BOOT
-    mcopy -i "$BUILD/esp.img" "$ARCH64_BOOT_BUILD/BOOTX64.EFI" ::/EFI/BOOT/BOOTX64.EFI
-    mcopy -i "$BUILD/esp.img" "$ARCH64_BUILD/kernel64.elf" ::/kernel64.elf
-    # 创建 startup.nsh 自动启动脚本（UEFI Shell 模式下需要）
-    # 使用顺序检测，避免for循环语法问题
-    cat > "$BUILD/startup.nsh" << 'EOF'
-@echo -off
-set StartupDelay 0
-echo Starting OpenOS UEFI Boot...
-
-FS0:
-if exist \EFI\BOOT\BOOTX64.EFI then
-    \EFI\BOOT\BOOTX64.EFI
-    goto end
-endif
-
-FS1:
-if exist \EFI\BOOT\BOOTX64.EFI then
-    \EFI\BOOT\BOOTX64.EFI
-    goto end
-endif
-
-FS2:
-if exist \EFI\BOOT\BOOTX64.EFI then
-    \EFI\BOOT\BOOTX64.EFI
-    goto end
-endif
-
-echo ERROR: Bootloader not found on FS0, FS1, FS2
-echo Mappings:
-map -r
-pause
-:end
-EOF
-    mcopy -i "$BUILD/esp.img" "$BUILD/startup.nsh" ::/startup.nsh
-    rm -f "$BUILD/startup.nsh"
+    # 使用 mtools 创建裸 FAT32 镜像并复制文件
+    echo "  使用 mtools 创建 FAT32 镜像..."
+    truncate -s ${ESP_SIZE_MB}M "$UEFI_IMG"
+    mkfs.vfat -F 32 -n "ESP" -S 512 -s 1 -R 32 "$UEFI_IMG" >/dev/null
+    mmd -i "$UEFI_IMG" ::/EFI
+    mmd -i "$UEFI_IMG" ::/EFI/BOOT
+    mcopy -i "$UEFI_IMG" "$ARCH64_BOOT_BUILD/BOOTX64.EFI" ::/EFI/BOOT/BOOTX64.EFI
+    mcopy -i "$UEFI_IMG" "$ARCH64_BUILD/kernel64.elf" ::/kernel64.elf
 
     # 验证镜像内容
     echo "  验证镜像内容:"
-    file "$BUILD/esp.img"
-    mdir -i "$BUILD/esp.img" ::/EFI/BOOT/
-
-    # 将 ESP 分区写入磁盘镜像
-    dd if="$BUILD/esp.img" of="$UEFI_IMG" bs=512 seek=2048 conv=notrunc 2>/dev/null
-
-    # 清理
-    rm -rf "$TMP_MNT" "$TMP_ESP" "$BUILD/esp.img"
+    file "$UEFI_IMG"
+    mdir -i "$UEFI_IMG" ::/EFI/BOOT/
 
     echo "  UEFI disk image: $UEFI_IMG"
-    echo "  ESP size: ${ESP_SIZE_MB}MB"
+    echo "  Size: ${ESP_SIZE_MB}MB (raw FAT32)"
 
     echo "x86_64 Build Successful!"
     echo "Output: $ARCH64_BUILD/kernel64.elf"

@@ -94,7 +94,21 @@ static inline int elf64_validate(const uint8_t *buffer, uint64_t size)
 static inline uint64_t elf64_get_entry(const uint8_t *buffer)
 {
     const elf64_ehdr_t *ehdr = (const elf64_ehdr_t *)buffer;
-    return ehdr->entry;
+    const elf64_phdr_t *phdrs = (const elf64_phdr_t *)(buffer + ehdr->phoff);
+    uint64_t entry = ehdr->entry;
+
+    /* 如果 entry 是高半区虚地址（未开分页不可访问），按首个 LOAD
+     * 段的 vaddr->paddr 差调到物理地址。内核启动初期代码必须用
+     * paddr 运行，启用分页后再跳到 vaddr。 */
+    if ((entry >> 48) == 0xFFFF) {
+        for (uint16_t i = 0; i < ehdr->phnum; ++i) {
+            const elf64_phdr_t *ph = &phdrs[i];
+            if (ph->type == ELF64_PT_LOAD && entry >= ph->vaddr && entry < ph->vaddr + ph->memsz) {
+                return (entry - ph->vaddr) + ph->paddr;
+            }
+        }
+    }
+    return entry;
 }
 
 static inline efi_status_t elf64_load_segments(efi_system_table64_t *system_table,
@@ -120,23 +134,38 @@ static inline efi_status_t elf64_load_segments(efi_system_table64_t *system_tabl
             continue;
         }
 
-        /* 计算页面对齐的地址和大小 */
-        uint64_t aligned_addr = ph->vaddr & ~0xFFFULL;
-        uint64_t aligned_size = ((ph->vaddr - aligned_addr + ph->memsz + 0xFFFULL) & ~0xFFFULL);
+        /* UEFI 下使用 PhysAddr 加载（内核高半区 vaddr=0xFFFFFFFF80000000 需
+         * paddr=0x200000 才能被 UEFI identity map 访问）。在 boot64.asm
+         * 启用分页后高半区 vaddr 会被映射到该物理页。 */
+        uint64_t load_addr = (ph->paddr != 0) ? ph->paddr : ph->vaddr;
+        uint64_t aligned_addr = load_addr & ~0xFFFULL;
+        uint64_t aligned_size = ((load_addr - aligned_addr + ph->memsz + 0xFFFULL) & ~0xFFFULL);
         uint64_t pages = aligned_size >> 12;
 
-        /* 分配内存 - 使用 AllocateAddress */
+        /* 分配内存 - 先试 AllocateAddress（保留 ELF 原定 paddr），失败则
+         * 回退 AllocateAnyPages。为了内核 boot64.asm 该都在开分页前只依赖
+         * UEFI identity map，AnyPages 后的地址仍能被访问。 */
         status = system_table->boot_services->allocate_pages(
             1, /* AllocateAddress */
             memory_type,
             pages,
             &aligned_addr);
         if (status != EFI_SUCCESS) {
-            return status;
+            /* 回退：AnyPages，让 UEFI 选位置 */
+            status = system_table->boot_services->allocate_pages(
+                0, /* AllocateAnyPages */
+                memory_type,
+                pages,
+                &aligned_addr);
+            if (status != EFI_SUCCESS) {
+                return status;
+            }
+            /* AnyPages 下 load_addr 不再是原始 paddr，调整 dest */
+            load_addr = aligned_addr + (load_addr & 0xFFFULL);
         }
 
         /* 清零 bss 部分 */
-        dest = (uint8_t *)(uintptr_t)ph->vaddr;
+        dest = (uint8_t *)(uintptr_t)load_addr;
         for (uint64_t j = 0; j < ph->memsz; ++j) {
             dest[j] = 0;
         }

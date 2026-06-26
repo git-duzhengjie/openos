@@ -101,21 +101,23 @@ struct efi_memory_descriptor64 {
 
 struct efi_boot_services64 {
     efi_table_header64_t hdr;
+    /* TPL services */
     void *raise_tpl;
     void *restore_tpl;
+    /* Memory services */
     efi_allocate_pages64_t allocate_pages;
     efi_free_pages64_t free_pages;
     efi_get_memory_map64_t get_memory_map;
-    void *set_mem;
-    void *copy_mem;
     efi_allocate_pool64_t allocate_pool;
     efi_free_pool64_t free_pool;
+    /* Event/Timer services */
     void *create_event;
     void *set_timer;
     void *wait_for_event;
     void *signal_event;
     void *close_event;
     void *check_event;
+    /* Protocol Handler services */
     void *install_protocol_interface;
     void *reinstall_protocol_interface;
     void *uninstall_protocol_interface;
@@ -123,13 +125,37 @@ struct efi_boot_services64 {
     void *reserved;
     void *register_protocol_notify;
     void *locate_handle;
-    efi_locate_protocol64_t locate_protocol;
+    void *locate_device_path;
     void *install_configuration_table;
+    /* Image services */
     void *load_image;
     void *start_image;
     void *exit;
     void *unload_image;
     efi_exit_boot_services64_t exit_boot_services;
+    /* Misc services */
+    void *get_next_monotonic_count;
+    void *stall;
+    void *set_watchdog_timer;
+    /* DriverSupport services */
+    void *connect_controller;
+    void *disconnect_controller;
+    /* Open and Close Protocol services */
+    void *open_protocol;
+    void *close_protocol;
+    void *open_protocol_information;
+    /* Library services */
+    void *protocols_per_handle;
+    void *locate_handle_buffer;
+    efi_locate_protocol64_t locate_protocol;
+    void *install_multiple_protocol_interfaces;
+    void *uninstall_multiple_protocol_interfaces;
+    /* 32-bit CRC services */
+    void *calculate_crc32;
+    /* Misc services */
+    void *copy_mem;
+    void *set_mem;
+    void *create_event_ex;
 };
 
 /* Simple File System Protocol */
