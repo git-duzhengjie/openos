@@ -1,6 +1,7 @@
 #include "../include/smp64.h"
 #include "../include/acpi64.h"
 #include "../include/lapic64.h"
+#include "../include/ap_trampoline64.h"
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -12,6 +13,7 @@
 
 typedef struct smp_state {
     bool     ready;
+    bool     trampoline_installed;
     uint8_t  bsp_apic_id;
     uint32_t cpu_count;          /* enabled CPUs incl. BSP */
     uint32_t ap_count;
@@ -75,8 +77,24 @@ uint8_t arch_x86_64_smp_ap_apic_id(uint32_t index) {
 }
 
 uint64_t arch_x86_64_smp_trampoline_phys(void) {
-    /* G.4.1: fixed low-1MB landing zone. We do not actually write to this
-     * page yet; G.4.2 will install the trampoline blob and validate the
-     * UEFI memory map marks it as conventional memory. */
+    /* Fixed low-1MB landing zone. G.4.2 installs blob here. */
     return OPENOS_X86_64_SMP_TRAMPOLINE_PHYS;
+}
+
+bool arch_x86_64_smp_install_trampoline(void) {
+    uint64_t phys = OPENOS_X86_64_SMP_TRAMPOLINE_PHYS;
+    if (!arch_x86_64_ap_trampoline_install(phys)) {
+        g_smp.trampoline_installed = false;
+        return false;
+    }
+    if (!arch_x86_64_ap_trampoline_verify(phys)) {
+        g_smp.trampoline_installed = false;
+        return false;
+    }
+    g_smp.trampoline_installed = true;
+    return true;
+}
+
+bool arch_x86_64_smp_trampoline_installed(void) {
+    return g_smp.trampoline_installed;
 }

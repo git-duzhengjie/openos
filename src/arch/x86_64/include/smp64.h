@@ -34,4 +34,10 @@ uint64_t arch_x86_64_smp_trampoline_phys(void);
 /* Total number of CPUs the firmware reported as enabled (BSP + APs). */
 uint32_t arch_x86_64_smp_cpu_count(void);
 
+/* G.4.2: install the AP trampoline blob at OPENOS_X86_64_SMP_TRAMPOLINE_PHYS.
+ * Returns true on success (blob bytes match and verify ok). No IPI fired.
+ */
+bool arch_x86_64_smp_install_trampoline(void);
+bool arch_x86_64_smp_trampoline_installed(void);
+
 #endif /* OPENOS_ARCH_X86_64_SMP64_H */

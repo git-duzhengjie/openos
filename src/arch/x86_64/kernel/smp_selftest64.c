@@ -1,5 +1,6 @@
 #include "../include/smp_selftest64.h"
 #include "../include/smp64.h"
+#include "../include/ap_trampoline64.h"
 #include "../include/early_console64.h"
 
 #include <stdint.h>
@@ -34,6 +35,15 @@ void arch_x86_64_smp_selftest_run(void)
         early_console64_write("] apic_id=");
         early_console64_write_hex64((uint64_t)arch_x86_64_smp_ap_apic_id(i));
     }
+
+    /* G.4.2: install AP trampoline blob and verify magic. */
+    log_kv("\n[x86_64][smp-selftest] tramp_blob_size=", arch_x86_64_ap_trampoline_size());
+    if (!arch_x86_64_smp_install_trampoline()) {
+        early_console64_write("\n[x86_64][smp-selftest] FAIL trampoline install/verify\n");
+        return;
+    }
+    early_console64_write("\n[x86_64][smp-selftest] trampoline installed @ ");
+    early_console64_write_hex64(arch_x86_64_smp_trampoline_phys());
 
     early_console64_write("\n[x86_64][smp-selftest] PASS\n");
 }

@@ -413,6 +413,7 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         kernel/acpi_selftest64.c \
         kernel/smp64.c \
         kernel/smp_selftest64.c \
+        kernel/ap_trampoline64.c \
         kernel/fdtable64.c \
         kernel/initrd64.c \
         kernel/vfs64.c \
@@ -447,10 +448,13 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         kernel/context_switch64.S \
         kernel/syscall_int80_compat64.S \
         kernel/syscall_sysret64.S \
+        kernel/ap_trampoline64.S \
         kernel/usermode64.S; do
         base="$(basename "${sfile%.S}")"
         if [ "$base" = "usermode64" ]; then
             obj="$ARCH64_BUILD/usermode64_asm.o"
+        elif [ "$base" = "ap_trampoline64" ]; then
+            obj="$ARCH64_BUILD/ap_trampoline64_asm.o"
         else
             obj="$ARCH64_BUILD/$base.o"
         fi
@@ -489,6 +493,8 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         "$ARCH64_BUILD/acpi_selftest64.o" \
         "$ARCH64_BUILD/smp64.o" \
         "$ARCH64_BUILD/smp_selftest64.o" \
+        "$ARCH64_BUILD/ap_trampoline64.o" \
+        "$ARCH64_BUILD/ap_trampoline64_asm.o" \
         "$ARCH64_BUILD/fdtable64.o" \
         "$ARCH64_BUILD/initrd64.o" \
         "$ARCH64_BUILD/vfs64.o" \
