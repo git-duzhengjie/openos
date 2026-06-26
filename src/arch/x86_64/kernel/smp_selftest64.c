@@ -127,9 +127,18 @@ void arch_x86_64_smp_selftest_run(void)
         return;
     }
 
-    /* All three stages reached by all APs. */
+    /* Stage 4: per-AP LAPIC bring-up (G.5-lapic). */
+    uint8_t alive_lapic = arch_x86_64_smp_alive_lapic_wait(expect, 500);
+    log_kv("\n[x86_64][smp-selftest] alive_lapic=", (uint64_t)alive_lapic);
+    log_kv(" expected>=", (uint64_t)expect);
+    if (ap_n > 0 && alive_lapic < expect) {
+        early_console64_write("\n[x86_64][smp-selftest] FAIL: AP LAPIC init incomplete\n");
+        return;
+    }
+
+    /* All four stages reached by all APs. */
     if (ap_n > 0) {
-        early_console64_write("\n[x86_64][smp-selftest] PASS: all APs reached long mode\n");
+        early_console64_write("\n[x86_64][smp-selftest] PASS: all APs LAPIC online\n");
     } else {
         early_console64_write("\n[x86_64][smp-selftest] PASS: no APs (UP system)\n");
     }

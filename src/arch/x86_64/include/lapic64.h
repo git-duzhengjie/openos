@@ -55,6 +55,19 @@
  * before we mask out the 8259A). */
 bool arch_x86_64_lapic_init(void);
 
+/* G.5-lapic: Per-AP LAPIC bring-up.
+ *
+ * The BSP has already mapped the LAPIC MMIO window (UEFI identity map covers
+ * 0xFEE00000), so APs reuse the same g_lapic_mmio pointer. This routine runs
+ * on each AP from ap_entry() and:
+ *   - clears its own TPR (accept all priorities)
+ *   - writes its own SVR with enable bit + spurious vector 0xFF
+ *   - reads back its own LAPIC ID for sanity
+ *
+ * Returns true if SVR enable was accepted (version readback != 0).
+ * Must be called *after* arch_x86_64_lapic_init() has finished on the BSP. */
+bool arch_x86_64_lapic_init_ap(void);
+
 /* Returns true once init has succeeded. */
 bool arch_x86_64_lapic_is_ready(void);
 

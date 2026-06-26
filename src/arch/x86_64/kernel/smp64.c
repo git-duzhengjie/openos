@@ -194,9 +194,11 @@ void arch_x86_64_smp_alive_reset_all(void) {
     volatile uint8_t *rm  = (volatile uint8_t *)(uintptr_t)OPENOS_X86_64_SMP_ALIVE_RM_PHYS;
     volatile uint8_t *pm  = (volatile uint8_t *)(uintptr_t)OPENOS_X86_64_SMP_ALIVE_PM32_PHYS;
     volatile uint8_t *lm  = (volatile uint8_t *)(uintptr_t)OPENOS_X86_64_SMP_ALIVE_LM64_PHYS;
+    volatile uint8_t *la  = (volatile uint8_t *)(uintptr_t)OPENOS_X86_64_SMP_ALIVE_LAPIC_PHYS;
     *rm = 0;
     *pm = 0;
     *lm = 0;
+    *la = 0;
 }
 
 uint8_t arch_x86_64_smp_alive_rm_wait(uint8_t expected, uint32_t timeout_ms) {
@@ -225,6 +227,23 @@ uint8_t arch_x86_64_smp_alive_lm64_wait(uint8_t expected, uint32_t timeout_ms) {
     uint32_t elapsed = 0;
     for (;;) {
         uint8_t cur = arch_x86_64_smp_alive_lm64();
+        if (cur >= expected) return cur;
+        if (elapsed >= timeout_ms) return cur;
+        arch_x86_64_delay_ms(1);
+        elapsed++;
+    }
+}
+
+uint8_t arch_x86_64_smp_alive_lapic(void) {
+    const volatile uint8_t *p =
+        (const volatile uint8_t *)(uintptr_t)OPENOS_X86_64_SMP_ALIVE_LAPIC_PHYS;
+    return *p;
+}
+
+uint8_t arch_x86_64_smp_alive_lapic_wait(uint8_t expected, uint32_t timeout_ms) {
+    uint32_t elapsed = 0;
+    for (;;) {
+        uint8_t cur = arch_x86_64_smp_alive_lapic();
         if (cur >= expected) return cur;
         if (elapsed >= timeout_ms) return cur;
         arch_x86_64_delay_ms(1);
@@ -311,7 +330,16 @@ void arch_x86_64_ap_entry(uint64_t apic_id) {
         g_ap_cpu_to_apic[cpu_idx] = (uint8_t)apic_id;
     }
 
-    /* TODO(G.5-lapic): per-CPU LAPIC init for APs */
+    /* G.5-lapic: bring this AP's local APIC online and record success in a
+     * shared atomic counter so the BSP selftest can wait on it. */
+    bool lapic_ok = arch_x86_64_lapic_init_ap();
+    if (lapic_ok) {
+        __asm__ __volatile__(
+            "lock incb (%0)"
+            :
+            : "r"((volatile uint8_t *)(uintptr_t)OPENOS_X86_64_SMP_ALIVE_LAPIC_PHYS)
+            : "memory");
+    }
     (void)arch_x86_64_lapic_id();
 
     for (;;) {

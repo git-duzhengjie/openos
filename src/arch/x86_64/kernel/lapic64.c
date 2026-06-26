@@ -82,6 +82,38 @@ bool arch_x86_64_lapic_init(void) {
 
 bool arch_x86_64_lapic_is_ready(void) { return g_lapic_ready; }
 
+/* G.5-lapic: AP-side LAPIC bring-up. The MMIO window was already discovered
+ * and mapped by the BSP; APs share the same g_lapic_mmio pointer. We only
+ * need to program TPR + SVR on each AP's local APIC unit. */
+bool arch_x86_64_lapic_init_ap(void) {
+    if (!g_lapic_ready || !g_lapic_mmio) {
+        return false;
+    }
+
+    /* Verify the AP's IA32_APIC_BASE has the global enable bit. UEFI normally
+     * leaves it on for all CPUs, but be defensive. */
+    uint64_t apic_base_msr = rdmsr_u64(IA32_APIC_BASE_MSR);
+    if ((apic_base_msr & IA32_APIC_BASE_GLOBAL_ENABLE) == 0) {
+        return false;
+    }
+
+    /* Clear TPR. */
+    mmio_write32(g_lapic_mmio, OPENOS_X86_64_LAPIC_REG_TPR, 0);
+
+    /* Enable SVR with spurious vector 0xFF. */
+    uint32_t svr = mmio_read32(g_lapic_mmio, OPENOS_X86_64_LAPIC_REG_SVR);
+    svr |= OPENOS_X86_64_LAPIC_SVR_ENABLE;
+    svr = (svr & ~0xFFu) | OPENOS_X86_64_LAPIC_SPURIOUS_VECTOR;
+    mmio_write32(g_lapic_mmio, OPENOS_X86_64_LAPIC_REG_SVR, svr);
+
+    /* Sanity readback — must be non-zero/non-all-ones. */
+    uint32_t ver = mmio_read32(g_lapic_mmio, OPENOS_X86_64_LAPIC_REG_VERSION);
+    if (ver == 0u || ver == 0xFFFFFFFFu) {
+        return false;
+    }
+    return true;
+}
+
 uint64_t arch_x86_64_lapic_mmio_base(void) {
     return (uint64_t)(uintptr_t)g_lapic_mmio;
 }

@@ -16,6 +16,10 @@
 #define OPENOS_X86_64_SMP_CPU_IDX_PHYS     0x00009018ULL
 #define OPENOS_X86_64_SMP_STACK_TABLE_PHYS 0x0000A000ULL
 
+/* G.5-lapic: AP-side LAPIC bring-up alive counter (1 byte, atomic incb).
+ * Each AP that successfully programmed its own LAPIC SVR/TPR bumps this. */
+#define OPENOS_X86_64_SMP_ALIVE_LAPIC_PHYS 0x00009020ULL
+
 bool arch_x86_64_smp_init(void);
 bool arch_x86_64_smp_is_ready(void);
 
@@ -43,6 +47,10 @@ void arch_x86_64_smp_alive_reset_all(void);
 uint8_t arch_x86_64_smp_alive_rm_wait(uint8_t expected, uint32_t timeout_ms);
 uint8_t arch_x86_64_smp_alive_pm32_wait(uint8_t expected, uint32_t timeout_ms);
 uint8_t arch_x86_64_smp_alive_lm64_wait(uint8_t expected, uint32_t timeout_ms);
+
+/* G.5-lapic: per-AP LAPIC bring-up confirmation. */
+uint8_t arch_x86_64_smp_alive_lapic(void);
+uint8_t arch_x86_64_smp_alive_lapic_wait(uint8_t expected, uint32_t timeout_ms);
 
 uint64_t arch_x86_64_smp_stack_base(uint32_t cpu_idx);
 uint64_t arch_x86_64_smp_stack_top(uint32_t cpu_idx);
