@@ -18,6 +18,8 @@
 #include "../include/sched_selftest64.h"
 #include "../include/net64.h"
 #include "../include/net_selftest64.h"
+#include "../include/tsc64.h"
+#include "../include/tsc_selftest64.h"
 #include "../include/tss64.h"
 #include "../include/usermode64.h"
 #include "../include/vfs64.h"
@@ -87,6 +89,10 @@ void arch_x86_64_early_init(const openos_bootinfo_t *bootinfo) {
     /* Step E.3: loopback socket layer. Allocation-free, lives in .bss so it
      * is safe to bring up alongside fd_init / vfs_init in early boot. */
     arch_x86_64_net_init();
+    /* Step E.4: TSC<->PIT calibration. Must run before any selftest that
+     * relies on uptime_ms(); idempotent and tolerates failure (uptime falls
+     * back to the legacy rdtsc>>20 estimate). */
+    arch_x86_64_tsc_init();
 }
 
 void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
@@ -155,6 +161,10 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
         early_console64_write("\n");
         arch_x86_64_net_print_status();
     }
+
+    /* Step E.4 TSC<->PIT calibration sanity. Non-fatal — uptime_ms() falls
+     * back to the legacy estimator if anything in this chain goes sideways. */
+    arch_x86_64_tsc_selftest_run();
 
     /* Step C: initrd & fdtable 就绪后再跳 ring3 hello64，否则 open(/hello.txt) 会看不到文件。 */
     early_console64_write("[x86_64][user] loading embedded hello64.elf size=");

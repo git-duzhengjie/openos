@@ -28,6 +28,7 @@
 #include "../include/net64.h"
 #include "../include/proc64.h"
 #include "../include/sched64.h"
+#include "../include/tsc64.h"
 #include "../include/usermode64.h"
 #include "../include/vfs64.h"
 #include "syscall.h" /* canonical SYS_* numbers (shared with i386) */
@@ -152,12 +153,16 @@ static uint64_t do_free(uint64_t ptr) {
 }
 
 /*
- * SYS_UPTIME_MS: derived from the TSC. We don't yet know the host CPU
- * frequency, so we report an artificial 1 GHz tick (TSC >> 20 ≈ ms). This is
- * good enough for monotonicity-only consumers; a real calibration will land
- * with the PIT/HPET driver.
+ * SYS_UPTIME_MS: real millisecond uptime, calibrated against the i8254 PIT
+ * during early boot (see tsc64.c). If calibration somehow failed (per_ms==0)
+ * we fall back to the legacy `rdtsc >> 20` placeholder so the call stays
+ * monotonic instead of returning a flat 0 — that keeps existing consumers
+ * working even on exotic hosts where the PIT poll didn't fire.
  */
 static uint64_t do_uptime_ms(void) {
+    uint64_t ms = arch_x86_64_tsc_uptime_ms();
+    if (ms != 0) return ms;
+    if (arch_x86_64_tsc_per_ms() != 0) return 0; /* calibrated, just early */
     uint32_t lo, hi;
     __asm__ volatile ("rdtsc" : "=a"(lo), "=d"(hi));
     uint64_t tsc = ((uint64_t)hi << 32) | lo;
