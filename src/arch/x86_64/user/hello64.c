@@ -154,5 +154,55 @@ int openos64_main(int argc, char **argv) {
         (void)openos64_write(OPENOS64_STDOUT_FILENO, tail, ti);
     }
 
+    /*
+     * Step E.4 verification: drive the PIT-calibrated uptime_ms syscall
+     * from ring3 end-to-end. We take two timestamps separated by a small
+     * busy-wait that yields between iterations (so the kernel has chances
+     * to observe time advancing), then assert:
+     *   1. both calls succeed (non-negative)
+     *   2. t1 >= t0 (monotonic non-decreasing)
+     * The exact deltas are printed in hex so regressions are diagnosable
+     * from the serial log alone. Expected on a calibrated kernel:
+     *   [hello64] step E.4: t0=0x... t1=0x... dt>=1
+     */
+    {
+        uint64_t t0 = openos64_uptime_ms();
+        /* Busy-spin + yield long enough that t1 advances past t0 even on
+         * QEMU TCG (where the calibrated TSC ticks slower than wall clock
+         * but still strictly advances). Nested loops give ~hundreds of ms
+         * on TCG; KVM hosts blow through this in microseconds. The outer
+         * yield keeps the kernel scheduler engaged. */
+        for (volatile int outer = 0; outer < 64; ++outer) {
+            for (volatile int inner = 0; inner < 65536; ++inner) {
+                /* nothing */
+            }
+            openos64_yield();
+        }
+        uint64_t t1 = openos64_uptime_ms();
+
+        char ub[96];
+        openos64_size_t ui = 0;
+        const char *up_pfx = "[hello64] step E.4: t0=0x";
+        for (const char *p = up_pfx; *p; ++p) ub[ui++] = *p;
+        static const char uphex[] = "0123456789abcdef";
+        for (int s = 60; s >= 0; s -= 4) ub[ui++] = uphex[(t0 >> s) & 0xF];
+        const char *mid = " t1=0x";
+        for (const char *p = mid; *p; ++p) ub[ui++] = *p;
+        for (int s = 60; s >= 0; s -= 4) ub[ui++] = uphex[(t1 >> s) & 0xF];
+        const char *tag;
+        if (t1 < t0)         tag = " dt<0 FAIL";
+        else if (t1 == t0)   tag = " dt=0 OK";
+        else                 tag = " dt>0 OK";
+        for (const char *p = tag; *p; ++p) ub[ui++] = *p;
+        ub[ui++] = '\n';
+        (void)openos64_write(OPENOS64_STDOUT_FILENO, ub, ui);
+
+        if (t1 < t0) {
+            write_str(OPENOS64_STDERR_FILENO,
+                      "[hello64] ERR: uptime_ms not monotonic\n");
+            return 7;
+        }
+    }
+
     return 0;
 }

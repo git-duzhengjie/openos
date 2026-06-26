@@ -23,6 +23,7 @@
 #define OPENOS64_SYS_BIND     284ULL
 #define OPENOS64_SYS_SENDTO   290ULL
 #define OPENOS64_SYS_RECVFROM 291ULL
+#define OPENOS64_SYS_UPTIME_MS 317ULL
 
 /* The kernel currently only accepts AF_OPENOS / SOCK_DGRAM / PROTO_DEFAULT. */
 #define OPENOS64_AF_OPENOS     1
@@ -137,6 +138,15 @@ static inline void openos64_exit(int code) {
 
 static inline void openos64_yield(void) {
     (void)openos64_syscall0(OPENOS64_SYS_YIELD);
+}
+
+/* ------------------ Step E.4 monotonic clock helper ------------------
+ * Returns milliseconds since boot, calibrated against the i8254 PIT during
+ * kernel init.  If calibration failed, the kernel falls back to a legacy
+ * rdtsc>>20 estimate; callers should treat the return value as monotonic
+ * non-decreasing only — not wall clock. */
+static inline uint64_t openos64_uptime_ms(void) {
+    return (uint64_t)openos64_syscall0(OPENOS64_SYS_UPTIME_MS);
 }
 
 /* ------------------ Step E.3 socket helpers ------------------ */
