@@ -32,17 +32,30 @@ bool arch_x86_64_ap_trampoline_install(uint64_t phys_addr)
     return true;
 }
 
+void arch_x86_64_ap_trampoline_set_cr3(uint64_t phys_addr, uint64_t cr3)
+{
+    volatile uint64_t *slot = (volatile uint64_t *)(uintptr_t)
+        (phys_addr + OPENOS_AP_TRAMPOLINE_CR3_OFFSET);
+    *slot = cr3;
+}
+
+void arch_x86_64_ap_trampoline_set_entry(uint64_t phys_addr, uint64_t entry)
+{
+    volatile uint64_t *slot = (volatile uint64_t *)(uintptr_t)
+        (phys_addr + OPENOS_AP_TRAMPOLINE_ENTRY_OFFSET);
+    *slot = entry;
+}
+
 bool arch_x86_64_ap_trampoline_verify(uint64_t phys_addr)
 {
     if (phys_addr == 0 || phys_addr >= 0x100000ull) {
         return false;
     }
     const volatile uint8_t *p = (const volatile uint8_t *)(uintptr_t)phys_addr;
-    /* G.4.3b-2a: code lives at offset 0, magic+version moved to +0x10. */
-    if (p[0x10] != (uint8_t)OPENOS_AP_TRAMPOLINE_MAGIC0) return false;
-    if (p[0x11] != (uint8_t)OPENOS_AP_TRAMPOLINE_MAGIC1) return false;
-    if (p[0x12] != (uint8_t)OPENOS_AP_TRAMPOLINE_MAGIC2) return false;
-    if (p[0x13] != (uint8_t)OPENOS_AP_TRAMPOLINE_MAGIC3) return false;
-    if (p[0x14] != (uint8_t)OPENOS_AP_TRAMPOLINE_VERSION) return false;
+    if (p[OPENOS_AP_TRAMPOLINE_MAGIC_OFFSET + 0] != (uint8_t)OPENOS_AP_TRAMPOLINE_MAGIC0) return false;
+    if (p[OPENOS_AP_TRAMPOLINE_MAGIC_OFFSET + 1] != (uint8_t)OPENOS_AP_TRAMPOLINE_MAGIC1) return false;
+    if (p[OPENOS_AP_TRAMPOLINE_MAGIC_OFFSET + 2] != (uint8_t)OPENOS_AP_TRAMPOLINE_MAGIC2) return false;
+    if (p[OPENOS_AP_TRAMPOLINE_MAGIC_OFFSET + 3] != (uint8_t)OPENOS_AP_TRAMPOLINE_MAGIC3) return false;
+    if (p[OPENOS_AP_TRAMPOLINE_MAGIC_OFFSET + 4] != (uint8_t)OPENOS_AP_TRAMPOLINE_VERSION) return false;
     return true;
 }

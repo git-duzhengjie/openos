@@ -6,7 +6,15 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-/* Step G.4.1 — SMP topology dump (no AP wakeup). */
+/* Step G.4.3b-2 — SMP three-stage trampoline verification.
+ *
+ * This selftest verifies end-to-end AP wakeup through all three stages:
+ *   Stage 1: real mode     (alive_rm   >= ap_count)
+ *   Stage 2: protected mode (alive_pm32 >= ap_count)
+ *   Stage 3: long mode      (alive_lm64 >= ap_count)
+ *
+ * Under QEMU -smp N, we expect N-1 APs to reach each stage.
+ */
 
 static void log_kv(const char *key, uint64_t val)
 {
@@ -38,6 +46,15 @@ void arch_x86_64_smp_selftest_run(void)
 
     /* G.4.2: install AP trampoline blob and verify magic. */
     log_kv("\n[x86_64][smp-selftest] tramp_blob_size=", arch_x86_64_ap_trampoline_size());
+
+    /* Debug: dump first 16 bytes of blob source */
+    const uint8_t *blob_src = arch_x86_64_ap_trampoline_blob();
+    for (int i = 0; i < 8; i++) {
+        log_kv(" blob_src[", (uint64_t)i);
+        early_console64_write("]=");
+        early_console64_write_hex64((uint64_t)blob_src[i]);
+    }
+
     if (!arch_x86_64_smp_install_trampoline()) {
         early_console64_write("\n[x86_64][smp-selftest] FAIL trampoline install/verify\n");
         return;
@@ -59,17 +76,12 @@ void arch_x86_64_smp_selftest_run(void)
         return;
     }
 
-    /* G.4.3b-1: full INIT-SIPI-SIPI sequence. After this, any compliant AP
-     * is executing at the trampoline page (currently a `cli; hlt` blob, so
-     * APs simply halt). We assert ok == sent only — i.e. every IPI in the
-     * three-step sequence was accepted by the local APIC. Verifying that
-     * APs actually woke up requires an alive flag set by AP code, which
-     * arrives with G.4.3b-2. */
-    /* G.4.3b-2a: trampoline blob v2 now executes `lock inc byte [0x9000]`
-     * before HLT. Zero the counter just before issuing INIT-SIPI-SIPI so any
-     * non-zero value afterwards is attributable to AP code that actually ran.
-     */
-    arch_x86_64_smp_alive_reset();
+    /* G.4.3b-2: full INIT-SIPI-SIPI sequence. Before sending, zero all three
+     * alive counters so we have a clean slate. */
+    arch_x86_64_smp_alive_reset_all();
+
+    /* G.5: backfill CR3 and entry into trampoline blob before SIPI. */
+    arch_x86_64_smp_prepare_aps();
 
     uint32_t sipi_sent = 0;
     uint32_t sipi_ok   = arch_x86_64_smp_send_startup_all_aps(&sipi_sent);
@@ -80,18 +92,45 @@ void arch_x86_64_smp_selftest_run(void)
         return;
     }
 
-    /* G.4.3b-2a: poll the alive counter with a 500ms timeout. Under QEMU each
-     * AP typically bumps the counter exactly once before HLT (timer dependent).
-     * We only require alive >= ap_count; on bare metal each AP may bump 1-2x. */
+    /* G.4.3b-2: three-stage alive verification.
+     * We poll each stage with 500ms timeout. APs should reach each stage
+     * essentially instantaneously under QEMU, but the timeout handles
+     * potential simulation slowdowns.
+     */
     uint32_t ap_n = arch_x86_64_smp_ap_count();
     uint8_t  expect = (ap_n > 0xFFu) ? 0xFFu : (uint8_t)ap_n;
-    uint8_t  alive  = arch_x86_64_smp_alive_wait(expect, 500);
-    log_kv("\n[x86_64][smp-selftest] ap_alive=", (uint64_t)alive);
+
+    /* Stage 1: real mode */
+    uint8_t alive_rm = arch_x86_64_smp_alive_rm_wait(expect, 500);
+    log_kv("\n[x86_64][smp-selftest] alive_rm=", (uint64_t)alive_rm);
     log_kv(" expected>=", (uint64_t)expect);
-    if (ap_n > 0 && alive < expect) {
-        early_console64_write("\n[x86_64][smp-selftest] FAIL ap alive\n");
+    if (ap_n > 0 && alive_rm < expect) {
+        early_console64_write("\n[x86_64][smp-selftest] FAIL: AP stuck before real mode\n");
         return;
     }
 
-    early_console64_write("\n[x86_64][smp-selftest] PASS\n");
+    /* Stage 2: protected mode */
+    uint8_t alive_pm32 = arch_x86_64_smp_alive_pm32_wait(expect, 500);
+    log_kv("\n[x86_64][smp-selftest] alive_pm32=", (uint64_t)alive_pm32);
+    log_kv(" expected>=", (uint64_t)expect);
+    if (ap_n > 0 && alive_pm32 < expect) {
+        early_console64_write("\n[x86_64][smp-selftest] FAIL: AP stuck in real mode\n");
+        return;
+    }
+
+    /* Stage 3: long mode */
+    uint8_t alive_lm64 = arch_x86_64_smp_alive_lm64_wait(expect, 500);
+    log_kv("\n[x86_64][smp-selftest] alive_lm64=", (uint64_t)alive_lm64);
+    log_kv(" expected>=", (uint64_t)expect);
+    if (ap_n > 0 && alive_lm64 < expect) {
+        early_console64_write("\n[x86_64][smp-selftest] FAIL: AP stuck in protected mode\n");
+        return;
+    }
+
+    /* All three stages reached by all APs. */
+    if (ap_n > 0) {
+        early_console64_write("\n[x86_64][smp-selftest] PASS: all APs reached long mode\n");
+    } else {
+        early_console64_write("\n[x86_64][smp-selftest] PASS: no APs (UP system)\n");
+    }
 }

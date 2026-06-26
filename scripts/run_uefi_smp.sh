@@ -15,11 +15,11 @@ qemu-system-x86_64 \
   -serial file:"$SER" -display none \
   -d guest_errors -D "$LOG" &
 QPID=$!
-sleep 15
+sleep 60
 kill -9 $QPID 2>/dev/null
 wait $QPID 2>/dev/null
 
 echo "=== SERIAL (清洗后) ==="
-cat "$SER" | tr -d '\000' | sed 's/\x1b\[[0-9;=]*[a-zA-Z]//g' | tail -60
+cat "$SER" | tr -d '\000' | sed 's/\x1b\[[0-9;=]*[a-zA-Z]//g' | tail -120
 echo "=== QEMU LOG ==="
 tail -20 "$LOG" 2>/dev/null

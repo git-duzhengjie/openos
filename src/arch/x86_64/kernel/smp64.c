@@ -3,22 +3,22 @@
 #include "../include/lapic64.h"
 #include "../include/ap_trampoline64.h"
 #include "../include/delay64.h"
+#include "../include/vmm64.h"
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
 
-/* Step G.4.1 — SMP topology snapshot.
- * No AP wakeup is performed here; this only consumes ACPI MADT data and
- * captures the BSP apic_id at runtime so later stages have authoritative
- * input. See smp64.h for the staged plan. */
+#define OPENOS_X86_64_SMP_STACK_BASE (0xFFFFD00000000000ULL)
 
 typedef struct smp_state {
     bool     ready;
     bool     trampoline_installed;
     uint8_t  bsp_apic_id;
-    uint32_t cpu_count;          /* enabled CPUs incl. BSP */
+    uint32_t cpu_count;
     uint32_t ap_count;
     uint8_t  ap_apic_ids[OPENOS_X86_64_SMP_MAX_CPUS];
+    uint8_t *stacks[OPENOS_X86_64_SMP_MAX_CPUS];
 } smp_state_t;
 
 static smp_state_t g_smp;
@@ -28,8 +28,10 @@ bool arch_x86_64_smp_init(void) {
     g_smp.bsp_apic_id = 0;
     g_smp.cpu_count = 0;
     g_smp.ap_count = 0;
+    for (uint32_t i = 0; i < OPENOS_X86_64_SMP_MAX_CPUS; ++i) {
+        g_smp.stacks[i] = 0;
+    }
 
-    /* Capture BSP apic_id from LAPIC ID register (must be after lapic init). */
     if (!arch_x86_64_lapic_is_ready()) {
         return false;
     }
@@ -37,7 +39,6 @@ bool arch_x86_64_smp_init(void) {
 
     const arch_x86_64_acpi_info_t *acpi = arch_x86_64_acpi_info();
     if (acpi == 0 || acpi->cpu_count == 0) {
-        /* No ACPI: still mark ready as a UP system. */
         g_smp.cpu_count = 1;
         g_smp.ap_count = 0;
         g_smp.ready = true;
@@ -78,7 +79,6 @@ uint8_t arch_x86_64_smp_ap_apic_id(uint32_t index) {
 }
 
 uint64_t arch_x86_64_smp_trampoline_phys(void) {
-    /* Fixed low-1MB landing zone. G.4.2 installs blob here. */
     return OPENOS_X86_64_SMP_TRAMPOLINE_PHYS;
 }
 
@@ -100,10 +100,6 @@ bool arch_x86_64_smp_trampoline_installed(void) {
     return g_smp.trampoline_installed;
 }
 
-/* G.4.3a — broadcast INIT IPI to every AP we discovered. No SIPI, no pause:
- * the APs enter the INIT "wait for SIPI" state and stay quiescent. Returns
- * the number of APs whose ICR write completed successfully; out-param
- * 'sent' is the number we attempted. Safe to call with ap_count == 0. */
 uint32_t arch_x86_64_smp_send_init_all_aps(uint32_t *out_sent) {
     uint32_t sent = 0, ok = 0;
     if (!g_smp.ready) {
@@ -121,17 +117,6 @@ uint32_t arch_x86_64_smp_send_init_all_aps(uint32_t *out_sent) {
     return ok;
 }
 
-/* G.4.3b-1 — issue INIT-SIPI-SIPI sequence to every AP. The trampoline must
- * already be installed (we read its physical address back from smp state).
- * Per Intel SDM 10.4.4.1 "Universal Algorithm":
- *   1. send INIT (assert)
- *   2. wait 10 ms
- *   3. send STARTUP (vec = trampoline >> 12)
- *   4. wait 200 us
- *   5. send STARTUP again
- * We count an AP as "ok" only if all three IPIs (INIT + SIPI + SIPI) deliver.
- * The trampoline page in G.4.3b-1 is still a `cli; hlt` blob, so APs end up
- * halted at the trampoline address — verifiable via QEMU monitor `info cpus`. */
 uint32_t arch_x86_64_smp_send_startup_all_aps(uint32_t *out_sent) {
     uint32_t sent = 0, ok = 0;
     if (!g_smp.ready || !g_smp.trampoline_installed) {
@@ -139,12 +124,9 @@ uint32_t arch_x86_64_smp_send_startup_all_aps(uint32_t *out_sent) {
         return 0;
     }
 
-    /* The trampoline lives at the fixed low-1MB page chosen by
-     * arch_x86_64_smp_install_trampoline(); ap_trampoline64 exposes it. */
     uint64_t tramp_phys = arch_x86_64_smp_trampoline_phys();
     if (tramp_phys == 0 || tramp_phys >= 0x100000ULL ||
         (tramp_phys & 0xFFFULL) != 0) {
-        /* trampoline must be 4KB-aligned and below 1MB for SIPI vector. */
         if (out_sent) *out_sent = 0;
         return 0;
     }
@@ -168,11 +150,6 @@ uint32_t arch_x86_64_smp_send_startup_all_aps(uint32_t *out_sent) {
     return ok;
 }
 
-/* G.4.3b-2a — alive counter at phys 0x9000. The AP trampoline blob v2
- * issues `lock inc byte [0x9000]` before halting, so this byte tracks how
- * many wake events were observed (each AP may bump it 1–2 times depending
- * on whether the second SIPI lands before HLT). The BSP zeroes it before
- * INIT-SIPI-SIPI and polls it afterwards. */
 void arch_x86_64_smp_alive_reset(void) {
     volatile uint8_t *p = (volatile uint8_t *)(uintptr_t)OPENOS_X86_64_SMP_ALIVE_PHYS;
     *p = 0;
@@ -184,7 +161,6 @@ uint8_t arch_x86_64_smp_alive_count(void) {
 }
 
 uint8_t arch_x86_64_smp_alive_wait(uint8_t expected, uint32_t timeout_ms) {
-    /* Poll in 1ms slices using the TSC-based delay primitive. */
     uint32_t elapsed = 0;
     for (;;) {
         uint8_t cur = arch_x86_64_smp_alive_count();
@@ -192,5 +168,137 @@ uint8_t arch_x86_64_smp_alive_wait(uint8_t expected, uint32_t timeout_ms) {
         if (elapsed >= timeout_ms) return cur;
         arch_x86_64_delay_ms(1);
         elapsed++;
+    }
+}
+
+#define OPENOS_X86_64_SMP_ALIVE_RM_PHYS    0x9000ULL
+#define OPENOS_X86_64_SMP_ALIVE_PM32_PHYS  0x9008ULL
+#define OPENOS_X86_64_SMP_ALIVE_LM64_PHYS  0x9010ULL
+
+uint8_t arch_x86_64_smp_alive_rm(void) {
+    const volatile uint8_t *p = (const volatile uint8_t *)(uintptr_t)OPENOS_X86_64_SMP_ALIVE_RM_PHYS;
+    return *p;
+}
+
+uint8_t arch_x86_64_smp_alive_pm32(void) {
+    const volatile uint8_t *p = (const volatile uint8_t *)(uintptr_t)OPENOS_X86_64_SMP_ALIVE_PM32_PHYS;
+    return *p;
+}
+
+uint8_t arch_x86_64_smp_alive_lm64(void) {
+    const volatile uint8_t *p = (const volatile uint8_t *)(uintptr_t)OPENOS_X86_64_SMP_ALIVE_LM64_PHYS;
+    return *p;
+}
+
+void arch_x86_64_smp_alive_reset_all(void) {
+    volatile uint8_t *rm  = (volatile uint8_t *)(uintptr_t)OPENOS_X86_64_SMP_ALIVE_RM_PHYS;
+    volatile uint8_t *pm  = (volatile uint8_t *)(uintptr_t)OPENOS_X86_64_SMP_ALIVE_PM32_PHYS;
+    volatile uint8_t *lm  = (volatile uint8_t *)(uintptr_t)OPENOS_X86_64_SMP_ALIVE_LM64_PHYS;
+    *rm = 0;
+    *pm = 0;
+    *lm = 0;
+}
+
+uint8_t arch_x86_64_smp_alive_rm_wait(uint8_t expected, uint32_t timeout_ms) {
+    uint32_t elapsed = 0;
+    for (;;) {
+        uint8_t cur = arch_x86_64_smp_alive_rm();
+        if (cur >= expected) return cur;
+        if (elapsed >= timeout_ms) return cur;
+        arch_x86_64_delay_ms(1);
+        elapsed++;
+    }
+}
+
+uint8_t arch_x86_64_smp_alive_pm32_wait(uint8_t expected, uint32_t timeout_ms) {
+    uint32_t elapsed = 0;
+    for (;;) {
+        uint8_t cur = arch_x86_64_smp_alive_pm32();
+        if (cur >= expected) return cur;
+        if (elapsed >= timeout_ms) return cur;
+        arch_x86_64_delay_ms(1);
+        elapsed++;
+    }
+}
+
+uint8_t arch_x86_64_smp_alive_lm64_wait(uint8_t expected, uint32_t timeout_ms) {
+    uint32_t elapsed = 0;
+    for (;;) {
+        uint8_t cur = arch_x86_64_smp_alive_lm64();
+        if (cur >= expected) return cur;
+        if (elapsed >= timeout_ms) return cur;
+        arch_x86_64_delay_ms(1);
+        elapsed++;
+    }
+}
+
+uint64_t arch_x86_64_smp_stack_base(uint32_t cpu_idx) {
+    if (cpu_idx >= OPENOS_X86_64_SMP_MAX_CPUS) return 0;
+    return OPENOS_X86_64_SMP_STACK_BASE + ((uint64_t)cpu_idx * OPENOS_X86_64_SMP_STACK_SIZE);
+}
+
+uint64_t arch_x86_64_smp_stack_top(uint32_t cpu_idx) {
+    if (cpu_idx >= OPENOS_X86_64_SMP_MAX_CPUS) return 0;
+    return OPENOS_X86_64_SMP_STACK_BASE + ((uint64_t)(cpu_idx + 1) * OPENOS_X86_64_SMP_STACK_SIZE);
+}
+
+uint64_t arch_x86_64_smp_cpu_stack_top(uint8_t apic_id) {
+    if (apic_id == g_smp.bsp_apic_id) {
+        return arch_x86_64_smp_stack_top(0);
+    }
+    for (uint32_t i = 0; i < g_smp.ap_count; ++i) {
+        if (g_smp.ap_apic_ids[i] == apic_id) {
+            return arch_x86_64_smp_stack_top(i + 1);
+        }
+    }
+    return 0;
+}
+
+static uint64_t smp_read_cr3(void) {
+    uint64_t val;
+    __asm__ volatile ("movq %%cr3, %0" : "=r"(val));
+    return val;
+}
+
+static bool smp_alloc_stack(uint32_t cpu_idx) {
+    /* TODO(G.5-stack): allocate physical pages via PMM and map RW for AP stack */
+    (void)cpu_idx;
+    return true;
+}
+
+void arch_x86_64_smp_prepare_aps(void) {
+    if (!g_smp.trampoline_installed) return;
+
+    uint64_t phys = arch_x86_64_smp_trampoline_phys();
+    uint64_t cr3  = smp_read_cr3();
+
+    arch_x86_64_ap_trampoline_set_cr3(phys, cr3);
+    arch_x86_64_ap_trampoline_set_entry(phys, (uint64_t)arch_x86_64_ap_entry);
+
+    /* BSP = cpu 0, stack pre-allocated by bootstrap */
+    for (uint32_t i = 1; i <= g_smp.ap_count; ++i) {
+        (void)smp_alloc_stack(i);
+    }
+}
+
+void arch_x86_64_ap_entry(uint64_t apic_id) {
+    /* TODO(G.5-stack): switch to per-CPU kernel stack once allocated. */
+    (void)apic_id;
+
+    /* TODO(G.5): per-CPU LAPIC init for APs */
+    (void)arch_x86_64_lapic_id();
+
+    uint32_t cpu_idx = 0;
+    for (uint32_t i = 0; i < g_smp.ap_count; ++i) {
+        if (g_smp.ap_apic_ids[i] == (uint8_t)apic_id) {
+            cpu_idx = i + 1;
+            break;
+        }
+    }
+
+    (void)cpu_idx;
+
+    for (;;) {
+        __asm__ volatile ("hlt");
     }
 }
