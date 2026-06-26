@@ -16,6 +16,8 @@
 #include "../include/syscall64.h"
 #include "../include/syscall_selftest64.h"
 #include "../include/sched_selftest64.h"
+#include "../include/net64.h"
+#include "../include/net_selftest64.h"
 #include "../include/tss64.h"
 #include "../include/usermode64.h"
 #include "../include/vfs64.h"
@@ -82,6 +84,9 @@ void arch_x86_64_early_init(const openos_bootinfo_t *bootinfo) {
     arch_x86_64_compat32_init();
     /* Step E.1: bring up the minimal PCB pool. Slot 0 = kernel proc (pid=1). */
     arch_x86_64_proc_init();
+    /* Step E.3: loopback socket layer. Allocation-free, lives in .bss so it
+     * is safe to bring up alongside fd_init / vfs_init in early boot. */
+    arch_x86_64_net_init();
 }
 
 void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
@@ -139,6 +144,16 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
         early_console64_write_hex64((uint64_t)(uint32_t)sched_rv);
         early_console64_write("\n");
         arch_x86_64_sched_print_status();
+    }
+
+    /* Step E.3 loopback socket selftest — still kernel-side, so any future
+     * regression in the socket API surfaces before ring3 work begins. */
+    {
+        int net_rv = arch_x86_64_net_selftest_run();
+        early_console64_write("[x86_64][net-selftest] result=");
+        early_console64_write_hex64((uint64_t)(uint32_t)net_rv);
+        early_console64_write("\n");
+        arch_x86_64_net_print_status();
     }
 
     /* Step C: initrd & fdtable 就绪后再跳 ring3 hello64，否则 open(/hello.txt) 会看不到文件。 */

@@ -17,6 +17,18 @@
 #define OPENOS64_SYS_CLOSE   226ULL
 #define OPENOS64_SYS_GETPPID 224ULL
 
+/* Step E.3: loopback datagram sockets. Numbers mirror the kernel
+ * SYS_SOCKET/BIND/SENDTO/RECVFROM in src/kernel/include/syscall.h. */
+#define OPENOS64_SYS_SOCKET   283ULL
+#define OPENOS64_SYS_BIND     284ULL
+#define OPENOS64_SYS_SENDTO   290ULL
+#define OPENOS64_SYS_RECVFROM 291ULL
+
+/* The kernel currently only accepts AF_OPENOS / SOCK_DGRAM / PROTO_DEFAULT. */
+#define OPENOS64_AF_OPENOS     1
+#define OPENOS64_SOCK_DGRAM    2
+#define OPENOS64_PROTO_DEFAULT 0
+
 #define OPENOS64_STDIN_FILENO  0
 #define OPENOS64_STDOUT_FILENO 1
 #define OPENOS64_STDERR_FILENO 2
@@ -125,6 +137,44 @@ static inline void openos64_exit(int code) {
 
 static inline void openos64_yield(void) {
     (void)openos64_syscall0(OPENOS64_SYS_YIELD);
+}
+
+/* ------------------ Step E.3 socket helpers ------------------ */
+static inline int openos64_socket(int domain, int type, int protocol) {
+    return (int)openos64_syscall3(OPENOS64_SYS_SOCKET,
+                                  (uint64_t)domain,
+                                  (uint64_t)type,
+                                  (uint64_t)protocol);
+}
+
+static inline int openos64_bind(int fd, uint16_t port) {
+    return (int)openos64_syscall2(OPENOS64_SYS_BIND,
+                                  (uint64_t)fd,
+                                  (uint64_t)port);
+}
+
+static inline openos64_ssize_t openos64_sendto(int fd,
+                                               const void *buf,
+                                               openos64_size_t len,
+                                               uint16_t dst_port) {
+    return (openos64_ssize_t)openos64_syscall5(OPENOS64_SYS_SENDTO,
+                                               (uint64_t)fd,
+                                               (uint64_t)(uintptr_t)buf,
+                                               len,
+                                               0,
+                                               (uint64_t)dst_port);
+}
+
+static inline openos64_ssize_t openos64_recvfrom(int fd,
+                                                 void *buf,
+                                                 openos64_size_t len,
+                                                 uint16_t *src_port_out) {
+    return (openos64_ssize_t)openos64_syscall5(OPENOS64_SYS_RECVFROM,
+                                               (uint64_t)fd,
+                                               (uint64_t)(uintptr_t)buf,
+                                               len,
+                                               0,
+                                               (uint64_t)(uintptr_t)src_port_out);
 }
 
 openos64_size_t openos64_strlen(const char *text);

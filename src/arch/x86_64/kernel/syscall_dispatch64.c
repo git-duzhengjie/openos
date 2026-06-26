@@ -25,6 +25,7 @@
 #include "../include/fdtable64.h"
 #include "../include/heap64.h"
 #include "../include/initrd64.h"
+#include "../include/net64.h"
 #include "../include/proc64.h"
 #include "../include/sched64.h"
 #include "../include/usermode64.h"
@@ -175,6 +176,60 @@ static uint64_t do_yield(void) {
 }
 
 /* ---------------------------------------------------------------------------
+ * Step E.3 — loopback socket backends.
+ *
+ * These thin wrappers translate the user-mode uint64_t arg vector into the
+ * net64 API. The only signature subtlety is that sendto/recvfrom take a
+ * destination/source port as the last argument; we use a4 (the fifth slot)
+ * so that a3 (POSIX flags) stays available for a future real stack without
+ * breaking the ABI.
+ * ------------------------------------------------------------------------- */
+static uint64_t do_socket(uint64_t domain, uint64_t type, uint64_t protocol) {
+    int fd = arch_x86_64_net_socket((int)domain, (int)type, (int)protocol);
+    if (fd < 0) return (uint64_t)-1;
+    return (uint64_t)fd;
+}
+
+static uint64_t do_bind(uint64_t fd, uint64_t port) {
+    int r = arch_x86_64_net_bind((int)fd, (uint16_t)port);
+    return (r < 0) ? (uint64_t)-1 : 0;
+}
+
+static uint64_t do_sendto(uint64_t fd,
+                          uint64_t buf_ptr,
+                          uint64_t len,
+                          uint64_t flags,
+                          uint64_t dst_port) {
+    (void)flags;
+    if (!validate_user_buf(buf_ptr, len)) return (uint64_t)-1;
+    int n = arch_x86_64_net_sendto((int)fd,
+                                   (const void *)(uintptr_t)buf_ptr,
+                                   (x86_64_size_t)len,
+                                   (uint16_t)dst_port);
+    if (n < 0) return (uint64_t)-1;
+    return (uint64_t)n;
+}
+
+static uint64_t do_recvfrom(uint64_t fd,
+                            uint64_t buf_ptr,
+                            uint64_t len,
+                            uint64_t flags,
+                            uint64_t src_port_out_ptr) {
+    (void)flags;
+    if (!validate_user_buf(buf_ptr, len)) return (uint64_t)-1;
+    /*
+     * src_port_out is an optional uint16_t* in user memory. We accept NULL
+     * by passing through to net64_recvfrom which already handles it.
+     */
+    int n = arch_x86_64_net_recvfrom((int)fd,
+                                     (void *)(uintptr_t)buf_ptr,
+                                     (x86_64_size_t)len,
+                                     (uint16_t *)(uintptr_t)src_port_out_ptr);
+    if (n < 0) return (uint64_t)-1;
+    return (uint64_t)n;
+}
+
+/* ---------------------------------------------------------------------------
  * Common dispatch table.
  * ------------------------------------------------------------------------- */
 
@@ -185,9 +240,8 @@ uint64_t arch_x86_64_syscall_dispatch_common(uint64_t num,
                                              uint64_t a3,
                                              uint64_t a4,
                                              uint64_t a5) {
-    /* a3..a5 reserved for syscalls with more than 3 args; not used yet. */
-    (void)a3;
-    (void)a4;
+    /* a3..a5 reserved for syscalls with more than 3 args; Step E.3 uses a3/a4
+     * for sendto/recvfrom (flags + port slot). a5 is still unused. */
     (void)a5;
 
     ++dispatch_total_count;
@@ -216,6 +270,12 @@ uint64_t arch_x86_64_syscall_dispatch_common(uint64_t num,
 
     /* -------- time -------- */
     case SYS_UPTIME_MS:   return do_uptime_ms();
+
+    /* -------- net (Step E.3, loopback only) -------- */
+    case SYS_SOCKET:      return do_socket(a0, a1, a2);
+    case SYS_BIND:        return do_bind(a0, a1);
+    case SYS_SENDTO:      return do_sendto(a0, a1, a2, a3, a4);
+    case SYS_RECVFROM:    return do_recvfrom(a0, a1, a2, a3, a4);
 
     default:
         ++dispatch_enosys_count;
