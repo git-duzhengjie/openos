@@ -1,5 +1,6 @@
 #include "../include/pit64.h"
 #include "../include/pic64.h"
+#include "../include/lapic64.h"
 #include "../include/sched64.h"
 
 #include <stdint.h>
@@ -78,6 +79,14 @@ void arch_x86_64_pit_irq0_handler(void) {
      * existing irq-selftest behavior (delta ∈ [18,22] over 200ms) is
      * preserved bit-for-bit. */
     g_pit_ticks++;
-    arch_x86_64_pic_send_eoi(0x20u);
+    /* Route EOI to whichever controller is currently driving us. Once
+     * Step G.1 wires the IOAPIC, IRQ0 is delivered via the LAPIC and
+     * the PIC EOI is a stale write that would actually un-mask master
+     * IRQs we did not authorize. Pick the right path at runtime. */
+    if (arch_x86_64_lapic_is_ready()) {
+        arch_x86_64_lapic_send_eoi();
+    } else {
+        arch_x86_64_pic_send_eoi(0x20u);
+    }
     (void)arch_x86_64_sched_on_tick();
 }

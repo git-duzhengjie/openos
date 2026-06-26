@@ -114,3 +114,11 @@ uint16_t arch_x86_64_pic_get_mask(void) {
     uint8_t hi = pic_inb(OPENOS_X86_64_PIC_SLAVE_DATA);
     return (uint16_t)(((uint16_t)hi << 8) | lo);
 }
+
+void arch_x86_64_pic_disable(void) {
+    /* Mask all 16 lines. PIC remap stays in place — if a spurious IRQ
+     * still slips through, it will be vectored to 0x20..0x2F and our IDT
+     * has those stubs wired (they will EOI and return). */
+    pic_outb(OPENOS_X86_64_PIC_MASTER_DATA, 0xFFu);
+    pic_outb(OPENOS_X86_64_PIC_SLAVE_DATA,  0xFFu);
+}

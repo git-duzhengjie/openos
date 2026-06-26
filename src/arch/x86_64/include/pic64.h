@@ -38,4 +38,9 @@ void arch_x86_64_pic_send_eoi(uint8_t cpu_vector);
 /* Read the current 16-bit IRQ mask (master in low byte, slave in high). */
 uint16_t arch_x86_64_pic_get_mask(void);
 
+/* Mask EVERY line on both PIC chips (0xFF/0xFF). Used right before we hand
+ * IRQ routing over to the IOAPIC/LAPIC in Step G.1. PIC remap is kept so
+ * any stray legacy IRQ (e.g. spurious) still lands at a known vector. */
+void arch_x86_64_pic_disable(void);
+
 #endif /* OPENOS_ARCH_X86_64_PIC64_H */

@@ -25,6 +25,7 @@
 #include "../include/tsc_selftest64.h"
 #include "../include/irq_selftest64.h"
 #include "../include/sched_preempt_selftest64.h"
+#include "../include/apic_selftest64.h"
 
 /* Step F.2: IRQ0 ISR entry implemented in isr64.S. Declared here so the
  * boot path can hand its address to arch_x86_64_idt_register_irq(). */
@@ -207,6 +208,13 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
      * exit so the downstream ring3 hello64 path inherits IRQs-off as
      * before. */
     (void)arch_x86_64_sched_preempt_selftest_run();
+
+    /* Step G.1: switch IRQ0 routing from the 8259A to LAPIC/IOAPIC. From
+     * this point on, lapic_is_ready() flips true and pit's IRQ0 handler
+     * EOIs via LAPIC. Failure is non-fatal: PIC remains masked-on the
+     * way it was after F.2 / F.3, so the system keeps booting on the
+     * legacy path. */
+    (void)arch_x86_64_apic_selftest_run();
 
     /* Step C: initrd & fdtable 就绪后再跳 ring3 hello64，否则 open(/hello.txt) 会看不到文件。 */
     early_console64_write("[x86_64][user] loading embedded hello64.elf size=");
