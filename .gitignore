@@ -35,3 +35,4 @@ src/kernel/include/version.h
 
 # 外部依赖缓存，包含 Chromium checkout 等大体积源码
 .openos-deps/
+.commit_msg.tmp
