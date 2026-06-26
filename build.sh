@@ -409,6 +409,8 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         kernel/lapic64.c \
         kernel/ioapic64.c \
         kernel/apic_selftest64.c \
+        kernel/acpi64.c \
+        kernel/acpi_selftest64.c \
         kernel/fdtable64.c \
         kernel/initrd64.c \
         kernel/vfs64.c \
@@ -481,6 +483,8 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         "$ARCH64_BUILD/lapic64.o" \
         "$ARCH64_BUILD/ioapic64.o" \
         "$ARCH64_BUILD/apic_selftest64.o" \
+        "$ARCH64_BUILD/acpi64.o" \
+        "$ARCH64_BUILD/acpi_selftest64.o" \
         "$ARCH64_BUILD/fdtable64.o" \
         "$ARCH64_BUILD/initrd64.o" \
         "$ARCH64_BUILD/vfs64.o" \

@@ -26,6 +26,7 @@
 #include "../include/irq_selftest64.h"
 #include "../include/sched_preempt_selftest64.h"
 #include "../include/apic_selftest64.h"
+#include "../include/acpi_selftest64.h"
 #include "../include/sched_prio_selftest64.h"
 
 /* Step F.2: IRQ0 ISR entry implemented in isr64.S. Declared here so the
@@ -209,6 +210,13 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
      * exit so the downstream ring3 hello64 path inherits IRQs-off as
      * before. */
     (void)arch_x86_64_sched_preempt_selftest_run();
+
+    /* Step G.3a: parse ACPI tables (RSDP via EFI cfg table -> XSDT -> MADT)
+     * to enumerate CPUs and IO-APICs. Must run BEFORE apic_selftest so the
+     * latter can later be evolved to use MADT-discovered LAPIC/IOAPIC bases
+     * instead of the hard-coded MMIO addresses. Failure is non-fatal: the
+     * G.1/G.2 path falls back to its compile-time defaults. */
+    (void)arch_x86_64_acpi_selftest_run();
 
     /* Step G.1: switch IRQ0 routing from the 8259A to LAPIC/IOAPIC. From
      * this point on, lapic_is_ready() flips true and pit's IRQ0 handler

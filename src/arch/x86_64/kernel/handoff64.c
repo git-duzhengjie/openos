@@ -10,6 +10,7 @@ extern char __kernel64_end[];
 static openos_bootinfo_t g_openos_bootinfo;
 static uint64_t g_last_memory_region_count;
 static uint64_t g_last_usable_bytes;
+static const uefi64_handoff_info_t *g_saved_uefi_handoff;
 
 static uint32_t bootinfo_memory_type_from_uefi(uint32_t uefi_type)
 {
@@ -55,6 +56,9 @@ static x86_64_phys_addr_t kernel_phys_from_virt(uintptr_t virt)
 const openos_bootinfo_t *arch_x86_64_bootinfo_from_uefi_handoff(const uefi64_handoff_info_t *handoff)
 {
     openos_bootinfo_t *bootinfo = &g_openos_bootinfo;
+
+    /* Step G.3a: stash for later consumers (ACPI, etc.). */
+    g_saved_uefi_handoff = handoff;
 
     for (uint64_t i = 0; i < sizeof(*bootinfo); ++i) {
         ((uint8_t *)bootinfo)[i] = 0;
@@ -146,4 +150,9 @@ void arch_x86_64_handoff_print_status(void)
     early_console64_write(" usable bytes: ");
     early_console64_write_hex64(g_last_usable_bytes);
     early_console64_write("\n");
+}
+
+const uefi64_handoff_info_t *arch_x86_64_uefi_handoff(void)
+{
+    return g_saved_uefi_handoff;
 }
