@@ -91,6 +91,7 @@ typedef struct {
     x86_64_context_t    ctx;          /* slot 0 mirrors bootstrap_context */
     void               *stack_base;   /* heap-allocated stack (slot >=1) */
     uint32_t            id;           /* 1-based slot id; 0 == bootstrap */
+    uint32_t            priority;     /* G.2: scheduling priority band */
 } sched_slot_t;
 
 static sched_slot_t  sched_slots[OPENOS_X86_64_SCHED_MAX_KTHREADS];
@@ -101,10 +102,11 @@ static void sched_ensure_bootstrap_slot(void) {
     if (sched_slots[0].state != SCHED_SLOT_FREE) {
         return;
     }
-    sched_slots[0].state = SCHED_SLOT_RUNNING;
-    sched_slots[0].id    = 0u;
+    sched_slots[0].state    = SCHED_SLOT_RUNNING;
+    sched_slots[0].id       = 0u;
+    sched_slots[0].priority = OPENOS_X86_64_SCHED_PRIO_DEFAULT;
     /* slot 0 "ctx" is unused for save; bootstrap_context handles that. */
-    sched_current_idx    = 0u;
+    sched_current_idx       = 0u;
 }
 
 static uint32_t sched_alloc_slot(void) {
@@ -144,8 +146,27 @@ static uint32_t sched_pick_next(uint32_t from_idx) {
 }
 
 uint32_t arch_x86_64_sched_spawn_kthread(x86_64_thread_entry_t entry, void *arg) {
+    return arch_x86_64_sched_spawn_kthread_prio(entry, arg,
+                                                OPENOS_X86_64_SCHED_PRIO_DEFAULT);
+}
+
+uint32_t arch_x86_64_sched_quantum_for_priority(uint32_t priority) {
+    switch (priority) {
+    case OPENOS_X86_64_SCHED_PRIO_HIGH:   return OPENOS_X86_64_SCHED_QUANTUM_HIGH;
+    case OPENOS_X86_64_SCHED_PRIO_LOW:    return OPENOS_X86_64_SCHED_QUANTUM_LOW;
+    case OPENOS_X86_64_SCHED_PRIO_NORMAL: /* fallthrough */
+    default:                              return OPENOS_X86_64_SCHED_QUANTUM_NORMAL;
+    }
+}
+
+uint32_t arch_x86_64_sched_spawn_kthread_prio(x86_64_thread_entry_t entry,
+                                              void *arg,
+                                              uint32_t priority) {
     if (entry == NULL) {
         return 0u;
+    }
+    if (priority > OPENOS_X86_64_SCHED_PRIO_MAX) {
+        priority = OPENOS_X86_64_SCHED_PRIO_DEFAULT;
     }
     uint32_t idx = sched_alloc_slot();
     if (idx == 0u) {
@@ -166,7 +187,30 @@ uint32_t arch_x86_64_sched_spawn_kthread(x86_64_thread_entry_t entry, void *arg)
     sched_slots[idx].ctx       = tctx.regs;
     sched_slots[idx].state     = SCHED_SLOT_READY;
     sched_slots[idx].id        = idx;
+    sched_slots[idx].priority  = priority;
     return idx;
+}
+
+uint32_t arch_x86_64_sched_set_priority(uint32_t slot, uint32_t priority) {
+    if (slot >= OPENOS_X86_64_SCHED_MAX_KTHREADS) {
+        return 0xFFFFFFFFu;
+    }
+    if (priority > OPENOS_X86_64_SCHED_PRIO_MAX) {
+        return 0xFFFFFFFFu;
+    }
+    if (sched_slots[slot].state == SCHED_SLOT_FREE
+        || sched_slots[slot].state == SCHED_SLOT_EXITED) {
+        return 0xFFFFFFFFu;
+    }
+    sched_slots[slot].priority = priority;
+    return 0u;
+}
+
+uint32_t arch_x86_64_sched_get_priority(uint32_t slot) {
+    if (slot >= OPENOS_X86_64_SCHED_MAX_KTHREADS) {
+        return OPENOS_X86_64_SCHED_PRIO_DEFAULT;
+    }
+    return sched_slots[slot].priority;
 }
 
 uint32_t arch_x86_64_sched_yield(void) {
@@ -246,7 +290,7 @@ uint64_t arch_x86_64_sched_switch_count(void)   { return sched_switch_count; }
  *   - Counted via sched_preempt_count so selftests can prove the
  *     IRQ-driven path was actually exercised (vs. cooperative yield).
  * ----------------------------------------------------------------- */
-static uint32_t sched_quantum_left = OPENOS_X86_64_SCHED_QUANTUM_TICKS;
+static uint32_t sched_quantum_left = OPENOS_X86_64_SCHED_QUANTUM_NORMAL;
 static uint64_t sched_preempt_count = 0u;
 
 static int sched_has_other_ready(uint32_t cur) {
@@ -272,13 +316,22 @@ uint32_t arch_x86_64_sched_on_tick(void) {
     if (sched_quantum_left != 0u) {
         return 0u;
     }
-    sched_quantum_left = OPENOS_X86_64_SCHED_QUANTUM_TICKS;
+    /* G.2: re-arm quantum from incoming (post-switch) thread's priority.
+     * We compute it twice — once now using the current (about-to-leave)
+     * thread, and once after yield using the newly-current thread. The
+     * value that sticks is the one we set AFTER yield. */
+    sched_quantum_left = arch_x86_64_sched_quantum_for_priority(
+        sched_slots[sched_current_idx].priority);
 
     if (!sched_has_other_ready(sched_current_idx)) {
         return 0u;
     }
     uint32_t prev = sched_current_idx;
     uint32_t nxt  = arch_x86_64_sched_yield();
+    /* Re-arm again using the NEW current thread's priority so HIGH
+     * threads get their full slice on resume. */
+    sched_quantum_left = arch_x86_64_sched_quantum_for_priority(
+        sched_slots[sched_current_idx].priority);
     if (nxt != 0u || sched_current_idx != prev) {
         ++sched_preempt_count;
         return 1u;

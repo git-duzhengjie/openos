@@ -26,6 +26,7 @@
 #include "../include/irq_selftest64.h"
 #include "../include/sched_preempt_selftest64.h"
 #include "../include/apic_selftest64.h"
+#include "../include/sched_prio_selftest64.h"
 
 /* Step F.2: IRQ0 ISR entry implemented in isr64.S. Declared here so the
  * boot path can hand its address to arch_x86_64_idt_register_irq(). */
@@ -215,6 +216,14 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
      * way it was after F.2 / F.3, so the system keeps booting on the
      * legacy path. */
     (void)arch_x86_64_apic_selftest_run();
+
+    /* Step G.2: priority-weighted scheduling self-test. Spawns three
+     * spin kthreads at HIGH / NORMAL / LOW priorities and asserts the
+     * canonical CPU-share ordering H > N > L. Runs through the
+     * IOAPIC GSI2 path established by G.1 (falls back to PIC if LAPIC
+     * isn't ready). Re-masks IRQ0 on exit so downstream ring3 path
+     * keeps inheriting "IRQs-off" precondition. */
+    (void)arch_x86_64_sched_prio_selftest_run();
 
     /* Step C: initrd & fdtable 就绪后再跳 ring3 hello64，否则 open(/hello.txt) 会看不到文件。 */
     early_console64_write("[x86_64][user] loading embedded hello64.elf size=");

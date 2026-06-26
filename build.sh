@@ -405,6 +405,7 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         kernel/pit64.c \
         kernel/irq_selftest64.c \
         kernel/sched_preempt_selftest64.c \
+        kernel/sched_prio_selftest64.c \
         kernel/lapic64.c \
         kernel/ioapic64.c \
         kernel/apic_selftest64.c \
@@ -476,6 +477,7 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         "$ARCH64_BUILD/pit64.o" \
         "$ARCH64_BUILD/irq_selftest64.o" \
         "$ARCH64_BUILD/sched_preempt_selftest64.o" \
+        "$ARCH64_BUILD/sched_prio_selftest64.o" \
         "$ARCH64_BUILD/lapic64.o" \
         "$ARCH64_BUILD/ioapic64.o" \
         "$ARCH64_BUILD/apic_selftest64.o" \

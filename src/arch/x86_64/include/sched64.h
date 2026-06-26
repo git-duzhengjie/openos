@@ -99,4 +99,42 @@ uint64_t arch_x86_64_sched_switch_count(void);
 uint32_t arch_x86_64_sched_on_tick(void);
 uint64_t arch_x86_64_sched_preempt_count(void);
 
+/* -----------------------------------------------------------------
+ * Step G.2: priority-weighted time slices (WRR-like).
+ *
+ * Three priority bands, expressed as weights:
+ *   HIGH    quantum = 10 ticks (100 ms @ PIT_HZ=100)
+ *   NORMAL  quantum =  5 ticks ( 50 ms)  ← same as F.3 baseline
+ *   LOW     quantum =  2 ticks ( 20 ms)
+ *
+ * pick_next() KEEPS round-robin scanning. Only the quantum length
+ * differs per slot, so LOW threads still run — they just run less.
+ * This avoids strict-priority starvation while giving HIGH ~5x the
+ * CPU of LOW.
+ *
+ * Default priority for newly spawned kthreads (including the
+ * bootstrap slot) is NORMAL. arch_x86_64_sched_spawn_kthread()
+ * remains source-compatible: it forwards to _prio() with NORMAL.
+ *
+ * Returns of set/get_priority: 0 on success / value;  for set,
+ * UINT32_MAX (0xFFFFFFFFu) means "invalid slot or priority".
+ * ----------------------------------------------------------------- */
+
+#define OPENOS_X86_64_SCHED_PRIO_LOW    0u
+#define OPENOS_X86_64_SCHED_PRIO_NORMAL 1u
+#define OPENOS_X86_64_SCHED_PRIO_HIGH   2u
+#define OPENOS_X86_64_SCHED_PRIO_DEFAULT OPENOS_X86_64_SCHED_PRIO_NORMAL
+#define OPENOS_X86_64_SCHED_PRIO_MAX    OPENOS_X86_64_SCHED_PRIO_HIGH
+
+#define OPENOS_X86_64_SCHED_QUANTUM_HIGH   10u
+#define OPENOS_X86_64_SCHED_QUANTUM_NORMAL 5u
+#define OPENOS_X86_64_SCHED_QUANTUM_LOW    2u
+
+uint32_t arch_x86_64_sched_spawn_kthread_prio(x86_64_thread_entry_t entry,
+                                              void *arg,
+                                              uint32_t priority);
+uint32_t arch_x86_64_sched_set_priority(uint32_t slot, uint32_t priority);
+uint32_t arch_x86_64_sched_get_priority(uint32_t slot);
+uint32_t arch_x86_64_sched_quantum_for_priority(uint32_t priority);
+
 #endif /* OPENOS_ARCH_X86_64_SCHED64_H */
