@@ -8,6 +8,7 @@
 #include "../include/heap64.h"
 #include "../include/handoff64.h"
 #include "../include/idt64.h"
+#include "../include/idt_selftest64.h"
 #include "../include/initrd64.h"
 #include "../include/pmm64.h"
 #include "../include/proc64.h"
@@ -132,6 +133,18 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
     early_console64_write("\n");
     arch_x86_64_initrd_print_status();
     arch_x86_64_vfs_print_status();
+
+    /* Step F.1 IDT registration selftest — runs as the very first selftest
+     * because every later subsystem (syscall, sched, net, tsc, ring3 drop)
+     * implicitly trusts that the IDT routes #PF/#GP/#UD/etc. to our C
+     * handlers. A silently-broken gate here would otherwise turn a
+     * follow-on bug into a triple-fault reset with zero log. */
+    {
+        int idt_rv = arch_x86_64_idt_selftest_run();
+        early_console64_write("[x86_64][idt-selftest] result=");
+        early_console64_write_hex64((uint64_t)(uint32_t)idt_rv);
+        early_console64_write("\n");
+    }
 
     /* Step C kernel-side selftest — 不依赖 OVMF/ring3 跳转，直接验证 dispatch→VFS→initrd 链路。 */
     {

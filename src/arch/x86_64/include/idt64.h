@@ -39,4 +39,19 @@ void arch_x86_64_idt_init(void);
 void arch_x86_64_idt_print_status(void);
 void arch_x86_64_exception_dispatch(const struct x86_64_exception_frame *frame);
 
+/*
+ * Step F.1: read-only inspector for the installed IDT. Used by the IDT
+ * registration selftest to confirm that all 32 CPU-exception vectors plus
+ * the legacy int 0x80 compat gate carry the right offset / selector / DPL /
+ * IST without ever actually triggering an exception.
+ */
+struct x86_64_idt_gate_info {
+    uint64_t offset;       /* reassembled 64-bit handler entry point */
+    uint16_t selector;     /* code segment selector loaded by the gate */
+    uint8_t ist;           /* IST index (0 = no IST stack switch) */
+    uint8_t type_attr;     /* raw type_attr byte (P|DPL|0|gate-type) */
+};
+
+int arch_x86_64_idt_query_gate(uint8_t vector, struct x86_64_idt_gate_info *out);
+
 #endif /* OPENOS_ARCH_X86_64_IDT64_H */

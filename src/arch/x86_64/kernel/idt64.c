@@ -130,6 +130,27 @@ void arch_x86_64_idt_print_status(void) {
     early_console64_write("\n");
 }
 
+int arch_x86_64_idt_query_gate(uint8_t vector, struct x86_64_idt_gate_info *out) {
+    /*
+     * Step F.1: non-destructive read-back path for the IDT selftest. We
+     * reassemble the 64-bit handler offset from the three descriptor halves
+     * and forward selector/IST/type_attr verbatim. No lidt, no entry
+     * mutation — the caller decides what a "valid" gate looks like.
+     */
+    if (!out) {
+        return 1;
+    }
+    const struct idt64_entry *entry = &idt64[vector];
+    uint64_t lo = (uint64_t)entry->offset_low;
+    uint64_t mid = (uint64_t)entry->offset_mid << 16;
+    uint64_t hi = (uint64_t)entry->offset_high << 32;
+    out->offset = lo | mid | hi;
+    out->selector = entry->selector;
+    out->ist = (uint8_t)(entry->ist & 0x07u);
+    out->type_attr = entry->type_attr;
+    return 0;
+}
+
 void arch_x86_64_exception_dispatch(const struct x86_64_exception_frame *frame) {
     /*
      * Step D.2: be loud about exceptions instead of silently halting. Without

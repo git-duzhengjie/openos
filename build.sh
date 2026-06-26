@@ -390,6 +390,7 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         kernel/gdt64.c \
         kernel/tss64.c \
         kernel/idt64.c \
+        kernel/idt_selftest64.c \
         kernel/sched64.c \
         kernel/proc64.c \
         kernel/syscall64.c \
@@ -451,6 +452,7 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         "$ARCH64_BUILD/gdt64.o" \
         "$ARCH64_BUILD/tss64.o" \
         "$ARCH64_BUILD/idt64.o" \
+        "$ARCH64_BUILD/idt_selftest64.o" \
         "$ARCH64_BUILD/isr64.o" \
         "$ARCH64_BUILD/sched64.o" \
         "$ARCH64_BUILD/proc64.o" \
