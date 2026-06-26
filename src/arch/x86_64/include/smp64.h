@@ -20,6 +20,9 @@
  * Each AP that successfully programmed its own LAPIC SVR/TPR bumps this. */
 #define OPENOS_X86_64_SMP_ALIVE_LAPIC_PHYS 0x00009020ULL
 
+/* G.5-gdt-tss: AP-side per-CPU GDT+TSS installed alive counter. */
+#define OPENOS_X86_64_SMP_ALIVE_PERCPU_PHYS 0x00009028ULL
+
 bool arch_x86_64_smp_init(void);
 bool arch_x86_64_smp_is_ready(void);
 
@@ -51,6 +54,10 @@ uint8_t arch_x86_64_smp_alive_lm64_wait(uint8_t expected, uint32_t timeout_ms);
 /* G.5-lapic: per-AP LAPIC bring-up confirmation. */
 uint8_t arch_x86_64_smp_alive_lapic(void);
 uint8_t arch_x86_64_smp_alive_lapic_wait(uint8_t expected, uint32_t timeout_ms);
+
+/* G.5-gdt-tss: per-AP private GDT+TSS confirmation. */
+uint8_t arch_x86_64_smp_alive_percpu(void);
+uint8_t arch_x86_64_smp_alive_percpu_wait(uint8_t expected, uint32_t timeout_ms);
 
 uint64_t arch_x86_64_smp_stack_base(uint32_t cpu_idx);
 uint64_t arch_x86_64_smp_stack_top(uint32_t cpu_idx);

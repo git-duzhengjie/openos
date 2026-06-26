@@ -136,9 +136,18 @@ void arch_x86_64_smp_selftest_run(void)
         return;
     }
 
-    /* All four stages reached by all APs. */
+    /* Stage 5: per-AP GDT+TSS installed (G.5-gdt-tss). */
+    uint8_t alive_percpu = arch_x86_64_smp_alive_percpu_wait(expect, 500);
+    log_kv("\n[x86_64][smp-selftest] alive_percpu=", (uint64_t)alive_percpu);
+    log_kv(" expected>=", (uint64_t)expect);
+    if (ap_n > 0 && alive_percpu < expect) {
+        early_console64_write("\n[x86_64][smp-selftest] FAIL: AP per-CPU GDT/TSS load incomplete\n");
+        return;
+    }
+
+    /* All five stages reached by all APs. */
     if (ap_n > 0) {
-        early_console64_write("\n[x86_64][smp-selftest] PASS: all APs LAPIC online\n");
+        early_console64_write("\n[x86_64][smp-selftest] PASS: all APs on private GDT/TSS\n");
     } else {
         early_console64_write("\n[x86_64][smp-selftest] PASS: no APs (UP system)\n");
     }

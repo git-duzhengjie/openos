@@ -119,6 +119,21 @@ ap_lm64_entry:
     /* Atomic: alive[lm64] += 1 */
     lock incb (0x9010)
 
+    /* G.5-SSE: Enable x87/SSE on this AP before running any C code.
+     * BSP gets SSE pre-enabled by UEFI firmware; APs come up cold and
+     * the compiler emits SSE instructions (pxor %xmm, %xmm) for memset/
+     * struct-zero, which #UD without OSFXSR. Triple-fault would result.
+     * Intel SDM Vol.3A 13.1.4:
+     *   CR0.MP=1, CR0.EM=0, CR0.NE=1
+     *   CR4.OSFXSR=1 (bit 9), CR4.OSXMMEXCPT=1 (bit 10) */
+    movq    %cr0, %rax
+    andq    $~(1<<2), %rax           /* clear CR0.EM */
+    orq     $((1<<1)|(1<<5)), %rax   /* set CR0.MP, CR0.NE */
+    movq    %rax, %cr0
+    movq    %cr4, %rax
+    orq     $((1<<9)|(1<<10)), %rax  /* set CR4.OSFXSR, CR4.OSXMMEXCPT */
+    movq    %rax, %cr4
+
     /* G.5: Per-CPU stack allocation.
      *
      * 0x9018 = 8-byte atomic CPU-index counter (init = 1, slot 0 reserved for BSP)

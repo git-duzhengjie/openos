@@ -413,6 +413,7 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         kernel/acpi_selftest64.c \
         kernel/smp64.c \
         kernel/smp_selftest64.c \
+        kernel/percpu64.c \
         kernel/ap_trampoline64.c \
         kernel/delay64.c \
         kernel/fdtable64.c \
@@ -494,6 +495,7 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         "$ARCH64_BUILD/acpi_selftest64.o" \
         "$ARCH64_BUILD/smp64.o" \
         "$ARCH64_BUILD/smp_selftest64.o" \
+        "$ARCH64_BUILD/percpu64.o" \
         "$ARCH64_BUILD/ap_trampoline64.o" \
         "$ARCH64_BUILD/ap_trampoline64_asm.o" \
         "$ARCH64_BUILD/delay64.o" \

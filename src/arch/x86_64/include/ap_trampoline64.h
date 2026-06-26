@@ -29,9 +29,11 @@
 #define OPENOS_AP_TRAMPOLINE_VERSION  0x05u
 
 /* Fixed offsets within blob. */
-#define OPENOS_AP_TRAMPOLINE_CR3_OFFSET     0x0F0u
-#define OPENOS_AP_TRAMPOLINE_ENTRY_OFFSET   0x0F8u
-#define OPENOS_AP_TRAMPOLINE_MAGIC_OFFSET   0x100u
+/* G.5-SSE: long-mode entry now enables x87/SSE before C code, which adds
+ * ~32 bytes; all subsequent slots shifted up by 0x20 from G.4.3b-2. */
+#define OPENOS_AP_TRAMPOLINE_CR3_OFFSET     0x110u
+#define OPENOS_AP_TRAMPOLINE_ENTRY_OFFSET   0x118u
+#define OPENOS_AP_TRAMPOLINE_MAGIC_OFFSET   0x120u
 
 /* Size of the embedded blob (bytes). */
 uint64_t arch_x86_64_ap_trampoline_size(void);

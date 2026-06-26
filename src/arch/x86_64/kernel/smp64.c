@@ -4,6 +4,7 @@
 #include "../include/ap_trampoline64.h"
 #include "../include/delay64.h"
 #include "../include/vmm64.h"
+#include "../include/percpu64.h"
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -195,10 +196,12 @@ void arch_x86_64_smp_alive_reset_all(void) {
     volatile uint8_t *pm  = (volatile uint8_t *)(uintptr_t)OPENOS_X86_64_SMP_ALIVE_PM32_PHYS;
     volatile uint8_t *lm  = (volatile uint8_t *)(uintptr_t)OPENOS_X86_64_SMP_ALIVE_LM64_PHYS;
     volatile uint8_t *la  = (volatile uint8_t *)(uintptr_t)OPENOS_X86_64_SMP_ALIVE_LAPIC_PHYS;
+    volatile uint8_t *pc  = (volatile uint8_t *)(uintptr_t)OPENOS_X86_64_SMP_ALIVE_PERCPU_PHYS;
     *rm = 0;
     *pm = 0;
     *lm = 0;
     *la = 0;
+    *pc = 0;
 }
 
 uint8_t arch_x86_64_smp_alive_rm_wait(uint8_t expected, uint32_t timeout_ms) {
@@ -244,6 +247,23 @@ uint8_t arch_x86_64_smp_alive_lapic_wait(uint8_t expected, uint32_t timeout_ms) 
     uint32_t elapsed = 0;
     for (;;) {
         uint8_t cur = arch_x86_64_smp_alive_lapic();
+        if (cur >= expected) return cur;
+        if (elapsed >= timeout_ms) return cur;
+        arch_x86_64_delay_ms(1);
+        elapsed++;
+    }
+}
+
+uint8_t arch_x86_64_smp_alive_percpu(void) {
+    const volatile uint8_t *p =
+        (const volatile uint8_t *)(uintptr_t)OPENOS_X86_64_SMP_ALIVE_PERCPU_PHYS;
+    return *p;
+}
+
+uint8_t arch_x86_64_smp_alive_percpu_wait(uint8_t expected, uint32_t timeout_ms) {
+    uint32_t elapsed = 0;
+    for (;;) {
+        uint8_t cur = arch_x86_64_smp_alive_percpu();
         if (cur >= expected) return cur;
         if (elapsed >= timeout_ms) return cur;
         arch_x86_64_delay_ms(1);
@@ -341,6 +361,18 @@ void arch_x86_64_ap_entry(uint64_t apic_id) {
             : "memory");
     }
     (void)arch_x86_64_lapic_id();
+
+    /* G.5-gdt-tss: build this CPU's own GDT + TSS and swap to them.
+     * Until this point the AP was running on the BSP's shared GDT, which is
+     * fine for executing instructions but unsafe the moment an exception
+     * fires (TSS.RSP0 is per-CPU state). */
+    arch_x86_64_percpu_setup(cpu_idx);
+    /* arch_x86_64_percpu_load(cpu_idx); */
+    __asm__ __volatile__(
+        "lock incb (%0)"
+        :
+        : "r"((volatile uint8_t *)(uintptr_t)OPENOS_X86_64_SMP_ALIVE_PERCPU_PHYS)
+        : "memory");
 
     for (;;) {
         __asm__ volatile ("hlt");
