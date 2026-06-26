@@ -92,4 +92,15 @@ uint32_t arch_x86_64_lapic_version_raw(void);
 bool arch_x86_64_lapic_icr_wait(void);
 bool arch_x86_64_lapic_send_init(uint8_t apic_id);
 
+/* G.4.3b-1 — send STARTUP (SIPI) IPI.
+ *
+ * SIPI is encoded as delivery_mode=110b, level=assert(1), trigger=edge(0),
+ * destination_mode=physical(0). The vector field (bits 7:0) carries the
+ * real-mode start address: CS:IP = (vector << 8):0000  i.e. physical
+ * (vector << 12). vector must be in the low 1MB range so vector ∈ [0,0xFF],
+ * and we conventionally use 0x08 (→ 0x8000).
+ *
+ * Returns true on successful delivery (ICR settled), false on timeout. */
+bool arch_x86_64_lapic_send_startup(uint8_t apic_id, uint8_t vector);
+
 #endif /* OPENOS_ARCH_X86_64_LAPIC64_H */

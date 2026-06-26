@@ -45,4 +45,19 @@ bool arch_x86_64_smp_trampoline_installed(void);
  * receives the attempted count (== ap_count). */
 uint32_t arch_x86_64_smp_send_init_all_aps(uint32_t *out_sent);
 
+/* G.4.3b-1 — issue the full INIT-SIPI-SIPI wakeup sequence to every AP:
+ *
+ *   for each AP:
+ *     send_init(apic_id)
+ *     delay 10 ms
+ *     send_startup(apic_id, vector=trampoline>>12)
+ *     delay 200 us
+ *     send_startup(apic_id, vector=trampoline>>12)
+ *
+ * After this returns, an AP that obeys the spec is executing at the
+ * trampoline page; in G.4.3b-1 that page is just `cli; hlt`, so APs simply
+ * halt. *out_sent (optional) receives the attempted count; the return value
+ * is the number of APs whose IPI sequence fully delivered (3 IPIs each). */
+uint32_t arch_x86_64_smp_send_startup_all_aps(uint32_t *out_sent);
+
 #endif /* OPENOS_ARCH_X86_64_SMP64_H */

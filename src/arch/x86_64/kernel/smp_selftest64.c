@@ -59,5 +59,20 @@ void arch_x86_64_smp_selftest_run(void)
         return;
     }
 
+    /* G.4.3b-1: full INIT-SIPI-SIPI sequence. After this, any compliant AP
+     * is executing at the trampoline page (currently a `cli; hlt` blob, so
+     * APs simply halt). We assert ok == sent only — i.e. every IPI in the
+     * three-step sequence was accepted by the local APIC. Verifying that
+     * APs actually woke up requires an alive flag set by AP code, which
+     * arrives with G.4.3b-2. */
+    uint32_t sipi_sent = 0;
+    uint32_t sipi_ok   = arch_x86_64_smp_send_startup_all_aps(&sipi_sent);
+    log_kv("\n[x86_64][smp-selftest] sipi_seq_sent=", (uint64_t)sipi_sent);
+    log_kv(" sipi_seq_ok=", (uint64_t)sipi_ok);
+    if (sipi_ok != sipi_sent) {
+        early_console64_write("\n[x86_64][smp-selftest] FAIL sipi sequence\n");
+        return;
+    }
+
     early_console64_write("\n[x86_64][smp-selftest] PASS\n");
 }

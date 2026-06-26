@@ -157,3 +157,28 @@ bool arch_x86_64_lapic_send_init(uint8_t apic_id) {
 
     return arch_x86_64_lapic_icr_wait();
 }
+
+/* G.4.3b-1 — send STARTUP (SIPI) IPI.
+ *
+ * Same ICR sequencing as INIT (HIGH first, then LOW triggers delivery).
+ * Encoding differs only in DELMOD (110b = STARTUP) and the vector field
+ * (which here carries the real-mode start page; AP will begin executing at
+ * physical (vector << 12) in real mode).
+ */
+bool arch_x86_64_lapic_send_startup(uint8_t apic_id, uint8_t vector) {
+    if (!g_lapic_ready) return false;
+
+    if (!arch_x86_64_lapic_icr_wait()) return false;
+
+    uint32_t high = ((uint32_t)apic_id) << 24;
+    mmio_write32(g_lapic_mmio, OPENOS_X86_64_LAPIC_REG_ICR_HIGH, high);
+
+    uint32_t low =
+        OPENOS_X86_64_LAPIC_ICR_DELMOD_STARTUP |
+        OPENOS_X86_64_LAPIC_ICR_DESTMOD_PHYS |
+        OPENOS_X86_64_LAPIC_ICR_LEVEL_ASSERT |
+        (uint32_t)vector;
+    mmio_write32(g_lapic_mmio, OPENOS_X86_64_LAPIC_REG_ICR_LOW, low);
+
+    return arch_x86_64_lapic_icr_wait();
+}
