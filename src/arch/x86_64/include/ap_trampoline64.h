@@ -17,7 +17,7 @@
 #define OPENOS_AP_TRAMPOLINE_MAGIC1   'P'
 #define OPENOS_AP_TRAMPOLINE_MAGIC2   'T'
 #define OPENOS_AP_TRAMPOLINE_MAGIC3   'R'
-#define OPENOS_AP_TRAMPOLINE_VERSION  0x01u
+#define OPENOS_AP_TRAMPOLINE_VERSION  0x02u
 
 /* Size of the embedded blob (bytes). */
 uint64_t arch_x86_64_ap_trampoline_size(void);

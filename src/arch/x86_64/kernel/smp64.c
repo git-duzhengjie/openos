@@ -167,3 +167,30 @@ uint32_t arch_x86_64_smp_send_startup_all_aps(uint32_t *out_sent) {
     if (out_sent) *out_sent = sent;
     return ok;
 }
+
+/* G.4.3b-2a — alive counter at phys 0x9000. The AP trampoline blob v2
+ * issues `lock inc byte [0x9000]` before halting, so this byte tracks how
+ * many wake events were observed (each AP may bump it 1–2 times depending
+ * on whether the second SIPI lands before HLT). The BSP zeroes it before
+ * INIT-SIPI-SIPI and polls it afterwards. */
+void arch_x86_64_smp_alive_reset(void) {
+    volatile uint8_t *p = (volatile uint8_t *)(uintptr_t)OPENOS_X86_64_SMP_ALIVE_PHYS;
+    *p = 0;
+}
+
+uint8_t arch_x86_64_smp_alive_count(void) {
+    const volatile uint8_t *p = (const volatile uint8_t *)(uintptr_t)OPENOS_X86_64_SMP_ALIVE_PHYS;
+    return *p;
+}
+
+uint8_t arch_x86_64_smp_alive_wait(uint8_t expected, uint32_t timeout_ms) {
+    /* Poll in 1ms slices using the TSC-based delay primitive. */
+    uint32_t elapsed = 0;
+    for (;;) {
+        uint8_t cur = arch_x86_64_smp_alive_count();
+        if (cur >= expected) return cur;
+        if (elapsed >= timeout_ms) return cur;
+        arch_x86_64_delay_ms(1);
+        elapsed++;
+    }
+}

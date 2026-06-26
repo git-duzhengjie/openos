@@ -65,12 +65,31 @@ void arch_x86_64_smp_selftest_run(void)
      * three-step sequence was accepted by the local APIC. Verifying that
      * APs actually woke up requires an alive flag set by AP code, which
      * arrives with G.4.3b-2. */
+    /* G.4.3b-2a: trampoline blob v2 now executes `lock inc byte [0x9000]`
+     * before HLT. Zero the counter just before issuing INIT-SIPI-SIPI so any
+     * non-zero value afterwards is attributable to AP code that actually ran.
+     */
+    arch_x86_64_smp_alive_reset();
+
     uint32_t sipi_sent = 0;
     uint32_t sipi_ok   = arch_x86_64_smp_send_startup_all_aps(&sipi_sent);
     log_kv("\n[x86_64][smp-selftest] sipi_seq_sent=", (uint64_t)sipi_sent);
     log_kv(" sipi_seq_ok=", (uint64_t)sipi_ok);
     if (sipi_ok != sipi_sent) {
         early_console64_write("\n[x86_64][smp-selftest] FAIL sipi sequence\n");
+        return;
+    }
+
+    /* G.4.3b-2a: poll the alive counter with a 500ms timeout. Under QEMU each
+     * AP typically bumps the counter exactly once before HLT (timer dependent).
+     * We only require alive >= ap_count; on bare metal each AP may bump 1-2x. */
+    uint32_t ap_n = arch_x86_64_smp_ap_count();
+    uint8_t  expect = (ap_n > 0xFFu) ? 0xFFu : (uint8_t)ap_n;
+    uint8_t  alive  = arch_x86_64_smp_alive_wait(expect, 500);
+    log_kv("\n[x86_64][smp-selftest] ap_alive=", (uint64_t)alive);
+    log_kv(" expected>=", (uint64_t)expect);
+    if (ap_n > 0 && alive < expect) {
+        early_console64_write("\n[x86_64][smp-selftest] FAIL ap alive\n");
         return;
     }
 

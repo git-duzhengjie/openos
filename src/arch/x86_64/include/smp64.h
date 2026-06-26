@@ -60,4 +60,23 @@ uint32_t arch_x86_64_smp_send_init_all_aps(uint32_t *out_sent);
  * is the number of APs whose IPI sequence fully delivered (3 IPIs each). */
 uint32_t arch_x86_64_smp_send_startup_all_aps(uint32_t *out_sent);
 
+/* G.4.3b-2a — alive counter at physical 0x9000 (1 byte).
+ *
+ * The trampoline blob v2 executes `lock inc byte [0x9000]` before halting,
+ * so after a successful INIT-SIPI-SIPI each woken AP bumps this counter by
+ * (potentially) 1 or 2 depending on whether the 2nd SIPI was honored.
+ *
+ * BSP responsibilities:
+ *   - zero the counter BEFORE the wakeup sequence (arch_x86_64_smp_alive_reset)
+ *   - poll arch_x86_64_smp_alive_count() with a timeout
+ */
+#define OPENOS_X86_64_SMP_ALIVE_PHYS  0x9000ull
+
+void    arch_x86_64_smp_alive_reset(void);
+uint8_t arch_x86_64_smp_alive_count(void);
+
+/* Block until alive_count() >= expected or `timeout_ms` elapses (TSC-based).
+ * Returns the final alive_count() value. */
+uint8_t arch_x86_64_smp_alive_wait(uint8_t expected, uint32_t timeout_ms);
+
 #endif /* OPENOS_ARCH_X86_64_SMP64_H */
