@@ -4,8 +4,9 @@ project(OpenOS LANGUAGES NONE)
 
 set(OPENOS_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 set(OPENOS_BUILD_SCRIPT "${OPENOS_SOURCE_DIR}/build.sh" CACHE FILEPATH "OpenOS legacy build script")
-set(OPENOS_DEFAULT_ARCH "i386" CACHE STRING "Default OpenOS architecture")
-set_property(CACHE OPENOS_DEFAULT_ARCH PROPERTY STRINGS i386 x86_64)
+# Step E.5: default architecture switched to x86_64 (long-mode UEFI main line).
+set(OPENOS_DEFAULT_ARCH "x86_64" CACHE STRING "Default OpenOS architecture (x86_64 main line, i386 legacy)")
+set_property(CACHE OPENOS_DEFAULT_ARCH PROPERTY STRINGS x86_64 i386)
 
 find_program(BASH_EXECUTABLE bash REQUIRED)
 find_program(NASM_EXECUTABLE nasm)

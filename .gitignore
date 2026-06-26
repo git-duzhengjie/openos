@@ -5,6 +5,10 @@ build/
 *.bin
 target/
 
+# Scratch / scan output
+.scan_*.sh
+.scan_*.txt
+
 # IDE
 .vscode/
 .idea/

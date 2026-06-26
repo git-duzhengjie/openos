@@ -1380,7 +1380,7 @@
   - [ ] **E.2 sched64 真实化**：proc64.yield 接入 sched64 runqueue（多任务），实现 `arch_x86_64_sched_yield()`。
   - [ ] **E.3 net64 桥接**：socket/bind/sendto/recvfrom 上挂 dispatch。
   - [ ] **E.4 TSC → PIT/HPET 标定**：替换 `UPTIME_MS` 用 `rdtsc>>20` 的临时实现。
-  - [ ] **E.5 build.sh 默认 ARCH 切换为 x86_64**。
+  - [√] **E.5 build.sh 默认 ARCH 切换为 x86_64**：`build.sh` `BUILD_ARCH=${ARCH:-x86_64}`、Usage 调整为 `ARCH=x86_64|i386|aarch64`；`CMakeLists.txt` `OPENOS_DEFAULT_ARCH=x86_64`；`CMakePresets.json` `image` build preset 切到 `ninja-x86_64`。`./build.sh`（无环境变量）默认产出 `target/openos-uefi.img`，OVMF 启动 hello64 + proc64 step E 探针 + 干净返回 kmain；`ARCH=i386 ./build.sh` 同步无回归（仍产出 `target/openos.img`）。
 
 #### 21.2 其他平台与启动能力
 

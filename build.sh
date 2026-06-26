@@ -12,7 +12,9 @@ fi
 
 BUILD=target
 SRC=src/kernel
-BUILD_ARCH="${ARCH:-i386}"
+# Step E.5: default architecture switched to x86_64 (long mode UEFI main line).
+# Override with ARCH=i386 or ARCH=aarch64 for legacy/embedded targets.
+BUILD_ARCH="${ARCH:-x86_64}"
 OPENOS_TCC_SMOKE=${OPENOS_TCC_SMOKE:-0}
 KERNEL_EXTRA_CFLAGS="${KERNEL_EXTRA_CFLAGS:-}"
 if [ "$OPENOS_TCC_SMOKE" = "1" ]; then
@@ -35,8 +37,9 @@ if [ "$OPENOS_CJK_COVERAGE" != "ui" ] && [ "$OPENOS_CJK_EMBED" != "1" ] && [ "$O
 fi
 
 usage() {
-    echo "Usage: ARCH=i386|x86_64|aarch64 ./build.sh [clean|test|cppsmoke|sdk|sdk-smoke|chromium-source-check|chromium-gn-check|chromium-engine-gate|chromium-real-switch-gate|skia-official-check|v8-official-check|host-tools-check]"
-    echo "       ./build.sh [i386|x86_64|aarch64] [clean|test|cppsmoke|sdk|sdk-smoke]"
+    echo "Usage: ARCH=x86_64|i386|aarch64 ./build.sh [clean|test|cppsmoke|sdk|sdk-smoke|chromium-source-check|chromium-gn-check|chromium-engine-gate|chromium-real-switch-gate|skia-official-check|v8-official-check|host-tools-check]"
+    echo "       (default ARCH is x86_64; pass ARCH=i386 for the legacy 32-bit image)"
+    echo "       ./build.sh [x86_64|i386|aarch64] [clean|test|cppsmoke|sdk|sdk-smoke]"
     echo "       ./build.sh cppsmoke    # probe OpenOS userland C++ toolchain"
     echo "       ./build.sh sdk         # export OpenOS userland SDK/sysroot for Chromium ports"
     echo "       ./build.sh sdk-smoke   # verify SDK can build a minimal OpenOS user ELF"

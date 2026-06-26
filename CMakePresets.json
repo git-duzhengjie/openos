@@ -37,7 +37,7 @@
   "buildPresets": [
     {
       "name": "image",
-      "configurePreset": "ninja-i386",
+      "configurePreset": "ninja-x86_64",
       "targets": ["openos-image"]
     },
     {
