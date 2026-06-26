@@ -1,4 +1,4 @@
-/* G.4.3b-2 + G.5 — x86_64 AP trampoline (v0x04)
+/* G.4.3b-2 + G.5 — x86_64 AP trampoline (v0x05)
  *
  * Full three-stage transition: real → PM32 → LM64 → C entry.
  * Loaded at physical address 0x8000, size < 512 bytes.
@@ -119,10 +119,16 @@ ap_lm64_entry:
     /* Atomic: alive[lm64] += 1 */
     lock incb (0x9010)
 
-    /* Set up temporary stack in low memory.
-     * Use 0xC000 as stack top — just enough to enter C code safely.
-     */
-    movq    $0xC000, %rsp
+    /* G.5: Per-CPU stack allocation.
+     *
+     * 0x9018 = 8-byte atomic CPU-index counter (init = 1, slot 0 reserved for BSP)
+     * 0xA000 = 8-byte-per-slot stack-top table, filled by BSP before SIPI.
+     *
+     * Each AP atomically grabs its own index, then loads the corresponding
+     * 64-bit stack top from the table. No two APs share a stack. */
+    movq    $1, %rax
+    lock xaddq %rax, (0x9018)        /* rax = old counter (this AP's index) */
+    movq    (0xA000)(,%rax,8), %rsp  /* rsp = stack_top_table[rax] */
     movq    %rsp, %rbp
 
     /* Read APIC ID via CPUID (leaf 01h, EBX bits 31-24).
@@ -180,6 +186,6 @@ entry_slot:
 
 magic:
     .byte 'A', 'P', 'T', 'R'
-    .byte 0x04
+    .byte 0x05
 
 __ap_trampoline_blob_end:

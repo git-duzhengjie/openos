@@ -260,11 +260,12 @@ static uint64_t smp_read_cr3(void) {
     return val;
 }
 
-static bool smp_alloc_stack(uint32_t cpu_idx) {
-    /* TODO(G.5-stack): allocate physical pages via PMM and map RW for AP stack */
-    (void)cpu_idx;
-    return true;
-}
+/* Static per-AP stacks in BSS (16 KiB each). Index 0 is BSP placeholder. */
+static uint8_t g_ap_stacks[OPENOS_X86_64_SMP_MAX_CPUS][OPENOS_X86_64_SMP_STACK_SIZE]
+    __attribute__((aligned(16)));
+
+/* Track which AP got which cpu index (filled in ap_entry) */
+static volatile uint8_t g_ap_cpu_to_apic[OPENOS_X86_64_SMP_MAX_CPUS];
 
 void arch_x86_64_smp_prepare_aps(void) {
     if (!g_smp.trampoline_installed) return;
@@ -275,19 +276,30 @@ void arch_x86_64_smp_prepare_aps(void) {
     arch_x86_64_ap_trampoline_set_cr3(phys, cr3);
     arch_x86_64_ap_trampoline_set_entry(phys, (uint64_t)arch_x86_64_ap_entry);
 
-    /* BSP = cpu 0, stack pre-allocated by bootstrap */
-    for (uint32_t i = 1; i <= g_smp.ap_count; ++i) {
-        (void)smp_alloc_stack(i);
+    /* Fill the per-CPU stack-top table at 0xA000.
+     * Slot 0 is reserved for BSP (unused by APs); slots 1..N hold AP stack tops. */
+    volatile uint64_t *stack_table =
+        (volatile uint64_t *)(uintptr_t)OPENOS_X86_64_SMP_STACK_TABLE_PHYS;
+    for (uint32_t i = 0; i < OPENOS_X86_64_SMP_MAX_CPUS; ++i) {
+        uint64_t top = (uint64_t)(uintptr_t)&g_ap_stacks[i][OPENOS_X86_64_SMP_STACK_SIZE];
+        stack_table[i] = top;
+        g_ap_cpu_to_apic[i] = 0xFFu;
     }
+
+    /* Reset the atomic AP cpu-index counter at 0x9018.
+     * Init = 1 so the first AP picks slot 1 (slot 0 = BSP). */
+    volatile uint64_t *cpu_idx_ctr =
+        (volatile uint64_t *)(uintptr_t)OPENOS_X86_64_SMP_CPU_IDX_PHYS;
+    *cpu_idx_ctr = 1;
 }
 
 void arch_x86_64_ap_entry(uint64_t apic_id) {
-    /* TODO(G.5-stack): switch to per-CPU kernel stack once allocated. */
-    (void)apic_id;
+    /* At this point %rsp already points to the top of this AP's private stack
+     * (set up in trampoline LM64 via the 0xA000 table). Safe to call C now. */
 
-    /* TODO(G.5): per-CPU LAPIC init for APs */
-    (void)arch_x86_64_lapic_id();
-
+    /* Read back our cpu index from the counter — the trampoline used lock xadd
+     * which means the *current* counter value is (max_used + 1). We can't get
+     * our own pre-add return that way; instead, derive cpu_idx from apic_id. */
     uint32_t cpu_idx = 0;
     for (uint32_t i = 0; i < g_smp.ap_count; ++i) {
         if (g_smp.ap_apic_ids[i] == (uint8_t)apic_id) {
@@ -295,8 +307,12 @@ void arch_x86_64_ap_entry(uint64_t apic_id) {
             break;
         }
     }
+    if (cpu_idx < OPENOS_X86_64_SMP_MAX_CPUS) {
+        g_ap_cpu_to_apic[cpu_idx] = (uint8_t)apic_id;
+    }
 
-    (void)cpu_idx;
+    /* TODO(G.5-lapic): per-CPU LAPIC init for APs */
+    (void)arch_x86_64_lapic_id();
 
     for (;;) {
         __asm__ volatile ("hlt");

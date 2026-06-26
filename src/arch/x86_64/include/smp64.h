@@ -5,10 +5,16 @@
 #include <stdbool.h>
 
 #define OPENOS_X86_64_SMP_MAX_CPUS   64u
-#define OPENOS_X86_64_SMP_STACK_SIZE (8ULL * 1024ULL)
+#define OPENOS_X86_64_SMP_STACK_SIZE (16ULL * 1024ULL)
 
 #define OPENOS_X86_64_SMP_TRAMPOLINE_PHYS  0x00008000ULL
 #define OPENOS_X86_64_SMP_ALIVE_PHYS       0x00009000ULL
+
+/* Per-CPU bring-up shared memory (low physical addresses, identity mapped):
+ *   0x9018: 8-byte atomic CPU index counter (BSP zeroes, AP uses lock xadd)
+ *   0xA000: 8-byte-per-slot stack-top table (filled by BSP, read by AP) */
+#define OPENOS_X86_64_SMP_CPU_IDX_PHYS     0x00009018ULL
+#define OPENOS_X86_64_SMP_STACK_TABLE_PHYS 0x0000A000ULL
 
 bool arch_x86_64_smp_init(void);
 bool arch_x86_64_smp_is_ready(void);
