@@ -113,3 +113,47 @@ uint32_t arch_x86_64_lapic_version_raw(void) {
     if (!g_lapic_ready) return 0;
     return mmio_read32(g_lapic_mmio, OPENOS_X86_64_LAPIC_REG_VERSION);
 }
+
+/* G.4.3a — ICR delivery-status poll with bounded spin. */
+bool arch_x86_64_lapic_icr_wait(void) {
+    if (!g_lapic_ready) return false;
+    /* 1M iterations is plenty: a healthy LAPIC clears delivery_status within
+     * a handful of bus cycles. We never block forever even if hardware is
+     * wedged — the selftest will simply report FAIL. */
+    for (uint32_t i = 0; i < 1000000u; ++i) {
+        uint32_t low = mmio_read32(g_lapic_mmio, OPENOS_X86_64_LAPIC_REG_ICR_LOW);
+        if ((low & OPENOS_X86_64_LAPIC_ICR_DELIVERY_STATUS) == 0) {
+            return true;
+        }
+        __asm__ __volatile__("pause");
+    }
+    return false;
+}
+
+/* G.4.3a — send INIT IPI to one physical-destination AP.
+ *
+ * Sequencing rules (SDM Vol.3A 10.6):
+ *   - Write ICR_HIGH first (destination apic_id in bits 31:24). The act of
+ *     writing ICR_LOW is what triggers delivery, so HIGH must be set first.
+ *   - INIT is encoded as delivery_mode=101b, level=assert(1), trigger=edge(0),
+ *     destination_mode=physical(0), vector=0.
+ *   - After writing ICR_LOW, poll delivery_status until it clears.
+ */
+bool arch_x86_64_lapic_send_init(uint8_t apic_id) {
+    if (!g_lapic_ready) return false;
+
+    /* Make sure no prior IPI is still in flight before we clobber ICR. */
+    if (!arch_x86_64_lapic_icr_wait()) return false;
+
+    uint32_t high = ((uint32_t)apic_id) << 24;
+    mmio_write32(g_lapic_mmio, OPENOS_X86_64_LAPIC_REG_ICR_HIGH, high);
+
+    uint32_t low =
+        OPENOS_X86_64_LAPIC_ICR_DELMOD_INIT |
+        OPENOS_X86_64_LAPIC_ICR_DESTMOD_PHYS |
+        OPENOS_X86_64_LAPIC_ICR_LEVEL_ASSERT;
+    /* Vector field (bits 7:0) must be zero for INIT. */
+    mmio_write32(g_lapic_mmio, OPENOS_X86_64_LAPIC_REG_ICR_LOW, low);
+
+    return arch_x86_64_lapic_icr_wait();
+}

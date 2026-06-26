@@ -45,5 +45,19 @@ void arch_x86_64_smp_selftest_run(void)
     early_console64_write("\n[x86_64][smp-selftest] trampoline installed @ ");
     early_console64_write_hex64(arch_x86_64_smp_trampoline_phys());
 
+    /* G.4.3a: broadcast INIT IPI to every AP. No SIPI — APs simply enter
+     * the "wait for SIPI" state and remain quiescent. We do not assert any
+     * specific count under QEMU smp=1 (ap_count may be 0); we only assert
+     * that ok == sent, i.e. every attempted ICR write was accepted by the
+     * local APIC. */
+    uint32_t sent = 0;
+    uint32_t ok   = arch_x86_64_smp_send_init_all_aps(&sent);
+    log_kv("\n[x86_64][smp-selftest] init_ipi_sent=", (uint64_t)sent);
+    log_kv(" init_ipi_ok=", (uint64_t)ok);
+    if (ok != sent) {
+        early_console64_write("\n[x86_64][smp-selftest] FAIL init_ipi delivery\n");
+        return;
+    }
+
     early_console64_write("\n[x86_64][smp-selftest] PASS\n");
 }

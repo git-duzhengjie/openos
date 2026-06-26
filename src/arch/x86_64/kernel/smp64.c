@@ -98,3 +98,24 @@ bool arch_x86_64_smp_install_trampoline(void) {
 bool arch_x86_64_smp_trampoline_installed(void) {
     return g_smp.trampoline_installed;
 }
+
+/* G.4.3a — broadcast INIT IPI to every AP we discovered. No SIPI, no pause:
+ * the APs enter the INIT "wait for SIPI" state and stay quiescent. Returns
+ * the number of APs whose ICR write completed successfully; out-param
+ * 'sent' is the number we attempted. Safe to call with ap_count == 0. */
+uint32_t arch_x86_64_smp_send_init_all_aps(uint32_t *out_sent) {
+    uint32_t sent = 0, ok = 0;
+    if (!g_smp.ready) {
+        if (out_sent) *out_sent = 0;
+        return 0;
+    }
+    for (uint32_t i = 0; i < g_smp.ap_count; ++i) {
+        uint8_t id = g_smp.ap_apic_ids[i];
+        sent++;
+        if (arch_x86_64_lapic_send_init(id)) {
+            ok++;
+        }
+    }
+    if (out_sent) *out_sent = sent;
+    return ok;
+}

@@ -34,9 +34,20 @@
 #define OPENOS_X86_64_LAPIC_REG_TPR             0x080u
 #define OPENOS_X86_64_LAPIC_REG_EOI             0x0B0u
 #define OPENOS_X86_64_LAPIC_REG_SVR             0x0F0u
+#define OPENOS_X86_64_LAPIC_REG_ICR_LOW         0x300u
+#define OPENOS_X86_64_LAPIC_REG_ICR_HIGH        0x310u
 
 /* SVR bits. */
 #define OPENOS_X86_64_LAPIC_SVR_ENABLE          (1u << 8)
+
+/* ICR_LOW fields (SDM Vol.3A Figure 10-12). */
+#define OPENOS_X86_64_LAPIC_ICR_DELMOD_FIXED    (0u << 8)
+#define OPENOS_X86_64_LAPIC_ICR_DELMOD_INIT     (5u << 8)
+#define OPENOS_X86_64_LAPIC_ICR_DELMOD_STARTUP  (6u << 8)
+#define OPENOS_X86_64_LAPIC_ICR_DESTMOD_PHYS    (0u << 11)
+#define OPENOS_X86_64_LAPIC_ICR_DELIVERY_STATUS (1u << 12)
+#define OPENOS_X86_64_LAPIC_ICR_LEVEL_ASSERT    (1u << 14)
+#define OPENOS_X86_64_LAPIC_ICR_TRIGGER_LEVEL   (1u << 15)
 
 /* Bring LAPIC online: program SVR enable + spurious vector, clear TPR.
  * Returns true on success; false if MSR_IA32_APIC_BASE indicates LAPIC is
@@ -64,5 +75,21 @@ uint8_t arch_x86_64_lapic_id(void);
 
 /* Convenience: read LAPIC version register raw value. */
 uint32_t arch_x86_64_lapic_version_raw(void);
+
+/* G.4.3a — IPI primitives.
+ *
+ * arch_x86_64_lapic_icr_wait:
+ *   Spin-poll ICR_LOW.Delivery_Status (bit 12) until it clears, indicating
+ *   that the LAPIC has accepted the previously written ICR command. Bounded
+ *   spin (~1M iterations) so a wedged LAPIC cannot livelock the BSP.
+ *   Returns true if cleared, false on timeout.
+ *
+ * arch_x86_64_lapic_send_init:
+ *   Send an INIT IPI to the physical-destination apic_id (8-bit). Edge
+ *   triggered, level=assert, vector=0. Caller is responsible for the 10ms
+ *   pause and the subsequent two SIPI broadcasts (G.4.3b).
+ *   Returns true on successful delivery (ICR settled), false on timeout. */
+bool arch_x86_64_lapic_icr_wait(void);
+bool arch_x86_64_lapic_send_init(uint8_t apic_id);
 
 #endif /* OPENOS_ARCH_X86_64_LAPIC64_H */

@@ -40,4 +40,9 @@ uint32_t arch_x86_64_smp_cpu_count(void);
 bool arch_x86_64_smp_install_trampoline(void);
 bool arch_x86_64_smp_trampoline_installed(void);
 
+/* G.4.3a — broadcast INIT IPI to all APs (no SIPI yet). Returns count of
+ * APs whose INIT was acknowledged by the local APIC; *out_sent (optional)
+ * receives the attempted count (== ap_count). */
+uint32_t arch_x86_64_smp_send_init_all_aps(uint32_t *out_sent);
+
 #endif /* OPENOS_ARCH_X86_64_SMP64_H */
