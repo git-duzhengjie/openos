@@ -1,0 +1,68 @@
+#include "../include/pit64.h"
+#include "../include/pic64.h"
+
+#include <stdint.h>
+
+/* Step F.2 — PIT channel 0 rate generator.
+ *
+ * PIT_INPUT_HZ is fixed by hardware at 1193182 Hz. To produce a target
+ * frequency of `hz` we load reload = round(PIT_INPUT_HZ / hz).
+ * Caller guarantees hz in [19, 1193182]; we clamp anyway.
+ *
+ * Command byte 0x36 = channel 0, lobyte+hibyte, mode 2 (rate generator),
+ * binary. Mode 2 keeps OUT high and drops it for one input cycle each time
+ * the counter wraps — what we want for periodic IRQ0.
+ *
+ * Note: the tsc64 calibrator uses channel 2 with mode 0 and an explicit
+ * gate; the two channels are independent so there is no interaction. */
+
+#define PIT_INPUT_HZ 1193182u
+
+#define PIT_PORT_CHANNEL0 0x40u
+#define PIT_PORT_COMMAND  0x43u
+
+static volatile uint64_t g_pit_ticks = 0;
+static uint32_t g_pit_hz = 0;
+
+static inline void pit_outb(uint16_t port, uint8_t val) {
+    __asm__ __volatile__("outb %0, %1" : : "a"(val), "Nd"(port));
+}
+
+void arch_x86_64_pit_init(uint32_t hz) {
+    if (hz < 19u) {
+        hz = 19u; /* below this the reload would overflow 16 bits */
+    }
+    if (hz > PIT_INPUT_HZ) {
+        hz = PIT_INPUT_HZ;
+    }
+    uint32_t reload = (PIT_INPUT_HZ + hz / 2u) / hz;
+    if (reload == 0u) {
+        reload = 1u;
+    }
+    if (reload > 0xFFFFu) {
+        reload = 0xFFFFu;
+    }
+
+    /* Command: channel 0, access lobyte+hibyte, mode 2, binary. */
+    pit_outb(PIT_PORT_COMMAND, 0x34u);
+    pit_outb(PIT_PORT_CHANNEL0, (uint8_t)(reload & 0xFFu));
+    pit_outb(PIT_PORT_CHANNEL0, (uint8_t)((reload >> 8) & 0xFFu));
+
+    g_pit_hz = hz;
+    g_pit_ticks = 0;
+}
+
+uint64_t arch_x86_64_pit_get_ticks(void) {
+    return g_pit_ticks;
+}
+
+uint32_t arch_x86_64_pit_get_hz(void) {
+    return g_pit_hz;
+}
+
+void arch_x86_64_pit_irq0_handler(void) {
+    /* IRQ0 hot path — keep it tiny. F.3 will append the scheduler hook
+     * here, but in F.2 we just bump the counter and ack the PIC. */
+    g_pit_ticks++;
+    arch_x86_64_pic_send_eoi(0x20u);
+}

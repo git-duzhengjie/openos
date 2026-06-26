@@ -67,14 +67,35 @@ static void build_gdt64(void) {
 
 void arch_x86_64_gdt_init(void) {
     build_gdt64();
+    /*
+     * Step F.2 root-cause fix: UEFI loader leaves CS = 0x38 (its own ring-0
+     * code selector). lgdt only reloads the descriptor table; the CS selector
+     * register itself is unchanged and only the hidden descriptor cache keeps
+     * working. The instant an external IRQ pushes the current CS onto the iret
+     * frame, hardware records 0x38, which in *our* GDT maps to the TSS upper
+     * half (a system segment, not code) -> iretq triggers #GP(0x38).
+     *
+     * Far-return through the new kernel code selector to commit CS, then refresh
+     * DS/ES/SS/FS/GS with the kernel data selector. After this sequence every
+     * segment register holds a selector that points into *our* GDT.
+     */
     __asm__ __volatile__(
-        "lgdt %0\n"
+        "lgdt %[gdt]\n"
+        "pushq %[code]\n"
+        "leaq 1f(%%rip), %%rax\n"
+        "pushq %%rax\n"
+        "lretq\n"
+        "1:\n"
         "movw %[data], %%ax\n"
         "movw %%ax, %%ds\n"
         "movw %%ax, %%es\n"
         "movw %%ax, %%ss\n"
+        "movw %%ax, %%fs\n"
+        "movw %%ax, %%gs\n"
         :
-        : "m"(gdt64_ptr), [data] "i"(OPENOS_X86_64_GDT_KERNEL_DATA)
+        : [gdt] "m"(gdt64_ptr),
+          [code] "i"((uint64_t)OPENOS_X86_64_GDT_KERNEL_CODE),
+          [data] "i"(OPENOS_X86_64_GDT_KERNEL_DATA)
         : "rax", "memory");
 }
 

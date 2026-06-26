@@ -151,6 +151,20 @@ int arch_x86_64_idt_query_gate(uint8_t vector, struct x86_64_idt_gate_info *out)
     return 0;
 }
 
+int arch_x86_64_idt_register_irq(uint8_t cpu_vector, void (*handler)(void)) {
+    /*
+     * Step F.2: only PIC-mapped vectors are accepted. We deliberately
+     * refuse to clobber the 32 CPU-exception slots (0x00..0x1F) or the
+     * legacy int 0x80 compat gate (0x80). Future IOAPIC/MSI work can grow
+     * a separate registration path.
+     */
+    if (cpu_vector < 0x20u || cpu_vector >= 0x30u || handler == 0) {
+        return -1;
+    }
+    set_idt64_gate(cpu_vector, (idt64_handler_t)(uintptr_t)handler, 0u, OPENOS_X86_64_IDT_INTERRUPT_GATE);
+    return 0;
+}
+
 void arch_x86_64_exception_dispatch(const struct x86_64_exception_frame *frame) {
     /*
      * Step D.2: be loud about exceptions instead of silently halting. Without
@@ -177,6 +191,22 @@ void arch_x86_64_exception_dispatch(const struct x86_64_exception_frame *frame) 
         early_console64_write_hex64(frame->ss);
         early_console64_write(" cr2=");
         early_console64_write_hex64(cr2);
+    }
+    /* Step F.2 debug — if the IRQ0 stub captured the iret frame before
+     * trapping, dump it here so we can see the actual hardware-pushed
+     * RIP/CS/RFLAGS/RSP/SS values that iretq tried to load. */
+    {
+        extern uint64_t irq0_iret_dump[5];
+        early_console64_write("\n[x86_64][exception] irq0_iret RIP=");
+        early_console64_write_hex64(irq0_iret_dump[0]);
+        early_console64_write(" CS=");
+        early_console64_write_hex64(irq0_iret_dump[1]);
+        early_console64_write(" RFLAGS=");
+        early_console64_write_hex64(irq0_iret_dump[2]);
+        early_console64_write(" RSP=");
+        early_console64_write_hex64(irq0_iret_dump[3]);
+        early_console64_write(" SS=");
+        early_console64_write_hex64(irq0_iret_dump[4]);
     }
     early_console64_write("\n");
     for (;;) {

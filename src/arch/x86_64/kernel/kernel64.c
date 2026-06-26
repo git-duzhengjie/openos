@@ -10,6 +10,8 @@
 #include "../include/idt64.h"
 #include "../include/idt_selftest64.h"
 #include "../include/initrd64.h"
+#include "../include/pic64.h"
+#include "../include/pit64.h"
 #include "../include/pmm64.h"
 #include "../include/proc64.h"
 #include "../include/sched64.h"
@@ -21,6 +23,11 @@
 #include "../include/net_selftest64.h"
 #include "../include/tsc64.h"
 #include "../include/tsc_selftest64.h"
+#include "../include/irq_selftest64.h"
+
+/* Step F.2: IRQ0 ISR entry implemented in isr64.S. Declared here so the
+ * boot path can hand its address to arch_x86_64_idt_register_irq(). */
+extern void x86_64_irq0(void);
 #include "../include/tss64.h"
 #include "../include/usermode64.h"
 #include "../include/vfs64.h"
@@ -94,6 +101,14 @@ void arch_x86_64_early_init(const openos_bootinfo_t *bootinfo) {
      * relies on uptime_ms(); idempotent and tolerates failure (uptime falls
      * back to the legacy rdtsc>>20 estimate). */
     arch_x86_64_tsc_init();
+    /* Step F.2: 8259A remap (master 0x20, slave 0x28) + PIT channel 0
+     * @ 100 Hz. IRQs stay globally disabled here — the IRQ self-test will
+     * be the first code to flip the IF bit, and it cleans up after itself.
+     * Order matters: remap before any sti, otherwise BIOS-default IRQ0
+     * would fire on the #DF vector and panic. */
+    arch_x86_64_pic_init();
+    arch_x86_64_pit_init(OPENOS_X86_64_PIT_HZ_DEFAULT);
+    arch_x86_64_idt_register_irq(0x20u, x86_64_irq0);
 }
 
 void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
@@ -178,6 +193,11 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
     /* Step E.4 TSC<->PIT calibration sanity. Non-fatal — uptime_ms() falls
      * back to the legacy estimator if anything in this chain goes sideways. */
     arch_x86_64_tsc_selftest_run();
+
+    /* Step F.2: IRQ0 chain self-test. Briefly enables interrupts, expects
+     * ~20 PIT ticks over 200 ms, then disables IRQs again. Must follow
+     * tsc_selftest_run so per_ms is known-good. */
+    arch_x86_64_irq_selftest_run();
 
     /* Step C: initrd & fdtable 就绪后再跳 ring3 hello64，否则 open(/hello.txt) 会看不到文件。 */
     early_console64_write("[x86_64][user] loading embedded hello64.elf size=");

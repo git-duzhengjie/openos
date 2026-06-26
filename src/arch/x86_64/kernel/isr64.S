@@ -1,5 +1,6 @@
 .section .text,"ax"
 .extern arch_x86_64_exception_dispatch
+.extern arch_x86_64_pit_irq0_handler
 
 .macro ISR_NOERR vector
 .global x86_64_isr\vector
@@ -48,6 +49,69 @@ ISR_NOERR 28
 ISR_ERR   29
 ISR_ERR   30
 ISR_NOERR 31
+
+/* Step F.2 — IRQ0 / vector 0x20 dedicated stub.
+ * Hardware does not push an error code for external interrupts, and we do
+ * NOT route this through the common exception path (no frame layout, no
+ * panic). We save the SysV caller-saved set, call the C handler, restore,
+ * and iretq. The PIC EOI is sent inside the C handler. */
+.global x86_64_irq0
+x86_64_irq0:
+    /* Diagnostic: snapshot the hardware iret frame to a fixed memory region
+     * so we can examine it post-mortem if anything goes wrong. The stack
+     * shape on entry is (top-down):
+     *  [%rsp+0]   hw-pushed RIP
+     *  [%rsp+8]   hw-pushed CS
+     *  [%rsp+16]  hw-pushed RFLAGS
+     *  [%rsp+24]  hw-pushed RSP
+     *  [%rsp+32]  hw-pushed SS
+     */
+    pushq %rax
+    pushq %rbx
+    leaq irq0_iret_dump(%rip), %rbx
+    movq 16(%rsp), %rax
+    movq %rax, 0(%rbx)    /* RIP    */
+    movq 24(%rsp), %rax
+    movq %rax, 8(%rbx)    /* CS     */
+    movq 32(%rsp), %rax
+    movq %rax, 16(%rbx)   /* RFLAGS */
+    movq 40(%rsp), %rax
+    movq %rax, 24(%rbx)   /* RSP    */
+    movq 48(%rsp), %rax
+    movq %rax, 32(%rbx)   /* SS     */
+    popq %rbx
+    popq %rax
+
+    /* Now save the SysV caller-saved set and dispatch to C. The C handler is
+     * responsible for bumping g_pit_ticks and sending the PIC EOI. */
+    pushq %rax
+    pushq %rcx
+    pushq %rdx
+    pushq %rsi
+    pushq %rdi
+    pushq %r8
+    pushq %r9
+    pushq %r10
+    pushq %r11
+    cld
+    call arch_x86_64_pit_irq0_handler
+    popq %r11
+    popq %r10
+    popq %r9
+    popq %r8
+    popq %rdi
+    popq %rsi
+    popq %rdx
+    popq %rcx
+    popq %rax
+    iretq
+
+.section .bss,"aw",@nobits
+.global irq0_iret_dump
+.balign 16
+irq0_iret_dump:
+    .skip 64
+.section .text,"ax"
 
 .global x86_64_isr_common
 x86_64_isr_common:

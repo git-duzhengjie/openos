@@ -401,6 +401,9 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         kernel/net_selftest64.c \
         kernel/tsc64.c \
         kernel/tsc_selftest64.c \
+        kernel/pic64.c \
+        kernel/pit64.c \
+        kernel/irq_selftest64.c \
         kernel/fdtable64.c \
         kernel/initrd64.c \
         kernel/vfs64.c \
@@ -465,6 +468,9 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         "$ARCH64_BUILD/net_selftest64.o" \
         "$ARCH64_BUILD/tsc64.o" \
         "$ARCH64_BUILD/tsc_selftest64.o" \
+        "$ARCH64_BUILD/pic64.o" \
+        "$ARCH64_BUILD/pit64.o" \
+        "$ARCH64_BUILD/irq_selftest64.o" \
         "$ARCH64_BUILD/fdtable64.o" \
         "$ARCH64_BUILD/initrd64.o" \
         "$ARCH64_BUILD/vfs64.o" \

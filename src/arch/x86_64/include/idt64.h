@@ -54,4 +54,12 @@ struct x86_64_idt_gate_info {
 
 int arch_x86_64_idt_query_gate(uint8_t vector, struct x86_64_idt_gate_info *out);
 
+/*
+ * Step F.2: register an external-interrupt gate (used by pic64/pit64 for
+ * IRQ0..IRQ15 wired to CPU vectors 0x20..0x2F). DPL=0, interrupt gate,
+ * IST=0. Returns 0 on success, -1 if the vector is outside the PIC range
+ * (we deliberately refuse to overwrite exception or syscall gates).
+ */
+int arch_x86_64_idt_register_irq(uint8_t cpu_vector, void (*handler)(void));
+
 #endif /* OPENOS_ARCH_X86_64_IDT64_H */
