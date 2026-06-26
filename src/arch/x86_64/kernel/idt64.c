@@ -166,6 +166,21 @@ int arch_x86_64_idt_register_irq(uint8_t cpu_vector, void (*handler)(void)) {
 }
 
 void arch_x86_64_exception_dispatch(const struct x86_64_exception_frame *frame) {
+    /* G.3b-final: vector 2 (NMI) is recoverable in our model — it can
+     * be steered to a CPU via LVT LINT1, and on PC platforms it most
+     * commonly represents a chassis / watchdog event we just want to
+     * log. Treat it as non-fatal so the kernel keeps running. */
+    if (frame && frame->vector == 2u) {
+        static volatile uint64_t s_nmi_count = 0;
+        ++s_nmi_count;
+        early_console64_write("\n[x86_64][nmi] count=");
+        early_console64_write_hex64(s_nmi_count);
+        early_console64_write(" rip=");
+        early_console64_write_hex64((uint64_t)frame->rip);
+        early_console64_write("\n");
+        return;
+    }
+
     /*
      * Step D.2: be loud about exceptions instead of silently halting. Without
      * this, a ring3 #PF on the boot page tables produces zero output and looks

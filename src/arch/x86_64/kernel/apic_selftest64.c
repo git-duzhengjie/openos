@@ -62,6 +62,27 @@ bool arch_x86_64_apic_selftest_run(void) {
     log_kv_hex(" id=", arch_x86_64_lapic_id());
     log_kv_hex(" ver=", arch_x86_64_lapic_version_raw());
 
+    /* G.3b-final: program LVT LINT0/LINT1 for NMI/ExtINT routing using
+     * ACPI MADT type-4 entries. Done immediately after lapic_init so the
+     * BSP starts the rest of bring-up with a sane interrupt pin posture.
+     */
+    bool nmi_ok = arch_x86_64_lapic_setup_nmi_lvt(/*is_bsp=*/true);
+    uint32_t lint0 = arch_x86_64_lapic_read_lvt_lint0();
+    uint32_t lint1 = arch_x86_64_lapic_read_lvt_lint1();
+    log_kv_hex("\n[x86_64][apic-selftest] nmi_lvt programmed=",
+               (uint64_t)(nmi_ok ? 1u : 0u));
+    log_kv_hex(" lint0=", lint0);
+    log_kv_hex(" lint1=", lint1);
+    /* Sanity: at least one LINT must carry NMI delivery (DM=100b in bits[10:8]).
+     * If the BSP didn't get even a default NMI route, route_isa_irq below
+     * may still pass, but we'd silently lose NMIs from the chassis. */
+    bool lint0_nmi = ((lint0 >> 8) & 0x7u) == 0x4u;
+    bool lint1_nmi = ((lint1 >> 8) & 0x7u) == 0x4u;
+    if (!lint0_nmi && !lint1_nmi) {
+        early_console64_write("\n[x86_64][apic-selftest] FAIL no LINT carries NMI\n");
+        return false;
+    }
+
     /* Phase 2: IOAPIC. */
     if (!arch_x86_64_ioapic_init()) {
         early_console64_write("\n[x86_64][apic-selftest] FAIL ioapic_init\n");

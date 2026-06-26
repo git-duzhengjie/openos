@@ -214,3 +214,67 @@ bool arch_x86_64_lapic_send_startup(uint8_t apic_id, uint8_t vector) {
 
     return arch_x86_64_lapic_icr_wait();
 }
+
+/* G.3b-final — program LVT LINT0 / LINT1 for NMI/ExtINT routing.
+ *
+ * Per Intel SDM 10.5.1 the LVT LINTn registers control how external INTR
+ * pins are delivered to the local CPU. On a typical PC firmware:
+ *   - BSP   : LINT0 = ExtINT (8259 cascade), LINT1 = NMI
+ *   - APs   : both LINTs masked unless MADT type 4 says otherwise
+ *
+ * Some virtualised platforms (notably TianoCore OVMF) emit a MADT type-4
+ * entry covering acpi_processor_id == 0xFF ("all CPUs") for LINT1=NMI.
+ * We honour whatever the firmware tells us; if nothing is specified for
+ * the BSP we still program a sane ExtINT/NMI pair, because masking LINT0
+ * on the BSP breaks legacy timer interrupts during APIC bring-up before
+ * we switch to IOAPIC routing.
+ */
+bool arch_x86_64_lapic_setup_nmi_lvt(bool is_bsp) {
+    if (!g_lapic_ready) return false;
+
+    /* Start with both LINTs masked-out. */
+    uint32_t lint0 = OPENOS_X86_64_LAPIC_LVT_MASKED;
+    uint32_t lint1 = OPENOS_X86_64_LAPIC_LVT_MASKED;
+
+    bool programmed_nmi = false;
+
+    /* Try to honour ACPI-supplied routing for this CPU. */
+    uint8_t  apic_id = arch_x86_64_lapic_id();
+    uint8_t  lint    = 0xFF;
+    uint16_t flags   = 0;
+    int rc = arch_x86_64_acpi_resolve_lapic_nmi(apic_id, &lint, &flags);
+    if (rc == 1 && lint <= 1u) {
+        /* MPS/ACPI flags: bits[1:0] polarity (00=conform,01=hi,11=lo)
+         *                 bits[3:2] trigger  (00=conform,01=edge,11=level)
+         */
+        uint32_t lvt = OPENOS_X86_64_LAPIC_LVT_DM_NMI;
+        if (((flags >> 0) & 0x3u) == 0x3u) lvt |= OPENOS_X86_64_LAPIC_LVT_POL_LOW;
+        if (((flags >> 2) & 0x3u) == 0x3u) lvt |= OPENOS_X86_64_LAPIC_LVT_TRIG_LEVEL;
+
+        if (lint == 0u) lint0 = lvt;
+        else             lint1 = lvt;
+        programmed_nmi = true;
+    } else if (rc == 0 && is_bsp) {
+        /* No override for the BSP — install firmware-conventional defaults:
+         * LINT0=ExtINT (legacy 8259 cascade), LINT1=NMI edge/active-hi.
+         */
+        lint0 = OPENOS_X86_64_LAPIC_LVT_DM_EXTINT;
+        lint1 = OPENOS_X86_64_LAPIC_LVT_DM_NMI;
+        programmed_nmi = true;
+    }
+
+    mmio_write32(g_lapic_mmio, OPENOS_X86_64_LAPIC_REG_LVT_LINT0, lint0);
+    mmio_write32(g_lapic_mmio, OPENOS_X86_64_LAPIC_REG_LVT_LINT1, lint1);
+
+    return programmed_nmi;
+}
+
+uint32_t arch_x86_64_lapic_read_lvt_lint0(void) {
+    if (!g_lapic_ready) return 0;
+    return mmio_read32(g_lapic_mmio, OPENOS_X86_64_LAPIC_REG_LVT_LINT0);
+}
+
+uint32_t arch_x86_64_lapic_read_lvt_lint1(void) {
+    if (!g_lapic_ready) return 0;
+    return mmio_read32(g_lapic_mmio, OPENOS_X86_64_LAPIC_REG_LVT_LINT1);
+}

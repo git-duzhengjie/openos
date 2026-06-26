@@ -354,6 +354,12 @@ void arch_x86_64_ap_entry(uint64_t apic_id) {
      * shared atomic counter so the BSP selftest can wait on it. */
     bool lapic_ok = arch_x86_64_lapic_init_ap();
     if (lapic_ok) {
+        /* G.3b-final: each AP programs its own LVT LINT0/LINT1 per the
+         * ACPI MADT, so chassis NMIs steered at this CPU's LINT pin get
+         * delivered as vector 2 rather than vanishing or escalating to
+         * a triple fault. Failures are non-fatal — alive_lapic still
+         * counts as "AP is up". */
+        (void)arch_x86_64_lapic_setup_nmi_lvt(/*is_bsp=*/false);
         __asm__ __volatile__(
             "lock incb (%0)"
             :

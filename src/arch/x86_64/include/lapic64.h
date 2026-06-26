@@ -36,6 +36,26 @@
 #define OPENOS_X86_64_LAPIC_REG_SVR             0x0F0u
 #define OPENOS_X86_64_LAPIC_REG_ICR_LOW         0x300u
 #define OPENOS_X86_64_LAPIC_REG_ICR_HIGH        0x310u
+#define OPENOS_X86_64_LAPIC_REG_LVT_LINT0       0x350u
+#define OPENOS_X86_64_LAPIC_REG_LVT_LINT1       0x360u
+#define OPENOS_X86_64_LAPIC_REG_LVT_ERROR       0x370u
+
+/* LVT field encodings. Bit layout for LINT0/LINT1 (Intel SDM 10.5.1):
+ *   [ 7: 0] vector       (ignored for NMI/SMI/INIT/ExtINT)
+ *   [10: 8] delivery mode (000=Fixed, 010=SMI, 100=NMI, 101=INIT, 111=ExtINT)
+ *   [11]    destination mode (ignored for these LVT regs)
+ *   [12]    delivery status (RO)
+ *   [13]    interrupt input pin polarity (0=active high, 1=active low)
+ *   [14]    remote IRR (RO)
+ *   [15]    trigger mode (0=edge, 1=level)
+ *   [16]    mask (1=masked)
+ */
+#define OPENOS_X86_64_LAPIC_LVT_DM_FIXED        (0u << 8)
+#define OPENOS_X86_64_LAPIC_LVT_DM_NMI          (4u << 8)
+#define OPENOS_X86_64_LAPIC_LVT_DM_EXTINT       (7u << 8)
+#define OPENOS_X86_64_LAPIC_LVT_POL_LOW         (1u << 13)
+#define OPENOS_X86_64_LAPIC_LVT_TRIG_LEVEL      (1u << 15)
+#define OPENOS_X86_64_LAPIC_LVT_MASKED          (1u << 16)
 
 /* SVR bits. */
 #define OPENOS_X86_64_LAPIC_SVR_ENABLE          (1u << 8)
@@ -115,5 +135,24 @@ bool arch_x86_64_lapic_send_init(uint8_t apic_id);
  *
  * Returns true on successful delivery (ICR settled), false on timeout. */
 bool arch_x86_64_lapic_send_startup(uint8_t apic_id, uint8_t vector);
+
+/* G.3b-final — Program LVT LINT0/LINT1 to route NMI/ExtINT properly.
+ *
+ * Walks the ACPI MADT type-4 (Local APIC NMI) entries for the *current*
+ * processor (read its LAPIC ID via REG_ID) and programs the matching
+ * LINTn register with delivery_mode=NMI(100b), level/edge & active hi/lo
+ * derived from MPS flags. The other LINT pin (typically LINT0) is set
+ * to ExtINT(111b) only on the BSP — on APs both LINT0/LINT1 default to
+ * masked unless an explicit MADT entry says otherwise.
+ *
+ * Returns true if at least one LINT pin was successfully programmed
+ * with NMI delivery, false otherwise (still safe — masked LVT entries
+ * are written either way). Callable from both BSP and AP paths.
+ */
+bool arch_x86_64_lapic_setup_nmi_lvt(bool is_bsp);
+
+/* Diagnostic helpers used by apic-selftest: raw read of LVT LINT0/LINT1. */
+uint32_t arch_x86_64_lapic_read_lvt_lint0(void);
+uint32_t arch_x86_64_lapic_read_lvt_lint1(void);
 
 #endif /* OPENOS_ARCH_X86_64_LAPIC64_H */

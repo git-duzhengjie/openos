@@ -27,6 +27,7 @@ extern "C" {
 #define OPENOS_X86_64_ACPI_MAX_CPUS         32u
 #define OPENOS_X86_64_ACPI_MAX_IOAPICS       4u
 #define OPENOS_X86_64_ACPI_MAX_IRQ_OVERRIDES 16u
+#define OPENOS_X86_64_ACPI_MAX_LAPIC_NMIS   32u
 
 typedef struct {
     uint8_t  acpi_processor_id;
@@ -47,6 +48,17 @@ typedef struct {
     uint16_t flags;
 } acpi_irq_override_entry_t;
 
+/* MADT type 4: Local APIC NMI source.
+ *   acpi_processor_id == 0xFF means "applies to all processors".
+ *   lint is 0 or 1 (LINT0 / LINT1).
+ *   flags layout matches MPS (same as irq_override flags).
+ */
+typedef struct {
+    uint8_t  acpi_processor_id;
+    uint16_t flags;
+    uint8_t  lint;
+} acpi_lapic_nmi_entry_t;
+
 typedef struct {
     uint32_t valid;        /* 1 once init succeeded */
     uint32_t cpu_count;
@@ -55,9 +67,12 @@ typedef struct {
     uint64_t lapic_address; /* MADT-declared LAPIC MMIO base */
     uint8_t  bsp_apic_id;   /* read from CPUID(0x01).EBX[31:24] at init time */
 
-    acpi_cpu_entry_t         cpus[OPENOS_X86_64_ACPI_MAX_CPUS];
-    acpi_ioapic_entry_t      ioapics[OPENOS_X86_64_ACPI_MAX_IOAPICS];
+    uint32_t lapic_nmi_count;
+
+    acpi_cpu_entry_t          cpus[OPENOS_X86_64_ACPI_MAX_CPUS];
+    acpi_ioapic_entry_t       ioapics[OPENOS_X86_64_ACPI_MAX_IOAPICS];
     acpi_irq_override_entry_t irq_overrides[OPENOS_X86_64_ACPI_MAX_IRQ_OVERRIDES];
+    acpi_lapic_nmi_entry_t    lapic_nmis[OPENOS_X86_64_ACPI_MAX_LAPIC_NMIS];
 
     /* raw RSDP / table pointers retained for diagnostics */
     uint64_t rsdp_phys;
@@ -89,6 +104,24 @@ uint32_t arch_x86_64_acpi_first_ioapic_gsi_base(void);
 int      arch_x86_64_acpi_resolve_isa_gsi(uint8_t irq,
                                           uint32_t *out_gsi,
                                           uint16_t *out_flags);
+
+/* G.3b-final: Local APIC NMI lookup.
+ *
+ * Given an APIC ID (a.k.a. processor's local APIC ID), find the
+ * MADT type-4 entry that applies (acpi_processor_id == that CPU's
+ * acpi_processor_id, OR acpi_processor_id == 0xFF meaning "all").
+ *
+ * Returns:
+ *   1  - a matching entry was found, *out_lint / *out_flags written.
+ *  -1  - ACPI not initialised yet.
+ *   0  - no override applies to this CPU (caller should still program
+ *        a sane default; typical PC firmware lists LINT1=NMI for all
+ *        CPUs, so this is mostly a defensive path).
+ * *out_* may be NULL.
+ */
+int arch_x86_64_acpi_resolve_lapic_nmi(uint8_t apic_id,
+                                       uint8_t *out_lint,
+                                       uint16_t *out_flags);
 
 #ifdef __cplusplus
 }

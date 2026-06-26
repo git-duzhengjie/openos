@@ -107,6 +107,14 @@ typedef struct __attribute__((packed)) {
     uint16_t flags;
 } acpi_madt_irqoverride_t;
 
+/* type 4: Local APIC NMI Source */
+typedef struct __attribute__((packed)) {
+    acpi_madt_entry_hdr_t hdr;
+    uint8_t  acpi_processor_id; /* 0xFF = all processors */
+    uint16_t flags;
+    uint8_t  lint;              /* 0 or 1 */
+} acpi_madt_lapic_nmi_t;
+
 /* ------------------------------------------------------------------ */
 /* Singleton state                                                     */
 /* ------------------------------------------------------------------ */
@@ -265,8 +273,21 @@ static void acpi_parse_madt(const acpi_madt_t *madt,
             }
             break;
         }
+        case 4: { /* Local APIC NMI Source */
+            const acpi_madt_lapic_nmi_t *nmi = (const acpi_madt_lapic_nmi_t *)p;
+            if (out->lapic_nmi_count < OPENOS_X86_64_ACPI_MAX_LAPIC_NMIS) {
+                out->lapic_nmis[out->lapic_nmi_count].acpi_processor_id = nmi->acpi_processor_id;
+                out->lapic_nmis[out->lapic_nmi_count].flags             = nmi->flags;
+                out->lapic_nmis[out->lapic_nmi_count].lint              = nmi->lint;
+                out->lapic_nmi_count++;
+            }
+            break;
+        }
         default:
-            /* type 4 NMI / type 5 LAPIC addr override are deferred to G.3b */
+            /* type 5 LAPIC addr override is rarely used on PCs and is
+             * deferred; the 64-bit LAPIC base is anyway read via
+             * IA32_APIC_BASE MSR at lapic_init() time.
+             */
             break;
         }
 
@@ -411,4 +432,50 @@ int arch_x86_64_acpi_resolve_isa_gsi(uint8_t irq,
     if (out_gsi)   *out_gsi   = irq;
     if (out_flags) *out_flags = 0;
     return 0;
+}
+
+int arch_x86_64_acpi_resolve_lapic_nmi(uint8_t apic_id,
+                                       uint8_t *out_lint,
+                                       uint16_t *out_flags)
+{
+    if (!g_acpi_info.valid) return -1;
+
+    /* First map apic_id -> acpi_processor_id by walking the cpu table.
+     * If the CPU isn't enumerated (shouldn't happen on AP that already
+     * came alive), treat apic_id itself as the processor id for the
+     * 0xFF "all CPUs" comparison.
+     */
+    uint8_t acpi_pid = apic_id;
+    bool    pid_known = false;
+    for (uint32_t i = 0; i < g_acpi_info.cpu_count; ++i) {
+        if (g_acpi_info.cpus[i].apic_id == apic_id) {
+            acpi_pid = g_acpi_info.cpus[i].acpi_processor_id;
+            pid_known = true;
+            break;
+        }
+    }
+    (void)pid_known;
+
+    /* Strategy: exact match wins; otherwise an entry with 0xFF (="all")
+     * is the fallback. This matches Linux's behaviour.
+     */
+    int      found_all = -1;
+    int      found_one = -1;
+    for (uint32_t i = 0; i < g_acpi_info.lapic_nmi_count; ++i) {
+        const acpi_lapic_nmi_entry_t *e = &g_acpi_info.lapic_nmis[i];
+        if (e->acpi_processor_id == acpi_pid) {
+            found_one = (int)i;
+            break;
+        }
+        if (e->acpi_processor_id == 0xFFu && found_all < 0) {
+            found_all = (int)i;
+        }
+    }
+
+    int pick = (found_one >= 0) ? found_one : found_all;
+    if (pick < 0) return 0;
+
+    if (out_lint)  *out_lint  = g_acpi_info.lapic_nmis[pick].lint;
+    if (out_flags) *out_flags = g_acpi_info.lapic_nmis[pick].flags;
+    return 1;
 }
