@@ -82,10 +82,7 @@ ap_pm32_entry:
     /* Atomic: alive[pm32] += 1 */
     lock incb (0x9008)
 
-    /* DEBUG(G.5-bring-up): pause in PM32 to verify the real→PM32 transition
-     * before attempting the PM32→LM64 step. */
-1:  hlt
-    jmp 1b
+    /* G.5: real→PM32 verified, now proceed to LM64 transition. */
 
     /* Load CR3 backfilled by BSP (physical address of PML4) */
     movl    (0x8000 + (cr3_slot - __ap_trampoline_blob_start)), %eax
@@ -96,10 +93,13 @@ ap_pm32_entry:
     orb     $0x20, %al
     movl    %eax, %cr4
 
-    /* Set LME bit in EFER MSR */
+    /* Set LME bit in EFER MSR.
+     * EFER is read into EDX:EAX. LME = bit 8, i.e. EAX bit 8.
+     * NOTE: `orb $0x100,%ah` would silently truncate to 0 — use a
+     * word-sized OR on AX so the bit actually lands at EAX bit 8. */
     movl    $0xC0000080, %ecx
     rdmsr
-    orb     $0x100, %ah
+    orw     $0x0100, %ax
     wrmsr
 
     /* Enable paging (this activates long mode) */
@@ -125,15 +125,17 @@ ap_lm64_entry:
     movq    $0xC000, %rsp
     movq    %rsp, %rbp
 
-    /* Read APIC ID via CPUID (leaf 01h, EDX bits 31-24) */
+    /* Read APIC ID via CPUID (leaf 01h, EBX bits 31-24).
+     * Per Intel SDM Vol 2A: initial Local APIC ID lives in EBX[31:24],
+     * NOT EDX. (EDX holds feature flags.) */
     pushq   %rbx
     pushq   %rcx
     pushq   %rdx
     movl    $0x01, %eax
     cpuid
-    shrq    $24, %rdx
-    andq    $0xFF, %rdx
-    movq    %rdx, %rdi  /* first argument to ap_entry() = apic_id */
+    shrl    $24, %ebx
+    andl    $0xFF, %ebx
+    movq    %rbx, %rdi  /* first argument to ap_entry() = apic_id */
     popq    %rdx
     popq    %rcx
     popq    %rbx

@@ -29,9 +29,9 @@
 #define OPENOS_AP_TRAMPOLINE_VERSION  0x04u
 
 /* Fixed offsets within blob. */
-#define OPENOS_AP_TRAMPOLINE_CR3_OFFSET     0x0E8u
-#define OPENOS_AP_TRAMPOLINE_ENTRY_OFFSET   0x0F0u
-#define OPENOS_AP_TRAMPOLINE_MAGIC_OFFSET   0x0F8u
+#define OPENOS_AP_TRAMPOLINE_CR3_OFFSET     0x0E0u
+#define OPENOS_AP_TRAMPOLINE_ENTRY_OFFSET   0x0E8u
+#define OPENOS_AP_TRAMPOLINE_MAGIC_OFFSET   0x0F0u
 
 /* Size of the embedded blob (bytes). */
 uint64_t arch_x86_64_ap_trampoline_size(void);
