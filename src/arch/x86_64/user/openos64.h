@@ -15,6 +15,7 @@
 #define OPENOS64_SYS_YIELD   201ULL
 #define OPENOS64_SYS_OPEN    225ULL
 #define OPENOS64_SYS_CLOSE   226ULL
+#define OPENOS64_SYS_GETPPID 224ULL
 
 #define OPENOS64_STDIN_FILENO  0
 #define OPENOS64_STDOUT_FILENO 1
@@ -104,6 +105,14 @@ static inline int openos64_close(int fd) {
 
 static inline long openos64_getpid(void) {
     return openos64_syscall0(OPENOS64_SYS_GETPID);
+}
+
+static inline long openos64_gettid(void) {
+    return openos64_syscall0(OPENOS64_SYS_GETTID);
+}
+
+static inline long openos64_getppid(void) {
+    return openos64_syscall0(OPENOS64_SYS_GETPPID);
 }
 
 static inline void openos64_exit(int code) __attribute__((noreturn));

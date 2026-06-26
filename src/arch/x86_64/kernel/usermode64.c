@@ -5,6 +5,7 @@
 #include "../include/early_console64.h"
 #include "../include/gdt64.h"
 #include "../include/pmm64.h"
+#include "../include/proc64.h"
 
 extern void arch_x86_64_iretq_enter_user(const x86_64_user_iretq_frame_t *frame);
 
@@ -197,6 +198,10 @@ void arch_x86_64_usermode_mark_exited(int code) {
     usermode_exited = 1;
     usermode_running = 0;
     ++usermode_exit_count;
+    /* Step E.1: tear down the ring3 PCB so SYS_GETPID after exit reports
+     * the kernel proc again. Safe even if the user program never spawned
+     * (proc_exit is a no-op on the kernel slot). */
+    arch_x86_64_proc_exit(code);
 }
 
 void arch_x86_64_usermode_return_to_kernel(void) {

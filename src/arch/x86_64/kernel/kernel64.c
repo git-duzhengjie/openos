@@ -10,6 +10,7 @@
 #include "../include/idt64.h"
 #include "../include/initrd64.h"
 #include "../include/pmm64.h"
+#include "../include/proc64.h"
 #include "../include/sched64.h"
 #include "../include/shell64.h"
 #include "../include/syscall64.h"
@@ -78,6 +79,8 @@ void arch_x86_64_early_init(const openos_bootinfo_t *bootinfo) {
     arch_x86_64_fd_init();
     arch_x86_64_shell_init();
     arch_x86_64_compat32_init();
+    /* Step E.1: bring up the minimal PCB pool. Slot 0 = kernel proc (pid=1). */
+    arch_x86_64_proc_init();
 }
 
 void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
@@ -132,6 +135,12 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
     early_console64_write("\n");
     elf64_load_result_t hello64 = arch_x86_64_elf64_load_image(hello64_elf, (x86_64_size_t)hello64_elf_size);
     if (hello64.status == ELF64_LOADER_OK) {
+        /* Step E.1: register the ring3 program as a real PCB so SYS_GETPID
+         * returns the spawned pid (=2) instead of the old hard-coded 1. */
+        uint32_t hello_pid = arch_x86_64_proc_spawn_user("hello64");
+        early_console64_write("[x86_64][proc] spawned hello64 pid=");
+        early_console64_write_hex64((uint64_t)hello_pid);
+        early_console64_write("\n");
         early_console64_write("[x86_64][user] entering ring3 hello64 entry=");
         early_console64_write_hex64((uint64_t)hello64.entry);
         early_console64_write("\n");
@@ -148,6 +157,7 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
     }
     arch_x86_64_elf64_loader_print_status();
     arch_x86_64_usermode_print_status();
+    arch_x86_64_proc_print_status();
 
     arch_x86_64_shell_run_init();
     arch_x86_64_shell_print_status();

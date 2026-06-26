@@ -1375,11 +1375,12 @@
   - [√] **修复 `x86_64_syscall_frame_t` 字段顺序错位**（push 反序 → 结构低到高，原先把 r11/RFLAGS=0x46 当成 num，导致全部 ENOSYS 后 ring3 撞 hlt #GP）
   - [√] 端到端 ring3 hello64 在 UEFI/OVMF 下完整跑通：WRITE → OPEN → READ → WRITE → CLOSE → WRITE → EXIT 全部正确分派
   - [ ] 清理 SYS_EXIT 之后 `usermode_return_to_kernel` 栈恢复路径残留的内核态 #UD（次要，不影响 ring3 业务，单独跟踪）
-- [ ] **Step E（待开工）**：覆盖率继续上探
-  - [ ] 桥接 proc64 / sched64 真实实现，落地 getpid/gettid/yield
-  - [ ] 桥接 net64（socket/bind/sendto/recvfrom）
-  - [ ] TSC → PIT/HPET 标定，替换 UPTIME_MS 临时实现
-  - [ ] `build.sh` 默认 ARCH 切换为 x86_64
+- [ ] **Step E（进行中）**：覆盖率继续上探
+  - [√] **E.1 proc64 接入**：新增 `proc64.{h,c}`（8 槽 PCB，slot 0=kernel pid=1），dispatch 的 `GETPID/GETTID/GETPPID/GETUID/GETGID/YIELD` 改为读 proc64 当前 PCB；`kernel64.c` ring3 启动前 `proc_spawn_user("hello64")` → pid=2/tid=2/ppid=1；`usermode64.c` `mark_exited` 调 `proc_exit` 回退到内核 PCB。`hello64` 加 step E 验证段：`[hello64] step E: pid=2 tid=2 ppid=1 yield=0` 精确字串作回归探针。
+  - [ ] **E.2 sched64 真实化**：proc64.yield 接入 sched64 runqueue（多任务），实现 `arch_x86_64_sched_yield()`。
+  - [ ] **E.3 net64 桥接**：socket/bind/sendto/recvfrom 上挂 dispatch。
+  - [ ] **E.4 TSC → PIT/HPET 标定**：替换 `UPTIME_MS` 用 `rdtsc>>20` 的临时实现。
+  - [ ] **E.5 build.sh 默认 ARCH 切换为 x86_64**。
 
 #### 21.2 其他平台与启动能力
 

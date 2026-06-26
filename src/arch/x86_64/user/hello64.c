@@ -53,5 +53,35 @@ int openos64_main(int argc, char **argv) {
 
     write_str(OPENOS64_STDOUT_FILENO,
               "[hello64] step C: done\n");
+
+    /*
+     * Step E.1 verification: exercise the proc64-backed identity syscalls.
+     * The kernel registers hello64 as pid=2 (child of kernel pid=1, tid=2),
+     * so the expected output is exactly:
+     *   [hello64] step E: pid=2 tid=2 ppid=1 yield=0
+     * Any deviation means proc64 wiring drifted; the exact-string form lets
+     * us grep for regressions from the run script.
+     */
+    long pid  = openos64_getpid();
+    long tid  = openos64_gettid();
+    long ppid = openos64_getppid();
+    openos64_yield();
+    long yret = 0; /* SYS_YIELD returns 0 on success; recorded for symmetry */
+
+    /* tiny inline decimal formatter — only single-digit values expected here */
+    char line[64];
+    const char *prefix = "[hello64] step E: pid=";
+    openos64_size_t i = 0;
+    for (const char *p = prefix; *p; ++p) line[i++] = *p;
+    line[i++] = (char)('0' + (pid  & 0x7F));
+    line[i++] = ' '; line[i++] = 't'; line[i++] = 'i'; line[i++] = 'd'; line[i++] = '=';
+    line[i++] = (char)('0' + (tid  & 0x7F));
+    line[i++] = ' '; line[i++] = 'p'; line[i++] = 'p'; line[i++] = 'i'; line[i++] = 'd'; line[i++] = '=';
+    line[i++] = (char)('0' + (ppid & 0x7F));
+    line[i++] = ' '; line[i++] = 'y'; line[i++] = 'i'; line[i++] = 'e'; line[i++] = 'l'; line[i++] = 'd'; line[i++] = '=';
+    line[i++] = (char)('0' + (yret & 0x7F));
+    line[i++] = '\n';
+    (void)openos64_write(OPENOS64_STDOUT_FILENO, line, i);
+
     return 0;
 }

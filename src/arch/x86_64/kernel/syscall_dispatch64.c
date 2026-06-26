@@ -25,6 +25,7 @@
 #include "../include/fdtable64.h"
 #include "../include/heap64.h"
 #include "../include/initrd64.h"
+#include "../include/proc64.h"
 #include "../include/sched64.h"
 #include "../include/usermode64.h"
 #include "../include/vfs64.h"
@@ -163,12 +164,13 @@ static uint64_t do_uptime_ms(void) {
 }
 
 /*
- * SYS_YIELD: scheduler does not yet support preemption on x86_64. Until
- * arch_x86_64_sched_yield() lands we just return success so cooperative loops
- * compile and run without spinning the dispatcher.
+ * SYS_YIELD: Step E.1 routes the call through proc64's cooperative yield
+ * counter. The dispatcher itself stays branchless so future sched64 work
+ * only has to swap proc64_yield()'s body for a real reschedule. We still
+ * return 0 (success) — POSIX semantics for sched_yield().
  */
 static uint64_t do_yield(void) {
-    /* TODO: hook into sched64 once a yield primitive is exposed. */
+    (void)arch_x86_64_proc_yield();
     return 0;
 }
 
@@ -193,11 +195,12 @@ uint64_t arch_x86_64_syscall_dispatch_common(uint64_t num,
     switch (num) {
     /* -------- process / thread -------- */
     case SYS_EXIT:        return do_exit(a0);
-    case SYS_GETPID:      return 1;     /* TODO: real PID via proc64 */
-    case SYS_GETTID:      return 1;     /* TODO: real TID via sched64 */
-    case SYS_GETPPID:     return 0;
-    case SYS_GETUID:      return 0;     /* root-only world for now */
-    case SYS_GETGID:      return 0;
+    /* Step E.1: identity syscalls now read proc64's current PCB. */
+    case SYS_GETPID:      return (uint64_t)arch_x86_64_proc_current_pid();
+    case SYS_GETTID:      return (uint64_t)arch_x86_64_proc_current_tid();
+    case SYS_GETPPID:     return (uint64_t)arch_x86_64_proc_current_ppid();
+    case SYS_GETUID:      return (uint64_t)arch_x86_64_proc_current_uid();
+    case SYS_GETGID:      return (uint64_t)arch_x86_64_proc_current_gid();
     case SYS_YIELD:       return do_yield();
 
     /* -------- I/O (read-only initrd + early console) -------- */
