@@ -71,6 +71,25 @@ const arch_x86_64_acpi_info_t *arch_x86_64_acpi_info(void);
 uint32_t arch_x86_64_acpi_cpu_count(void);
 uint8_t  arch_x86_64_acpi_bsp_apic_id(void);
 
+/* G.3b helpers: consume MADT data without exposing raw arrays.
+ *
+ * - first_ioapic_*  : 0 if ACPI not initialized or no IOAPIC declared.
+ * - resolve_isa_gsi : looks the legacy ISA `irq` (0..15) up against the
+ *                     MADT interrupt-override table; falls back to the
+ *                     identity mapping (gsi=irq, flags=0) when no entry
+ *                     matches. Returns 1 if an explicit override was
+ *                     found, 0 if the identity fallback was used, -1
+ *                     when ACPI itself is unavailable. *out args may be
+ *                     NULL. flags layout matches MPS:
+ *                       bits[1:0] = polarity (00=conform, 01=hi, 11=lo)
+ *                       bits[3:2] = trigger  (00=conform, 01=edge, 11=level)
+ */
+uint64_t arch_x86_64_acpi_first_ioapic_base(void);
+uint32_t arch_x86_64_acpi_first_ioapic_gsi_base(void);
+int      arch_x86_64_acpi_resolve_isa_gsi(uint8_t irq,
+                                          uint32_t *out_gsi,
+                                          uint16_t *out_flags);
+
 #ifdef __cplusplus
 }
 #endif

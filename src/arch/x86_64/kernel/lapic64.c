@@ -1,4 +1,5 @@
 #include "../include/lapic64.h"
+#include "../include/acpi64.h"
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -43,11 +44,16 @@ bool arch_x86_64_lapic_init(void) {
         return false;
     }
 
-    /* MSR also encodes the actual base PA in bits [51:12], but on every
-     * modern QEMU/real-world UEFI box it equals the default 0xFEE00000.
-     * Use the MSR value if it differs (e.g. after relocation), otherwise
-     * the hardcoded default. */
-    uint64_t pa = apic_base_msr & ~0xFFFull;
+    /* G.3b: Prefer the LAPIC base reported by ACPI MADT. Fall back to the
+     * IA32_APIC_BASE MSR, then to the architectural default 0xFEE00000. */
+    uint64_t pa = 0;
+    const arch_x86_64_acpi_info_t *acpi = arch_x86_64_acpi_info();
+    if (acpi && acpi->valid && acpi->lapic_address) {
+        pa = acpi->lapic_address;
+    }
+    if (pa == 0) {
+        pa = apic_base_msr & ~0xFFFull;
+    }
     if (pa == 0) {
         pa = OPENOS_X86_64_LAPIC_DEFAULT_PHYS_BASE;
     }

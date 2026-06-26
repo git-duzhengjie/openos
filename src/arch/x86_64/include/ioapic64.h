@@ -57,4 +57,22 @@ void arch_x86_64_ioapic_unmask(uint8_t gsi);
 /* Read raw 64-bit redirection entry (for selftest verification). */
 uint64_t arch_x86_64_ioapic_read_redir(uint8_t gsi);
 
+/* G.3b additions. */
+
+/* Returns the GSI base of the first IOAPIC (0 on a standard PC). */
+uint32_t arch_x86_64_ioapic_gsi_base(void);
+
+/* ACPI-aware ISA IRQ routing.
+ *
+ * Resolves `isa_irq` (0..15) via the MADT IRQ-override table to a GSI plus
+ * polarity/trigger flags, then programs the matching redirection entry on
+ * this IOAPIC, leaving it UNMASKED for immediate delivery to `vector` on
+ * `dest_lapic_id`.
+ *
+ * Returns the local pin index that was programmed, or 0xFF on error
+ * (IOAPIC not ready / GSI out of this IOAPIC's range). */
+uint8_t arch_x86_64_ioapic_route_isa_irq(uint8_t isa_irq,
+                                         uint8_t vector,
+                                         uint8_t dest_lapic_id);
+
 #endif /* OPENOS_ARCH_X86_64_IOAPIC64_H */

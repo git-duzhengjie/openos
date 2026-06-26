@@ -76,12 +76,26 @@ bool arch_x86_64_apic_selftest_run(void) {
         return false;
     }
 
-    /* Phase 3: program GSI2 -> vector 0x20 -> dest = boot LAPIC. */
+    /* Phase 3: program GSI2 -> vector 0x20 -> dest = boot LAPIC.
+     *
+     * G.3b: use the ACPI-aware ISA IRQ router. It looks up the MADT
+     * IRQ-override table to translate ISA IRQ0 to its GSI (q35 reports
+     * GSI2), applies polarity/trigger flags, and leaves the redir
+     * UNMASKED on success. We still verify the resulting redir matches
+     * what we asked for. */
     uint8_t boot_lapic_id = arch_x86_64_lapic_id();
-    arch_x86_64_ioapic_set_redir(APIC_SELFTEST_PIT_GSI,
-                                 APIC_SELFTEST_PIT_VECTOR,
-                                 boot_lapic_id);
-    uint64_t redir = arch_x86_64_ioapic_read_redir(APIC_SELFTEST_PIT_GSI);
+    uint8_t routed_pin = arch_x86_64_ioapic_route_isa_irq(0u,
+                                                          APIC_SELFTEST_PIT_VECTOR,
+                                                          boot_lapic_id);
+    if (routed_pin == 0xFFu) {
+        early_console64_write("\n[x86_64][apic-selftest] FAIL route_isa_irq\n");
+        return false;
+    }
+    if (routed_pin != APIC_SELFTEST_PIT_GSI) {
+        /* Not fatal, but flag it so we notice spec drift. */
+        log_kv_hex("\n[x86_64][apic-selftest] note routed_pin=", routed_pin);
+    }
+    uint64_t redir = arch_x86_64_ioapic_read_redir(routed_pin);
     log_kv_hex("\n[x86_64][apic-selftest] redir[GSI2]=", redir);
 
     /* Verify: low byte = vector, high dword bits[31:24] = dest. */
@@ -99,8 +113,8 @@ bool arch_x86_64_apic_selftest_run(void) {
     cli();
     arch_x86_64_pic_disable();
 
-    /* Phase 5: unmask GSI2 so IRQ0 actually delivers. */
-    arch_x86_64_ioapic_unmask(APIC_SELFTEST_PIT_GSI);
+    /* G.3b: route_isa_irq already leaves the redir unmasked; the
+     * historical explicit unmask is no longer required. */
 
     /* Phase 6: tick verification. Mirror the F.2 IRQ selftest. */
     uint64_t per_ms = arch_x86_64_tsc_per_ms();
@@ -120,10 +134,11 @@ bool arch_x86_64_apic_selftest_run(void) {
     uint64_t t1 = arch_x86_64_tsc_uptime_ms();
 
     cli();
-    /* Re-mask GSI2 so we leave the system in the same "IRQs disabled"
+    /* Re-mask the routed pin so we leave the system in the same "IRQs
+     * disabled" state that the next selftest expects.
      * posture every other selftest expects. The scheduler will unmask
      * again when it starts driving preemption. */
-    arch_x86_64_ioapic_mask(APIC_SELFTEST_PIT_GSI);
+    arch_x86_64_ioapic_mask(routed_pin);
 
     uint64_t after_ticks = arch_x86_64_pit_get_ticks();
     uint64_t delta = after_ticks - before_ticks;

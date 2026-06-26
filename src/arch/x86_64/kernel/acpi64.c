@@ -375,3 +375,40 @@ uint8_t arch_x86_64_acpi_bsp_apic_id(void)
 {
     return g_acpi_info.bsp_apic_id;
 }
+
+uint64_t arch_x86_64_acpi_first_ioapic_base(void)
+{
+    if (!g_acpi_info.valid) return 0;
+    if (g_acpi_info.ioapic_count == 0) return 0;
+    return (uint64_t)g_acpi_info.ioapics[0].address;
+}
+
+uint32_t arch_x86_64_acpi_first_ioapic_gsi_base(void)
+{
+    if (!g_acpi_info.valid) return 0;
+    if (g_acpi_info.ioapic_count == 0) return 0;
+    return g_acpi_info.ioapics[0].gsi_base;
+}
+
+int arch_x86_64_acpi_resolve_isa_gsi(uint8_t irq,
+                                     uint32_t *out_gsi,
+                                     uint16_t *out_flags)
+{
+    if (!g_acpi_info.valid) return -1;
+
+    /* Linear search override table (typically <= 5 entries on PC). */
+    for (uint32_t i = 0; i < g_acpi_info.irq_override_count; ++i) {
+        const acpi_irq_override_entry_t *ov = &g_acpi_info.irq_overrides[i];
+        /* bus == 0 means ISA per ACPI 6.x */
+        if (ov->bus == 0 && ov->source_irq == irq) {
+            if (out_gsi)   *out_gsi   = ov->gsi;
+            if (out_flags) *out_flags = ov->flags;
+            return 1;
+        }
+    }
+
+    /* Identity fallback (ISA IRQn == GSIn, edge / active-high). */
+    if (out_gsi)   *out_gsi   = irq;
+    if (out_flags) *out_flags = 0;
+    return 0;
+}
