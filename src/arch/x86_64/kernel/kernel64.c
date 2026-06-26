@@ -27,6 +27,7 @@
 #include "../include/sched_preempt_selftest64.h"
 #include "../include/apic_selftest64.h"
 #include "../include/acpi_selftest64.h"
+#include "../include/smp_selftest64.h"
 #include "../include/sched_prio_selftest64.h"
 
 /* Step F.2: IRQ0 ISR entry implemented in isr64.S. Declared here so the
@@ -224,6 +225,10 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
      * way it was after F.2 / F.3, so the system keeps booting on the
      * legacy path. */
     (void)arch_x86_64_apic_selftest_run();
+
+    /* Step G.4.1: SMP topology snapshot (no AP wakeup yet). Must run AFTER
+     * apic_selftest so LAPIC is initialized and BSP apic_id is readable. */
+    arch_x86_64_smp_selftest_run();
 
     /* Step G.2: priority-weighted scheduling self-test. Spawns three
      * spin kthreads at HIGH / NORMAL / LOW priorities and asserts the
