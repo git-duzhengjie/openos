@@ -232,6 +232,62 @@ uint32_t arch_x86_64_sched_kthread_count(void) {
 uint32_t arch_x86_64_sched_current_slot(void)   { return sched_current_idx; }
 uint64_t arch_x86_64_sched_switch_count(void)   { return sched_switch_count; }
 
+/* -----------------------------------------------------------------
+ * Step F.3: preemptive tick hook.
+ *
+ * Invariants enforced here (NOT inside yield, so cooperative yield
+ * keeps its existing behavior):
+ *   - Only preempt when at least one OTHER kthread is READY. The
+ *     bootstrap slot is always present; lone-bootstrap means "nothing
+ *     to preempt to", so we cheaply early-return.
+ *   - Quantum counter is per-CPU global (single CPU here). On switch
+ *     we reset it; the new RUNNING thread also starts with a fresh
+ *     budget.
+ *   - Counted via sched_preempt_count so selftests can prove the
+ *     IRQ-driven path was actually exercised (vs. cooperative yield).
+ * ----------------------------------------------------------------- */
+static uint32_t sched_quantum_left = OPENOS_X86_64_SCHED_QUANTUM_TICKS;
+static uint64_t sched_preempt_count = 0u;
+
+static int sched_has_other_ready(uint32_t cur) {
+    for (uint32_t i = 0u; i < OPENOS_X86_64_SCHED_MAX_KTHREADS; ++i) {
+        if (i == cur) continue;
+        if (sched_slots[i].state == SCHED_SLOT_READY ||
+            sched_slots[i].state == SCHED_SLOT_RUNNING) {
+            return 1;
+        }
+    }
+    /* Bootstrap (slot 0) is always considered ready as a fallback. */
+    if (cur != 0u && sched_slots[0].state != SCHED_SLOT_EXITED) {
+        return 1;
+    }
+    return 0;
+}
+
+uint32_t arch_x86_64_sched_on_tick(void) {
+    sched_ensure_bootstrap_slot();
+    if (sched_quantum_left > 0u) {
+        --sched_quantum_left;
+    }
+    if (sched_quantum_left != 0u) {
+        return 0u;
+    }
+    sched_quantum_left = OPENOS_X86_64_SCHED_QUANTUM_TICKS;
+
+    if (!sched_has_other_ready(sched_current_idx)) {
+        return 0u;
+    }
+    uint32_t prev = sched_current_idx;
+    uint32_t nxt  = arch_x86_64_sched_yield();
+    if (nxt != 0u || sched_current_idx != prev) {
+        ++sched_preempt_count;
+        return 1u;
+    }
+    return 0u;
+}
+
+uint64_t arch_x86_64_sched_preempt_count(void) { return sched_preempt_count; }
+
 void arch_x86_64_sched_print_status(void) {
     early_console64_write("[x86_64][sched] context switch supports rsp/rip/rflags and r8-r15\n");
     early_console64_write("[x86_64][sched] ready=");

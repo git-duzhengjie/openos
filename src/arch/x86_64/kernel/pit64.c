@@ -1,5 +1,6 @@
 #include "../include/pit64.h"
 #include "../include/pic64.h"
+#include "../include/sched64.h"
 
 #include <stdint.h>
 
@@ -61,8 +62,22 @@ uint32_t arch_x86_64_pit_get_hz(void) {
 }
 
 void arch_x86_64_pit_irq0_handler(void) {
-    /* IRQ0 hot path — keep it tiny. F.3 will append the scheduler hook
-     * here, but in F.2 we just bump the counter and ack the PIC. */
+    /* IRQ0 hot path. Order matters:
+     *   1. bump the visible tick counter (selftests poll this)
+     *   2. EOI the PIC so a re-entrant IRQ0 can fire after we sti below
+     *      (the scheduler yield will resume some other thread with
+     *       IF=1, and we MUST have already EOI'd by then or the line
+     *       stays masked at the controller)
+     *   3. invoke the preemptive scheduler hook. If it switches away,
+     *      we return *much later* once this thread is rescheduled —
+     *      that is fine: IRQ0 stub will then pop caller-saved regs and
+     *      iretq back to the user/kernel context that was running when
+     *      THIS thread was originally preempted.
+     *
+     * Pre-F.3 the gate is a no-op until a kthread is spawned, so
+     * existing irq-selftest behavior (delta ∈ [18,22] over 200ms) is
+     * preserved bit-for-bit. */
     g_pit_ticks++;
     arch_x86_64_pic_send_eoi(0x20u);
+    (void)arch_x86_64_sched_on_tick();
 }

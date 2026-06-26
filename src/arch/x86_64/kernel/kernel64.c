@@ -24,6 +24,7 @@
 #include "../include/tsc64.h"
 #include "../include/tsc_selftest64.h"
 #include "../include/irq_selftest64.h"
+#include "../include/sched_preempt_selftest64.h"
 
 /* Step F.2: IRQ0 ISR entry implemented in isr64.S. Declared here so the
  * boot path can hand its address to arch_x86_64_idt_register_irq(). */
@@ -198,6 +199,14 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
      * ~20 PIT ticks over 200 ms, then disables IRQs again. Must follow
      * tsc_selftest_run so per_ms is known-good. */
     arch_x86_64_irq_selftest_run();
+
+    /* Step F.3: preemptive scheduler self-test. Spawns two non-yielding
+     * spin kthreads and lets IRQ0 (PIT @100Hz) drive context switches
+     * via arch_x86_64_sched_on_tick(). Must follow irq_selftest_run so
+     * PIC remap + PIT chain are proven good. The test re-masks IRQ0 on
+     * exit so the downstream ring3 hello64 path inherits IRQs-off as
+     * before. */
+    (void)arch_x86_64_sched_preempt_selftest_run();
 
     /* Step C: initrd & fdtable 就绪后再跳 ring3 hello64，否则 open(/hello.txt) 会看不到文件。 */
     early_console64_write("[x86_64][user] loading embedded hello64.elf size=");

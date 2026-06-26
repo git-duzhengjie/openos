@@ -31,6 +31,12 @@ arch_x86_64_context_switch:
     mov %rax, 0x08(%rdi)
     pushfq
     popq %rax
+    /* Step F.3: force IF=1 in the *saved* rflags. When an IRQ handler
+     * (CPL=0, IF=0) calls into the scheduler, the live rflags has IF=0;
+     * if we stored that as-is the preempted thread would resume with
+     * interrupts disabled and never be preempted again. Always store
+     * IF=1 so every resume reopens the preemption window. */
+    orq  $0x200, %rax
     mov %rax, 0x10(%rdi)
 
     mov %rbx, 0x18(%rdi)

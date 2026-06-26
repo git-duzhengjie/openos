@@ -76,4 +76,27 @@ uint32_t arch_x86_64_sched_kthread_count(void);
 uint32_t arch_x86_64_sched_current_slot(void);
 uint64_t arch_x86_64_sched_switch_count(void);
 
+/* -----------------------------------------------------------------
+ * Step F.3: preemptive tick hook.
+ *
+ * Called from IRQ0 (PIT) hot path AFTER pic_send_eoi. Each call burns
+ * one quantum tick from the running thread's budget; when the budget
+ * reaches zero the hook invokes the same yield path used by
+ * cooperative kthreads — safe because IRQ0 stub already saved every
+ * caller-saved register, so resume-to-here is bit-identical to a
+ * regular function return.
+ *
+ * Quantum is fixed at OPENOS_X86_64_SCHED_QUANTUM_TICKS PIT ticks.
+ * At PIT_HZ=100 that is 50 ms per slice.
+ *
+ * Returns 1 if a preemption switch was performed this call, 0
+ * otherwise. The return value is informational; the IRQ0 path
+ * ignores it.
+ * ----------------------------------------------------------------- */
+
+#define OPENOS_X86_64_SCHED_QUANTUM_TICKS 5u
+
+uint32_t arch_x86_64_sched_on_tick(void);
+uint64_t arch_x86_64_sched_preempt_count(void);
+
 #endif /* OPENOS_ARCH_X86_64_SCHED64_H */
