@@ -203,4 +203,21 @@ uint64_t arch_x86_64_sched_tick_calls_for_cpu(uint32_t cpu_idx);
  * switches on each AP. Returns 0 for unknown cpu_idx. */
 uint64_t arch_x86_64_sched_switch_count_for_cpu(uint32_t cpu_idx);
 
+/* G.6.6b: thread migration primitive.
+ * Atomically reassigns a slot's owner_cpu to target_cpu and pings the
+ * target via a reschedule IPI so it picks the new work on its next
+ * tick. Returns 0 on success; non-zero on error (bad slot, bad target,
+ * idle slot, slot currently RUNNING on another CPU, etc.).
+ *
+ * Safety contract: only slots in SCHED_SLOT_READY may be migrated.
+ * Slots in SCHED_SLOT_RUNNING are owned by another CPU's register file
+ * and would race the context save -- callers must yield first if they
+ * want to migrate self, which is currently unsupported. */
+uint32_t arch_x86_64_sched_migrate(uint32_t slot_idx, uint32_t target_cpu);
+
+/* G.6.6b: read a slot's current owner_cpu without going through %gs.
+ * Returns 0xFFFFFFFFu if slot_idx is out of bounds or the slot is FREE.
+ * Used by smp_selftest stage 13 to prove a migration took effect. */
+uint32_t arch_x86_64_sched_slot_owner(uint32_t slot_idx);
+
 #endif /* OPENOS_ARCH_X86_64_SCHED64_H */

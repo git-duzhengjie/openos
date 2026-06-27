@@ -561,3 +561,54 @@ uint64_t arch_x86_64_sched_switch_count_for_cpu(uint32_t cpu_idx) {
     if (p == (void *)0) return 0;
     return p->sched_switch_count;
 }
+
+/* G.6.6b: peek at a slot's owner_cpu. Returns 0xFFFFFFFFu on FREE or
+ * out-of-bounds. Slots are static storage so reads need no locking;
+ * owner_cpu is u32 aligned and observers tolerate eventual consistency. */
+uint32_t arch_x86_64_sched_slot_owner(uint32_t slot_idx) {
+    if (slot_idx >= OPENOS_X86_64_SCHED_MAX_KTHREADS) return 0xFFFFFFFFu;
+    sched_slot_t *s = &sched_slots[slot_idx];
+    if (s->state == SCHED_SLOT_FREE) return 0xFFFFFFFFu;
+    return s->owner_cpu;
+}
+
+/* G.6.6b: migrate a READY slot to target_cpu and poke the target with a
+ * reschedule IPI so it picks the new work on its next tick.
+ *
+ * Returns:
+ *   0  success
+ *   1  slot_idx out of bounds
+ *   2  slot is FREE / EXITED (nothing to migrate)
+ *   3  slot is RUNNING (would race a context save on its current owner)
+ *   4  slot is the per-CPU idle (idle is pinned by design)
+ *   5  target_cpu out of bounds or not online
+ *   6  no-op (already owned by target_cpu)
+ *   7  IPI send failed (target apic_id unknown / cpu not alive)
+ *
+ * Owner mutation happens first; if the target ever ticks before we send
+ * the IPI it would still discover the new owner -- the IPI just shortens
+ * latency from O(tick) to O(IPI). */
+uint32_t arch_x86_64_sched_migrate(uint32_t slot_idx, uint32_t target_cpu) {
+    if (slot_idx >= OPENOS_X86_64_SCHED_MAX_KTHREADS) return 1u;
+    sched_slot_t *s = &sched_slots[slot_idx];
+
+    if (s->state == SCHED_SLOT_FREE || s->state == SCHED_SLOT_EXITED) return 2u;
+    if (s->state == SCHED_SLOT_RUNNING) return 3u;
+    if (s->is_idle) return 4u;
+
+    uint32_t online = arch_x86_64_smp_cpu_count();
+    if (online == 0u) online = 1u; /* defensive: at least BSP exists */
+    if (target_cpu >= online || target_cpu >= OPENOS_X86_64_SMP_MAX_CPUS_HINT) return 5u;
+
+    if (s->owner_cpu == target_cpu) return 6u;
+
+    s->owner_cpu = target_cpu;
+
+    /* BSP-bound migrations need no IPI: BSP will pick up on its next PIT
+     * tick. APs need a kick because they only run on LAPIC timer ticks
+     * (~6Hz) and we want the migration latency to be O(microseconds). */
+    if (target_cpu != 0u) {
+        if (!arch_x86_64_smp_send_resched_ipi(target_cpu)) return 7u;
+    }
+    return 0u;
+}

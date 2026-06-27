@@ -5,6 +5,9 @@
 #include "../include/percpu64.h"
 #include "../include/sched64.h"
 #include "../include/pit64.h"
+#include "../include/lapic64.h"
+#include "../include/ioapic64.h"
+#include "../include/delay64.h"
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -469,9 +472,96 @@ void arch_x86_64_smp_selftest_run(void)
         early_console64_write(" all APs acked");
     }
 
+    /* Stage 13 (G.6.6b): migrate a READY slot across CPUs and prove the
+     * target CPU picks it up.
+     *
+     * Strategy:
+     *   - Spawn one fresh burner pinned to AP1. Slot is in SCHED_SLOT_READY
+     *     and has never run -- no register state to preserve.
+     *   - Snapshot BSP's sched_switch_count.
+     *   - Migrate the new slot from AP1 -> BSP via sched_migrate(slot, 0).
+     *     Target is BSP so no IPI is needed; BSP's PIT tick will discover
+     *     the new READY work on its next pick_next pass.
+     *   - Verify owner_cpu flipped to 0 immediately (synchronous).
+     *   - Poll up to 1s for BSP.sched_switch_count to advance (proves BSP
+     *     actually context-switched into the migrated burner).
+     *
+     * We intentionally migrate TO the BSP (not AP->AP) because the BSP is
+     * driven by PIT at ~18Hz which gives us a sub-100ms tick window, much
+     * snappier than AP LAPIC timer's ~6Hz. */
+    if (ap_n > 0) {
+        early_console64_write("\n[x86_64][smp-selftest] stage 13: cross-CPU migration");
+        uint32_t mig_slot = arch_x86_64_sched_spawn_kthread_prio_on(
+            burner_entry, (void *)(uintptr_t)1u,
+            OPENOS_X86_64_SCHED_PRIO_NORMAL, 1u);
+        if (mig_slot == 0u) {
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 13 spawn for migration\n");
+            return;
+        }
+        log_kv(" slot=", (uint64_t)mig_slot);
+        log_kv(" owner_before=", (uint64_t)arch_x86_64_sched_slot_owner(mig_slot));
+
+        uint64_t bsp_sw_before = arch_x86_64_sched_switch_count_for_cpu(0);
+        log_kv(" bsp_sw_before=", bsp_sw_before);
+
+        uint32_t rc = arch_x86_64_sched_migrate(mig_slot, 0u);
+        if (rc != 0u) {
+            log_kv("\n[x86_64][smp-selftest] FAIL: stage 13 migrate rc=", (uint64_t)rc);
+            early_console64_write("\n");
+            return;
+        }
+        uint32_t owner_after = arch_x86_64_sched_slot_owner(mig_slot);
+        log_kv(" owner_after=", (uint64_t)owner_after);
+        if (owner_after != 0u) {
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 13 owner_cpu did not flip to 0\n");
+            return;
+        }
+
+        /* Poll up to ~1s for BSP to pick the migrated work.
+         *
+         * IMPORTANT: by the time smp_selftest runs, the preceding
+         * sched_preempt_selftest has cli'd and the apic_selftest has
+         * masked the IOAPIC redir for IRQ0 (PIT) on its way out. Stage
+         * 9-12 above worked anyway because those signals don't depend
+         * on BSP IRQ0.
+         *
+         * For stage 13 we explicitly *need* BSP to take PIT ticks so
+         * sched_on_tick runs and pick_next discovers the migrated slot.
+         * Re-route ISA IRQ0 via the IOAPIC (the call is idempotent and
+         * leaves the redir UNMASKED), then sti. After the wait, restore
+         * the inherited cli + mask state. */
+        uint8_t bsp_lapic_id = arch_x86_64_lapic_id();
+        uint8_t pit_gsi = arch_x86_64_ioapic_route_isa_irq(0u, 0x20u, bsp_lapic_id);
+        __asm__ __volatile__("sti");
+
+        uint64_t bsp_tick_before = arch_x86_64_sched_tick_calls_for_cpu(0);
+        bool bsp_advanced = false;
+        uint64_t bsp_sw_after = bsp_sw_before;
+        for (int t = 0; t < 200; ++t) {
+            arch_x86_64_delay_ms(5);
+            bsp_sw_after = arch_x86_64_sched_switch_count_for_cpu(0);
+            if (bsp_sw_after > bsp_sw_before) { bsp_advanced = true; break; }
+        }
+        uint64_t bsp_tick_after = arch_x86_64_sched_tick_calls_for_cpu(0);
+
+        /* Restore inherited cli + masked-IOAPIC state for downstream tests. */
+        __asm__ __volatile__("cli");
+        if (pit_gsi != 0xFFu) {
+            arch_x86_64_ioapic_mask(pit_gsi);
+        }
+
+        log_kv(" bsp_tick_delta=", bsp_tick_after - bsp_tick_before);
+        log_kv(" bsp_sw_after=", bsp_sw_after);
+        if (!bsp_advanced) {
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 13 BSP sched_switch_count did not advance after migration\n");
+            return;
+        }
+        early_console64_write(" PASS");
+    }
+
     /* All stages reached by all APs. */
     if (ap_n > 0) {
-        early_console64_write("\n[x86_64][smp-selftest] PASS: all APs idle on private GDT/TSS/IDT+GS + sched-registered + LAPIC-timer driving sched_on_tick + distributed kthreads switched per-CPU + cross-CPU reschedule IPI delivered\n");
+        early_console64_write("\n[x86_64][smp-selftest] PASS: all APs idle on private GDT/TSS/IDT+GS + sched-registered + LAPIC-timer driving sched_on_tick + distributed kthreads switched per-CPU + cross-CPU reschedule IPI delivered + cross-CPU migration verified\n");
     } else {
         early_console64_write("\n[x86_64][smp-selftest] PASS: no APs (UP system, BSP idle slot only)\n");
     }
