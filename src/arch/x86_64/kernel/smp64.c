@@ -6,6 +6,7 @@
 #include "../include/vmm64.h"
 #include "../include/percpu64.h"
 #include "../include/idt64.h"
+#include "../include/sched64.h"
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -200,6 +201,7 @@ void arch_x86_64_smp_alive_reset_all(void) {
     volatile uint8_t *pc  = (volatile uint8_t *)(uintptr_t)OPENOS_X86_64_SMP_ALIVE_PERCPU_PHYS;
     volatile uint8_t *id  = (volatile uint8_t *)(uintptr_t)OPENOS_X86_64_SMP_ALIVE_IDLE_PHYS;
     volatile uint8_t *gs  = (volatile uint8_t *)(uintptr_t)OPENOS_X86_64_SMP_ALIVE_GS_PHYS;
+    volatile uint8_t *sc  = (volatile uint8_t *)(uintptr_t)OPENOS_X86_64_SMP_ALIVE_SCHED_PHYS;
     *rm = 0;
     *pm = 0;
     *lm = 0;
@@ -207,6 +209,7 @@ void arch_x86_64_smp_alive_reset_all(void) {
     *pc = 0;
     *id = 0;
     *gs = 0;
+    *sc = 0;
 }
 
 uint8_t arch_x86_64_smp_alive_rm_wait(uint8_t expected, uint32_t timeout_ms) {
@@ -305,6 +308,24 @@ uint8_t arch_x86_64_smp_alive_gs_wait(uint8_t expected, uint32_t timeout_ms) {
     uint32_t elapsed = 0;
     for (;;) {
         uint8_t cur = arch_x86_64_smp_alive_gs();
+        if (cur >= expected) return cur;
+        if (elapsed >= timeout_ms) return cur;
+        arch_x86_64_delay_ms(1);
+        elapsed++;
+    }
+}
+
+/* G.6.4: AP idle slot registered in the scheduler. */
+uint8_t arch_x86_64_smp_alive_sched(void) {
+    const volatile uint8_t *p =
+        (const volatile uint8_t *)(uintptr_t)OPENOS_X86_64_SMP_ALIVE_SCHED_PHYS;
+    return *p;
+}
+
+uint8_t arch_x86_64_smp_alive_sched_wait(uint8_t expected, uint32_t timeout_ms) {
+    uint32_t elapsed = 0;
+    for (;;) {
+        uint8_t cur = arch_x86_64_smp_alive_sched();
         if (cur >= expected) return cur;
         if (elapsed >= timeout_ms) return cur;
         arch_x86_64_delay_ms(1);
@@ -451,8 +472,23 @@ void arch_x86_64_ap_entry(uint64_t apic_id) {
         : "r"((volatile uint8_t *)(uintptr_t)OPENOS_X86_64_SMP_ALIVE_IDLE_PHYS)
         : "memory");
 
+    /* G.6.4: register this AP's idle slot in the scheduler. The slot id
+     * equals this CPU's cpu_idx by construction (slots 0..MAX_CPUS-1 are
+     * reserved for per-CPU idle threads). sched_init_ap seeds our
+     * quantum so a future timer tick will not divide-by-zero. */
+    arch_x86_64_sched_init_ap();
+    uint32_t my_idle_slot = arch_x86_64_sched_register_ap_idle();
+    if (my_idle_slot == 0xFFFFFFFFu) {
+        for (;;) { __asm__ volatile ("cli; hlt"); }
+    }
+    __asm__ __volatile__(
+        "lock incb (%0)"
+        :
+        : "r"((volatile uint8_t *)(uintptr_t)OPENOS_X86_64_SMP_ALIVE_SCHED_PHYS)
+        : "memory");
+
     /* AP idle loop. Interrupts stay disabled for now — sti + per-CPU
-     * scheduler entry lands in G.6.4. */
+     * timer + migration land in G.6.5. */
     for (;;) {
         __asm__ volatile ("hlt");
     }

@@ -31,6 +31,12 @@
 /* G.6.2: AP-side GS_BASE installed (per-CPU "current") confirmation. */
 #define OPENOS_X86_64_SMP_ALIVE_GS_PHYS    0x00009038ULL
 
+/* G.6.4: AP-side per-CPU idle slot registered in the scheduler
+ * (sched_register_ap_idle returned the AP's own cpu_idx). Each AP bumps
+ * this once its idle slot is RUNNING and this_cpu()->sched_current_idx
+ * points at it. With N CPUs the BSP expects this to settle at N-1. */
+#define OPENOS_X86_64_SMP_ALIVE_SCHED_PHYS 0x00009040ULL
+
 bool arch_x86_64_smp_init(void);
 bool arch_x86_64_smp_is_ready(void);
 
@@ -74,6 +80,10 @@ uint8_t arch_x86_64_smp_alive_idle_wait(uint8_t expected, uint32_t timeout_ms);
 /* G.6.2: per-AP GS_BASE installation confirmation. */
 uint8_t arch_x86_64_smp_alive_gs(void);
 uint8_t arch_x86_64_smp_alive_gs_wait(uint8_t expected, uint32_t timeout_ms);
+
+/* G.6.4: per-AP scheduler-registered (idle slot RUNNING) confirmation. */
+uint8_t arch_x86_64_smp_alive_sched(void);
+uint8_t arch_x86_64_smp_alive_sched_wait(uint8_t expected, uint32_t timeout_ms);
 
 uint64_t arch_x86_64_smp_stack_base(uint32_t cpu_idx);
 uint64_t arch_x86_64_smp_stack_top(uint32_t cpu_idx);

@@ -3,6 +3,7 @@
 #include "../include/ap_trampoline64.h"
 #include "../include/early_console64.h"
 #include "../include/percpu64.h"
+#include "../include/sched64.h"
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -182,10 +183,32 @@ void arch_x86_64_smp_selftest_run(void)
         return;
     }
 
+    /* Stage 8: per-CPU idle slot registered in the scheduler (G.6.4).
+     * Each AP, after installing its private GS_BASE, calls
+     * sched_init_ap() + sched_register_ap_idle() and bumps the
+     * alive_sched counter. The BSP then runs sched_idle_selftest() to
+     * confirm every online CPU owns exactly one is_idle RUNNING slot. */
+    uint8_t alive_sched = arch_x86_64_smp_alive_sched_wait(expect, 500);
+    log_kv("\n[x86_64][smp-selftest] alive_sched=", (uint64_t)alive_sched);
+    log_kv(" expected>=", (uint64_t)expect);
+    if (ap_n > 0 && alive_sched < expect) {
+        early_console64_write("\n[x86_64][smp-selftest] FAIL: AP did not register idle slot\n");
+        return;
+    }
+
+    uint32_t online_cpus = ap_n + 1u;
+    uint32_t idle_rc = arch_x86_64_sched_idle_selftest(online_cpus);
+    log_kv("\n[x86_64][smp-selftest] sched_idle_selftest=", (uint64_t)idle_rc);
+    log_kv(" online_cpus=", (uint64_t)online_cpus);
+    if (idle_rc != 0u) {
+        early_console64_write("\n[x86_64][smp-selftest] FAIL: sched_idle_selftest non-zero\n");
+        return;
+    }
+
     /* All stages reached by all APs. */
     if (ap_n > 0) {
-        early_console64_write("\n[x86_64][smp-selftest] PASS: all APs idle on private GDT/TSS/IDT+GS\n");
+        early_console64_write("\n[x86_64][smp-selftest] PASS: all APs idle on private GDT/TSS/IDT+GS + sched-registered\n");
     } else {
-        early_console64_write("\n[x86_64][smp-selftest] PASS: no APs (UP system)\n");
+        early_console64_write("\n[x86_64][smp-selftest] PASS: no APs (UP system, BSP idle slot only)\n");
     }
 }

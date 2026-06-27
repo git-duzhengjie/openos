@@ -127,10 +127,12 @@ typedef enum {
 
 typedef struct {
     sched_slot_state_t  state;
-    x86_64_context_t    ctx;          /* slot 0 mirrors bootstrap_context */
-    void               *stack_base;   /* heap-allocated stack (slot >=1) */
-    uint32_t            id;           /* 1-based slot id; 0 == bootstrap */
+    x86_64_context_t    ctx;          /* slot 0 mirrors BSP bootstrap_context */
+    void               *stack_base;   /* heap-allocated stack (kthread slots) */
+    uint32_t            id;           /* 1-based slot id; 0 == BSP bootstrap */
     uint32_t            priority;     /* G.2: scheduling priority band */
+    uint32_t            owner_cpu;    /* G.6.4: per-CPU affinity */
+    uint32_t            is_idle;      /* G.6.4: 1 = idle thread for owner_cpu */
 } sched_slot_t;
 
 static sched_slot_t  sched_slots[OPENOS_X86_64_SCHED_MAX_KTHREADS];
@@ -141,16 +143,26 @@ static void sched_ensure_bootstrap_slot(void) {
     if (sched_slots[0].state != SCHED_SLOT_FREE) {
         return;
     }
-    sched_slots[0].state    = SCHED_SLOT_RUNNING;
-    sched_slots[0].id       = 0u;
-    sched_slots[0].priority = OPENOS_X86_64_SCHED_PRIO_DEFAULT;
-    /* slot 0 "ctx" is unused for save; bootstrap_context handles that. */
+    sched_slots[0].state     = SCHED_SLOT_RUNNING;
+    sched_slots[0].id        = 0u;
+    sched_slots[0].priority  = OPENOS_X86_64_SCHED_PRIO_DEFAULT;
+    sched_slots[0].owner_cpu = 0u;   /* G.6.4: BSP owns slot 0 */
+    /* NOTE: slot 0 is the BSP's bootstrap thread (running selftests,
+     * etc.) -- it is *not* a dedicated idle thread. AP cpus each get
+     * their own real idle slot via sched_register_ap_idle, where
+     * is_idle=1. The BSP has no separate idle thread: when no other
+     * work is ready, slot 0 simply stays RUNNING and the bootstrap
+     * code continues to spin/yield/hlt as it sees fit. */
+    sched_slots[0].is_idle   = 0u;
     sched_pc_set_current(0u);
 }
 
 static uint32_t sched_alloc_slot(void) {
     sched_ensure_bootstrap_slot();
-    for (uint32_t i = 1u; i < OPENOS_X86_64_SCHED_MAX_KTHREADS; ++i) {
+    /* G.6.4: dynamic kthreads live above the reserved idle band so that
+     * slot ids [0 .. MAX_CPUS_HINT-1] are forever owned by their own CPU. */
+    for (uint32_t i = OPENOS_X86_64_SMP_MAX_CPUS_HINT;
+         i < OPENOS_X86_64_SCHED_MAX_KTHREADS; ++i) {
         if (sched_slots[i].state == SCHED_SLOT_FREE
             || sched_slots[i].state == SCHED_SLOT_EXITED) {
             if (sched_slots[i].state == SCHED_SLOT_EXITED
@@ -158,8 +170,10 @@ static uint32_t sched_alloc_slot(void) {
                 arch_x86_64_kfree(sched_slots[i].stack_base);
                 sched_slots[i].stack_base = NULL;
             }
-            sched_slots[i].state = SCHED_SLOT_FREE;
-            sched_slots[i].id    = i;
+            sched_slots[i].state    = SCHED_SLOT_FREE;
+            sched_slots[i].id       = i;
+            sched_slots[i].is_idle  = 0u;
+            /* owner_cpu set by caller (spawn pins to spawning CPU). */
             return i;
         }
     }
@@ -167,20 +181,40 @@ static uint32_t sched_alloc_slot(void) {
 }
 
 static uint32_t sched_pick_next(uint32_t from_idx) {
-    /* Round-robin: scan slots starting after `from_idx`. */
+    /* G.6.4: only consider slots whose owner_cpu matches this CPU.
+     *
+     * BSP (cpu_idx==0) is special: it has no separate idle thread, so
+     * slot 0 (the bootstrap thread) is itself the fallback when nothing
+     * else is READY. APs get a dedicated is_idle=1 slot via
+     * sched_register_ap_idle; their fallback is slot[cpu_idx]. */
+    uint32_t my_cpu  = arch_x86_64_this_cpu_ptr()->cpu_idx;
+    uint32_t fallback = (my_cpu == 0u) ? 0u
+                                       : ((my_cpu < OPENOS_X86_64_SMP_MAX_CPUS_HINT) ? my_cpu : 0u);
+
+    /* Pass 1: round-robin over non-idle ready slots owned by this CPU. */
     for (uint32_t step = 1u; step <= OPENOS_X86_64_SCHED_MAX_KTHREADS; ++step) {
         uint32_t i = (from_idx + step) % OPENOS_X86_64_SCHED_MAX_KTHREADS;
-        if (i == 0u) {
-            if (sched_slots[0].state == SCHED_SLOT_RUNNING
-                || sched_slots[0].state == SCHED_SLOT_READY) {
-                return 0u;
-            }
-            continue;
-        }
+        if (sched_slots[i].owner_cpu != my_cpu) continue;
+        if (sched_slots[i].is_idle)             continue;
         if (sched_slots[i].state == SCHED_SLOT_READY) {
             return i;
         }
+        /* slot 0 on the BSP is RUNNING (not READY) when we are switching
+         * away from it; allow round-robin to land back on it as a normal
+         * thread, not just a fallback. */
+        if (my_cpu == 0u && i == 0u
+            && sched_slots[0].state == SCHED_SLOT_RUNNING
+            && from_idx != 0u) {
+            return 0u;
+        }
     }
+
+    /* Pass 2: fall back to this CPU's idle/bootstrap slot. */
+    if (sched_slots[fallback].state == SCHED_SLOT_RUNNING
+        || sched_slots[fallback].state == SCHED_SLOT_READY) {
+        return fallback;
+    }
+
     return from_idx;
 }
 
@@ -227,6 +261,8 @@ uint32_t arch_x86_64_sched_spawn_kthread_prio(x86_64_thread_entry_t entry,
     sched_slots[idx].state     = SCHED_SLOT_READY;
     sched_slots[idx].id        = idx;
     sched_slots[idx].priority  = priority;
+    sched_slots[idx].owner_cpu = arch_x86_64_this_cpu_ptr()->cpu_idx; /* G.6.4: pin to spawning CPU */
+    sched_slots[idx].is_idle   = 0u;
     return idx;
 }
 
@@ -331,15 +367,24 @@ uint64_t arch_x86_64_sched_switch_count(void)   { return sched_pc_switches(); }
  * ----------------------------------------------------------------- */
 
 static int sched_has_other_ready(uint32_t cur) {
+    /* G.6.4: filter by owner_cpu == this_cpu()->cpu_idx. is_idle slots
+     * are explicitly NOT "other work" -- they are only the fallback. */
+    uint32_t my_cpu = arch_x86_64_this_cpu_ptr()->cpu_idx;
+    uint32_t fallback = (my_cpu == 0u) ? 0u
+                                       : ((my_cpu < OPENOS_X86_64_SMP_MAX_CPUS_HINT) ? my_cpu : 0u);
+
     for (uint32_t i = 0u; i < OPENOS_X86_64_SCHED_MAX_KTHREADS; ++i) {
         if (i == cur) continue;
+        if (sched_slots[i].owner_cpu != my_cpu) continue;
+        if (sched_slots[i].is_idle)             continue;
         if (sched_slots[i].state == SCHED_SLOT_READY ||
             sched_slots[i].state == SCHED_SLOT_RUNNING) {
             return 1;
         }
     }
-    /* Bootstrap (slot 0) is always considered ready as a fallback. */
-    if (cur != 0u && sched_slots[0].state != SCHED_SLOT_EXITED) {
+    /* Fallback slot (BSP slot 0 / AP idle) is always a valid landing,
+     * but it is not "other ready work" if we are already on it. */
+    if (cur != fallback && sched_slots[fallback].state != SCHED_SLOT_EXITED) {
         return 1;
     }
     return 0;
@@ -391,4 +436,80 @@ void arch_x86_64_sched_print_status(void) {
     early_console64_write(" kthreads=");
     early_console64_write_hex64((uint64_t)arch_x86_64_sched_kthread_count());
     early_console64_write("\n");
+}
+
+/* -----------------------------------------------------------------
+ * Step G.6.4: per-CPU idle thread bookkeeping.
+ *
+ * sched_init_ap()          : called from ap_main once %gs is loaded.
+ *                            Seeds sched_quantum_left so a future sti
+ *                            + timer tick on this AP will not divide
+ *                            by zero or fire immediately.
+ *
+ * sched_register_ap_idle() : reserves slot[cpu_idx] as the AP's idle
+ *                            thread (RUNNING, owner_cpu=cpu_idx,
+ *                            is_idle=1, sched_current_idx=cpu_idx).
+ *                            Returns the slot id.
+ *
+ * sched_idle_slot_for_cpu(): returns the slot id of CPU C's idle
+ *                            thread, or 0xFFFFFFFF if none.
+ *
+ * sched_idle_selftest()    : verifies every online CPU owns exactly
+ *                            one is_idle slot in RUNNING state, and
+ *                            reserved slots above online_cpus stay
+ *                            pristine FREE.
+ * ----------------------------------------------------------------- */
+
+void arch_x86_64_sched_init_ap(void) {
+    arch_x86_64_this_cpu_ptr()->sched_quantum_left = OPENOS_X86_64_SCHED_QUANTUM_NORMAL;
+}
+
+uint32_t arch_x86_64_sched_register_ap_idle(void) {
+    uint32_t cpu = arch_x86_64_this_cpu_ptr()->cpu_idx;
+    if (cpu == 0u || cpu >= OPENOS_X86_64_SMP_MAX_CPUS_HINT) {
+        return 0xFFFFFFFFu;
+    }
+    if (sched_slots[cpu].state != SCHED_SLOT_FREE) {
+        return 0xFFFFFFFFu;
+    }
+    sched_slots[cpu].state      = SCHED_SLOT_RUNNING;
+    sched_slots[cpu].id         = cpu;
+    sched_slots[cpu].priority   = OPENOS_X86_64_SCHED_PRIO_DEFAULT;
+    sched_slots[cpu].owner_cpu  = cpu;
+    sched_slots[cpu].is_idle    = 1u;
+    sched_slots[cpu].stack_base = NULL;  /* AP runs on its trampoline stack */
+    sched_pc_set_current(cpu);
+    return cpu;
+}
+
+uint32_t arch_x86_64_sched_idle_slot_for_cpu(uint32_t cpu_idx) {
+    if (cpu_idx >= OPENOS_X86_64_SMP_MAX_CPUS_HINT) return 0xFFFFFFFFu;
+    if (sched_slots[cpu_idx].is_idle  != 1u)        return 0xFFFFFFFFu;
+    if (sched_slots[cpu_idx].owner_cpu != cpu_idx)  return 0xFFFFFFFFu;
+    return cpu_idx;
+}
+
+uint32_t arch_x86_64_sched_idle_selftest(uint32_t online_cpus) {
+    if (online_cpus == 0u || online_cpus > OPENOS_X86_64_SMP_MAX_CPUS_HINT) {
+        return 1u;
+    }
+    /* CPU 0 / BSP: slot 0 is the bootstrap thread, not a dedicated idle.
+     * It must be RUNNING with owner_cpu=0 and is_idle=0. */
+    if (sched_slots[0].owner_cpu != 0u)             return 0x01u;
+    if (sched_slots[0].is_idle != 0u)               return 0x02u;
+    if (sched_slots[0].state != SCHED_SLOT_RUNNING) return 0x03u;
+
+    /* APs (CPU 1..online_cpus-1): each must own a dedicated is_idle
+     * slot at slot[cpu_idx], RUNNING. */
+    for (uint32_t c = 1u; c < online_cpus; ++c) {
+        if (sched_slots[c].is_idle != 1u)              return 0x10u | c;
+        if (sched_slots[c].owner_cpu != c)             return 0x20u | c;
+        if (sched_slots[c].state != SCHED_SLOT_RUNNING) return 0x30u | c;
+    }
+    /* Reserved band above online_cpus must remain pristine FREE. */
+    for (uint32_t c = online_cpus; c < OPENOS_X86_64_SMP_MAX_CPUS_HINT; ++c) {
+        if (sched_slots[c].state != SCHED_SLOT_FREE)   return 0x40u | c;
+        if (sched_slots[c].is_idle != 0u)              return 0x50u | c;
+    }
+    return 0u;
 }
