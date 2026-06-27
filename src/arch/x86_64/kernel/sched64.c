@@ -612,3 +612,80 @@ uint32_t arch_x86_64_sched_migrate(uint32_t slot_idx, uint32_t target_cpu) {
     }
     return 0u;
 }
+
+/* ====================================================================
+ * G.6.7a: preemption tail-hook plumbing
+ *
+ * Design notes (also see sched64.h):
+ *  - need_resched is a per-CPU latch (u32, naturally aligned at offset
+ *    0x40). Writers store 1, the local CPU reads-and-clears it at
+ *    ISR-tail.
+ *  - On x86_64 aligned u32 stores are atomic w.r.t. aligned u32 loads,
+ *    so a remote CPU writing 1 while the local CPU reads-and-clears
+ *    cannot produce a torn value. Worst case is the remote write loses
+ *    a race with the clear, in which case the next IPI / next tick will
+ *    re-arm the latch -- acceptable for a wakeup hint.
+ *  - Dispatch is *not* recursive: we sched_yield only when not already
+ *    inside another yield (a future preempt_count gate would live here
+ *    and replace this simple check). Today the only callers are ISR
+ *    tails which never re-enter, so we keep it simple.
+ * ==================================================================== */
+
+void arch_x86_64_sched_set_need_resched(void) {
+    /* Local-CPU latch. Going through %gs avoids touching the global
+     * percpu array when the only thing we want is "this CPU". */
+    arch_x86_64_percpu_t *p = arch_x86_64_this_cpu_ptr();
+    if (!p) return;
+    p->need_resched = 1u;
+}
+
+void arch_x86_64_sched_set_need_resched_remote(uint32_t cpu_idx) {
+    if (cpu_idx >= OPENOS_X86_64_PERCPU_MAX_CPUS) return;
+    arch_x86_64_percpu_t *p = arch_x86_64_percpu_slot(cpu_idx);
+    if (!p) return;
+    /* Plain store: aligned u32 -> single instruction, no torn-write
+     * risk on the remote reader. No memory barrier needed because the
+     * accompanying IPI (which is what the caller will send next) acts
+     * as a serializing event on the remote CPU's interrupt boundary. */
+    p->need_resched = 1u;
+}
+
+uint32_t arch_x86_64_sched_check_and_dispatch(void) {
+    arch_x86_64_percpu_t *p = arch_x86_64_this_cpu_ptr();
+    if (!p) return 0u;
+
+    /* Read-and-clear. If the latch wasn't set, fast path: no yield. */
+    uint32_t pending = p->need_resched;
+    if (!pending) return 0u;
+    p->need_resched = 0u;
+
+    /* Account *before* yielding -- once we yield, our stack is parked
+     * and the count we want to bump belongs to the CPU we're leaving.
+     * Note: dispatch_count is tied to the CPU, not the thread, so it
+     * stays consistent across the upcoming context switch. */
+    p->resched_dispatch_count++;
+
+    /* Perform the actual reschedule. sched_yield will pick the next
+     * runnable slot on this CPU (or fall back to the per-CPU idle if
+     * nothing else is ready). It returns through context_switch which
+     * restores the next thread's rflags -- the restored thread will
+     * therefore observe IF=1 even though we entered with IF=0. This is
+     * the same EOI-last + iretq-restores-IF discipline used by the
+     * timer tick path; see F.3 commit for the full proof. */
+    arch_x86_64_sched_yield();
+    return 1u;
+}
+
+uint64_t arch_x86_64_sched_dispatch_count_for_cpu(uint32_t cpu_idx) {
+    if (cpu_idx >= OPENOS_X86_64_PERCPU_MAX_CPUS) return 0ull;
+    arch_x86_64_percpu_t *p = arch_x86_64_percpu_slot(cpu_idx);
+    if (!p) return 0ull;
+    return p->resched_dispatch_count;
+}
+
+uint32_t arch_x86_64_sched_need_resched_for_cpu(uint32_t cpu_idx) {
+    if (cpu_idx >= OPENOS_X86_64_PERCPU_MAX_CPUS) return 0u;
+    arch_x86_64_percpu_t *p = arch_x86_64_percpu_slot(cpu_idx);
+    if (!p) return 0u;
+    return p->need_resched;
+}

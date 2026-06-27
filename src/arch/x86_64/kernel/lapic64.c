@@ -1,6 +1,7 @@
 #include "../include/lapic64.h"
 #include "../include/acpi64.h"
 #include "../include/percpu64.h"
+#include "../include/sched64.h"   /* G.6.7a: check_and_dispatch tail hook */
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -250,18 +251,52 @@ bool arch_x86_64_lapic_send_fixed_ipi(uint8_t apic_id, uint8_t vector) {
 
 /* G.6.6a — Reschedule-IPI ISR (vector 0x41).
  *
- * Bumps the per-CPU resched_ipi_count via the percpu pointer cached in
- * GS_BASE, then signals end-of-interrupt. EOI-last sequencing follows
- * the same rationale as the timer ISR (see lapic_timer_irq_handler):
- * EOI is LAPIC-per-CPU state, not per-thread, so it survives any future
- * context switch occurring between the bump and EOI.
+ * G.6.7a evolution: this handler now does *three* things in strict
+ * order:
+ *   (1) bump resched_ipi_count   -- proves the IPI was delivered
+ *   (2) latch need_resched=1     -- the cross-CPU "please reschedule"
+ *                                   signal that the tail dispatcher
+ *                                   will consume
+ *   (3) write EOI                -- LAPIC end-of-interrupt
+ *   (4) call check_and_dispatch  -- read-and-clear the latch and, if
+ *                                   set, sched_yield right here. This
+ *                                   is what makes the IPI an *immediate*
+ *                                   reschedule rather than a hint that
+ *                                   has to wait for the next timer tick.
+ *
+ * Ordering rationale:
+ *  - EOI is LAPIC-per-CPU state, not per-thread, so it survives any
+ *    context switch happening inside check_and_dispatch. We could in
+ *    principle EOI *after* the dispatch (since EOI just unmasks the
+ *    next LAPIC interrupt and is safe either way), but EOI-last-before-
+ *    dispatch keeps the LAPIC ready for the *next* interrupt while we
+ *    are still on the parked stack of the old thread -- one less window
+ *    where a queued IPI could be held up.
+ *  - check_and_dispatch is the *only* place inside an ISR where we may
+ *    sched_yield. It must therefore be called after EOI, with IF still
+ *    cleared by the ISR stub. The yielded-to thread's restored rflags
+ *    will set IF=1, mirroring the timer-tick path (see F.3 proof).
+ *  - The ISR stub (isr64.S) saved all caller-saved registers before
+ *    calling this C handler. context_switch only saves callee-saved
+ *    regs, but since iretq from the next thread eventually unwinds
+ *    through *its* ISR stub (or its initial entry frame), the symmetry
+ *    is preserved. Same discipline as the timer tick yield path.
  */
 void arch_x86_64_lapic_resched_irq_handler(void) {
     arch_x86_64_percpu_t *pc = arch_x86_64_this_cpu_ptr();
     if (pc) {
         pc->resched_ipi_count++;
+        /* Latch the local need_resched flag. Even if some future caller
+         * also pre-latched it via sched_set_need_resched_remote() before
+         * sending us the IPI, setting it again is idempotent. */
+        pc->need_resched = 1u;
     }
     mmio_write32(g_lapic_mmio, OPENOS_X86_64_LAPIC_REG_EOI, 0);
+
+    /* Tail dispatch: this may sched_yield and not return on this stack.
+     * If it returns (need_resched was 0 by the time we read it, e.g.
+     * spurious / already-handled), we just iretq back through the stub. */
+    (void)arch_x86_64_sched_check_and_dispatch();
 }
 
 /* G.3b-final — program LVT LINT0 / LINT1 for NMI/ExtINT routing.

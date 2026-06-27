@@ -227,6 +227,15 @@ void arch_x86_64_percpu_install_gs(uint32_t cpu_idx) {
     p->sched_preempt_count  = 0;
     p->lapic_timer_count    = 0;
     p->sched_tick_calls     = 0;
+    /* G.6.6a/G.6.7a: clear reschedule-IPI counters and need_resched flag.
+     * Note: install_gs() runs once per CPU during its bring-up, so this
+     * is the right place to zero them. BSP=0 contract for need_resched
+     * is enforced here by initial value + by smp_send_resched_ipi
+     * rejecting BSP targets. */
+    p->resched_ipi_count        = 0;
+    p->need_resched             = 0;
+    p->_resv_after_need_resched = 0;
+    p->resched_dispatch_count   = 0;
 
     /* Write IA32_GS_BASE directly. Note: a subsequent `mov <selector>, %gs`
      * would reload the hidden base from the GDT descriptor and *clobber*

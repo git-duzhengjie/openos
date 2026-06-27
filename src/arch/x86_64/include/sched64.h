@@ -220,4 +220,54 @@ uint32_t arch_x86_64_sched_migrate(uint32_t slot_idx, uint32_t target_cpu);
  * Used by smp_selftest stage 13 to prove a migration took effect. */
 uint32_t arch_x86_64_sched_slot_owner(uint32_t slot_idx);
 
+/* ---- G.6.7a: preemption tail-hook primitives -----------------------
+ *
+ * Background: historically the only place we ever made a scheduling
+ * decision was inside the timer-tick ISR (sched_on_tick -> sched_yield
+ * when the local quantum hits 0). That works for time-slicing but it
+ * means any cross-CPU wakeup has to wait up to one full tick (~166ms
+ * on AP LAPIC timer @ ~6Hz) before the target CPU actually picks up
+ * the new runnable thread, even though the resched-IPI itself reaches
+ * the target in microseconds.
+ *
+ * G.6.7a fixes that by introducing a per-CPU "please reschedule"
+ * latch, plus a generic ISR-tail dispatcher:
+ *
+ *   - sched_set_need_resched()      sets the latch on caller's CPU.
+ *   - sched_set_need_resched_remote() sets it on a remote CPU's slot
+ *                                     (used by future cross-CPU
+ *                                     wakeup paths; safe today because
+ *                                     u32 stores on x86_64 are atomic
+ *                                     w.r.t. aligned naturally-sized
+ *                                     loads).
+ *   - sched_check_and_dispatch()    reads-and-clears the latch and, if
+ *                                     it was set, performs a sched_yield
+ *                                     on the caller's CPU. Returns the
+ *                                     number of yields actually issued
+ *                                     (0 or 1). MUST be called from
+ *                                     ISR-tail context, after EOI has
+ *                                     been written, with IF=0 still in
+ *                                     effect; sched_yield itself goes
+ *                                     through context_switch and the
+ *                                     restored thread's rflags will
+ *                                     re-enable IF.
+ *
+ * Counters:
+ *   - resched_dispatch_count goes up once per successful tail-fire on
+ *     each CPU. Selftest stage 14 uses it to *prove* a remote IPI
+ *     triggered an immediate context switch on the target CPU rather
+ *     than waiting for the next timer tick.
+ *
+ * BSP=0 contract: BSP must never see need_resched=1 in G.6.7a (BSP is
+ * not a valid resched-IPI target). A non-zero BSP value is an error. */
+void arch_x86_64_sched_set_need_resched(void);
+void arch_x86_64_sched_set_need_resched_remote(uint32_t cpu_idx);
+uint32_t arch_x86_64_sched_check_and_dispatch(void);
+
+/* Observer for selftests. Returns the per-CPU resched_dispatch_count
+ * read directly from the percpu slot (not via %gs). Returns 0 for
+ * unknown cpu_idx. */
+uint64_t arch_x86_64_sched_dispatch_count_for_cpu(uint32_t cpu_idx);
+uint32_t arch_x86_64_sched_need_resched_for_cpu(uint32_t cpu_idx);
+
 #endif /* OPENOS_ARCH_X86_64_SCHED64_H */

@@ -49,7 +49,36 @@ typedef struct openos_x86_64_percpu {
      * to be non-zero here. This is the direct proof that BSP->AP IPI
      * delivery actually lands on the target core. */
     uint64_t resched_ipi_count;   /* offset 0x38 */
-    uint64_t _pad[8];             /* pad to 128 bytes for cache-line alignment */
+    /* G.6.7a: cross-CPU "please reschedule" signal flag.
+     *
+     * Set by either:
+     *   - the local reschedule-IPI handler (after it bumps
+     *     resched_ipi_count) so that the same handler can immediately
+     *     dispatch a context switch on this CPU, OR
+     *   - a remote CPU via sched_set_need_resched_remote() (future use
+     *     for cross-CPU wakeups that don't have to wait for the next
+     *     timer tick).
+     *
+     * Cleared by arch_x86_64_sched_check_and_dispatch() at ISR-tail.
+     * Naturally aligned u32 -> single-instruction atomic load/store
+     * on x86_64, no torn-read risk even across CPUs.
+     *
+     * BSP=0 contract: BSP currently never receives reschedule IPIs in
+     * G.6.7a (smp_send_resched_ipi rejects BSP target). BSP slot of
+     * need_resched must stay 0 throughout normal operation; a non-zero
+     * BSP value would indicate stray IPI / mis-routed wakeup. */
+    uint32_t need_resched;        /* offset 0x40 */
+    uint32_t _resv_after_need_resched; /* offset 0x44 (alignment hole) */
+    /* G.6.7a: counts the number of times check_and_dispatch() observed
+     * need_resched=1 on entry and acted on it (i.e. cleared the flag,
+     * invoked sched_yield). Independent of resched_ipi_count: the IPI
+     * counter goes up on every IPI delivery, the dispatch counter goes
+     * up on every successful tail-hook fire. They should be equal in
+     * steady state when need_resched is only ever set by the local IPI
+     * handler. Selftest uses this to prove the IPI -> dispatch path
+     * runs *before* the next timer tick. */
+    uint64_t resched_dispatch_count; /* offset 0x48 */
+    uint64_t _pad[6];             /* pad to 128 bytes for cache-line alignment */
 } __attribute__((aligned(64))) arch_x86_64_percpu_t;
 
 /* Per-field offsets (compile-time, for asm or sanity checks). */
@@ -63,6 +92,8 @@ typedef struct openos_x86_64_percpu {
 #define OPENOS_X86_64_PERCPU_OFF_LAPIC_TIMER     0x28
 #define OPENOS_X86_64_PERCPU_OFF_SCHED_TICKS     0x30
 #define OPENOS_X86_64_PERCPU_OFF_RESCHED_IPI     0x38
+#define OPENOS_X86_64_PERCPU_OFF_NEED_RESCHED    0x40
+#define OPENOS_X86_64_PERCPU_OFF_RESCHED_DISPATCH 0x48
 
 /* IA32_GS_BASE MSR */
 #define OPENOS_X86_64_MSR_GS_BASE        0xC0000101u
