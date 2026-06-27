@@ -6,6 +6,7 @@
 #include "../include/early_console64.h"
 #include "../include/heap64.h"
 #include "../include/percpu64.h"
+#include "../include/smp64.h"  /* G.6.5c: OPENOS_X86_64_SMP_MAX_CPUS for spawn_on clamp */
 
 /* G.6.3: per-CPU scheduler cursors / counters live in arch_x86_64_percpu_t,
  * addressable via %gs. The sched_slots[] pool itself is still a single
@@ -235,11 +236,27 @@ uint32_t arch_x86_64_sched_quantum_for_priority(uint32_t priority) {
 uint32_t arch_x86_64_sched_spawn_kthread_prio(x86_64_thread_entry_t entry,
                                               void *arg,
                                               uint32_t priority) {
+    return arch_x86_64_sched_spawn_kthread_prio_on(
+        entry, arg, priority, arch_x86_64_this_cpu_ptr()->cpu_idx);
+}
+
+uint32_t arch_x86_64_sched_spawn_kthread_prio_on(x86_64_thread_entry_t entry,
+                                                 void *arg,
+                                                 uint32_t priority,
+                                                 uint32_t target_cpu) {
     if (entry == NULL) {
         return 0u;
     }
     if (priority > OPENOS_X86_64_SCHED_PRIO_MAX) {
         priority = OPENOS_X86_64_SCHED_PRIO_DEFAULT;
+    }
+    /* G.6.5c: clamp out-of-range target_cpu to the spawning CPU.
+     * MAX_CPUS is the hard ceiling; the smp layer reports the actual
+     * online count via arch_x86_64_smp_cpu_count(), but we tolerate any
+     * valid percpu slot index here (idle threads for cpu_idx >=
+     * cpu_count would simply never be picked). */
+    if (target_cpu >= OPENOS_X86_64_SMP_MAX_CPUS) {
+        target_cpu = arch_x86_64_this_cpu_ptr()->cpu_idx;
     }
     uint32_t idx = sched_alloc_slot();
     if (idx == 0u) {
@@ -261,7 +278,7 @@ uint32_t arch_x86_64_sched_spawn_kthread_prio(x86_64_thread_entry_t entry,
     sched_slots[idx].state     = SCHED_SLOT_READY;
     sched_slots[idx].id        = idx;
     sched_slots[idx].priority  = priority;
-    sched_slots[idx].owner_cpu = arch_x86_64_this_cpu_ptr()->cpu_idx; /* G.6.4: pin to spawning CPU */
+    sched_slots[idx].owner_cpu = target_cpu; /* G.6.5c: explicit pin */
     sched_slots[idx].is_idle   = 0u;
     return idx;
 }
@@ -533,4 +550,14 @@ uint64_t arch_x86_64_sched_tick_calls_for_cpu(uint32_t cpu_idx) {
     arch_x86_64_percpu_t *p = arch_x86_64_percpu_slot(cpu_idx);
     if (p == (void *)0) return 0;
     return p->sched_tick_calls;
+}
+
+/* G.6.5c: per-CPU sched_switch_count reader (no %gs, cross-CPU safe).
+ * Same alignment/torn-read argument as tick_calls_for_cpu: u64 natural
+ * alignment on x86_64 guarantees atomic load; we only need eventual
+ * consistency for polling. */
+uint64_t arch_x86_64_sched_switch_count_for_cpu(uint32_t cpu_idx) {
+    arch_x86_64_percpu_t *p = arch_x86_64_percpu_slot(cpu_idx);
+    if (p == (void *)0) return 0;
+    return p->sched_switch_count;
 }

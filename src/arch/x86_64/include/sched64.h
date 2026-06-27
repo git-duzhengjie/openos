@@ -170,6 +170,22 @@ uint64_t arch_x86_64_sched_preempt_count(void);
 uint32_t arch_x86_64_sched_spawn_kthread_prio(x86_64_thread_entry_t entry,
                                               void *arg,
                                               uint32_t priority);
+
+/* G.6.5c: spawn a kthread pinned to a specific CPU (owner_cpu = target_cpu).
+ * Used to distribute work across CPUs without changing the default
+ * spawn_kthread / spawn_kthread_prio behavior (which still pins to the
+ * spawning CPU).
+ *
+ * target_cpu must be a valid online CPU index; out-of-range values are
+ * clamped to the spawning CPU. priority semantics identical to _prio.
+ *
+ * Returns the slot id on success, 0 on failure (entry==NULL, no free slot,
+ * or kmalloc failure for the stack). */
+uint32_t arch_x86_64_sched_spawn_kthread_prio_on(x86_64_thread_entry_t entry,
+                                                 void *arg,
+                                                 uint32_t priority,
+                                                 uint32_t target_cpu);
+
 uint32_t arch_x86_64_sched_set_priority(uint32_t slot, uint32_t priority);
 uint32_t arch_x86_64_sched_get_priority(uint32_t slot);
 uint32_t arch_x86_64_sched_quantum_for_priority(uint32_t priority);
@@ -180,5 +196,11 @@ uint32_t arch_x86_64_sched_quantum_for_priority(uint32_t priority);
  * Returns 0 for unknown cpu_idx. Used by smp_selftest stage 10 to
  * prove sched_on_tick fires on each CPU's own IRQ path. */
 uint64_t arch_x86_64_sched_tick_calls_for_cpu(uint32_t cpu_idx);
+
+/* G.6.5c: per-CPU switch counter. Reads sched_switch_count from the
+ * percpu slot identified by cpu_idx, NOT %gs. Used by smp_selftest
+ * stage 11 to prove that distributed kthreads cause real context
+ * switches on each AP. Returns 0 for unknown cpu_idx. */
+uint64_t arch_x86_64_sched_switch_count_for_cpu(uint32_t cpu_idx);
 
 #endif /* OPENOS_ARCH_X86_64_SCHED64_H */

@@ -25,6 +25,37 @@ static void log_kv(const char *key, uint64_t val)
     early_console64_write_hex64(val);
 }
 
+/* G.6.5c: distributed-burner kthread.
+ *
+ * Spins for a bounded count then voluntarily exits via sched_exit_self.
+ * Rationale for the bound:
+ *   - We only need to *prove* sched_on_tick triggers a context switch on
+ *     each AP at least once. A bounded burner does that and then frees
+ *     its slot, avoiding TCG starvation (TCG runs all vCPUs on a single
+ *     host thread; an infinite spin loop on every AP would starve the
+ *     BSP after selftest completes and break downstream hello64/sentry).
+ *   - 1<<22 iterations of pause is ~tens of ms in TCG, plenty of room
+ *     for the LAPIC timer ISR (≈6Hz, ~166ms period) to fire at least
+ *     once and force a quantum-expiry switch.
+ *
+ * arg encodes the target_cpu hint (informational only).
+ * No early-console I/O — it is BSP-only and not lock-safe from APs. */
+static volatile uint64_t s_burner_spins[OPENOS_X86_64_SMP_MAX_CPUS_HINT] = {0};
+
+static void burner_entry(void *arg)
+{
+    uintptr_t cpu = (uintptr_t)arg;
+    if (cpu >= OPENOS_X86_64_SMP_MAX_CPUS_HINT) cpu = OPENOS_X86_64_SMP_MAX_CPUS_HINT - 1u;
+    const uint64_t kLoops = (uint64_t)1u << 22;
+    for (uint64_t i = 0; i < kLoops; ++i) {
+        s_burner_spins[cpu]++;
+        __asm__ volatile ("pause");
+    }
+    arch_x86_64_sched_exit_self();
+    /* unreachable */
+    for (;;) { __asm__ volatile ("hlt"); }
+}
+
 void arch_x86_64_smp_selftest_run(void)
 {
     early_console64_write("\n[x86_64][smp-selftest] begin");
@@ -294,9 +325,82 @@ void arch_x86_64_smp_selftest_run(void)
         }
     }
 
+    /* G.6.5c Stage 11: distribute kthreads to APs via owner_cpu and prove
+     * each AP actually performs context switches (not just receives ticks).
+     *
+     * Strategy:
+     *   - For each AP i in [1..ap_n], spawn one burner kthread pinned to
+     *     CPU i via sched_spawn_kthread_prio_on(..., target_cpu=i).
+     *   - Burner is an infinite spin loop. The AP's LAPIC-timer ISR will
+     *     decrement quantum and eventually call sched_switch_to(), which
+     *     toggles between the AP's idle slot and the burner slot.
+     *   - Poll sched_switch_count_for_cpu(i) until every AP has seen at
+     *     least one switch.
+     *
+     * BSP's switch count is NOT a pass criterion here: BSP already has its
+     * own historical switch traffic (sched/preempt selftests), and adding
+     * a min-1 check would be redundant and noisy. We log it for evidence.
+     *
+     * If ap_n == 0 (UP), this stage is a no-op pass. */
+    if (ap_n > 0) {
+        early_console64_write("\n[x86_64][smp-selftest] stage 11: distributing burner kthreads across APs...");
+
+        /* Snapshot baselines so we measure the *delta* (defensive: even if
+         * earlier stages caused BSP switches, AP counters must start at 0
+         * because no burner has ever been owned by an AP before). */
+        uint64_t base[OPENOS_X86_64_SMP_MAX_CPUS_HINT];
+        for (uint32_t i = 0; i <= ap_n && i < OPENOS_X86_64_SMP_MAX_CPUS_HINT; ++i) {
+            base[i] = arch_x86_64_sched_switch_count_for_cpu(i);
+        }
+
+        uint32_t spawned = 0u;
+        for (uint32_t i = 1; i <= ap_n; ++i) {
+            uint32_t id = arch_x86_64_sched_spawn_kthread_prio_on(
+                burner_entry, (void *)(uintptr_t)i,
+                OPENOS_X86_64_SCHED_PRIO_DEFAULT, i);
+            if (id == 0u) {
+                early_console64_write("\n[x86_64][smp-selftest] FAIL: spawn_on cpu ");
+                early_console64_write_hex64((uint64_t)i);
+                early_console64_write(" failed\n");
+                return;
+            }
+            log_kv(" burner@cpu", (uint64_t)i);
+            log_kv(" slot=", (uint64_t)id);
+            ++spawned;
+        }
+
+        /* Poll up to ~1s. LAPIC timer ~6Hz in QEMU; each AP needs >=1 tick
+         * to consume its quantum and trigger sched_switch_to(). 1s gives
+         * us ~6 ticks of headroom per AP, plenty for 100% pass margin. */
+        uint64_t deadline = arch_x86_64_pit_get_ticks() + 1000u;
+        bool all_switched = false;
+        while (arch_x86_64_pit_get_ticks() < deadline) {
+            all_switched = true;
+            for (uint32_t i = 1; i <= ap_n; ++i) {
+                if (arch_x86_64_sched_switch_count_for_cpu(i) <= base[i]) {
+                    all_switched = false;
+                    break;
+                }
+            }
+            if (all_switched) break;
+            __asm__ volatile ("pause");
+        }
+
+        for (uint32_t i = 0; i <= ap_n; ++i) {
+            log_kv("\n[x86_64][smp-selftest] sched_switch_count[", (uint64_t)i);
+            log_kv("]=", arch_x86_64_sched_switch_count_for_cpu(i));
+        }
+        if (!all_switched) {
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: distributed kthreads did not cause switches on every AP\n");
+            return;
+        }
+        log_kv("\n[x86_64][smp-selftest] stage 11 spawned=", (uint64_t)spawned);
+        early_console64_write(" all APs switched");
+    }
+
     /* All stages reached by all APs. */
     if (ap_n > 0) {
-        early_console64_write("\n[x86_64][smp-selftest] PASS: all APs idle on private GDT/TSS/IDT+GS + sched-registered + LAPIC-timer driving sched_on_tick\n");
+        early_console64_write("\n[x86_64][smp-selftest] PASS: all APs idle on private GDT/TSS/IDT+GS + sched-registered + LAPIC-timer driving sched_on_tick + distributed kthreads switched per-CPU\n");
     } else {
         early_console64_write("\n[x86_64][smp-selftest] PASS: no APs (UP system, BSP idle slot only)\n");
     }
