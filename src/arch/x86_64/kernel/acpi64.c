@@ -115,6 +115,17 @@ typedef struct __attribute__((packed)) {
     uint8_t  lint;              /* 0 or 1 */
 } acpi_madt_lapic_nmi_t;
 
+/* type 5: Local APIC Address Override.
+ *   When present, the 64-bit address here supersedes the 32-bit
+ *   madt->lapic_address header field. ACPI 6.x §5.2.12.8.
+ *   Length must be 12 (1+1+2 reserved + 8 addr).
+ */
+typedef struct __attribute__((packed)) {
+    acpi_madt_entry_hdr_t hdr;
+    uint16_t reserved;
+    uint64_t address;
+} acpi_madt_lapic_addr_override_t;
+
 /* ------------------------------------------------------------------ */
 /* Singleton state                                                     */
 /* ------------------------------------------------------------------ */
@@ -283,11 +294,23 @@ static void acpi_parse_madt(const acpi_madt_t *madt,
             }
             break;
         }
+        case 5: { /* Local APIC Address Override.
+                   *   ACPI §5.2.12.8: when present, the 64-bit address here
+                   *   supersedes the 32-bit lapic_address in the MADT header.
+                   *   QEMU/OVMF on the i440fx/q35 boards typically does NOT
+                   *   emit this entry (LAPIC sits at the legacy 0xFEE00000),
+                   *   but a spec-conformant parser must still honor it.
+                   */
+            const acpi_madt_lapic_addr_override_t *ovr =
+                (const acpi_madt_lapic_addr_override_t *)p;
+            if (hdr->length >= sizeof(*ovr)) {
+                out->lapic_address                 = ovr->address;
+                out->lapic_addr_override_present   = 1;
+            }
+            break;
+        }
         default:
-            /* type 5 LAPIC addr override is rarely used on PCs and is
-             * deferred; the 64-bit LAPIC base is anyway read via
-             * IA32_APIC_BASE MSR at lapic_init() time.
-             */
+            /* Other MADT entry types (x2APIC etc.) are not consumed yet. */
             break;
         }
 

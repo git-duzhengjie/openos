@@ -33,6 +33,8 @@ bool arch_x86_64_acpi_selftest_run(void)
     log_kv(" rsdt=", info->rsdt_phys);
     log_kv(" madt=", info->madt_phys);
     log_kv(" lapic_base=", info->lapic_address);
+    log_kv(" lapic_addr_override=",
+           (uint64_t)info->lapic_addr_override_present);
     log_kv(" bsp_apic_id=", (uint64_t)info->bsp_apic_id);
 
     log_kv("\n[x86_64][acpi-selftest] cpu_count=", info->cpu_count);

@@ -228,6 +228,20 @@ void arch_x86_64_smp_selftest_run(void)
         return;
     }
 
+    /* G.3b-2 Stage 8b: every AP must have executed lapic_setup_nmi_lvt()
+     * after bring-up. Each AP bumps the alive_nmi_lvt byte exactly once
+     * on a successful return. The BSP, by contract, does NOT bump this
+     * counter (it programs its own LINTx via the same routine, but the
+     * counter is AP-only — mirroring lapic_timer_count's BSP=0 contract).
+     * On -smp 1 the expected value is 0 and the wait short-circuits. */
+    uint8_t alive_nmi_lvt = arch_x86_64_smp_alive_nmi_lvt_wait(expect, 500);
+    log_kv("\n[x86_64][smp-selftest] alive_nmi_lvt=", (uint64_t)alive_nmi_lvt);
+    log_kv(" expected>=", (uint64_t)expect);
+    if (ap_n > 0 && alive_nmi_lvt < expect) {
+        early_console64_write("\n[x86_64][smp-selftest] FAIL: AP did not program LVT NMI\n");
+        return;
+    }
+
     uint32_t online_cpus = ap_n + 1u;
     uint32_t idle_rc = arch_x86_64_sched_idle_selftest(online_cpus);
     log_kv("\n[x86_64][smp-selftest] sched_idle_selftest=", (uint64_t)idle_rc);

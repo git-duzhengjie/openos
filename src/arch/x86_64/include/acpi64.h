@@ -64,8 +64,16 @@ typedef struct {
     uint32_t cpu_count;
     uint32_t ioapic_count;
     uint32_t irq_override_count;
-    uint64_t lapic_address; /* MADT-declared LAPIC MMIO base */
+    uint64_t lapic_address; /* MADT-declared LAPIC MMIO base
+                             *   - initial value: MADT type 0 header (u32, zext)
+                             *   - if MADT type 5 (LAPIC Address Override) is
+                             *     present, that u64 supersedes per ACPI spec.
+                             *   - lapic_addr_override_present records whether
+                             *     the override path was taken (diagnostics).
+                             */
     uint8_t  bsp_apic_id;   /* read from CPUID(0x01).EBX[31:24] at init time */
+    uint8_t  lapic_addr_override_present; /* 1 if a type-5 entry was applied */
+    uint8_t  _pad_g3b[2];
 
     uint32_t lapic_nmi_count;
 

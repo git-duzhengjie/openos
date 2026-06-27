@@ -85,6 +85,19 @@ uint8_t arch_x86_64_smp_alive_gs_wait(uint8_t expected, uint32_t timeout_ms);
 uint8_t arch_x86_64_smp_alive_sched(void);
 uint8_t arch_x86_64_smp_alive_sched_wait(uint8_t expected, uint32_t timeout_ms);
 
+/* G.3b-2: per-AP LAPIC-LVT NMI programmed confirmation.
+ *
+ * Each AP bumps this byte exactly once after it has successfully programmed
+ * its own LAPIC LINT0/LINT1 NMI source(s) from the MADT type-4 records via
+ * lapic_setup_nmi_lvt(). With N CPUs total the BSP expects this counter
+ * to settle at N-1 (BSP programs its own LINTx but does NOT bump this
+ * counter — by contract, mirroring the LAPIC-timer per-CPU counter
+ * pattern). Slot lives at 0x9048 (next free 8-byte slot after the G.6.4
+ * sched counter at 0x9040). */
+#define OPENOS_X86_64_SMP_ALIVE_NMI_LVT_PHYS 0x00009048ULL
+uint8_t arch_x86_64_smp_alive_nmi_lvt(void);
+uint8_t arch_x86_64_smp_alive_nmi_lvt_wait(uint8_t expected, uint32_t timeout_ms);
+
 uint64_t arch_x86_64_smp_stack_base(uint32_t cpu_idx);
 uint64_t arch_x86_64_smp_stack_top(uint32_t cpu_idx);
 uint64_t arch_x86_64_smp_cpu_stack_top(uint8_t apic_id);

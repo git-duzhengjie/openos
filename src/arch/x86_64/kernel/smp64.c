@@ -202,6 +202,7 @@ void arch_x86_64_smp_alive_reset_all(void) {
     volatile uint8_t *id  = (volatile uint8_t *)(uintptr_t)OPENOS_X86_64_SMP_ALIVE_IDLE_PHYS;
     volatile uint8_t *gs  = (volatile uint8_t *)(uintptr_t)OPENOS_X86_64_SMP_ALIVE_GS_PHYS;
     volatile uint8_t *sc  = (volatile uint8_t *)(uintptr_t)OPENOS_X86_64_SMP_ALIVE_SCHED_PHYS;
+    volatile uint8_t *nl  = (volatile uint8_t *)(uintptr_t)OPENOS_X86_64_SMP_ALIVE_NMI_LVT_PHYS;
     *rm = 0;
     *pm = 0;
     *lm = 0;
@@ -210,6 +211,7 @@ void arch_x86_64_smp_alive_reset_all(void) {
     *id = 0;
     *gs = 0;
     *sc = 0;
+    *nl = 0;
 }
 
 uint8_t arch_x86_64_smp_alive_rm_wait(uint8_t expected, uint32_t timeout_ms) {
@@ -333,6 +335,24 @@ uint8_t arch_x86_64_smp_alive_sched_wait(uint8_t expected, uint32_t timeout_ms) 
     }
 }
 
+/* G.3b-2: per-AP LAPIC LVT NMI programmed confirmation. */
+uint8_t arch_x86_64_smp_alive_nmi_lvt(void) {
+    const volatile uint8_t *p =
+        (const volatile uint8_t *)(uintptr_t)OPENOS_X86_64_SMP_ALIVE_NMI_LVT_PHYS;
+    return *p;
+}
+
+uint8_t arch_x86_64_smp_alive_nmi_lvt_wait(uint8_t expected, uint32_t timeout_ms) {
+    uint32_t elapsed = 0;
+    for (;;) {
+        uint8_t cur = arch_x86_64_smp_alive_nmi_lvt();
+        if (cur >= expected) return cur;
+        if (elapsed >= timeout_ms) return cur;
+        arch_x86_64_delay_ms(1);
+        elapsed++;
+    }
+}
+
 uint64_t arch_x86_64_smp_stack_base(uint32_t cpu_idx) {
     if (cpu_idx >= OPENOS_X86_64_SMP_MAX_CPUS) return 0;
     return OPENOS_X86_64_SMP_STACK_BASE + ((uint64_t)cpu_idx * OPENOS_X86_64_SMP_STACK_SIZE);
@@ -432,8 +452,20 @@ void arch_x86_64_ap_entry(uint64_t apic_id) {
          * ACPI MADT, so chassis NMIs steered at this CPU's LINT pin get
          * delivered as vector 2 rather than vanishing or escalating to
          * a triple fault. Failures are non-fatal — alive_lapic still
-         * counts as "AP is up". */
-        (void)arch_x86_64_lapic_setup_nmi_lvt(/*is_bsp=*/false);
+         * counts as "AP is up".
+         *
+         * G.3b-2: capture the return value and, on success, bump the
+         * per-AP alive byte at OPENOS_X86_64_SMP_ALIVE_NMI_LVT_PHYS so
+         * the BSP selftest can assert that every AP actually executed
+         * the LVT-NMI programming path. */
+        bool nmi_ok = arch_x86_64_lapic_setup_nmi_lvt(/*is_bsp=*/false);
+        if (nmi_ok) {
+            __asm__ __volatile__(
+                "lock incb (%0)"
+                :
+                : "r"((volatile uint8_t *)(uintptr_t)OPENOS_X86_64_SMP_ALIVE_NMI_LVT_PHYS)
+                : "memory");
+        }
         __asm__ __volatile__(
             "lock incb (%0)"
             :
