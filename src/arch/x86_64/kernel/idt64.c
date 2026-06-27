@@ -2,6 +2,22 @@
 #include "../include/idt64.h"
 #include "../include/early_console64.h"
 
+/*
+ * Step G.x: post-EXIT kernel-fault sentry state.
+ *
+ * Any CPU exception (vector 0..31) taken while frame->cs encodes a ring0
+ * selector bumps these counters. The very first such hit records vector,
+ * error code, RIP, RSP so a regression dumps actionable state instead of
+ * the usual silent triple-fault reset.
+ *
+ * All updates happen with interrupts disabled (we are inside an exception
+ * handler), and there is exactly one BSP path for the ring3-drop selftest
+ * that samples them, so plain volatile reads/writes are sufficient — no
+ * locking needed yet. When AP exception delivery starts firing we will
+ * revisit this with a per-CPU split.
+ */
+static volatile struct x86_64_kernel_fault_snapshot s_kfault = { 0 };
+
 struct idt64_entry {
     uint16_t offset_low;
     uint16_t selector;
@@ -166,6 +182,32 @@ int arch_x86_64_idt_register_irq(uint8_t cpu_vector, void (*handler)(void)) {
 }
 
 void arch_x86_64_exception_dispatch(const struct x86_64_exception_frame *frame) {
+    /*
+     * Step G.x: bump the ring0 fault sentry *before* any vector-specific
+     * handling. NMI is intentionally counted as well — if NMI fires from
+     * kernel code we still want a visible delta in the selftest sample.
+     *
+     * CS is the hardware-pushed selector. RPL bits 0..1 == 0 means the
+     * faulting code was running at ring0. We also defensively reject the
+     * NULL selector (frame->cs == 0) because the iret frame for a half-
+     * built context can leave it cleared.
+     */
+    if (frame && (frame->cs & 0x3u) == 0u && frame->cs != 0u) {
+        ++s_kfault.count;
+        switch (frame->vector) {
+            case 6:  ++s_kfault.ud_count; break;
+            case 13: ++s_kfault.gp_count; break;
+            case 14: ++s_kfault.pf_count; break;
+            default: break;
+        }
+        if (s_kfault.first_rip == 0u) {
+            s_kfault.first_vector = frame->vector;
+            s_kfault.first_error = frame->error_code;
+            s_kfault.first_rip = (uint64_t)frame->rip;
+            s_kfault.first_rsp = (uint64_t)frame->rsp;
+        }
+    }
+
     /* G.3b-final: vector 2 (NMI) is recoverable in our model — it can
      * be steered to a CPU via LVT LINT1, and on PC platforms it most
      * commonly represents a chassis / watchdog event we just want to
@@ -228,3 +270,49 @@ void arch_x86_64_exception_dispatch(const struct x86_64_exception_frame *frame) 
         __asm__ __volatile__("cli; hlt");
     }
 }
+
+uint64_t arch_x86_64_idt_kernel_fault_count(void) {
+    return s_kfault.count;
+}
+
+uint64_t arch_x86_64_idt_kernel_ud_count(void) {
+    return s_kfault.ud_count;
+}
+
+void arch_x86_64_idt_kernel_fault_snapshot(struct x86_64_kernel_fault_snapshot *out) {
+    if (!out) {
+        return;
+    }
+    out->count        = s_kfault.count;
+    out->ud_count     = s_kfault.ud_count;
+    out->gp_count     = s_kfault.gp_count;
+    out->pf_count     = s_kfault.pf_count;
+    out->first_vector = s_kfault.first_vector;
+    out->first_error  = s_kfault.first_error;
+    out->first_rip    = s_kfault.first_rip;
+    out->first_rsp    = s_kfault.first_rsp;
+}
+
+void arch_x86_64_idt_print_kernel_fault_stats(void) {
+    early_console64_write("[x86_64][kfault] ring0 exceptions total=");
+    early_console64_write_hex64(s_kfault.count);
+    early_console64_write(" ud=");
+    early_console64_write_hex64(s_kfault.ud_count);
+    early_console64_write(" gp=");
+    early_console64_write_hex64(s_kfault.gp_count);
+    early_console64_write(" pf=");
+    early_console64_write_hex64(s_kfault.pf_count);
+    early_console64_write("\n");
+    if (s_kfault.count) {
+        early_console64_write("[x86_64][kfault] first vec=");
+        early_console64_write_hex64(s_kfault.first_vector);
+        early_console64_write(" err=");
+        early_console64_write_hex64(s_kfault.first_error);
+        early_console64_write(" rip=");
+        early_console64_write_hex64(s_kfault.first_rip);
+        early_console64_write(" rsp=");
+        early_console64_write_hex64(s_kfault.first_rsp);
+        early_console64_write("\n");
+    }
+}
+

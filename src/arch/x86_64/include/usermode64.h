@@ -27,4 +27,15 @@ int arch_x86_64_usermode_run(x86_64_entry_t entry);
 void arch_x86_64_usermode_mark_exited(int code);
 void arch_x86_64_usermode_return_to_kernel(void) __attribute__((noreturn));
 
+/*
+ * Step G.x: post-EXIT kernel-fault sentry exports for the ring3 selftest.
+ *
+ * - canary: 0 before run, 1 inside the kernel-context save, 2 after the
+ *   inline-asm return path. Selftest checks canary == 2.
+ * - kfault_delta: how many ring0 exceptions the IDT saw while we were
+ *   off in ring3 + on the return path. Healthy runs MUST yield 0.
+ */
+uint64_t arch_x86_64_usermode_canary(void);
+uint64_t arch_x86_64_usermode_kfault_delta(void);
+
 #endif /* OPENOS_ARCH_X86_64_USERMODE64_H */

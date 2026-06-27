@@ -156,9 +156,12 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
 
     /* Step F.1 IDT registration selftest — runs as the very first selftest
      * because every later subsystem (syscall, sched, net, tsc, ring3 drop)
-     * implicitly trusts that the IDT routes #PF/#GP/#UD/etc. to our C
-     * handlers. A silently-broken gate here would otherwise turn a
-     * follow-on bug into a triple-fault reset with zero log. */
+     * needs the IDT to route #PF/#GP/#UD/etc. to our C handlers. A
+     * silently-broken gate here would otherwise turn a follow-on bug
+     * into a triple-fault reset with zero log. The complementary
+     * post-hello64 kernel-fault sentry (Step G.x) verifies after the
+     * fact that no ring0 exception slipped through during the ring3
+     * round-trip. */
     {
         int idt_rv = arch_x86_64_idt_selftest_run();
         early_console64_write("[x86_64][idt-selftest] result=");
@@ -267,6 +270,32 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
     arch_x86_64_elf64_loader_print_status();
     arch_x86_64_usermode_print_status();
     arch_x86_64_proc_print_status();
+
+    /* Step G.x post-EXIT kernel-fault sentry selftest.
+     *
+     * After the ring3 hello64 round-trip completes, we expect:
+     *   - canary == 2 (return path executed end-to-end)
+     *   - kfault_delta == 0 (no #UD/#GP/#PF/etc. in ring0 during the
+     *     entire round-trip; SYS_EXIT goes through the syscall path,
+     *     not the IDT, so this must stay flat)
+     *
+     * If either fails, the original 0b14358-class bug has come back —
+     * dump the IDT sentry snapshot so the regression points straight
+     * at the offending RIP. */
+    {
+        uint64_t canary = arch_x86_64_usermode_canary();
+        uint64_t kfdelta = arch_x86_64_usermode_kfault_delta();
+        early_console64_write("[x86_64][post-exit-sentry] canary=");
+        early_console64_write_hex64(canary);
+        early_console64_write(" kfault_delta=");
+        early_console64_write_hex64(kfdelta);
+        if (canary == 2 && kfdelta == 0) {
+            early_console64_write(" result=PASS\n");
+        } else {
+            early_console64_write(" result=FAIL\n");
+            arch_x86_64_idt_print_kernel_fault_stats();
+        }
+    }
 
     arch_x86_64_shell_run_init();
     arch_x86_64_shell_print_status();

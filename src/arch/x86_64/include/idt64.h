@@ -62,4 +62,38 @@ int arch_x86_64_idt_query_gate(uint8_t vector, struct x86_64_idt_gate_info *out)
  */
 int arch_x86_64_idt_register_irq(uint8_t cpu_vector, void (*handler)(void));
 
+/*
+ * Step G.x: post-EXIT kernel-fault sentry.
+ *
+ * Earlier work fixed a real bug where, after a ring3 program SYS_EXIT'd,
+ * the kernel return path landed at a bogus RIP and immediately #UD'd in
+ * ring0 (see commit 0b14358). The fix shipped, but there was no explicit
+ * counter to catch a regression — a silently-broken return path would
+ * once again just look like a triple-fault reset.
+ *
+ * These counters are bumped by arch_x86_64_exception_dispatch() whenever
+ * a CPU exception is taken with the saved CS pointing at a ring0
+ * selector. Selftests around the ring3 drop sample them before/after and
+ * fail loudly on any delta.
+ *
+ * The "first hit" snapshot stores vector / error_code / RIP / RSP from
+ * the very first ring0 exception seen, so a regression dump points
+ * straight at the offending instruction.
+ */
+struct x86_64_kernel_fault_snapshot {
+    uint64_t count;        /* total ring0 exceptions observed */
+    uint64_t ud_count;     /* #UD subset (vector 6) */
+    uint64_t gp_count;     /* #GP subset (vector 13) */
+    uint64_t pf_count;     /* #PF subset (vector 14) */
+    uint64_t first_vector;
+    uint64_t first_error;
+    uint64_t first_rip;
+    uint64_t first_rsp;
+};
+
+uint64_t arch_x86_64_idt_kernel_fault_count(void);
+uint64_t arch_x86_64_idt_kernel_ud_count(void);
+void arch_x86_64_idt_kernel_fault_snapshot(struct x86_64_kernel_fault_snapshot *out);
+void arch_x86_64_idt_print_kernel_fault_stats(void);
+
 #endif /* OPENOS_ARCH_X86_64_IDT64_H */

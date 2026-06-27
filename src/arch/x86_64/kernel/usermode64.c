@@ -4,10 +4,33 @@
 
 #include "../include/early_console64.h"
 #include "../include/gdt64.h"
+#include "../include/idt64.h"
 #include "../include/pmm64.h"
 #include "../include/proc64.h"
 
 extern void arch_x86_64_iretq_enter_user(const x86_64_user_iretq_frame_t *frame);
+
+/*
+ * Step G.x: ring3-drop sentry state.
+ *
+ * usermode_canary is set to:
+ *   0 before arch_x86_64_usermode_run() ever runs,
+ *   1 right after the kernel stashes its longjmp context ("entered"),
+ *   2 right after the inline-asm return path falls through `1:` and pops
+ *     the callee-saved frame cleanly ("return path executed end-to-end").
+ *
+ * If a regression of commit 0b14358 reintroduces the misaligned saved-rsp
+ * bug, the `ret` from arch_x86_64_usermode_return_to_kernel() lands at
+ * something other than label 1 — the canary will stay at 1 (or change in
+ * an unexpected way), and the selftest below panics.
+ *
+ * Paired with arch_x86_64_idt_kernel_fault_count(): even if the canary
+ * somehow gets to 2 by accident, a #UD/#GP/#PF on the way there bumps the
+ * kfault counter and the selftest still catches it.
+ */
+static volatile uint64_t usermode_canary = 0;
+static volatile uint64_t usermode_kfault_before = 0;
+static volatile uint64_t usermode_kfault_after = 0;
 
 /*
  * Step D.2: the bootstrap user stack must live in memory that ring3 can
@@ -126,6 +149,14 @@ int arch_x86_64_usermode_run(x86_64_entry_t entry) {
     usermode_running = 1;
     ++usermode_run_count;
 
+    /* Step G.x: take a snapshot of the ring0 fault counters before the
+     * iretq drop. The kernel between here and the matching post-iretq
+     * point below must observe zero ring0 exceptions — SYS_EXIT goes
+     * through the syscall path, not the IDT, so the sentry's "total"
+     * counter must not advance for a healthy run. */
+    usermode_kfault_before = arch_x86_64_idt_kernel_fault_count();
+    usermode_canary = 1;
+
     /*
      * Step D.3: save a real longjmp-style return context.
      *
@@ -189,6 +220,12 @@ int arch_x86_64_usermode_run(x86_64_entry_t entry) {
     );
     (void)exited_local; (void)code_local;
 
+    /* Step G.x: end of the ring3 round-trip. Mark canary=2 and sample the
+     * kfault counter again. The exported helpers below let the selftest
+     * verify (after_total - before_total) == 0. */
+    usermode_canary = 2;
+    usermode_kfault_after = arch_x86_64_idt_kernel_fault_count();
+
     usermode_running = 0;
     return usermode_exited ? usermode_last_exit_code : -3;
 }
@@ -230,5 +267,17 @@ void arch_x86_64_usermode_print_status(void) {
     early_console64_write_hex64(prepared_user_frame.rip);
     early_console64_write(" frame_rsp=");
     early_console64_write_hex64(prepared_user_frame.rsp);
+    early_console64_write(" canary=");
+    early_console64_write_hex64(usermode_canary);
+    early_console64_write(" kfault_delta=");
+    early_console64_write_hex64(usermode_kfault_after - usermode_kfault_before);
     early_console64_write("\n");
+}
+
+uint64_t arch_x86_64_usermode_canary(void) {
+    return usermode_canary;
+}
+
+uint64_t arch_x86_64_usermode_kfault_delta(void) {
+    return usermode_kfault_after - usermode_kfault_before;
 }
