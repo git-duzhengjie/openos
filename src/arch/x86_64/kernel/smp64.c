@@ -199,12 +199,14 @@ void arch_x86_64_smp_alive_reset_all(void) {
     volatile uint8_t *la  = (volatile uint8_t *)(uintptr_t)OPENOS_X86_64_SMP_ALIVE_LAPIC_PHYS;
     volatile uint8_t *pc  = (volatile uint8_t *)(uintptr_t)OPENOS_X86_64_SMP_ALIVE_PERCPU_PHYS;
     volatile uint8_t *id  = (volatile uint8_t *)(uintptr_t)OPENOS_X86_64_SMP_ALIVE_IDLE_PHYS;
+    volatile uint8_t *gs  = (volatile uint8_t *)(uintptr_t)OPENOS_X86_64_SMP_ALIVE_GS_PHYS;
     *rm = 0;
     *pm = 0;
     *lm = 0;
     *la = 0;
     *pc = 0;
     *id = 0;
+    *gs = 0;
 }
 
 uint8_t arch_x86_64_smp_alive_rm_wait(uint8_t expected, uint32_t timeout_ms) {
@@ -285,6 +287,24 @@ uint8_t arch_x86_64_smp_alive_idle_wait(uint8_t expected, uint32_t timeout_ms) {
     uint32_t elapsed = 0;
     for (;;) {
         uint8_t cur = arch_x86_64_smp_alive_idle();
+        if (cur >= expected) return cur;
+        if (elapsed >= timeout_ms) return cur;
+        arch_x86_64_delay_ms(1);
+        elapsed++;
+    }
+}
+
+/* G.6.2: per-AP GS_BASE installation confirmation. */
+uint8_t arch_x86_64_smp_alive_gs(void) {
+    const volatile uint8_t *p =
+        (const volatile uint8_t *)(uintptr_t)OPENOS_X86_64_SMP_ALIVE_GS_PHYS;
+    return *p;
+}
+
+uint8_t arch_x86_64_smp_alive_gs_wait(uint8_t expected, uint32_t timeout_ms) {
+    uint32_t elapsed = 0;
+    for (;;) {
+        uint8_t cur = arch_x86_64_smp_alive_gs();
         if (cur >= expected) return cur;
         if (elapsed >= timeout_ms) return cur;
         arch_x86_64_delay_ms(1);
@@ -406,6 +426,22 @@ void arch_x86_64_ap_entry(uint64_t apic_id) {
      * lidt the AP would either still trap into the BSP's IDTR or, worse,
      * into garbage if the BSP's IDTR is no longer mapped. */
     arch_x86_64_idt_load_ap();
+
+    /* G.6.2: install per-CPU "current" pointer via IA32_GS_BASE. Must come
+     * *after* percpu_load (which reloads %gs from the GDT data segment and
+     * thereby clobbers the hidden GS base) to take effect. */
+    arch_x86_64_percpu_install_gs(cpu_idx);
+    /* Verify the install: %gs:0 must round-trip back to &g_percpu[cpu_idx]
+     * with self-pointer + magic matching. If not, freeze this AP — better
+     * than silently bumping the alive counter and confusing the selftest. */
+    if (!arch_x86_64_percpu_gs_ok()) {
+        for (;;) { __asm__ volatile ("cli; hlt"); }
+    }
+    __asm__ __volatile__(
+        "lock incb (%0)"
+        :
+        : "r"((volatile uint8_t *)(uintptr_t)OPENOS_X86_64_SMP_ALIVE_GS_PHYS)
+        : "memory");
 
     /* G.6.1: announce the AP has reached its idle loop. With N CPUs total
      * the BSP expects this counter to settle at N-1 after AP bring-up. */

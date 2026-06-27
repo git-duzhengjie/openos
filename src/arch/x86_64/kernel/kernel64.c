@@ -4,6 +4,7 @@
 #include "../include/elf64_loader.h"
 #include "../include/embed_hello64.h"
 #include "../include/fdtable64.h"
+#include "../include/percpu64.h"
 #include "../include/gdt64.h"
 #include "../include/heap64.h"
 #include "../include/handoff64.h"
@@ -59,6 +60,11 @@ void arch_x86_64_early_init(const openos_bootinfo_t *bootinfo) {
     arch_x86_64_tss_init();
     arch_x86_64_gdt_init();
     arch_x86_64_tss_load();
+    /* G.6.2: install per-CPU "current" pointer for the BSP (cpu_idx=0).
+     * Must come after gdt_init/tss_load (those reload %gs from a GDT data
+     * descriptor with base=0 and would otherwise clobber the hidden base).
+     * From this point onward, %gs:0 yields &g_percpu[0]. */
+    arch_x86_64_percpu_install_gs(0);
     arch_x86_64_idt_init();
     early_console64_init();
     early_console64_write("[x86_64] arch_ops=");

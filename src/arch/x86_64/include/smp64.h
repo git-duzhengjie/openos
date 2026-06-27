@@ -28,6 +28,9 @@
  * entering the AP idle (hlt) loop. With N CPUs total the BSP expects N-1. */
 #define OPENOS_X86_64_SMP_ALIVE_IDLE_PHYS  0x00009030ULL
 
+/* G.6.2: AP-side GS_BASE installed (per-CPU "current") confirmation. */
+#define OPENOS_X86_64_SMP_ALIVE_GS_PHYS    0x00009038ULL
+
 bool arch_x86_64_smp_init(void);
 bool arch_x86_64_smp_is_ready(void);
 
@@ -67,6 +70,10 @@ uint8_t arch_x86_64_smp_alive_percpu_wait(uint8_t expected, uint32_t timeout_ms)
 /* G.6.1: per-AP idle-loop reached confirmation. */
 uint8_t arch_x86_64_smp_alive_idle(void);
 uint8_t arch_x86_64_smp_alive_idle_wait(uint8_t expected, uint32_t timeout_ms);
+
+/* G.6.2: per-AP GS_BASE installation confirmation. */
+uint8_t arch_x86_64_smp_alive_gs(void);
+uint8_t arch_x86_64_smp_alive_gs_wait(uint8_t expected, uint32_t timeout_ms);
 
 uint64_t arch_x86_64_smp_stack_base(uint32_t cpu_idx);
 uint64_t arch_x86_64_smp_stack_top(uint32_t cpu_idx);

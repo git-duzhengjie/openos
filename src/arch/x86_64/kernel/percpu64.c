@@ -190,3 +190,57 @@ x86_64_virt_addr_t arch_x86_64_percpu_tss_base(uint32_t cpu_idx) {
     }
     return (x86_64_virt_addr_t)(uintptr_t)&g_tss[cpu_idx];
 }
+
+/* ---------------- G.6.2: per-CPU "current" via GS_BASE ---------------- */
+
+static arch_x86_64_percpu_t g_percpu[OPENOS_X86_64_PERCPU_MAX_CPUS]
+    __attribute__((aligned(64)));
+
+arch_x86_64_percpu_t *arch_x86_64_percpu_slot(uint32_t cpu_idx) {
+    if (cpu_idx >= OPENOS_X86_64_PERCPU_MAX_CPUS) return (void *)0;
+    return &g_percpu[cpu_idx];
+}
+
+static inline void wrmsr64(uint32_t msr, uint64_t value) {
+    uint32_t lo = (uint32_t)(value & 0xFFFFFFFFu);
+    uint32_t hi = (uint32_t)(value >> 32);
+    __asm__ __volatile__("wrmsr" : : "c"(msr), "a"(lo), "d"(hi));
+}
+
+static inline uint64_t rdmsr64(uint32_t msr) {
+    uint32_t lo, hi;
+    __asm__ __volatile__("rdmsr" : "=a"(lo), "=d"(hi) : "c"(msr));
+    return ((uint64_t)hi << 32) | (uint64_t)lo;
+}
+
+void arch_x86_64_percpu_install_gs(uint32_t cpu_idx) {
+    if (cpu_idx >= OPENOS_X86_64_PERCPU_MAX_CPUS) {
+        return;
+    }
+    arch_x86_64_percpu_t *p = &g_percpu[cpu_idx];
+    p->self           = (uint64_t)(uintptr_t)p;
+    p->cpu_idx        = cpu_idx;
+    p->magic          = OPENOS_X86_64_PERCPU_MAGIC;
+    p->sched_ticks    = 0;
+    p->sched_switches = 0;
+
+    /* Write IA32_GS_BASE directly. Note: a subsequent `mov <selector>, %gs`
+     * would reload the hidden base from the GDT descriptor and *clobber*
+     * this value. callers must therefore install GS after percpu_load. */
+    wrmsr64(OPENOS_X86_64_MSR_GS_BASE, (uint64_t)(uintptr_t)p);
+
+    /* Also seed IA32_KERNEL_GS_BASE to the same value so a stray swapgs
+     * (e.g. from a future syscall path) doesn't land us in zeroland. */
+    wrmsr64(OPENOS_X86_64_MSR_KERNEL_GS_BASE, (uint64_t)(uintptr_t)p);
+}
+
+bool arch_x86_64_percpu_gs_ok(void) {
+    uint64_t base = rdmsr64(OPENOS_X86_64_MSR_GS_BASE);
+    if (base == 0) return false;
+    arch_x86_64_percpu_t *p = (arch_x86_64_percpu_t *)(uintptr_t)base;
+    /* Sanity: %gs:0 must self-pointer back to p, magic must match. */
+    if (p->self != base) return false;
+    if (p->magic != OPENOS_X86_64_PERCPU_MAGIC) return false;
+    if (p->cpu_idx >= OPENOS_X86_64_PERCPU_MAX_CPUS) return false;
+    return true;
+}

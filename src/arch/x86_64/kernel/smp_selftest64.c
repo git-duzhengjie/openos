@@ -2,6 +2,7 @@
 #include "../include/smp64.h"
 #include "../include/ap_trampoline64.h"
 #include "../include/early_console64.h"
+#include "../include/percpu64.h"
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -154,9 +155,36 @@ void arch_x86_64_smp_selftest_run(void)
         return;
     }
 
-    /* All six stages reached by all APs. */
+    /* Stage 7: per-CPU GS_BASE installed on every AP (G.6.2). */
+    uint8_t alive_gs = arch_x86_64_smp_alive_gs_wait(expect, 500);
+    log_kv("\n[x86_64][smp-selftest] alive_gs=", (uint64_t)alive_gs);
+    log_kv(" expected>=", (uint64_t)expect);
+    if (ap_n > 0 && alive_gs < expect) {
+        early_console64_write("\n[x86_64][smp-selftest] FAIL: AP did not install per-CPU GS_BASE\n");
+        return;
+    }
+
+    /* G.6.2 bonus: BSP-side GS_BASE sanity. From kernel64_main we installed
+     * GS for cpu_idx=0 right after tss_load; verify the self-pointer and
+     * magic round-trip through %gs:0. */
+    if (!arch_x86_64_percpu_gs_ok()) {
+        early_console64_write("\n[x86_64][smp-selftest] FAIL: BSP GS_BASE not consistent\n");
+        return;
+    }
+    arch_x86_64_percpu_t *bsp_pcpu = arch_x86_64_this_cpu_ptr();
+    log_kv("\n[x86_64][smp-selftest] bsp_pcpu_self=", (uint64_t)(uintptr_t)bsp_pcpu);
+    log_kv(" cpu_idx=", (uint64_t)arch_x86_64_this_cpu_idx());
+    log_kv(" magic=",   (uint64_t)arch_x86_64_this_cpu_magic());
+    if (arch_x86_64_this_cpu_idx() != 0 ||
+        arch_x86_64_this_cpu_magic() != OPENOS_X86_64_PERCPU_MAGIC ||
+        bsp_pcpu != arch_x86_64_percpu_slot(0)) {
+        early_console64_write("\n[x86_64][smp-selftest] FAIL: BSP gs:0 not pointing at percpu[0]\n");
+        return;
+    }
+
+    /* All stages reached by all APs. */
     if (ap_n > 0) {
-        early_console64_write("\n[x86_64][smp-selftest] PASS: all APs idle on private GDT/TSS/IDT\n");
+        early_console64_write("\n[x86_64][smp-selftest] PASS: all APs idle on private GDT/TSS/IDT+GS\n");
     } else {
         early_console64_write("\n[x86_64][smp-selftest] PASS: no APs (UP system)\n");
     }
