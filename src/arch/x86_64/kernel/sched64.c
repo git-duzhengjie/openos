@@ -392,6 +392,13 @@ static int sched_has_other_ready(uint32_t cur) {
 
 uint32_t arch_x86_64_sched_on_tick(void) {
     sched_ensure_bootstrap_slot();
+    /* G.6.5b: count every entry into this function on a per-CPU basis.
+     * This is the direct counterpart of the LAPIC-timer raw counter:
+     *   - On BSP: bumped by PIT IRQ0 path -> sched_on_tick.
+     *   - On AP:  bumped by LAPIC-timer vector 0x40 -> sched_on_tick.
+     * Selftest uses this to prove sched_on_tick is reachable from each
+     * CPU's own IRQ path (vs. only from cooperative yield). */
+    arch_x86_64_this_cpu_ptr()->sched_tick_calls++;
     if (sched_pc_quantum() > 0u) {
         sched_pc_dec_quantum();
     }
@@ -512,4 +519,18 @@ uint32_t arch_x86_64_sched_idle_selftest(uint32_t online_cpus) {
         if (sched_slots[c].is_idle != 0u)              return 0x50u | c;
     }
     return 0u;
+}
+
+/* G.6.5b: read per-CPU sched_on_tick entry counter for arbitrary CPU.
+ * Uses the percpu_slot() accessor (NOT %gs) so any CPU can observe any
+ * other CPU's counter. Safe to call without locks because:
+ *   - The counter is a 64-bit aligned scalar, written by exactly one
+ *     CPU (the owner) from its own IRQ context.
+ *   - We only need monotonic-eventual-consistency for the selftest's
+ *     polling loop: a slightly stale read is fine, torn read on x86_64
+ *     for naturally aligned u64 is not possible. */
+uint64_t arch_x86_64_sched_tick_calls_for_cpu(uint32_t cpu_idx) {
+    arch_x86_64_percpu_t *p = arch_x86_64_percpu_slot(cpu_idx);
+    if (p == (void *)0) return 0;
+    return p->sched_tick_calls;
 }

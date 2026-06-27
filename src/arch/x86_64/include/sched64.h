@@ -174,4 +174,11 @@ uint32_t arch_x86_64_sched_set_priority(uint32_t slot, uint32_t priority);
 uint32_t arch_x86_64_sched_get_priority(uint32_t slot);
 uint32_t arch_x86_64_sched_quantum_for_priority(uint32_t priority);
 
+/* G.6.5b: per-CPU sched_on_tick entry counter. Reads the value from
+ * the CPU identified by cpu_idx, NOT necessarily the caller's CPU.
+ * Implemented by walking the percpu array directly (no %gs needed).
+ * Returns 0 for unknown cpu_idx. Used by smp_selftest stage 10 to
+ * prove sched_on_tick fires on each CPU's own IRQ path. */
+uint64_t arch_x86_64_sched_tick_calls_for_cpu(uint32_t cpu_idx);
+
 #endif /* OPENOS_ARCH_X86_64_SCHED64_H */

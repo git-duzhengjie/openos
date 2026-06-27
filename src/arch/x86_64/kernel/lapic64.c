@@ -311,19 +311,52 @@ bool arch_x86_64_lapic_timer_init_periodic(uint8_t vector,
     return true;
 }
 
-/* G.6.5a — LAPIC timer IRQ handler (vector 0x40).
+/* G.6.5a/b — LAPIC timer IRQ handler (vector 0x40).
  *
  * Called from x86_64_irq_lapic_timer in isr64.S. Runs on whichever CPU
  * received the interrupt. Per-CPU state is accessed via this_cpu().
  *
- * In G.6.5a this is observation-only: bump the per-CPU heartbeat counter
- * and EOI. G.6.5b will wire sched_on_tick() in here. The BSP is NOT
- * expected to enter this handler (BSP never programs its LAPIC timer),
- * but we still write a correct EOI in case of stray delivery. */
+ * G.6.5a: observation-only — bump per-CPU heartbeat counter, then EOI.
+ *
+ * G.6.5b: also drive the scheduler quantum on this CPU by calling
+ *         arch_x86_64_sched_on_tick(). Ordering:
+ *           1) bump lapic_timer_count          (raw ISR-entry observer)
+ *           2) sched_on_tick()                  (may switch context!)
+ *           3) lapic_send_eoi()                 (always after sched step)
+ *
+ *         Rationale for EOI-last:
+ *           - If sched_on_tick switches contexts, we return into a
+ *             different thread's stack. The EOI is per-LAPIC (not per
+ *             thread), so emitting it here keeps the local APIC happy
+ *             regardless of which thread we resume into.
+ *           - With EOI before yield, a same-vector re-entry could fire
+ *             during the switch window. Keeping EOI last delays the
+ *             next timer interrupt until we have fully returned.
+ *
+ *         On the BSP this handler should never run (BSP does not arm
+ *         its LAPIC timer in G.6.5), but if it ever does we still
+ *         do the right thing: BSP's slot 0 is the bootstrap thread,
+ *         sched_on_tick will degrade gracefully if nothing else is
+ *         READY for cpu_idx==0.
+ */
+extern uint32_t arch_x86_64_sched_on_tick(void);
+
 void arch_x86_64_lapic_timer_irq_handler(void) {
     arch_x86_64_percpu_t *p = arch_x86_64_this_cpu_ptr();
     if (p != 0) {
         p->lapic_timer_count++;
     }
+
+    /* G.6.5b: drive per-CPU quantum / preemption. Safe to call here
+     * because:
+     *   - sched_on_tick reads/writes only this CPU's percpu cursors
+     *     (via %gs) plus sched_slots[] filtered by owner_cpu == us.
+     *   - sched_slots[] writes during steady-state are confined to
+     *     state transitions of slots already owned by this CPU; APs
+     *     never spawn new kthreads in G.6.5b, so no allocator races.
+     *   - The ISR entered with IF=0; we do NOT re-enable interrupts
+     *     before the call. */
+    (void)arch_x86_64_sched_on_tick();
+
     arch_x86_64_lapic_send_eoi();
 }

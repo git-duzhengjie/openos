@@ -226,6 +226,7 @@ void arch_x86_64_percpu_install_gs(uint32_t cpu_idx) {
     p->sched_switch_count   = 0;
     p->sched_preempt_count  = 0;
     p->lapic_timer_count    = 0;
+    p->sched_tick_calls     = 0;
 
     /* Write IA32_GS_BASE directly. Note: a subsequent `mov <selector>, %gs`
      * would reload the hidden base from the GDT descriptor and *clobber*

@@ -251,9 +251,52 @@ void arch_x86_64_smp_selftest_run(void)
         }
     }
 
+    /* G.6.5b Stage 10: each AP's LAPIC-timer ISR now drives sched_on_tick.
+     * We verify that the per-CPU sched_tick_calls counter (bumped at the
+     * very entry of sched_on_tick) advances on every CPU:
+     *   - BSP (cpu 0): driven by PIT IRQ0, must have advanced since boot.
+     *   - Each AP:     driven by LAPIC-timer vector 0x40, must have
+     *                  advanced at least once per AP.
+     *
+     * This is the proof that sched_on_tick is reachable from each CPU's
+     * *own* IRQ path (not just cooperative yields), and that the per-CPU
+     * cursors / quantum / preempt counters are being driven independently.
+     *
+     * Polling budget: another ~500 ms. We're tolerant here (min=1 per AP)
+     * because the LAPIC timer cadence is ~6 Hz in QEMU and we already
+     * burned half a second in stage 9 waiting for raw ticks. */
+    {
+        const uint64_t sched_min = 1u;
+        uint64_t deadline = arch_x86_64_pit_get_ticks() + 500u;
+        bool all_ticking = false;
+        while (arch_x86_64_pit_get_ticks() < deadline) {
+            all_ticking = true;
+            /* BSP: must always be advancing (PIT-driven). */
+            if (arch_x86_64_sched_tick_calls_for_cpu(0) == 0u) {
+                all_ticking = false;
+            }
+            for (uint32_t i = 1; i <= ap_n && all_ticking; ++i) {
+                if (arch_x86_64_sched_tick_calls_for_cpu(i) < sched_min) {
+                    all_ticking = false;
+                    break;
+                }
+            }
+            if (all_ticking) break;
+            __asm__ volatile ("pause");
+        }
+        for (uint32_t i = 0; i <= ap_n; ++i) {
+            log_kv("\n[x86_64][smp-selftest] sched_tick_calls[", (uint64_t)i);
+            log_kv("]=", arch_x86_64_sched_tick_calls_for_cpu(i));
+        }
+        if (!all_ticking) {
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: sched_on_tick not reachable on every CPU's own IRQ path\n");
+            return;
+        }
+    }
+
     /* All stages reached by all APs. */
     if (ap_n > 0) {
-        early_console64_write("\n[x86_64][smp-selftest] PASS: all APs idle on private GDT/TSS/IDT+GS + sched-registered + LAPIC-timer ticking\n");
+        early_console64_write("\n[x86_64][smp-selftest] PASS: all APs idle on private GDT/TSS/IDT+GS + sched-registered + LAPIC-timer driving sched_on_tick\n");
     } else {
         early_console64_write("\n[x86_64][smp-selftest] PASS: no APs (UP system, BSP idle slot only)\n");
     }
