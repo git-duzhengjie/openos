@@ -270,4 +270,46 @@ uint32_t arch_x86_64_sched_check_and_dispatch(void);
 uint64_t arch_x86_64_sched_dispatch_count_for_cpu(uint32_t cpu_idx);
 uint32_t arch_x86_64_sched_need_resched_for_cpu(uint32_t cpu_idx);
 
+/* ------------------------------------------------------------------
+ * G.6.7b: preempt-disable / preempt-enable critical-section gating.
+ *
+ * Semantics (Linux-style preempt_count, single-CPU local nesting):
+ *
+ *   preempt_disable():
+ *     this_cpu->preempt_disable_depth++
+ *     -- caller is now in a non-preemptible region. ISR-tail
+ *        dispatch (check_and_dispatch) will see depth>0 and refuse
+ *        to switch. need_resched can still be latched (by IPI, by
+ *        timer-tick-elect, by manual set), but it stays latched.
+ *
+ *   preempt_enable():
+ *     d = --this_cpu->preempt_disable_depth
+ *     if d == 0 and need_resched == 1:
+ *         preempt_deferred_count++
+ *         check_and_dispatch()   <-- deferred wakeup fires HERE
+ *
+ * Invariants:
+ *   - disable/enable are strictly paired per CPU (mismatched calls are
+ *     a bug; the depth would drift).
+ *   - depth is per-CPU, NOT per-thread. It is part of CPU state, like
+ *     interrupt-disable. A thread that yields with depth>0 carries
+ *     no debt to the next thread; that's why callers must always
+ *     enable before yielding/blocking.
+ *   - Re-entry from interrupts is safe: ISR handlers run on the
+ *     same CPU; if they call disable/enable in a balanced pair, the
+ *     outer count is preserved.
+ *   - At depth==0, behavior is identical to G.6.7a -- the gate is
+ *     transparent. This means no regression for stages 12/13/14.
+ *
+ * BSP=0 contract carry-over: BSP never receives reschedule IPIs in
+ * the current design, so BSP's preempt_deferred_count must stay 0
+ * under normal operation. Stage 15 manually drives the BSP gate from
+ * the BSP itself to exercise the latch path. */
+void arch_x86_64_preempt_disable(void);
+void arch_x86_64_preempt_enable(void);
+
+/* Observers for selftests (read percpu slot directly, not via %gs). */
+uint32_t arch_x86_64_preempt_depth_for_cpu(uint32_t cpu_idx);
+uint64_t arch_x86_64_preempt_deferred_count_for_cpu(uint32_t cpu_idx);
+
 #endif /* OPENOS_ARCH_X86_64_SCHED64_H */

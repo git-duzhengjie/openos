@@ -236,6 +236,12 @@ void arch_x86_64_percpu_install_gs(uint32_t cpu_idx) {
     p->need_resched             = 0;
     p->_resv_after_need_resched = 0;
     p->resched_dispatch_count   = 0;
+    /* G.6.7b: preempt-disable depth and deferred-dispatch counter
+     * start at 0 on every CPU. depth=0 is the "preemption enabled"
+     * state, the natural resting position. */
+    p->preempt_disable_depth    = 0;
+    p->_resv_after_pdd          = 0;
+    p->preempt_deferred_count   = 0;
 
     /* Write IA32_GS_BASE directly. Note: a subsequent `mov <selector>, %gs`
      * would reload the hidden base from the GDT descriptor and *clobber*

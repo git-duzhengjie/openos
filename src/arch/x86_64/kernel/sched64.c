@@ -654,6 +654,15 @@ uint32_t arch_x86_64_sched_check_and_dispatch(void) {
     arch_x86_64_percpu_t *p = arch_x86_64_this_cpu_ptr();
     if (!p) return 0u;
 
+    /* G.6.7b: critical-section gate. While preempt_disable_depth>0,
+     * we are inside a non-preemptible region. Leave the latch alone
+     * so that preempt_enable() can pick it up on the 1->0 edge and
+     * fire a deferred dispatch. This is the *load-bearing* behavior
+     * of the new gate: we observe the latch but refuse to act on it. */
+    if (p->preempt_disable_depth != 0u) {
+        return 0u;
+    }
+
     /* Read-and-clear. If the latch wasn't set, fast path: no yield. */
     uint32_t pending = p->need_resched;
     if (!pending) return 0u;
@@ -688,4 +697,68 @@ uint32_t arch_x86_64_sched_need_resched_for_cpu(uint32_t cpu_idx) {
     arch_x86_64_percpu_t *p = arch_x86_64_percpu_slot(cpu_idx);
     if (!p) return 0u;
     return p->need_resched;
+}
+
+/* ------------------------------------------------------------------
+ * G.6.7b: preempt-disable / preempt-enable.
+ *
+ * Both functions operate on the *current* CPU's percpu slot via %gs.
+ * They do NOT touch interrupt-flag state (IF). Disabling preemption
+ * is a softer guarantee than CLI: interrupts still fire, ISRs still
+ * run, but the ISR tail will NOT yield. This is the standard Linux
+ * preempt_count discipline and is the right granularity for the
+ * majority of kernel critical sections that need to be atomic w.r.t.
+ * other threads on the same CPU but tolerate interrupt nesting. */
+void arch_x86_64_preempt_disable(void) {
+    arch_x86_64_percpu_t *p = arch_x86_64_this_cpu_ptr();
+    if (!p) return;
+    /* Single-CPU local counter; no atomics required because only
+     * this CPU writes it. Interrupt nesting on this CPU is also fine:
+     * a disable inside an ISR raises the count, the matching enable
+     * lowers it, and the outer context sees a balanced delta of 0. */
+    p->preempt_disable_depth++;
+}
+
+void arch_x86_64_preempt_enable(void) {
+    arch_x86_64_percpu_t *p = arch_x86_64_this_cpu_ptr();
+    if (!p) return;
+
+    /* Underflow guard: a depth of 0 here means somebody called
+     * preempt_enable() without a matching preempt_disable(). That is
+     * a hard bug; do not decrement (would wrap u32 and permanently
+     * disable preemption on this CPU). */
+    if (p->preempt_disable_depth == 0u) {
+        return;
+    }
+
+    uint32_t new_depth = --p->preempt_disable_depth;
+
+    /* The deferred-dispatch edge: only fires on the 1->0 transition,
+     * not on nested 2->1 decrements. */
+    if (new_depth == 0u && p->need_resched != 0u) {
+        /* Account before yielding -- once we yield, our stack parks
+         * and any further increments would land on the wrong slot. */
+        p->preempt_deferred_count++;
+
+        /* Hand off to check_and_dispatch. By this point depth==0 so
+         * the gate inside it is open; it will read-and-clear the latch
+         * and call sched_yield. We could also call sched_yield directly
+         * here, but going through check_and_dispatch keeps the latch
+         * clearing logic and the dispatch_count bump in a single place. */
+        (void)arch_x86_64_sched_check_and_dispatch();
+    }
+}
+
+uint32_t arch_x86_64_preempt_depth_for_cpu(uint32_t cpu_idx) {
+    if (cpu_idx >= OPENOS_X86_64_PERCPU_MAX_CPUS) return 0u;
+    arch_x86_64_percpu_t *p = arch_x86_64_percpu_slot(cpu_idx);
+    if (!p) return 0u;
+    return p->preempt_disable_depth;
+}
+
+uint64_t arch_x86_64_preempt_deferred_count_for_cpu(uint32_t cpu_idx) {
+    if (cpu_idx >= OPENOS_X86_64_PERCPU_MAX_CPUS) return 0ull;
+    arch_x86_64_percpu_t *p = arch_x86_64_percpu_slot(cpu_idx);
+    if (!p) return 0ull;
+    return p->preempt_deferred_count;
 }

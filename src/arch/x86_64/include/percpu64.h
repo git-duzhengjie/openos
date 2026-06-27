@@ -78,7 +78,24 @@ typedef struct openos_x86_64_percpu {
      * handler. Selftest uses this to prove the IPI -> dispatch path
      * runs *before* the next timer tick. */
     uint64_t resched_dispatch_count; /* offset 0x48 */
-    uint64_t _pad[6];             /* pad to 128 bytes for cache-line alignment */
+    /* G.6.7b: per-CPU preempt-disable nesting depth. Incremented by
+     * arch_x86_64_preempt_disable(), decremented by
+     * arch_x86_64_preempt_enable(). While depth>0, the ISR-tail
+     * dispatch hook (sched_check_and_dispatch) MUST NOT context-switch;
+     * it leaves need_resched=1 latched and returns 0. preempt_enable()
+     * checks for a pending latch on the 1->0 edge and fires a deferred
+     * dispatch right there, so no wakeup is ever lost. u32 width
+     * accommodates absurd nesting; a non-zero value at scheduler
+     * shutdown is a bug. */
+    uint32_t preempt_disable_depth;  /* offset 0x50 */
+    uint32_t _resv_after_pdd;        /* offset 0x54 */
+    /* G.6.7b: counts the number of times preempt_enable() observed a
+     * pending need_resched on its 1->0 edge and consequently fired a
+     * deferred dispatch. Selftest stage 15 uses this to prove the
+     * latch-during-critical-section -> immediate-dispatch-on-exit
+     * property. */
+    uint64_t preempt_deferred_count; /* offset 0x58 */
+    uint64_t _pad[4];             /* pad to 128 bytes for cache-line alignment */
 } __attribute__((aligned(64))) arch_x86_64_percpu_t;
 
 /* Per-field offsets (compile-time, for asm or sanity checks). */
@@ -94,6 +111,8 @@ typedef struct openos_x86_64_percpu {
 #define OPENOS_X86_64_PERCPU_OFF_RESCHED_IPI     0x38
 #define OPENOS_X86_64_PERCPU_OFF_NEED_RESCHED    0x40
 #define OPENOS_X86_64_PERCPU_OFF_RESCHED_DISPATCH 0x48
+#define OPENOS_X86_64_PERCPU_OFF_PREEMPT_DEPTH    0x50
+#define OPENOS_X86_64_PERCPU_OFF_PREEMPT_DEFERRED 0x58
 
 /* IA32_GS_BASE MSR */
 #define OPENOS_X86_64_MSR_GS_BASE        0xC0000101u

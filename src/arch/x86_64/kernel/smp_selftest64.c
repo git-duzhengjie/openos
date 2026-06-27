@@ -688,10 +688,135 @@ void arch_x86_64_smp_selftest_run(void)
         early_console64_write(" PASS");
     }
 
+    /* ----------------------------------------------------------------
+     * Stage 15: preempt_disable / preempt_enable critical-section gate.
+     *
+     * This stage proves three independent properties of G.6.7b on the
+     * BSP (BSP is used because preempt_disable() is a property of the
+     * *current* CPU and we are running on the BSP here):
+     *
+     *   15.A  Gate closed -> dispatch suppressed.
+     *         With depth>0, manually latch need_resched. Then call
+     *         check_and_dispatch() and assert it returns 0 and the
+     *         latch is still set and resched_dispatch_count did NOT
+     *         move. This proves the gate actually blocks.
+     *
+     *   15.B  Gate reopened -> deferred dispatch fires.
+     *         Call preempt_enable() (1->0 edge). Assert
+     *         preempt_deferred_count incremented by exactly 1. The
+     *         latch should now be clear because the deferred
+     *         check_and_dispatch consumed it. (We do NOT assert a
+     *         context switch here because we are the only runnable
+     *         thread on the BSP at this point -- sched_yield will
+     *         no-op back to us. The deferred_count edge is the
+     *         load-bearing signal.)
+     *
+     *   15.C  Nesting depth is honored.
+     *         disable;disable -> depth=2. enable once -> depth=1,
+     *         latch (set manually) should STILL be blocked. enable
+     *         again -> depth=0 edge, deferred_count should jump.
+     *         This proves outer critical sections survive inner
+     *         enable() calls.
+     *
+     * The BSP=0 contract from G.6.7a remains: stage 14 already
+     * asserted bsp dispatch_count==0 and bsp need_resched==0 BEFORE
+     * this stage runs. Stage 15 *intentionally* moves these counters
+     * on the BSP, which is why it is sequenced last.
+     */
+    {
+        early_console64_write("\n[x86_64][smp-selftest] stage 15: preempt-disable/enable gate");
+
+        /* Sub-test 15.A ------------------------------------------------ */
+        uint64_t disp_before  = arch_x86_64_sched_dispatch_count_for_cpu(0u);
+        uint64_t defer_before = arch_x86_64_preempt_deferred_count_for_cpu(0u);
+
+        arch_x86_64_preempt_disable();
+        if (arch_x86_64_preempt_depth_for_cpu(0u) != 1u) {
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 15.A depth after disable != 1\n");
+            return;
+        }
+        arch_x86_64_sched_set_need_resched();
+        if (arch_x86_64_sched_need_resched_for_cpu(0u) != 1u) {
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 15.A latch not set\n");
+            return;
+        }
+        /* Critical assertion: dispatch must be suppressed while gate closed. */
+        uint32_t ret = arch_x86_64_sched_check_and_dispatch();
+        if (ret != 0u) {
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 15.A dispatch fired with depth>0\n");
+            return;
+        }
+        if (arch_x86_64_sched_need_resched_for_cpu(0u) != 1u) {
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 15.A latch was cleared by gated dispatch\n");
+            return;
+        }
+        if (arch_x86_64_sched_dispatch_count_for_cpu(0u) != disp_before) {
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 15.A dispatch_count moved despite gate\n");
+            return;
+        }
+
+        /* Sub-test 15.B ------------------------------------------------ */
+        arch_x86_64_preempt_enable();   /* 1 -> 0 edge, latch is pending */
+        if (arch_x86_64_preempt_depth_for_cpu(0u) != 0u) {
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 15.B depth after enable != 0\n");
+            return;
+        }
+        uint64_t defer_after_B = arch_x86_64_preempt_deferred_count_for_cpu(0u);
+        if (defer_after_B != defer_before + 1ull) {
+            log_kv("\n[x86_64][smp-selftest] FAIL: stage 15.B deferred_count delta != 1: before=",
+                   defer_before);
+            log_kv(" after=", defer_after_B);
+            early_console64_write("\n");
+            return;
+        }
+        if (arch_x86_64_sched_need_resched_for_cpu(0u) != 0u) {
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 15.B latch not consumed on enable edge\n");
+            return;
+        }
+
+        /* Sub-test 15.C ------------------------------------------------ */
+        uint64_t defer_before_C = arch_x86_64_preempt_deferred_count_for_cpu(0u);
+        arch_x86_64_preempt_disable();
+        arch_x86_64_preempt_disable();
+        if (arch_x86_64_preempt_depth_for_cpu(0u) != 2u) {
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 15.C nested depth != 2\n");
+            return;
+        }
+        arch_x86_64_sched_set_need_resched();
+        arch_x86_64_preempt_enable();   /* 2 -> 1, must NOT fire */
+        if (arch_x86_64_preempt_depth_for_cpu(0u) != 1u) {
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 15.C depth after inner enable != 1\n");
+            return;
+        }
+        if (arch_x86_64_preempt_deferred_count_for_cpu(0u) != defer_before_C) {
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 15.C deferred fired on 2->1 (should only fire on 1->0)\n");
+            return;
+        }
+        if (arch_x86_64_sched_need_resched_for_cpu(0u) != 1u) {
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 15.C latch cleared on 2->1\n");
+            return;
+        }
+        arch_x86_64_preempt_enable();   /* 1 -> 0, MUST fire */
+        if (arch_x86_64_preempt_depth_for_cpu(0u) != 0u) {
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 15.C depth after outer enable != 0\n");
+            return;
+        }
+        if (arch_x86_64_preempt_deferred_count_for_cpu(0u) != defer_before_C + 1ull) {
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 15.C deferred did not fire on 1->0\n");
+            return;
+        }
+        if (arch_x86_64_sched_need_resched_for_cpu(0u) != 0u) {
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 15.C latch not consumed on outer enable edge\n");
+            return;
+        }
+
+        early_console64_write(" PASS");
+    }
+
     /* All stages reached by all APs. */
     if (ap_n > 0) {
-        early_console64_write("\n[x86_64][smp-selftest] PASS: all APs idle on private GDT/TSS/IDT+GS + sched-registered + LAPIC-timer driving sched_on_tick + distributed kthreads switched per-CPU + cross-CPU reschedule IPI delivered + cross-CPU migration verified + IPI tail-hook dispatch verified\n");
+        early_console64_write("\n[x86_64][smp-selftest] PASS: all APs idle on private GDT/TSS/IDT+GS + sched-registered + LAPIC-timer driving sched_on_tick + distributed kthreads switched per-CPU + cross-CPU reschedule IPI delivered + cross-CPU migration verified + IPI tail-hook dispatch verified + preempt-disable gate verified\n");
     } else {
-        early_console64_write("\n[x86_64][smp-selftest] PASS: no APs (UP system, BSP idle slot only)\n");
+        early_console64_write("\n[x86_64][smp-selftest] PASS: no APs (UP system, BSP idle slot only) + preempt-disable gate verified\n");
     }
 }
