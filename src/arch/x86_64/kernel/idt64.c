@@ -134,6 +134,15 @@ void arch_x86_64_idt_init(void) {
     __asm__ __volatile__("lidt %0" : : "m"(idt64_ptr) : "memory");
 }
 
+/*
+ * Step G.6.1: load the (already-initialized) global IDTR on the calling CPU.
+ * Intended for APs after they have established their own GDT/TSS — no table
+ * mutation, just a bare lidt of the shared idt64_ptr.
+ */
+void arch_x86_64_idt_load_ap(void) {
+    __asm__ __volatile__("lidt %0" : : "m"(idt64_ptr) : "memory");
+}
+
 void arch_x86_64_idt_print_status(void) {
     early_console64_write("[x86_64][idt] entries=");
     early_console64_write_hex64(OPENOS_X86_64_IDT_ENTRY_COUNT);

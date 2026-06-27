@@ -23,6 +23,11 @@
 /* G.5-gdt-tss: AP-side per-CPU GDT+TSS installed alive counter. */
 #define OPENOS_X86_64_SMP_ALIVE_PERCPU_PHYS 0x00009028ULL
 
+/* G.6.1: AP-side idle-loop reached counter. Each AP bumps it after its own
+ * per-CPU GDT/TSS is loaded and its own IDTR is installed, i.e. right before
+ * entering the AP idle (hlt) loop. With N CPUs total the BSP expects N-1. */
+#define OPENOS_X86_64_SMP_ALIVE_IDLE_PHYS  0x00009030ULL
+
 bool arch_x86_64_smp_init(void);
 bool arch_x86_64_smp_is_ready(void);
 
@@ -58,6 +63,10 @@ uint8_t arch_x86_64_smp_alive_lapic_wait(uint8_t expected, uint32_t timeout_ms);
 /* G.5-gdt-tss: per-AP private GDT+TSS confirmation. */
 uint8_t arch_x86_64_smp_alive_percpu(void);
 uint8_t arch_x86_64_smp_alive_percpu_wait(uint8_t expected, uint32_t timeout_ms);
+
+/* G.6.1: per-AP idle-loop reached confirmation. */
+uint8_t arch_x86_64_smp_alive_idle(void);
+uint8_t arch_x86_64_smp_alive_idle_wait(uint8_t expected, uint32_t timeout_ms);
 
 uint64_t arch_x86_64_smp_stack_base(uint32_t cpu_idx);
 uint64_t arch_x86_64_smp_stack_top(uint32_t cpu_idx);

@@ -150,27 +150,21 @@ void arch_x86_64_percpu_load(uint32_t cpu_idx) {
      * limit/base pair and tripled the CPU. */
     const struct gdt_pointer *gp = &g_gdt_ptr[cpu_idx];
 
-    __asm__ __volatile__("lock incb 0x9030" ::: "memory");
-
     __asm__ __volatile__(
         "lgdt (%[gp])\n"
-        "lock incb 0x9031\n"
         "pushq %[code]\n"
         "leaq 1f(%%rip), %%rax\n"
         "pushq %%rax\n"
         "lretq\n"
         "1:\n"
-        "lock incb 0x9032\n"
         "movw %[data], %%ax\n"
         "movw %%ax, %%ds\n"
         "movw %%ax, %%es\n"
         "movw %%ax, %%ss\n"
         "movw %%ax, %%fs\n"
         "movw %%ax, %%gs\n"
-        "lock incb 0x9033\n"
         "movw %[tss],  %%ax\n"
         "ltr  %%ax\n"
-        "lock incb 0x9034\n"
         :
         : [gp]   "r"(gp),
           [code] "i"((uint64_t)OPENOS_X86_64_GDT_KERNEL_CODE),

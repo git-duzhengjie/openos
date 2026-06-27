@@ -36,6 +36,18 @@ struct x86_64_exception_frame {
 } __attribute__((packed));
 
 void arch_x86_64_idt_init(void);
+
+/*
+ * Step G.6.1: AP-side IDT activation.
+ *
+ * The IDT itself (table + gate descriptors) is built once on the BSP and is
+ * read-only thereafter, so every CPU shares the same `idt64[]` storage. What
+ * is NOT shared is IDTR — each CPU has its own. This helper performs a bare
+ * `lidt` against the existing global idt64_ptr without touching the table
+ * contents, so APs can route exceptions/interrupts through the same handlers
+ * as the BSP.
+ */
+void arch_x86_64_idt_load_ap(void);
 void arch_x86_64_idt_print_status(void);
 void arch_x86_64_exception_dispatch(const struct x86_64_exception_frame *frame);
 

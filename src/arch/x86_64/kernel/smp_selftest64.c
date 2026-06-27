@@ -145,9 +145,18 @@ void arch_x86_64_smp_selftest_run(void)
         return;
     }
 
-    /* All five stages reached by all APs. */
+    /* Stage 6: per-AP IDTR installed + AP idle loop reached (G.6.1). */
+    uint8_t alive_idle = arch_x86_64_smp_alive_idle_wait(expect, 500);
+    log_kv("\n[x86_64][smp-selftest] alive_idle=", (uint64_t)alive_idle);
+    log_kv(" expected>=", (uint64_t)expect);
+    if (ap_n > 0 && alive_idle < expect) {
+        early_console64_write("\n[x86_64][smp-selftest] FAIL: AP did not reach idle loop\n");
+        return;
+    }
+
+    /* All six stages reached by all APs. */
     if (ap_n > 0) {
-        early_console64_write("\n[x86_64][smp-selftest] PASS: all APs on private GDT/TSS\n");
+        early_console64_write("\n[x86_64][smp-selftest] PASS: all APs idle on private GDT/TSS/IDT\n");
     } else {
         early_console64_write("\n[x86_64][smp-selftest] PASS: no APs (UP system)\n");
     }
