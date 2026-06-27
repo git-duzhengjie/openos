@@ -5,6 +5,40 @@
 
 #include "../include/early_console64.h"
 #include "../include/heap64.h"
+#include "../include/percpu64.h"
+
+/* G.6.3: per-CPU scheduler cursors / counters live in arch_x86_64_percpu_t,
+ * addressable via %gs. The sched_slots[] pool itself is still a single
+ * shared array (slot ownership stays global; only the running-cursor and
+ * the bookkeeping counters are per-CPU). These shims keep the rest of
+ * this file readable. */
+static inline uint32_t sched_pc_current(void) {
+    return arch_x86_64_this_cpu_ptr()->sched_current_idx;
+}
+static inline void sched_pc_set_current(uint32_t v) {
+    arch_x86_64_this_cpu_ptr()->sched_current_idx = v;
+}
+static inline uint32_t sched_pc_quantum(void) {
+    return arch_x86_64_this_cpu_ptr()->sched_quantum_left;
+}
+static inline void sched_pc_set_quantum(uint32_t v) {
+    arch_x86_64_this_cpu_ptr()->sched_quantum_left = v;
+}
+static inline void sched_pc_dec_quantum(void) {
+    arch_x86_64_this_cpu_ptr()->sched_quantum_left--;
+}
+static inline uint64_t sched_pc_switches(void) {
+    return arch_x86_64_this_cpu_ptr()->sched_switch_count;
+}
+static inline void sched_pc_inc_switches(void) {
+    arch_x86_64_this_cpu_ptr()->sched_switch_count++;
+}
+static inline uint64_t sched_pc_preempts(void) {
+    return arch_x86_64_this_cpu_ptr()->sched_preempt_count;
+}
+static inline void sched_pc_inc_preempts(void) {
+    arch_x86_64_this_cpu_ptr()->sched_preempt_count++;
+}
 
 static x86_64_context_t bootstrap_context;
 static x86_64_context_t *current_context = &bootstrap_context;
@@ -37,6 +71,11 @@ void arch_x86_64_sched_init(void) {
     bootstrap_context.rflags = OPENOS_X86_64_CONTEXT_RFLAGS_IF;
     current_context = &bootstrap_context;
     sched64_ready = 1u;
+    /* G.6.3: quantum was previously a module-static initialized to
+     * QUANTUM_NORMAL. Now lives in percpu_t (zeroed by percpu_setup),
+     * so seed it here for the BSP. APs will seed via their own
+     * sched bring-up in G.6.4. */
+    sched_pc_set_quantum(OPENOS_X86_64_SCHED_QUANTUM_NORMAL);
 }
 
 void arch_x86_64_context_init(x86_64_thread_context_t *ctx,
@@ -95,8 +134,8 @@ typedef struct {
 } sched_slot_t;
 
 static sched_slot_t  sched_slots[OPENOS_X86_64_SCHED_MAX_KTHREADS];
-static uint32_t      sched_current_idx;
-static uint64_t      sched_switch_count;
+/* G.6.3: sched_current_idx, sched_switch_count, sched_quantum_left,
+ * sched_preempt_count moved into arch_x86_64_percpu_t (this_cpu()->...). */
 
 static void sched_ensure_bootstrap_slot(void) {
     if (sched_slots[0].state != SCHED_SLOT_FREE) {
@@ -106,7 +145,7 @@ static void sched_ensure_bootstrap_slot(void) {
     sched_slots[0].id       = 0u;
     sched_slots[0].priority = OPENOS_X86_64_SCHED_PRIO_DEFAULT;
     /* slot 0 "ctx" is unused for save; bootstrap_context handles that. */
-    sched_current_idx       = 0u;
+    sched_pc_set_current(0u);
 }
 
 static uint32_t sched_alloc_slot(void) {
@@ -215,7 +254,7 @@ uint32_t arch_x86_64_sched_get_priority(uint32_t slot) {
 
 uint32_t arch_x86_64_sched_yield(void) {
     sched_ensure_bootstrap_slot();
-    uint32_t cur = sched_current_idx;
+    uint32_t cur = sched_pc_current();
     uint32_t nxt = sched_pick_next(cur);
     if (nxt == cur) {
         return 0u;
@@ -226,8 +265,8 @@ uint32_t arch_x86_64_sched_yield(void) {
         sched_slots[cur].state = SCHED_SLOT_READY;
     }
     sched_slots[nxt].state    = SCHED_SLOT_RUNNING;
-    sched_current_idx         = nxt;
-    ++sched_switch_count;
+    sched_pc_set_current(nxt);
+    sched_pc_inc_switches();
 
     x86_64_context_t *from = (cur == 0u) ? &bootstrap_context : &sched_slots[cur].ctx;
     x86_64_context_t *to   = (nxt == 0u) ? &bootstrap_context : &sched_slots[nxt].ctx;
@@ -237,7 +276,7 @@ uint32_t arch_x86_64_sched_yield(void) {
 }
 
 void arch_x86_64_sched_exit_self(void) {
-    uint32_t cur = sched_current_idx;
+    uint32_t cur = sched_pc_current();
     if (cur == 0u) {
         /* Bootstrap must not exit through here. */
         return;
@@ -250,8 +289,8 @@ void arch_x86_64_sched_exit_self(void) {
         nxt = 0u;
     }
     sched_slots[nxt].state = SCHED_SLOT_RUNNING;
-    sched_current_idx      = nxt;
-    ++sched_switch_count;
+    sched_pc_set_current(nxt);
+    sched_pc_inc_switches();
 
     x86_64_context_t *to = (nxt == 0u) ? &bootstrap_context : &sched_slots[nxt].ctx;
     /* `from == NULL` tells context_switch64.S to skip saving. */
@@ -273,8 +312,8 @@ uint32_t arch_x86_64_sched_kthread_count(void) {
     return n;
 }
 
-uint32_t arch_x86_64_sched_current_slot(void)   { return sched_current_idx; }
-uint64_t arch_x86_64_sched_switch_count(void)   { return sched_switch_count; }
+uint32_t arch_x86_64_sched_current_slot(void)   { return sched_pc_current(); }
+uint64_t arch_x86_64_sched_switch_count(void)   { return sched_pc_switches(); }
 
 /* -----------------------------------------------------------------
  * Step F.3: preemptive tick hook.
@@ -284,14 +323,12 @@ uint64_t arch_x86_64_sched_switch_count(void)   { return sched_switch_count; }
  *   - Only preempt when at least one OTHER kthread is READY. The
  *     bootstrap slot is always present; lone-bootstrap means "nothing
  *     to preempt to", so we cheaply early-return.
- *   - Quantum counter is per-CPU global (single CPU here). On switch
+ *   - Quantum counter is per-CPU (G.6.3: lives in percpu_t). On switch
  *     we reset it; the new RUNNING thread also starts with a fresh
  *     budget.
- *   - Counted via sched_preempt_count so selftests can prove the
- *     IRQ-driven path was actually exercised (vs. cooperative yield).
+ *   - Counted via sched_preempt_count (per-CPU) so selftests can prove
+ *     the IRQ-driven path was actually exercised (vs. cooperative yield).
  * ----------------------------------------------------------------- */
-static uint32_t sched_quantum_left = OPENOS_X86_64_SCHED_QUANTUM_NORMAL;
-static uint64_t sched_preempt_count = 0u;
 
 static int sched_has_other_ready(uint32_t cur) {
     for (uint32_t i = 0u; i < OPENOS_X86_64_SCHED_MAX_KTHREADS; ++i) {
@@ -310,36 +347,36 @@ static int sched_has_other_ready(uint32_t cur) {
 
 uint32_t arch_x86_64_sched_on_tick(void) {
     sched_ensure_bootstrap_slot();
-    if (sched_quantum_left > 0u) {
-        --sched_quantum_left;
+    if (sched_pc_quantum() > 0u) {
+        sched_pc_dec_quantum();
     }
-    if (sched_quantum_left != 0u) {
+    if (sched_pc_quantum() != 0u) {
         return 0u;
     }
     /* G.2: re-arm quantum from incoming (post-switch) thread's priority.
      * We compute it twice — once now using the current (about-to-leave)
      * thread, and once after yield using the newly-current thread. The
      * value that sticks is the one we set AFTER yield. */
-    sched_quantum_left = arch_x86_64_sched_quantum_for_priority(
-        sched_slots[sched_current_idx].priority);
+    sched_pc_set_quantum(arch_x86_64_sched_quantum_for_priority(
+        sched_slots[sched_pc_current()].priority));
 
-    if (!sched_has_other_ready(sched_current_idx)) {
+    if (!sched_has_other_ready(sched_pc_current())) {
         return 0u;
     }
-    uint32_t prev = sched_current_idx;
+    uint32_t prev = sched_pc_current();
     uint32_t nxt  = arch_x86_64_sched_yield();
     /* Re-arm again using the NEW current thread's priority so HIGH
      * threads get their full slice on resume. */
-    sched_quantum_left = arch_x86_64_sched_quantum_for_priority(
-        sched_slots[sched_current_idx].priority);
-    if (nxt != 0u || sched_current_idx != prev) {
-        ++sched_preempt_count;
+    sched_pc_set_quantum(arch_x86_64_sched_quantum_for_priority(
+        sched_slots[sched_pc_current()].priority));
+    if (nxt != 0u || sched_pc_current() != prev) {
+        sched_pc_inc_preempts();
         return 1u;
     }
     return 0u;
 }
 
-uint64_t arch_x86_64_sched_preempt_count(void) { return sched_preempt_count; }
+uint64_t arch_x86_64_sched_preempt_count(void) { return sched_pc_preempts(); }
 
 void arch_x86_64_sched_print_status(void) {
     early_console64_write("[x86_64][sched] context switch supports rsp/rip/rflags and r8-r15\n");
@@ -348,9 +385,9 @@ void arch_x86_64_sched_print_status(void) {
     early_console64_write(" current=");
     early_console64_write_hex64((uint64_t)(uintptr_t)current_context);
     early_console64_write(" slot=");
-    early_console64_write_hex64((uint64_t)sched_current_idx);
+    early_console64_write_hex64((uint64_t)sched_pc_current());
     early_console64_write(" switches=");
-    early_console64_write_hex64(sched_switch_count);
+    early_console64_write_hex64(sched_pc_switches());
     early_console64_write(" kthreads=");
     early_console64_write_hex64((uint64_t)arch_x86_64_sched_kthread_count());
     early_console64_write("\n");

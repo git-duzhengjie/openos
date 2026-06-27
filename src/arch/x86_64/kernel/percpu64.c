@@ -218,11 +218,13 @@ void arch_x86_64_percpu_install_gs(uint32_t cpu_idx) {
         return;
     }
     arch_x86_64_percpu_t *p = &g_percpu[cpu_idx];
-    p->self           = (uint64_t)(uintptr_t)p;
-    p->cpu_idx        = cpu_idx;
-    p->magic          = OPENOS_X86_64_PERCPU_MAGIC;
-    p->sched_ticks    = 0;
-    p->sched_switches = 0;
+    p->self                 = (uint64_t)(uintptr_t)p;
+    p->cpu_idx              = cpu_idx;
+    p->magic                = OPENOS_X86_64_PERCPU_MAGIC;
+    p->sched_current_idx    = 0;
+    p->sched_quantum_left   = 0;
+    p->sched_switch_count   = 0;
+    p->sched_preempt_count  = 0;
 
     /* Write IA32_GS_BASE directly. Note: a subsequent `mov <selector>, %gs`
      * would reload the hidden base from the GDT descriptor and *clobber*

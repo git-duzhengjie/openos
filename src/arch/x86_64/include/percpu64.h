@@ -9,19 +9,36 @@
  *               checks; lets code read it via %gs:0 and verify it == &g_percpu[i])
  * - cpu_idx   : logical CPU index (BSP=0, AP=1..N-1)
  * - magic     : 'PCPU' (0x55504350) so a stray uninit GS_BASE is detected
- * - sched_ticks / sched_switches : per-CPU scheduler counters (populated by
- *                                   G.6.3+; declared here so layout is stable)
+ * - sched_current_idx / sched_quantum_left / sched_switch_count /
+ *   sched_preempt_count : per-CPU scheduler cursors and counters (G.6.3).
+ *   The sched_slots[] pool itself remains a single shared array.
  */
 #define OPENOS_X86_64_PERCPU_MAGIC 0x55504350u  /* 'PCPU' little-endian */
 
 typedef struct openos_x86_64_percpu {
-    uint64_t self;            /* offset 0x00: pointer to self */
-    uint32_t cpu_idx;         /* offset 0x08 */
-    uint32_t magic;           /* offset 0x0C */
-    uint64_t sched_ticks;     /* offset 0x10 (reserved for G.6.3+) */
-    uint64_t sched_switches;  /* offset 0x18 (reserved for G.6.3+) */
-    uint64_t _pad[12];        /* pad to 128 bytes for cache-line alignment */
+    uint64_t self;                /* offset 0x00: pointer to self */
+    uint32_t cpu_idx;             /* offset 0x08 */
+    uint32_t magic;               /* offset 0x0C */
+    /* G.6.3: per-CPU scheduler state. Previously module-static globals
+     * inside sched64.c; pulled into the percpu struct so that each CPU
+     * has its own current-thread index and quantum bookkeeping. The
+     * sched_slots[] pool itself remains a single shared array for now
+     * (G.6.3 only splits the *cursors*; slot ownership stays global). */
+    uint32_t sched_current_idx;   /* offset 0x10 */
+    uint32_t sched_quantum_left;  /* offset 0x14 */
+    uint64_t sched_switch_count;  /* offset 0x18 */
+    uint64_t sched_preempt_count; /* offset 0x20 */
+    uint64_t _pad[11];            /* pad to 128 bytes for cache-line alignment */
 } __attribute__((aligned(64))) arch_x86_64_percpu_t;
+
+/* Per-field offsets (compile-time, for asm or sanity checks). */
+#define OPENOS_X86_64_PERCPU_OFF_SELF            0x00
+#define OPENOS_X86_64_PERCPU_OFF_CPU_IDX         0x08
+#define OPENOS_X86_64_PERCPU_OFF_MAGIC           0x0C
+#define OPENOS_X86_64_PERCPU_OFF_SCHED_CURRENT   0x10
+#define OPENOS_X86_64_PERCPU_OFF_SCHED_QUANTUM   0x14
+#define OPENOS_X86_64_PERCPU_OFF_SCHED_SWITCHES  0x18
+#define OPENOS_X86_64_PERCPU_OFF_SCHED_PREEMPTS  0x20
 
 /* IA32_GS_BASE MSR */
 #define OPENOS_X86_64_MSR_GS_BASE        0xC0000101u
