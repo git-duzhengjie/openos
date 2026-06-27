@@ -36,9 +36,28 @@
 #define OPENOS_X86_64_LAPIC_REG_SVR             0x0F0u
 #define OPENOS_X86_64_LAPIC_REG_ICR_LOW         0x300u
 #define OPENOS_X86_64_LAPIC_REG_ICR_HIGH        0x310u
+#define OPENOS_X86_64_LAPIC_REG_LVT_TIMER       0x320u
 #define OPENOS_X86_64_LAPIC_REG_LVT_LINT0       0x350u
 #define OPENOS_X86_64_LAPIC_REG_LVT_LINT1       0x360u
 #define OPENOS_X86_64_LAPIC_REG_LVT_ERROR       0x370u
+#define OPENOS_X86_64_LAPIC_REG_TIMER_ICR       0x380u  /* initial count */
+#define OPENOS_X86_64_LAPIC_REG_TIMER_CCR       0x390u  /* current count (RO) */
+#define OPENOS_X86_64_LAPIC_REG_TIMER_DCR       0x3E0u  /* divide config */
+
+/* G.6.5a — LAPIC timer fields (LVT_TIMER bits, Intel SDM Vol.3A 10.5.4).
+ *   [16]    mask
+ *   [17:18] timer mode (00=one-shot, 01=periodic, 10=TSC-deadline)
+ * DCR divide values (only bits [0:1] and [3]):
+ *   0b1011 = divide by 1   (we use divide by 16 = 0b1010)
+ */
+#define OPENOS_X86_64_LAPIC_LVT_TIMER_PERIODIC  (1u << 17)
+#define OPENOS_X86_64_LAPIC_TIMER_DCR_DIV16     0x0Au
+
+/* G.6.5a — AP LAPIC timer interrupt vector. Chosen above the PIC-mapped
+ * range (0x20..0x2F) and below the spurious vector 0xFF. Each AP delivers
+ * its own LAPIC-timer tick on this vector via LVT_TIMER.vector. The BSP
+ * does NOT program its own LAPIC timer in G.6.5a (BSP still ticks off PIT). */
+#define OPENOS_X86_64_LAPIC_TIMER_VECTOR        0x40u
 
 /* LVT field encodings. Bit layout for LINT0/LINT1 (Intel SDM 10.5.1):
  *   [ 7: 0] vector       (ignored for NMI/SMI/INIT/ExtINT)
@@ -87,6 +106,21 @@ bool arch_x86_64_lapic_init(void);
  * Returns true if SVR enable was accepted (version readback != 0).
  * Must be called *after* arch_x86_64_lapic_init() has finished on the BSP. */
 bool arch_x86_64_lapic_init_ap(void);
+
+/* G.6.5a — Program this CPU's LAPIC timer in periodic mode.
+ *
+ * Called from the AP path (after lapic_init_ap) to start a per-CPU heartbeat
+ * that fires `vector` at a rate of roughly (LAPIC-bus-Hz / divider) /
+ * initial_count Hz. On QEMU the LAPIC bus runs at ~1 GHz so with divider=16
+ * and initial_count=1_000_000 we get ~62 Hz per AP (≈ 16 ms / tick).
+ *
+ * The BSP does NOT call this in G.6.5a — it continues to receive scheduler
+ * ticks via the PIT IRQ0 path, leaving G.6.5a's blast radius purely AP-side.
+ *
+ * Returns true on success. */
+bool arch_x86_64_lapic_timer_init_periodic(uint8_t vector,
+                                            uint32_t initial_count,
+                                            uint32_t divider_dcr);
 
 /* Returns true once init has succeeded. */
 bool arch_x86_64_lapic_is_ready(void);

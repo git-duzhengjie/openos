@@ -28,7 +28,13 @@ typedef struct openos_x86_64_percpu {
     uint32_t sched_quantum_left;  /* offset 0x14 */
     uint64_t sched_switch_count;  /* offset 0x18 */
     uint64_t sched_preempt_count; /* offset 0x20 */
-    uint64_t _pad[11];            /* pad to 128 bytes for cache-line alignment */
+    /* G.6.5a: per-CPU LAPIC-timer tick counter. Incremented by the AP
+     * LAPIC-timer ISR; observed by smp_selftest to confirm the AP's
+     * timer is actually firing. The BSP's slot stays at 0 because the
+     * BSP still ticks off PIT (its sched_switch_count is the visible
+     * proof of life there). */
+    uint64_t lapic_timer_count;   /* offset 0x28 */
+    uint64_t _pad[10];            /* pad to 128 bytes for cache-line alignment */
 } __attribute__((aligned(64))) arch_x86_64_percpu_t;
 
 /* Per-field offsets (compile-time, for asm or sanity checks). */
@@ -39,6 +45,7 @@ typedef struct openos_x86_64_percpu {
 #define OPENOS_X86_64_PERCPU_OFF_SCHED_QUANTUM   0x14
 #define OPENOS_X86_64_PERCPU_OFF_SCHED_SWITCHES  0x18
 #define OPENOS_X86_64_PERCPU_OFF_SCHED_PREEMPTS  0x20
+#define OPENOS_X86_64_PERCPU_OFF_LAPIC_TIMER     0x28
 
 /* IA32_GS_BASE MSR */
 #define OPENOS_X86_64_MSR_GS_BASE        0xC0000101u

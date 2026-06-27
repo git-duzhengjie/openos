@@ -1,6 +1,7 @@
 .section .text,"ax"
 .extern arch_x86_64_exception_dispatch
 .extern arch_x86_64_pit_irq0_handler
+.extern arch_x86_64_lapic_timer_irq_handler
 
 .macro ISR_NOERR vector
 .global x86_64_isr\vector
@@ -112,6 +113,35 @@ x86_64_irq0:
 irq0_iret_dump:
     .skip 64
 .section .text,"ax"
+
+/* G.6.5a — LAPIC timer IRQ stub (vector OPENOS_X86_64_LAPIC_TIMER_VECTOR=0x40).
+ * Per-CPU periodic timer driving the AP scheduler heartbeat. The hardware
+ * does not push an error code (external interrupt). We save the SysV
+ * caller-saved set, call the C handler, restore, and iretq. The C handler
+ * is responsible for sending the LAPIC EOI. */
+.global x86_64_irq_lapic_timer
+x86_64_irq_lapic_timer:
+    pushq %rax
+    pushq %rcx
+    pushq %rdx
+    pushq %rsi
+    pushq %rdi
+    pushq %r8
+    pushq %r9
+    pushq %r10
+    pushq %r11
+    cld
+    call arch_x86_64_lapic_timer_irq_handler
+    popq %r11
+    popq %r10
+    popq %r9
+    popq %r8
+    popq %rdi
+    popq %rsi
+    popq %rdx
+    popq %rcx
+    popq %rax
+    iretq
 
 .global x86_64_isr_common
 x86_64_isr_common:

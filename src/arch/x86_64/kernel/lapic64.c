@@ -1,5 +1,6 @@
 #include "../include/lapic64.h"
 #include "../include/acpi64.h"
+#include "../include/percpu64.h"
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -277,4 +278,52 @@ uint32_t arch_x86_64_lapic_read_lvt_lint0(void) {
 uint32_t arch_x86_64_lapic_read_lvt_lint1(void) {
     if (!g_lapic_ready) return 0;
     return mmio_read32(g_lapic_mmio, OPENOS_X86_64_LAPIC_REG_LVT_LINT1);
+}
+
+/* G.6.5a — program this CPU's LAPIC timer in periodic mode.
+ *
+ * Critical ordering (Intel SDM Vol.3A 10.5.4):
+ *   1. write DCR (divider) FIRST.
+ *   2. write LVT_TIMER (vector + periodic mode bit, unmasked).
+ *   3. write ICR (initial count) LAST — writing ICR is what arms /
+ *      restarts the timer. Writing ICR=0 stops it.
+ *
+ * Each CPU's accesses to the (architecturally global) LAPIC MMIO page are
+ * routed by hardware to its own LAPIC, so this is safe to call from APs
+ * without locking. */
+bool arch_x86_64_lapic_timer_init_periodic(uint8_t vector,
+                                            uint32_t initial_count,
+                                            uint32_t divider_dcr) {
+    if (!g_lapic_ready) return false;
+    if (initial_count == 0u) return false;
+
+    /* 1. divider */
+    mmio_write32(g_lapic_mmio, OPENOS_X86_64_LAPIC_REG_TIMER_DCR,
+                 divider_dcr & 0xFu);
+
+    /* 2. LVT_TIMER = periodic | vector. Mask bit (16) cleared = unmasked. */
+    uint32_t lvt = ((uint32_t)vector) | OPENOS_X86_64_LAPIC_LVT_TIMER_PERIODIC;
+    mmio_write32(g_lapic_mmio, OPENOS_X86_64_LAPIC_REG_LVT_TIMER, lvt);
+
+    /* 3. initial count — arms the timer */
+    mmio_write32(g_lapic_mmio, OPENOS_X86_64_LAPIC_REG_TIMER_ICR, initial_count);
+
+    return true;
+}
+
+/* G.6.5a — LAPIC timer IRQ handler (vector 0x40).
+ *
+ * Called from x86_64_irq_lapic_timer in isr64.S. Runs on whichever CPU
+ * received the interrupt. Per-CPU state is accessed via this_cpu().
+ *
+ * In G.6.5a this is observation-only: bump the per-CPU heartbeat counter
+ * and EOI. G.6.5b will wire sched_on_tick() in here. The BSP is NOT
+ * expected to enter this handler (BSP never programs its LAPIC timer),
+ * but we still write a correct EOI in case of stray delivery. */
+void arch_x86_64_lapic_timer_irq_handler(void) {
+    arch_x86_64_percpu_t *p = arch_x86_64_this_cpu_ptr();
+    if (p != 0) {
+        p->lapic_timer_count++;
+    }
+    arch_x86_64_lapic_send_eoi();
 }

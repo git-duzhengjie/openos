@@ -4,6 +4,7 @@
 #include "../include/early_console64.h"
 #include "../include/percpu64.h"
 #include "../include/sched64.h"
+#include "../include/pit64.h"
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -205,9 +206,54 @@ void arch_x86_64_smp_selftest_run(void)
         return;
     }
 
+    /* G.6.5a Stage 9: every AP must be receiving its own LAPIC-timer
+     * interrupts. Each AP arms its LAPIC timer (periodic, vector 0x40,
+     * DCR=div16, ICR=10_000_000) right before its sti/hlt loop, so by the
+     * time we reach this stage the ISR has already been bumping each
+     * AP's percpu.lapic_timer_count. We require at least 2 ticks per AP
+     * to avoid flagging a single stray interrupt as success.
+     *
+     * The BSP slot is expected to stay at 0 — we explicitly do NOT
+     * program the BSP's LAPIC timer in G.6.5a (the BSP scheduler still
+     * runs off PIT IRQ0). Asserting bsp_ticks==0 is part of the contract
+     * for this step: a non-zero BSP count would mean a stray AP IRQ was
+     * misrouted, which would be a real bug.
+     *
+     * Polling budget: ~500 ms total. We don't have a precise wait helper
+     * for this counter, so we spin on PIT-derived jiffies. */
+    if (ap_n > 0) {
+        const uint64_t timer_min = 2u;
+        uint64_t deadline = arch_x86_64_pit_get_ticks() + 500u;
+        bool all_ticking = false;
+        while (arch_x86_64_pit_get_ticks() < deadline) {
+            all_ticking = true;
+            for (uint32_t i = 1; i <= ap_n; ++i) {
+                if (arch_x86_64_smp_lapic_timer_count(i) < timer_min) {
+                    all_ticking = false;
+                    break;
+                }
+            }
+            if (all_ticking) break;
+            __asm__ volatile ("pause");
+        }
+        for (uint32_t i = 0; i <= ap_n; ++i) {
+            log_kv("\n[x86_64][smp-selftest] lapic_timer[", (uint64_t)i);
+            log_kv("] count=", arch_x86_64_smp_lapic_timer_count(i));
+        }
+        uint64_t bsp_ticks = arch_x86_64_smp_lapic_timer_count(0);
+        if (bsp_ticks != 0u) {
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: BSP LAPIC timer fired (should be 0 in G.6.5a)\n");
+            return;
+        }
+        if (!all_ticking) {
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: at least one AP LAPIC timer not ticking\n");
+            return;
+        }
+    }
+
     /* All stages reached by all APs. */
     if (ap_n > 0) {
-        early_console64_write("\n[x86_64][smp-selftest] PASS: all APs idle on private GDT/TSS/IDT+GS + sched-registered\n");
+        early_console64_write("\n[x86_64][smp-selftest] PASS: all APs idle on private GDT/TSS/IDT+GS + sched-registered + LAPIC-timer ticking\n");
     } else {
         early_console64_write("\n[x86_64][smp-selftest] PASS: no APs (UP system, BSP idle slot only)\n");
     }

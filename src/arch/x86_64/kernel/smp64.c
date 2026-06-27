@@ -355,6 +355,18 @@ uint64_t arch_x86_64_smp_cpu_stack_top(uint8_t apic_id) {
     return 0;
 }
 
+/* G.6.5a: observation helper — read a target CPU's LAPIC-timer tick
+ * count from its percpu slot. The slot is shared memory, but the field
+ * is bumped only by the owning CPU's ISR, so a cross-CPU read here is
+ * benign (we accept torn 64-bit reads on 32-bit platforms; on x86_64 a
+ * mov %rax is atomic for naturally aligned uint64_t). */
+uint64_t arch_x86_64_smp_lapic_timer_count(uint32_t cpu_idx) {
+    if (cpu_idx >= OPENOS_X86_64_SMP_MAX_CPUS) return 0;
+    arch_x86_64_percpu_t *p = arch_x86_64_percpu_slot(cpu_idx);
+    if (p == 0) return 0;
+    return p->lapic_timer_count;
+}
+
 static uint64_t smp_read_cr3(void) {
     uint64_t val;
     __asm__ volatile ("movq %%cr3, %0" : "=r"(val));
@@ -487,8 +499,32 @@ void arch_x86_64_ap_entry(uint64_t apic_id) {
         : "r"((volatile uint8_t *)(uintptr_t)OPENOS_X86_64_SMP_ALIVE_SCHED_PHYS)
         : "memory");
 
-    /* AP idle loop. Interrupts stay disabled for now — sti + per-CPU
-     * timer + migration land in G.6.5. */
+    /* G.6.5a: program this AP's own LAPIC timer (periodic, vector 0x40).
+     *
+     * Frequency choice: with DCR=divide-by-16 and ICR=10_000_000, on QEMU's
+     * ~1 GHz LAPIC bus the tick rate is ~6 Hz per AP — deliberately slow
+     * for the first cut: enough to confirm IRQ delivery in the selftest
+     * window but not so fast that any latent bug starves the BSP.
+     *
+     * The IDT vector 0x40 was registered by the BSP before SMP bring-up
+     * (see kernel64.c around arch_x86_64_smp_init), so by the time we get
+     * here the gate is already live system-wide.
+     *
+     * sti AFTER the timer is armed: that way the first tick will fire into
+     * a fully wired-up handler, not into a brief window where the IDT gate
+     * is live but our per-CPU counter is uninitialised. */
+    if (!arch_x86_64_lapic_timer_init_periodic(
+            OPENOS_X86_64_LAPIC_TIMER_VECTOR,
+            10000000u,
+            OPENOS_X86_64_LAPIC_TIMER_DCR_DIV16)) {
+        for (;;) { __asm__ volatile ("cli; hlt"); }
+    }
+
+    /* AP idle loop with interrupts ENABLED. The LAPIC timer ISR bumps
+     * this CPU's percpu.lapic_timer_count; smp_selftest observes the
+     * counters to confirm per-CPU heartbeats. G.6.5b will wire
+     * sched_on_tick() into the same ISR. */
+    __asm__ volatile ("sti");
     for (;;) {
         __asm__ volatile ("hlt");
     }

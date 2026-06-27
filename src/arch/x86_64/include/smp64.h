@@ -89,6 +89,12 @@ uint64_t arch_x86_64_smp_stack_base(uint32_t cpu_idx);
 uint64_t arch_x86_64_smp_stack_top(uint32_t cpu_idx);
 uint64_t arch_x86_64_smp_cpu_stack_top(uint8_t apic_id);
 
+/* G.6.5a: read this CPU's per-CPU LAPIC-timer tick count. Returns 0 for
+ * an out-of-range cpu_idx or before percpu_setup has run. Each AP bumps
+ * its own counter from the LAPIC-timer ISR; the BSP's counter stays at 0
+ * because the BSP does not program its LAPIC timer in G.6.5a. */
+uint64_t arch_x86_64_smp_lapic_timer_count(uint32_t cpu_idx);
+
 void arch_x86_64_smp_prepare_aps(void);
 void arch_x86_64_ap_entry(uint64_t apic_id);
 

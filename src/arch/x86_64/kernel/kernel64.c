@@ -34,6 +34,7 @@
 /* Step F.2: IRQ0 ISR entry implemented in isr64.S. Declared here so the
  * boot path can hand its address to arch_x86_64_idt_register_irq(). */
 extern void x86_64_irq0(void);
+extern void x86_64_irq_lapic_timer(void);  /* G.6.5a: AP per-CPU LAPIC timer */
 #include "../include/tss64.h"
 #include "../include/usermode64.h"
 #include "../include/vfs64.h"
@@ -120,6 +121,16 @@ void arch_x86_64_early_init(const openos_bootinfo_t *bootinfo) {
     arch_x86_64_pic_init();
     arch_x86_64_pit_init(OPENOS_X86_64_PIT_HZ_DEFAULT);
     arch_x86_64_idt_register_irq(0x20u, x86_64_irq0);
+
+    /* G.6.5a: register the AP per-CPU LAPIC-timer ISR on vector 0x40.
+     * Registration lives on the BSP side because the IDT is shared
+     * structurally across cores (each CPU loads the same IDT base via
+     * arch_x86_64_idt_load_ap). By installing the gate here — strictly
+     * before arch_x86_64_smp_init() fires the AP bring-up sequence — we
+     * guarantee that the first AP-side LAPIC timer interrupt finds a
+     * fully wired handler. The BSP itself never programs its LAPIC timer
+     * in G.6.5a, so it will not enter this ISR. */
+    arch_x86_64_idt_register_irq(0x40u, x86_64_irq_lapic_timer);
 }
 
 void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
