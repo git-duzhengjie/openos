@@ -387,6 +387,38 @@ uint64_t arch_x86_64_smp_lapic_timer_count(uint32_t cpu_idx) {
     return p->lapic_timer_count;
 }
 
+/* Forward decl: storage is `static` below, defined after these
+ * G.6.6a accessors. C permits multiple tentative definitions of a
+ * static array (one with size, one without) so this resolves to the
+ * single object defined further down. */
+static volatile uint8_t g_ap_cpu_to_apic[];
+
+/* G.6.6a — cross-CPU read of resched_ipi_count.
+ * Same percpu_slot() path as the timer counter; natural u64 alignment
+ * gives torn-read freedom on x86_64. Unlike the timer count, this slot
+ * may be non-zero on BSP if some AP ever sends a reschedule IPI back. */
+uint64_t arch_x86_64_smp_resched_ipi_count(uint32_t cpu_idx) {
+    if (cpu_idx >= OPENOS_X86_64_SMP_MAX_CPUS) return 0;
+    arch_x86_64_percpu_t *p = arch_x86_64_percpu_slot(cpu_idx);
+    if (p == 0) return 0;
+    return p->resched_ipi_count;
+}
+
+/* G.6.6a — BSP/AP helper: send a reschedule IPI (vector 0x41) to cpu_idx.
+ *
+ * Refuses cpu_idx==0 (BSP, no use case yet), refuses out-of-range, and
+ * refuses an AP that never came online (apic_id == 0xFF placeholder).
+ * Returns true only if both ICR busy-waits drained cleanly. */
+bool arch_x86_64_smp_send_resched_ipi(uint32_t cpu_idx) {
+    if (cpu_idx == 0) return false;
+    if (cpu_idx >= OPENOS_X86_64_SMP_MAX_CPUS) return false;
+    uint8_t target_apic = g_ap_cpu_to_apic[cpu_idx];
+    if (target_apic == 0xFFu) return false;
+    /* Vector 0x41 must already be registered on the target CPU —
+     * kernel64.c does this before arch_x86_64_smp_init() is called. */
+    return arch_x86_64_lapic_send_fixed_ipi(target_apic, 0x41u);
+}
+
 static uint64_t smp_read_cr3(void) {
     uint64_t val;
     __asm__ volatile ("movq %%cr3, %0" : "=r"(val));

@@ -42,7 +42,14 @@ typedef struct openos_x86_64_percpu {
      * the direct proof that sched_on_tick is reachable from each CPU's
      * own interrupt path. */
     uint64_t sched_tick_calls;    /* offset 0x30 */
-    uint64_t _pad[9];             /* pad to 128 bytes for cache-line alignment */
+    /* G.6.6a: per-CPU reschedule-IPI delivery counter. Bumped by the
+     * fixed-delivery LAPIC IPI handler at vector 0x41. Unlike the
+     * timer counter which is strictly AP-only, BSP may also receive
+     * reschedule IPIs (self-IPI or from APs), so BSP slot is allowed
+     * to be non-zero here. This is the direct proof that BSP->AP IPI
+     * delivery actually lands on the target core. */
+    uint64_t resched_ipi_count;   /* offset 0x38 */
+    uint64_t _pad[8];             /* pad to 128 bytes for cache-line alignment */
 } __attribute__((aligned(64))) arch_x86_64_percpu_t;
 
 /* Per-field offsets (compile-time, for asm or sanity checks). */
@@ -55,6 +62,7 @@ typedef struct openos_x86_64_percpu {
 #define OPENOS_X86_64_PERCPU_OFF_SCHED_PREEMPTS  0x20
 #define OPENOS_X86_64_PERCPU_OFF_LAPIC_TIMER     0x28
 #define OPENOS_X86_64_PERCPU_OFF_SCHED_TICKS     0x30
+#define OPENOS_X86_64_PERCPU_OFF_RESCHED_IPI     0x38
 
 /* IA32_GS_BASE MSR */
 #define OPENOS_X86_64_MSR_GS_BASE        0xC0000101u

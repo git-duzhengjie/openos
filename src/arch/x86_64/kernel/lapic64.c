@@ -216,6 +216,54 @@ bool arch_x86_64_lapic_send_startup(uint8_t apic_id, uint8_t vector) {
     return arch_x86_64_lapic_icr_wait();
 }
 
+/* G.6.6a — Send a fixed-delivery IPI to one CPU.
+ *
+ * Same ICR sequencing pattern as INIT/STARTUP (HIGH first sets physical
+ * destination apic_id, LOW write triggers delivery). Encoding:
+ *   delivery_mode = 000b (fixed)
+ *   destination_mode = 0 (physical)
+ *   level = 1 (assert)
+ *   trigger = 0 (edge)        — implicit for fixed delivery
+ *   shorthand = 00b           — implicit
+ *   vector = caller-supplied IDT vector (0x10–0xFE per SDM)
+ *
+ * The target CPU must already have this vector registered in its IDT.
+ * Returns true if both pre- and post- ICR busy-waits drained cleanly.
+ */
+bool arch_x86_64_lapic_send_fixed_ipi(uint8_t apic_id, uint8_t vector) {
+    if (!g_lapic_ready) return false;
+
+    if (!arch_x86_64_lapic_icr_wait()) return false;
+
+    uint32_t high = ((uint32_t)apic_id) << 24;
+    mmio_write32(g_lapic_mmio, OPENOS_X86_64_LAPIC_REG_ICR_HIGH, high);
+
+    uint32_t low =
+        OPENOS_X86_64_LAPIC_ICR_DELMOD_FIXED |
+        OPENOS_X86_64_LAPIC_ICR_DESTMOD_PHYS |
+        OPENOS_X86_64_LAPIC_ICR_LEVEL_ASSERT |
+        (uint32_t)vector;
+    mmio_write32(g_lapic_mmio, OPENOS_X86_64_LAPIC_REG_ICR_LOW, low);
+
+    return arch_x86_64_lapic_icr_wait();
+}
+
+/* G.6.6a — Reschedule-IPI ISR (vector 0x41).
+ *
+ * Bumps the per-CPU resched_ipi_count via the percpu pointer cached in
+ * GS_BASE, then signals end-of-interrupt. EOI-last sequencing follows
+ * the same rationale as the timer ISR (see lapic_timer_irq_handler):
+ * EOI is LAPIC-per-CPU state, not per-thread, so it survives any future
+ * context switch occurring between the bump and EOI.
+ */
+void arch_x86_64_lapic_resched_irq_handler(void) {
+    arch_x86_64_percpu_t *pc = arch_x86_64_this_cpu_ptr();
+    if (pc) {
+        pc->resched_ipi_count++;
+    }
+    mmio_write32(g_lapic_mmio, OPENOS_X86_64_LAPIC_REG_EOI, 0);
+}
+
 /* G.3b-final — program LVT LINT0 / LINT1 for NMI/ExtINT routing.
  *
  * Per Intel SDM 10.5.1 the LVT LINTn registers control how external INTR

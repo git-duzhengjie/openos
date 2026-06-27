@@ -189,4 +189,27 @@ bool arch_x86_64_lapic_setup_nmi_lvt(bool is_bsp);
 uint32_t arch_x86_64_lapic_read_lvt_lint0(void);
 uint32_t arch_x86_64_lapic_read_lvt_lint1(void);
 
+/* G.6.6a — Send a fixed-delivery IPI to the physical-destination apic_id.
+ *
+ * Encoding: delivery_mode=000b (fixed), destination_mode=physical(0),
+ * level=assert(1), trigger=edge(0), shorthand=00b. Vector is the IDT
+ * vector that will fire on the target CPU. Used for the reschedule IPI
+ * at vector 0x41 (and any future fixed-vector cross-CPU notifications).
+ *
+ * Caller must ensure vector is registered in the IDT on the target CPU
+ * BEFORE the IPI is sent (otherwise the target gets #GP on iretq path).
+ *
+ * Returns true on successful delivery (ICR settled), false on timeout. */
+bool arch_x86_64_lapic_send_fixed_ipi(uint8_t apic_id, uint8_t vector);
+
+/* G.6.6a — Reschedule-IPI ISR (vector 0x41).
+ *
+ * Bumps this CPU's percpu_t.resched_ipi_count and EOIs. The actual
+ * reschedule decision is deferred to the next timer tick: ISR-time
+ * preemption of kernel-mode contexts requires a full preempt framework
+ * we don't have yet. This handler's only job is to provide the
+ * cross-CPU "poke" signal and prove that BSP->AP fixed IPI delivery
+ * works end-to-end. */
+void arch_x86_64_lapic_resched_irq_handler(void);
+
 #endif /* OPENOS_ARCH_X86_64_LAPIC64_H */

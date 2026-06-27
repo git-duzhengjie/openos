@@ -108,6 +108,20 @@ uint64_t arch_x86_64_smp_cpu_stack_top(uint8_t apic_id);
  * because the BSP does not program its LAPIC timer in G.6.5a. */
 uint64_t arch_x86_64_smp_lapic_timer_count(uint32_t cpu_idx);
 
+/* G.6.6a: read CPU cpu_idx's reschedule-IPI delivery count. Cross-CPU
+ * read goes through arch_x86_64_percpu_slot() so it does not depend on
+ * the caller's GS_BASE pointing at the target CPU. Natural u64 alignment
+ * guarantees torn-read freedom on x86_64. BSP slot may legitimately be
+ * non-zero (BSP can receive IPIs too), unlike the LAPIC timer counter
+ * which is strictly AP-only by contract. */
+uint64_t arch_x86_64_smp_resched_ipi_count(uint32_t cpu_idx);
+
+/* G.6.6a: BSP-side helper that resolves cpu_idx -> apic_id and sends a
+ * fixed-delivery IPI at vector 0x41 to the target. Refuses to IPI the
+ * caller itself, refuses cpu_idx==0, refuses an unborn AP. Returns true
+ * only if the ICR write actually completed within the busy-wait budget. */
+bool arch_x86_64_smp_send_resched_ipi(uint32_t cpu_idx);
+
 void arch_x86_64_smp_prepare_aps(void);
 void arch_x86_64_ap_entry(uint64_t apic_id);
 

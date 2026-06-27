@@ -189,11 +189,15 @@ int arch_x86_64_idt_register_irq(uint8_t cpu_vector, void (*handler)(void)) {
      * (OPENOS_X86_64_LAPIC_TIMER_VECTOR = 0x40), used by the AP
      * per-CPU timer. Still refuse 0x80 (int 0x80 compat) and 0xFF
      * (LAPIC spurious).
+     *
+     * G.6.6a: also accept the cross-CPU reschedule-IPI vector 0x41,
+     * sent via fixed-delivery IPI from any CPU to any other CPU.
      */
     if (handler == 0) return -1;
     bool ok = false;
     if (cpu_vector >= 0x20u && cpu_vector < 0x30u) ok = true;
     if (cpu_vector == 0x40u) ok = true;
+    if (cpu_vector == 0x41u) ok = true;
     if (!ok) return -1;
     set_idt64_gate(cpu_vector, (idt64_handler_t)(uintptr_t)handler, 0u, OPENOS_X86_64_IDT_INTERRUPT_GATE);
     return 0;

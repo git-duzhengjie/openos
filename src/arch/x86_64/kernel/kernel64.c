@@ -35,6 +35,7 @@
  * boot path can hand its address to arch_x86_64_idt_register_irq(). */
 extern void x86_64_irq0(void);
 extern void x86_64_irq_lapic_timer(void);  /* G.6.5a: AP per-CPU LAPIC timer */
+extern void x86_64_irq_lapic_resched(void); /* G.6.6a: cross-CPU reschedule IPI */
 #include "../include/tss64.h"
 #include "../include/usermode64.h"
 #include "../include/vfs64.h"
@@ -131,6 +132,14 @@ void arch_x86_64_early_init(const openos_bootinfo_t *bootinfo) {
      * fully wired handler. The BSP itself never programs its LAPIC timer
      * in G.6.5a, so it will not enter this ISR. */
     arch_x86_64_idt_register_irq(0x40u, x86_64_irq_lapic_timer);
+
+    /* G.6.6a: register the cross-CPU reschedule-IPI handler on vector
+     * 0x41. Same ordering contract as 0x40 — the gate must be live on
+     * every CPU before arch_x86_64_smp_init() returns, otherwise the
+     * first IPI BSP sends to an AP during selftest would land on an
+     * unwired vector and #GP. Vector 0x41 avoids the legacy PIC range
+     * (0x20–0x2F), the timer at 0x40, and the spurious vector 0xFF. */
+    arch_x86_64_idt_register_irq(0x41u, x86_64_irq_lapic_resched);
 }
 
 void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {

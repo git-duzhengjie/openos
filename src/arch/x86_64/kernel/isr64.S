@@ -2,6 +2,7 @@
 .extern arch_x86_64_exception_dispatch
 .extern arch_x86_64_pit_irq0_handler
 .extern arch_x86_64_lapic_timer_irq_handler
+.extern arch_x86_64_lapic_resched_irq_handler
 
 .macro ISR_NOERR vector
 .global x86_64_isr\vector
@@ -132,6 +133,35 @@ x86_64_irq_lapic_timer:
     pushq %r11
     cld
     call arch_x86_64_lapic_timer_irq_handler
+    popq %r11
+    popq %r10
+    popq %r9
+    popq %r8
+    popq %rdi
+    popq %rsi
+    popq %rdx
+    popq %rcx
+    popq %rax
+    iretq
+
+/* G.6.6a — LAPIC reschedule-IPI stub (vector 0x41).
+ * Cross-CPU "poke" signal sent via fixed-delivery IPI. Same caller-saved
+ * frame and EOI-in-C contract as the timer stub. The handler bumps the
+ * per-CPU resched_ipi_count and EOIs; the actual reschedule decision is
+ * deferred to the next timer tick. */
+.global x86_64_irq_lapic_resched
+x86_64_irq_lapic_resched:
+    pushq %rax
+    pushq %rcx
+    pushq %rdx
+    pushq %rsi
+    pushq %rdi
+    pushq %r8
+    pushq %r9
+    pushq %r10
+    pushq %r11
+    cld
+    call arch_x86_64_lapic_resched_irq_handler
     popq %r11
     popq %r10
     popq %r9

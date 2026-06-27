@@ -412,9 +412,66 @@ void arch_x86_64_smp_selftest_run(void)
         early_console64_write(" all APs switched");
     }
 
+    /* G.6.6a Stage 12: BSP -> each AP fixed-delivery reschedule IPI.
+     *
+     * For every AP we send exactly one IPI at vector 0x41 via
+     * arch_x86_64_smp_send_resched_ipi(). The handler bumps that AP's
+     * resched_ipi_count and EOIs. We then poll cross-CPU through
+     * arch_x86_64_smp_resched_ipi_count() until every AP advanced to >=1
+     * (budget: 500 ms PIT). BSP's slot must stay 0 in this stage because
+     * we never send a reschedule IPI to ourselves — a non-zero BSP slot
+     * here would indicate a stray IPI / wrong routing.
+     *
+     * This is the end-to-end proof that BSP->AP fixed-delivery IPI is
+     * wired correctly: ICR encoding correct, target apic_id resolved
+     * correctly, vector 0x41 live in each AP's IDT, ISR stub jumps to
+     * the C handler, percpu pointer reachable via GS, EOI delivered. */
+    if (ap_n > 0) {
+        early_console64_write("\n[x86_64][smp-selftest] stage 12: BSP -> AP reschedule IPI...");
+        uint64_t ipi_sent = 0;
+        for (uint32_t i = 1; i <= ap_n; ++i) {
+            if (arch_x86_64_smp_send_resched_ipi(i)) {
+                ipi_sent++;
+            } else {
+                log_kv("\n[x86_64][smp-selftest] FAIL: send_resched_ipi to cpu ", (uint64_t)i);
+                early_console64_write(" returned false\n");
+                return;
+            }
+        }
+
+        const uint64_t ipi_min = 1u;
+        uint64_t deadline = arch_x86_64_pit_get_ticks() + 500u;
+        bool all_got = false;
+        while (arch_x86_64_pit_get_ticks() < deadline) {
+            all_got = true;
+            for (uint32_t i = 1; i <= ap_n; ++i) {
+                if (arch_x86_64_smp_resched_ipi_count(i) < ipi_min) {
+                    all_got = false;
+                    break;
+                }
+            }
+            if (all_got) break;
+            __asm__ volatile ("pause");
+        }
+        for (uint32_t i = 0; i <= ap_n; ++i) {
+            log_kv("\n[x86_64][smp-selftest] resched_ipi_count[", (uint64_t)i);
+            log_kv("]=", arch_x86_64_smp_resched_ipi_count(i));
+        }
+        if (!all_got) {
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: not every AP received its reschedule IPI within 500ms\n");
+            return;
+        }
+        if (arch_x86_64_smp_resched_ipi_count(0) != 0u) {
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: BSP resched_ipi_count expected 0 (BSP was never IPI'd in this stage)\n");
+            return;
+        }
+        log_kv("\n[x86_64][smp-selftest] stage 12 ipi_sent=", (uint64_t)ipi_sent);
+        early_console64_write(" all APs acked");
+    }
+
     /* All stages reached by all APs. */
     if (ap_n > 0) {
-        early_console64_write("\n[x86_64][smp-selftest] PASS: all APs idle on private GDT/TSS/IDT+GS + sched-registered + LAPIC-timer driving sched_on_tick + distributed kthreads switched per-CPU\n");
+        early_console64_write("\n[x86_64][smp-selftest] PASS: all APs idle on private GDT/TSS/IDT+GS + sched-registered + LAPIC-timer driving sched_on_tick + distributed kthreads switched per-CPU + cross-CPU reschedule IPI delivered\n");
     } else {
         early_console64_write("\n[x86_64][smp-selftest] PASS: no APs (UP system, BSP idle slot only)\n");
     }
