@@ -96,12 +96,18 @@ int arch_x86_64_sched_prio_selftest_run(void) {
     uint64_t preempts_before = arch_x86_64_sched_preempt_count();
     uint64_t switches_before = arch_x86_64_sched_switch_count();
 
-    uint32_t id_h = arch_x86_64_sched_spawn_kthread_prio(
-        burner_high,   0, OPENOS_X86_64_SCHED_PRIO_HIGH);
-    uint32_t id_n = arch_x86_64_sched_spawn_kthread_prio(
-        burner_normal, 0, OPENOS_X86_64_SCHED_PRIO_NORMAL);
-    uint32_t id_l = arch_x86_64_sched_spawn_kthread_prio(
-        burner_low,    0, OPENOS_X86_64_SCHED_PRIO_LOW);
+    /* G.6.7-pre fix: pin all three burners to BSP (CPU 0) so they
+     * actually contend for the same CPU's quantum. Otherwise the
+     * G.6.5c round-robin spawner would scatter them across cores and
+     * each runs ~unthrottled, collapsing H/N/L into ratio ~= 1:1:1
+     * and failing the H > N > L invariant on SMP_N>=2. The priority
+     * scheduler is per-CPU; this test is a per-CPU invariant. */
+    uint32_t id_h = arch_x86_64_sched_spawn_kthread_prio_on(
+        burner_high,   0, OPENOS_X86_64_SCHED_PRIO_HIGH,   0u);
+    uint32_t id_n = arch_x86_64_sched_spawn_kthread_prio_on(
+        burner_normal, 0, OPENOS_X86_64_SCHED_PRIO_NORMAL, 0u);
+    uint32_t id_l = arch_x86_64_sched_spawn_kthread_prio_on(
+        burner_low,    0, OPENOS_X86_64_SCHED_PRIO_LOW,    0u);
     if (id_h == 0u || id_n == 0u || id_l == 0u) {
         early_console64_write("\n[x86_64][prio-selftest] FAIL spawn\n");
         return 2;
@@ -112,6 +118,20 @@ int arch_x86_64_sched_prio_selftest_run(void) {
     log_kv(" prio_h=", (uint64_t)arch_x86_64_sched_get_priority(id_h));
     log_kv(" prio_n=", (uint64_t)arch_x86_64_sched_get_priority(id_n));
     log_kv(" prio_l=", (uint64_t)arch_x86_64_sched_get_priority(id_l));
+
+    /* G.6.7-pre fix #2: demote the bootstrap thread (slot 0, the kernel's
+     * current execution context on BSP) to LOW for the measurement window.
+     * Bootstrap defaults to NORMAL priority, so before this fix it competed
+     * for quantum 1:1 against burner_normal in the round-robin pick_next.
+     * Even worse, our wait loop below is a busy pause-loop (no hlt), so
+     * bootstrap actually consumes its full NORMAL quantum every visit,
+     * shrinking the gap H>N below the 12.5% guard band. Demoting to LOW
+     * makes bootstrap's quantum 2x smaller than burner_low's quantum-share
+     * never-mind burner_normal/burner_high, so the H:N:L ratio cleanly
+     * reflects only the three burners. Restored at the end. */
+    uint32_t boot_slot = arch_x86_64_sched_current_slot();
+    uint32_t boot_prio = arch_x86_64_sched_get_priority(boot_slot);
+    (void)arch_x86_64_sched_set_priority(boot_slot, OPENOS_X86_64_SCHED_PRIO_LOW);
 
     cli();
     /* G.2 runs AFTER apic_selftest, so IRQ0 delivery goes through IOAPIC GSI2
@@ -137,6 +157,9 @@ int arch_x86_64_sched_prio_selftest_run(void) {
     } else {
         arch_x86_64_pic_mask(0u);
     }
+
+    /* G.6.7-pre fix #2: restore bootstrap thread's original priority. */
+    (void)arch_x86_64_sched_set_priority(boot_slot, boot_prio);
 
     uint64_t preempts_after = arch_x86_64_sched_preempt_count();
     uint64_t switches_after = arch_x86_64_sched_switch_count();
