@@ -130,4 +130,25 @@ void     arch_x86_64_idt_disarm_ud_probe(void);
 uint64_t arch_x86_64_idt_ud_probe_count(void);
 int      arch_x86_64_idt_ud_probe_is_armed(void);
 
+/*
+ * G.3b-4: recoverable single-shot #PF probe.
+ *
+ * arm_pf_probe(rip, len, cr2): the very next #PF whose frame->rip matches
+ *   `rip` AND whose CR2 matches `cr2` exactly is treated as expected — the
+ *   dispatcher increments pf_probe_count, advances frame->rip by `len`
+ *   bytes (skipping the faulting load/store), and returns WITHOUT polluting
+ *   the kernel fault snapshot or halting. The probe disarms itself on hit.
+ *
+ * The dual (rip,cr2) match guarantees we never silently swallow an
+ * unrelated #PF — an unexpected fault at the same RIP but different CR2,
+ * or vice versa, still falls through to the normal fatal path.
+ *
+ * Note: this does NOT install a mapping for `cr2`. If the same instruction
+ *   re-executes after probe disarm, it will fault for real.
+ */
+void     arch_x86_64_idt_arm_pf_probe(uint64_t expected_rip, uint32_t insn_len, uint64_t expected_cr2);
+void     arch_x86_64_idt_disarm_pf_probe(void);
+uint64_t arch_x86_64_idt_pf_probe_count(void);
+int      arch_x86_64_idt_pf_probe_is_armed(void);
+
 #endif /* OPENOS_ARCH_X86_64_IDT64_H */

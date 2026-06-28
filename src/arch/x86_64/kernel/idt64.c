@@ -75,6 +75,45 @@ int arch_x86_64_idt_ud_probe_is_armed(void)
     return (int)g_ud_probe_armed;
 }
 
+/*
+ * G.3b-4: same shape as the #UD probe, plus a CR2 match. Faulting linear
+ * address (CR2) is read from the CPU at exception entry, so we let the
+ * dispatcher capture it and compare it against the armed value.
+ */
+static volatile uint32_t g_pf_probe_armed   = 0;
+static volatile uint32_t g_pf_probe_insnlen = 0;
+static volatile uint64_t g_pf_probe_rip     = 0;
+static volatile uint64_t g_pf_probe_cr2     = 0;
+static volatile uint64_t g_pf_probe_count   = 0;
+
+void arch_x86_64_idt_arm_pf_probe(uint64_t expected_rip, uint32_t insn_len, uint64_t expected_cr2)
+{
+    g_pf_probe_rip     = expected_rip;
+    g_pf_probe_cr2     = expected_cr2;
+    g_pf_probe_insnlen = insn_len;
+    __asm__ __volatile__("" ::: "memory");
+    g_pf_probe_armed   = 1u;
+}
+
+void arch_x86_64_idt_disarm_pf_probe(void)
+{
+    g_pf_probe_armed   = 0u;
+    __asm__ __volatile__("" ::: "memory");
+    g_pf_probe_rip     = 0;
+    g_pf_probe_cr2     = 0;
+    g_pf_probe_insnlen = 0;
+}
+
+uint64_t arch_x86_64_idt_pf_probe_count(void)
+{
+    return g_pf_probe_count;
+}
+
+int arch_x86_64_idt_pf_probe_is_armed(void)
+{
+    return (int)g_pf_probe_armed;
+}
+
 struct idt64_entry {
     uint16_t offset_low;
     uint16_t selector;
@@ -279,6 +318,30 @@ void arch_x86_64_exception_dispatch(struct x86_64_exception_frame *frame) {
         ++g_ud_probe_count;
         frame->rip = (x86_64_entry_t)((uint64_t)frame->rip + step);
         return;
+    }
+
+    /*
+     * G.3b-4: recoverable #PF probe gate. Same single-shot pattern as the
+     * #UD probe, but additionally matches CR2 (the faulting linear address)
+     * to make sure we never silently swallow an unrelated page fault.
+     *
+     * NOTE: we intentionally do NOT install any mapping for cr2. If the
+     * faulting instruction re-executes after we return, it will fault
+     * again — the probe is a one-shot "this exact load/store is allowed
+     * to fault here, please skip past it" mechanism, used by the selftest
+     * to prove the dispatcher can resume from a synchronous #PF.
+     */
+    if (frame && g_pf_probe_armed && frame->vector == 14u &&
+        (uint64_t)frame->rip == g_pf_probe_rip) {
+        uint64_t cr2_now = 0;
+        __asm__ __volatile__("mov %%cr2, %0" : "=r"(cr2_now));
+        if (cr2_now == g_pf_probe_cr2) {
+            uint32_t step = g_pf_probe_insnlen;
+            g_pf_probe_armed = 0u;
+            ++g_pf_probe_count;
+            frame->rip = (x86_64_entry_t)((uint64_t)frame->rip + step);
+            return;
+        }
     }
 
     /*
