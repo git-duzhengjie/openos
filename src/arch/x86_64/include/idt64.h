@@ -49,7 +49,7 @@ void arch_x86_64_idt_init(void);
  */
 void arch_x86_64_idt_load_ap(void);
 void arch_x86_64_idt_print_status(void);
-void arch_x86_64_exception_dispatch(const struct x86_64_exception_frame *frame);
+void arch_x86_64_exception_dispatch(struct x86_64_exception_frame *frame);
 
 /*
  * Step F.1: read-only inspector for the installed IDT. Used by the IDT
@@ -110,5 +110,24 @@ void arch_x86_64_idt_print_kernel_fault_stats(void);
 
 /* G.7g-2: monotonic NMI delivery counter (global, all CPUs). */
 uint64_t arch_x86_64_idt_nmi_count(void);
+
+/*
+ * G.3b-3: recoverable single-shot fault probe.
+ *
+ * arm_ud_probe(rip, len): the very next #UD whose frame->rip exactly matches
+ *   `rip` is treated as expected — the dispatcher increments ud_probe_count,
+ *   advances frame->rip by `len` bytes (so iretq resumes past the faulting
+ *   instruction), and returns WITHOUT polluting the kernel fault snapshot or
+ *   halting. The probe disarms itself on hit so it is genuinely single-shot.
+ *
+ * Intended use: selftest places a `ud2` (len=2) at a known label, arms with
+ *   (&label, 2), executes ud2, and asserts ud_probe_count incremented by 1.
+ *   Together with G.7g-2 NMI live-fire, this validates that the IDT plumbing
+ *   not only routes exceptions but can also *recover* from them.
+ */
+void     arch_x86_64_idt_arm_ud_probe(uint64_t expected_rip, uint32_t insn_len);
+void     arch_x86_64_idt_disarm_ud_probe(void);
+uint64_t arch_x86_64_idt_ud_probe_count(void);
+int      arch_x86_64_idt_ud_probe_is_armed(void);
 
 #endif /* OPENOS_ARCH_X86_64_IDT64_H */

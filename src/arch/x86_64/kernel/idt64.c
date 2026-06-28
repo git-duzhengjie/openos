@@ -30,6 +30,51 @@ uint64_t arch_x86_64_idt_nmi_count(void)
     return g_nmi_count;
 }
 
+/*
+ * G.3b-3: single-shot recoverable #UD probe.
+ *
+ *   armed       — 0 = disarmed, 1 = waiting for a matching fault
+ *   expected_rip— RIP that the dispatcher must see on entry to count as a hit
+ *   insn_len    — bytes to advance frame->rip by (e.g. 2 for ud2)
+ *   count       — number of hits accepted so far (monotonic)
+ *
+ * Lives in BSS; the BSP arms / disarms with IRQs off, and the dispatcher runs
+ * with IRQs off (CPU clears IF on exception entry through an interrupt gate),
+ * so plain volatile access is sufficient.
+ */
+static volatile uint32_t g_ud_probe_armed   = 0;
+static volatile uint32_t g_ud_probe_insnlen = 0;
+static volatile uint64_t g_ud_probe_rip     = 0;
+static volatile uint64_t g_ud_probe_count   = 0;
+
+void arch_x86_64_idt_arm_ud_probe(uint64_t expected_rip, uint32_t insn_len)
+{
+    /* Order: write the payload before flipping the armed flag, so a fault
+     * racing with the arm sequence cannot observe armed=1 with a stale RIP. */
+    g_ud_probe_rip     = expected_rip;
+    g_ud_probe_insnlen = insn_len;
+    __asm__ __volatile__("" ::: "memory");
+    g_ud_probe_armed   = 1u;
+}
+
+void arch_x86_64_idt_disarm_ud_probe(void)
+{
+    g_ud_probe_armed   = 0u;
+    __asm__ __volatile__("" ::: "memory");
+    g_ud_probe_rip     = 0;
+    g_ud_probe_insnlen = 0;
+}
+
+uint64_t arch_x86_64_idt_ud_probe_count(void)
+{
+    return g_ud_probe_count;
+}
+
+int arch_x86_64_idt_ud_probe_is_armed(void)
+{
+    return (int)g_ud_probe_armed;
+}
+
 struct idt64_entry {
     uint16_t offset_low;
     uint16_t selector;
@@ -213,7 +258,29 @@ int arch_x86_64_idt_register_irq(uint8_t cpu_vector, void (*handler)(void)) {
     return 0;
 }
 
-void arch_x86_64_exception_dispatch(const struct x86_64_exception_frame *frame) {
+void arch_x86_64_exception_dispatch(struct x86_64_exception_frame *frame) {
+    /*
+     * G.3b-3: recoverable #UD probe gate — runs *before* the kernel fault
+     * sentry so a probed-and-resumed ud2 does NOT pollute first_rip/etc.
+     *
+     * Match conditions (all required):
+     *   - probe is armed
+     *   - vector is 6 (#UD)
+     *   - frame->rip matches the armed RIP exactly (no fuzzy match — we want
+     *     to catch wild #UD elsewhere, not silently swallow them)
+     *
+     * On hit we disarm, bump the count, and step rip past the faulting
+     * instruction. iretq will then resume execution at rip+insn_len.
+     */
+    if (frame && g_ud_probe_armed && frame->vector == 6u &&
+        (uint64_t)frame->rip == g_ud_probe_rip) {
+        uint32_t step = g_ud_probe_insnlen;
+        g_ud_probe_armed = 0u;
+        ++g_ud_probe_count;
+        frame->rip = (x86_64_entry_t)((uint64_t)frame->rip + step);
+        return;
+    }
+
     /*
      * Step G.x: bump the ring0 fault sentry *before* any vector-specific
      * handling. NMI is intentionally counted as well — if NMI fires from
