@@ -108,4 +108,7 @@ uint64_t arch_x86_64_idt_kernel_ud_count(void);
 void arch_x86_64_idt_kernel_fault_snapshot(struct x86_64_kernel_fault_snapshot *out);
 void arch_x86_64_idt_print_kernel_fault_stats(void);
 
+/* G.7g-2: monotonic NMI delivery counter (global, all CPUs). */
+uint64_t arch_x86_64_idt_nmi_count(void);
+
 #endif /* OPENOS_ARCH_X86_64_IDT64_H */

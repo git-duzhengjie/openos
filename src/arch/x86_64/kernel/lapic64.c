@@ -545,3 +545,38 @@ uint32_t arch_x86_64_lapic_timer_ticks_per_ms(void)
 {
     return g_lapic_bus_ticks_per_ms;
 }
+
+/* G.7g-2 — Send NMI to self via LAPIC ICR.
+ *
+ * ICR low encoding:
+ *   bits [10:8]   = 100b  (delivery mode = NMI)
+ *   bits [12:11]  = 00b   (destination mode = physical, ignored for self)
+ *   bit  14       = 1     (level = assert)
+ *   bit  15       = 0     (trigger = edge)
+ *   bits [19:18]  = 01b   (destination shorthand = self)
+ *   bits [7:0]    = 0     (vector ignored for NMI)
+ *
+ * Returns true if the ICR write completed; false on delivery timeout.
+ */
+bool arch_x86_64_lapic_send_self_nmi(void)
+{
+    if (!g_lapic_ready) {
+        return false;
+    }
+
+    if (!arch_x86_64_lapic_icr_wait()) {
+        return false;
+    }
+
+    /* destination irrelevant for shorthand=self, but write 0 for hygiene */
+    mmio_write32(g_lapic_mmio, OPENOS_X86_64_LAPIC_REG_ICR_HIGH, 0u);
+
+    const uint32_t low =
+        (4u << 8)                                  /* delivery mode = NMI */
+        | OPENOS_X86_64_LAPIC_ICR_DESTMOD_PHYS
+        | OPENOS_X86_64_LAPIC_ICR_LEVEL_ASSERT
+        | (1u << 18);                              /* shorthand = self    */
+    mmio_write32(g_lapic_mmio, OPENOS_X86_64_LAPIC_REG_ICR_LOW, low);
+
+    return arch_x86_64_lapic_icr_wait();
+}

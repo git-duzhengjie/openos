@@ -6,6 +6,7 @@
 #include "../include/sched64.h"
 #include "../include/pit64.h"
 #include "../include/lapic64.h"
+#include "../include/idt64.h"  /* G.7g-2: nmi_count accessor */
 #include "../include/ioapic64.h"
 #include "../include/delay64.h"
 #include "../include/gdt64.h"
@@ -1394,9 +1395,38 @@ void arch_x86_64_smp_selftest_run(void)
         }
         early_console64_write(" PASS");
     }
+
+    /* ------------------------------------------------------------------
+     * Stage 23 (G.7g-2): NMI live-trigger via LAPIC ICR self-shorthand.
+     *
+     * Snapshot g_nmi_count, fire a self-NMI from the BSP, then re-read
+     * the counter. The exception entry path is already wired (vector 2
+     * handler increments g_nmi_count; NMI ack is implicit). PASS iff
+     * count strictly increased.
+     * ------------------------------------------------------------------ */
+    {
+        early_console64_write("\n[x86_64][smp-selftest] stage 23 (G.7g-2): NMI self-IPI ...");
+        uint64_t nmi_before = arch_x86_64_idt_nmi_count();
+        bool sent = arch_x86_64_lapic_send_self_nmi();
+        /* The NMI is asynchronous; give it a few hundred cycles to land. */
+        for (volatile int i = 0; i < 100000; ++i) { __asm__ volatile("pause" ::: "memory"); }
+        uint64_t nmi_after = arch_x86_64_idt_nmi_count();
+        log_kv(" sent=", (uint64_t)(sent ? 1u : 0u));
+        log_kv(" before=", nmi_before);
+        log_kv(" after=", nmi_after);
+        if (!sent) {
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 23 ICR delivery timeout\n");
+            return;
+        }
+        if (nmi_after <= nmi_before) {
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 23 NMI not observed in handler\n");
+            return;
+        }
+        early_console64_write(" PASS");
+    }
     if (ap_n > 0) {
-        early_console64_write("\n[x86_64][smp-selftest] PASS: all APs idle on private GDT/TSS/IDT+GS + sched-registered + LAPIC-timer driving sched_on_tick + distributed kthreads switched per-CPU + cross-CPU reschedule IPI delivered + cross-CPU migration verified + IPI tail-hook dispatch verified + preempt-disable gate verified + timer-tick honours gate + swapgs MSR pair OK + syscall RSP save-area OK + sched-slot kind/kstack tagging OK + USER-slot AP dispatch verified + LAPIC timer calibrated\n");
+        early_console64_write("\n[x86_64][smp-selftest] PASS: all APs idle on private GDT/TSS/IDT+GS + sched-registered + LAPIC-timer driving sched_on_tick + distributed kthreads switched per-CPU + cross-CPU reschedule IPI delivered + cross-CPU migration verified + IPI tail-hook dispatch verified + preempt-disable gate verified + timer-tick honours gate + swapgs MSR pair OK + syscall RSP save-area OK + sched-slot kind/kstack tagging OK + USER-slot AP dispatch verified + LAPIC timer calibrated + NMI live-trigger verified\n");
     } else {
-        early_console64_write("\n[x86_64][smp-selftest] PASS: no APs (UP system, BSP idle slot only) + preempt-disable gate verified + timer-tick honours gate + swapgs MSR pair OK + syscall RSP save-area OK + sched-slot kind/kstack tagging OK + USER-slot dispatch SKIPPED (ap<3) + LAPIC timer calibrated\n");
+        early_console64_write("\n[x86_64][smp-selftest] PASS: no APs (UP system, BSP idle slot only) + preempt-disable gate verified + timer-tick honours gate + swapgs MSR pair OK + syscall RSP save-area OK + sched-slot kind/kstack tagging OK + USER-slot dispatch SKIPPED (ap<3) + LAPIC timer calibrated + NMI live-trigger verified\n");
     }
 }

@@ -235,4 +235,18 @@ bool arch_x86_64_lapic_timer_calibrate(void);
  * calibration succeeds. */
 uint32_t arch_x86_64_lapic_timer_ticks_per_ms(void);
 
+/* G.7g-2 — Send an NMI to *this* CPU via LAPIC ICR self-shorthand.
+ *
+ * Encoding (SDM Vol.3A Fig.10-12):
+ *   delivery_mode = 100b (NMI)
+ *   destination_shorthand = 01b (self)
+ *   level = 1 (assert), trigger = 0 (edge), vector = 0 (NMI ignores it)
+ *
+ * Used by stage 23 to validate that the NMI vector handler is wired up
+ * and that g_nmi_count increments on a delivered NMI. Returns true if the
+ * ICR write completed (delivery_status cleared); false on timeout. The
+ * caller should also confirm g_nmi_count actually incremented.
+ */
+bool arch_x86_64_lapic_send_self_nmi(void);
+
 #endif /* OPENOS_ARCH_X86_64_LAPIC64_H */

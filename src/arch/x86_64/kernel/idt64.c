@@ -20,6 +20,16 @@
  */
 static volatile struct x86_64_kernel_fault_snapshot s_kfault = { 0 };
 
+/* G.7g-2: NMI delivery counter — file-scope so stage 23 can sample it.
+ * Updated only inside the exception handler (interrupts disabled), but
+ * read from C selftest code with IRQs on, so keep it volatile. */
+static volatile uint64_t g_nmi_count = 0;
+
+uint64_t arch_x86_64_idt_nmi_count(void)
+{
+    return g_nmi_count;
+}
+
 struct idt64_entry {
     uint16_t offset_low;
     uint16_t selector;
@@ -235,10 +245,9 @@ void arch_x86_64_exception_dispatch(const struct x86_64_exception_frame *frame) 
      * commonly represents a chassis / watchdog event we just want to
      * log. Treat it as non-fatal so the kernel keeps running. */
     if (frame && frame->vector == 2u) {
-        static volatile uint64_t s_nmi_count = 0;
-        ++s_nmi_count;
+        ++g_nmi_count;
         early_console64_write("\n[x86_64][nmi] count=");
-        early_console64_write_hex64(s_nmi_count);
+        early_console64_write_hex64(g_nmi_count);
         early_console64_write(" rip=");
         early_console64_write_hex64((uint64_t)frame->rip);
         early_console64_write("\n");
