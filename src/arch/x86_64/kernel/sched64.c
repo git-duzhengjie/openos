@@ -151,6 +151,34 @@ static sched_slot_t  sched_slots[OPENOS_X86_64_SCHED_MAX_KTHREADS];
 /* G.6.3: sched_current_idx, sched_switch_count, sched_quantum_left,
  * sched_preempt_count moved into arch_x86_64_percpu_t (this_cpu()->...). */
 
+static void sched_apply_rsp0_for_next(uint32_t nxt) {
+    /* G.7e: maintain TSS.RSP0 across slot transitions.
+     *
+     *   - USER slot:    write the slot's kernel_stack_top into TSS.RSP0
+     *                   so future syscalls/IRQs from ring3 land on this
+     *                   thread's private kernel stack.
+     *   - KERNEL slot:  restore TSS.RSP0 to the per-CPU baseline that
+     *                   percpu_setup() installed (kthreads use the
+     *                   per-CPU shared RSP0; their ctx.rsp is a
+     *                   separate switch stack, not RSP0).
+     *
+     * Slot 0 (BSP bootstrap) is KERNEL with kernel_stack_top=0 -- it
+     * uses the BSP's percpu baseline RSP0, which is exactly what the
+     * baseline-restore branch installs. */
+    uint32_t cpu = arch_x86_64_this_cpu_ptr()->cpu_idx;
+    if (sched_slots[nxt].kind == OPENOS_X86_64_SCHED_KIND_USER) {
+        uintptr_t kstk = sched_slots[nxt].kernel_stack_top;
+        if (kstk != 0u) {
+            (void)arch_x86_64_percpu_set_rsp0(cpu, (x86_64_stack_ptr_t)kstk);
+        }
+    } else {
+        uint64_t baseline = arch_x86_64_percpu_baseline_rsp0(cpu);
+        if (baseline != 0u) {
+            (void)arch_x86_64_percpu_set_rsp0(cpu, (x86_64_stack_ptr_t)baseline);
+        }
+    }
+}
+
 static void sched_ensure_bootstrap_slot(void) {
     if (sched_slots[0].state != SCHED_SLOT_FREE) {
         return;
@@ -352,6 +380,7 @@ uint32_t arch_x86_64_sched_yield(void) {
 
     x86_64_context_t *from = (cur == 0u) ? &bootstrap_context : &sched_slots[cur].ctx;
     x86_64_context_t *to   = (nxt == 0u) ? &bootstrap_context : &sched_slots[nxt].ctx;
+    sched_apply_rsp0_for_next(nxt);
     arch_x86_64_context_switch(from, to);
     /* When we resume here, sched_current_idx points back to `cur`. */
     return nxt;
@@ -375,6 +404,7 @@ void arch_x86_64_sched_exit_self(void) {
     sched_pc_inc_switches();
 
     x86_64_context_t *to = (nxt == 0u) ? &bootstrap_context : &sched_slots[nxt].ctx;
+    sched_apply_rsp0_for_next(nxt);
     /* `from == NULL` tells context_switch64.S to skip saving. */
     arch_x86_64_context_switch(NULL, to);
 

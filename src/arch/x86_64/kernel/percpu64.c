@@ -66,6 +66,9 @@ _Static_assert(__builtin_offsetof(arch_x86_64_percpu_t, syscall_kernel_rsp)
 _Static_assert(__builtin_offsetof(arch_x86_64_percpu_t, syscall_user_rsp)
                    == OPENOS_X86_64_PERCPU_OFF_SYSCALL_URSP,
                "syscall_user_rsp offset must match asm constant");
+_Static_assert(__builtin_offsetof(arch_x86_64_percpu_t, baseline_rsp0)
+                   == OPENOS_X86_64_PERCPU_OFF_BASELINE_RSP0,
+               "baseline_rsp0 offset must match asm constant");
 
 static uint64_t make_descriptor(uint32_t base, uint32_t limit,
                                 uint8_t access, uint8_t flags) {
@@ -221,6 +224,13 @@ x86_64_stack_ptr_t arch_x86_64_percpu_set_rsp0(uint32_t cpu_idx,
     return old;
 }
 
+uint64_t arch_x86_64_percpu_baseline_rsp0(uint32_t cpu_idx) {
+    if (cpu_idx >= OPENOS_X86_64_PERCPU_MAX_CPUS) {
+        return 0;
+    }
+    return g_percpu[cpu_idx].baseline_rsp0;
+}
+
 x86_64_stack_ptr_t arch_x86_64_percpu_ist(uint32_t cpu_idx, uint32_t ist_index) {
     if (cpu_idx >= OPENOS_X86_64_PERCPU_MAX_CPUS) {
         return 0;
@@ -293,6 +303,13 @@ void arch_x86_64_percpu_install_gs(uint32_t cpu_idx) {
      * slot and starts cleared. */
     p->syscall_kernel_rsp       = (uint64_t)g_tss[cpu_idx].rsp[0];
     p->syscall_user_rsp         = 0;
+
+    /* G.7e: snapshot the per-CPU baseline TSS.RSP0. percpu_setup() has
+     * already installed RSP0 at this point. The scheduler reads this
+     * baseline back via arch_x86_64_percpu_baseline_rsp0() when it
+     * switches *out of* a USER sched slot and needs to restore TSS.RSP0
+     * for subsequent KERNEL slots / interrupt entries on this CPU. */
+    p->baseline_rsp0            = (uint64_t)g_tss[cpu_idx].rsp[0];
 
     /* Write IA32_GS_BASE directly. Note: a subsequent `mov <selector>, %gs`
      * would reload the hidden base from the GDT descriptor and *clobber*

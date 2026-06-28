@@ -116,7 +116,15 @@ typedef struct openos_x86_64_percpu {
      * the same physical kernel stack for a given CPU/thread. */
     uint64_t syscall_kernel_rsp;     /* offset 0x60 */
     uint64_t syscall_user_rsp;       /* offset 0x68 */
-    uint64_t _pad[2];             /* pad to 128 bytes for cache-line alignment */
+    /* G.7e: per-CPU baseline RSP0 -- the value of TSS.RSP0 that
+     * was installed by percpu_setup() before any user thread ran.
+     * The scheduler restores TSS.RSP0 to this snapshot whenever it
+     * switches *from* a USER sched slot *back to* a KERNEL slot,
+     * so kthreads/interrupts continue to land on the per-CPU
+     * baseline kernel stack. Set exactly once, during the very
+     * first arch_x86_64_percpu_set_rsp0() call on this CPU. */
+    uint64_t baseline_rsp0;          /* offset 0x70 */
+    uint64_t _pad[1];             /* pad to 128 bytes for cache-line alignment */
 } __attribute__((aligned(64))) arch_x86_64_percpu_t;
 
 /* Per-field offsets (compile-time, for asm or sanity checks). */
@@ -136,6 +144,7 @@ typedef struct openos_x86_64_percpu {
 #define OPENOS_X86_64_PERCPU_OFF_PREEMPT_DEFERRED 0x58
 #define OPENOS_X86_64_PERCPU_OFF_SYSCALL_KRSP     0x60
 #define OPENOS_X86_64_PERCPU_OFF_SYSCALL_URSP     0x68
+#define OPENOS_X86_64_PERCPU_OFF_BASELINE_RSP0    0x70
 
 /* IA32_GS_BASE MSR */
 #define OPENOS_X86_64_MSR_GS_BASE        0xC0000101u
@@ -214,6 +223,13 @@ x86_64_virt_addr_t arch_x86_64_percpu_tss_base(uint32_t cpu_idx);
  * for keeping the new pointer alive. */
 x86_64_stack_ptr_t arch_x86_64_percpu_set_rsp0(uint32_t cpu_idx,
                                                 x86_64_stack_ptr_t new_rsp0);
+
+/* G.7e: read back the baseline RSP0 latched on this CPU during the
+ * very first percpu_install_gs() / percpu_setup() pass. The scheduler
+ * uses this snapshot to restore TSS.RSP0 when context-switching out
+ * of a USER sched slot back to a KERNEL slot. Returns 0 for an
+ * out-of-range cpu_idx or before this CPU's percpu install. */
+uint64_t arch_x86_64_percpu_baseline_rsp0(uint32_t cpu_idx);
 
 /* G.7a: read a 1-based IST entry (1..OPENOS_X86_64_PERCPU_IST_COUNT)
  * from cpu_idx's TSS. Returns 0 for out-of-range cpu or ist index. */
