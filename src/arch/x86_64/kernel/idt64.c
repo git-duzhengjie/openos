@@ -151,6 +151,44 @@ int arch_x86_64_idt_gp_probe_is_armed(void)
     return (int)g_gp_probe_armed;
 }
 
+/*
+ * G.3b-6: single-shot recoverable #DE probe. Same structure as the #UD/#GP
+ * probes (no aux value — precise RIP match is the strict gate). #DE is a
+ * fault so the hardware-pushed RIP points to the faulting div/idiv itself;
+ * on hit we disarm, bump the counter, and advance frame->rip by insn_len so
+ * iretq resumes past the faulting instruction.
+ */
+static volatile uint32_t g_de_probe_armed   = 0;
+static volatile uint32_t g_de_probe_insnlen = 0;
+static volatile uint64_t g_de_probe_rip     = 0;
+static volatile uint64_t g_de_probe_count   = 0;
+
+void arch_x86_64_idt_arm_de_probe(uint64_t expected_rip, uint32_t insn_len)
+{
+    g_de_probe_rip     = expected_rip;
+    g_de_probe_insnlen = insn_len;
+    __asm__ __volatile__("" ::: "memory");
+    g_de_probe_armed   = 1u;
+}
+
+void arch_x86_64_idt_disarm_de_probe(void)
+{
+    g_de_probe_armed   = 0u;
+    __asm__ __volatile__("" ::: "memory");
+    g_de_probe_rip     = 0;
+    g_de_probe_insnlen = 0;
+}
+
+uint64_t arch_x86_64_idt_de_probe_count(void)
+{
+    return g_de_probe_count;
+}
+
+int arch_x86_64_idt_de_probe_is_armed(void)
+{
+    return (int)g_de_probe_armed;
+}
+
 struct idt64_entry {
     uint16_t offset_low;
     uint16_t selector;
@@ -392,6 +430,21 @@ void arch_x86_64_exception_dispatch(struct x86_64_exception_frame *frame) {
         uint32_t step = g_gp_probe_insnlen;
         g_gp_probe_armed = 0u;
         ++g_gp_probe_count;
+        frame->rip = (x86_64_entry_t)((uint64_t)frame->rip + step);
+        return;
+    }
+
+    /*
+     * G.3b-6: single-shot recoverable #DE probe. Strict RIP match (no aux
+     * value: the selftest's divl %ecx (with %ecx=0) reproducer is precise
+     * enough). Disarm + bump + skip past the faulting div, NO kernel-fault
+     * sentry pollution. Mismatched #DE falls through to the fatal path.
+     */
+    if (frame && g_de_probe_armed && frame->vector == 0u &&
+        (uint64_t)frame->rip == g_de_probe_rip) {
+        uint32_t step = g_de_probe_insnlen;
+        g_de_probe_armed = 0u;
+        ++g_de_probe_count;
         frame->rip = (x86_64_entry_t)((uint64_t)frame->rip + step);
         return;
     }

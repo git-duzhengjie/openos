@@ -176,4 +176,26 @@ void     arch_x86_64_idt_disarm_gp_probe(void);
 uint64_t arch_x86_64_idt_gp_probe_count(void);
 int      arch_x86_64_idt_gp_probe_is_armed(void);
 
+/*
+ * G.3b-6: recoverable single-shot #DE probe.
+ *
+ * arm_de_probe(rip, len): the very next #DE (divide error, vector 0) whose
+ *   frame->rip exactly matches `rip` is treated as expected — the dispatcher
+ *   increments de_probe_count, advances frame->rip by `len` bytes (so iretq
+ *   resumes past the faulting div instruction), and returns WITHOUT polluting
+ *   the kernel fault snapshot. Single-shot: probe disarms itself on hit.
+ *
+ * #DE is a fault (not a trap): the hardware-pushed RIP points to the faulting
+ * div/idiv instruction itself, so advancing by insn_len is the correct way to
+ * resume past it. No aux value (the precise RIP match is the strict gate).
+ *
+ * Intended use: selftest places a `divl %ecx` (2 bytes: f7 f1) at a known
+ *   label with %ecx zeroed (and %edx:%eax preloaded), so DIV by zero raises
+ *   #DE with the faulting RIP at the div.
+ */
+void     arch_x86_64_idt_arm_de_probe(uint64_t expected_rip, uint32_t insn_len);
+void     arch_x86_64_idt_disarm_de_probe(void);
+uint64_t arch_x86_64_idt_de_probe_count(void);
+int      arch_x86_64_idt_de_probe_is_armed(void);
+
 #endif /* OPENOS_ARCH_X86_64_IDT64_H */
