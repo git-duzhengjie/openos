@@ -1925,9 +1925,140 @@ void arch_x86_64_smp_selftest_run(void)
         early_console64_write(" PASS");
     }
 
+    /* ------------------------------------------------------------------
+     * Stage 29 (G.3c): fault-injection burst harness.
+     *
+     * Runs the five recoverable-exception primitives (#UD/#PF/#GP/#DE/#BP)
+     * back-to-back in a loop of N iterations and checks that:
+     *   - each primitive's counter advanced by exactly N
+     *   - kernel-fault sentry was never touched (kf_delta == 0)
+     *   - no primitive is left armed at the end (single-shot honoured
+     *     under repeated arm/fire cycles)
+     *
+     * This is the foundation of a unified fault-injection harness: each
+     * primitive is reduced to an `arm_and_fire()` step, and the harness
+     * sequences them. Future work can shuffle the order, vary insn_len
+     * widths, or interleave with timer ticks.
+     *
+     * Burst count chosen small (N=5) to keep selftest fast. The probes
+     * have already been validated individually in stages 24..28.
+     * ------------------------------------------------------------------ */
+    {
+        early_console64_write("\n[x86_64][smp-selftest] stage 29 (G.3c): fault-injection burst harness ...");
+        const unsigned N = 5;
+        uint64_t ud_b = arch_x86_64_idt_ud_probe_count();
+        uint64_t pf_b = arch_x86_64_idt_pf_probe_count();
+        uint64_t gp_b = arch_x86_64_idt_gp_probe_count();
+        uint64_t de_b = arch_x86_64_idt_de_probe_count();
+        uint64_t bp_b = arch_x86_64_idt_bp_probe_count();
+        uint64_t kf_b;
+        {
+            struct x86_64_kernel_fault_snapshot snap;
+            arch_x86_64_idt_kernel_fault_snapshot(&snap);
+            kf_b = snap.count;
+        }
+
+        for (unsigned it = 0; it < N; ++it) {
+            /* ---- #UD: ud2 (0F 0B, 2 bytes) ---- */
+            __asm__ __volatile__(
+                "leaq    1f(%%rip), %%rdi\n\t"
+                "movl    $2, %%esi\n\t"
+                "call    arch_x86_64_idt_arm_ud_probe\n\t"
+                "1: ud2\n\t"
+                "2: nop\n\t"
+                ::: "rdi", "rsi", "rax", "rcx", "rdx", "r8", "r9", "r10", "r11",
+                    "memory", "cc");
+
+            /* ---- #PF: load from unmapped user-canonical addr (48 8b 00 = 3 bytes) ---- */
+            __asm__ __volatile__(
+                "leaq    1f(%%rip), %%rdi\n\t"
+                "movl    $3, %%esi\n\t"
+                "movabsq $0x00007FFFDEADBEE0, %%rdx\n\t"
+                "call    arch_x86_64_idt_arm_pf_probe\n\t"
+                "movabsq $0x00007FFFDEADBEE0, %%rax\n\t"
+                "1: movq    (%%rax), %%rax\n\t"
+                "2: nop\n\t"
+                ::: "rdi", "rsi", "rdx", "rax", "rcx", "r8", "r9", "r10", "r11",
+                    "memory", "cc");
+
+            /* ---- #GP: mov %ax,%fs with %ax=0xDEAD (8e e0 = 2 bytes) ---- */
+            __asm__ __volatile__(
+                "leaq    1f(%%rip), %%rdi\n\t"
+                "movl    $2, %%esi\n\t"
+                "call    arch_x86_64_idt_arm_gp_probe\n\t"
+                "movw    $0xDEAD, %%ax\n\t"
+                "1: movw    %%ax, %%fs\n\t"
+                "2: xorw    %%ax, %%ax\n\t"
+                "movw    %%ax, %%fs\n\t"
+                ::: "rdi", "rsi", "rax", "rcx", "rdx", "r8", "r9", "r10", "r11",
+                    "memory", "cc");
+
+            /* ---- #DE: divl %ecx with %edx:%eax=0:1, %ecx=0 (f7 f1 = 2 bytes) ---- */
+            __asm__ __volatile__(
+                "leaq    1f(%%rip), %%rdi\n\t"
+                "movl    $2, %%esi\n\t"
+                "call    arch_x86_64_idt_arm_de_probe\n\t"
+                "xorl    %%edx, %%edx\n\t"
+                "movl    $1, %%eax\n\t"
+                "xorl    %%ecx, %%ecx\n\t"
+                "1: divl    %%ecx\n\t"
+                "2: nop\n\t"
+                ::: "rdi", "rsi", "rax", "rcx", "rdx", "r8", "r9", "r10", "r11",
+                    "memory", "cc");
+
+            /* ---- #BP: int3 (cc = 1 byte, TRAP -- arm with post-int3 RIP) ---- */
+            __asm__ __volatile__(
+                "leaq    2f(%%rip), %%rdi\n\t"
+                "call    arch_x86_64_idt_arm_bp_probe\n\t"
+                "1: int3\n\t"
+                "2: nop\n\t"
+                ::: "rdi", "rax", "rcx", "rdx", "rsi", "r8", "r9", "r10", "r11",
+                    "memory", "cc");
+        }
+
+        uint64_t ud_a = arch_x86_64_idt_ud_probe_count();
+        uint64_t pf_a = arch_x86_64_idt_pf_probe_count();
+        uint64_t gp_a = arch_x86_64_idt_gp_probe_count();
+        uint64_t de_a = arch_x86_64_idt_de_probe_count();
+        uint64_t bp_a = arch_x86_64_idt_bp_probe_count();
+        uint64_t kf_a;
+        {
+            struct x86_64_kernel_fault_snapshot snap;
+            arch_x86_64_idt_kernel_fault_snapshot(&snap);
+            kf_a = snap.count;
+        }
+
+        log_kv(" iters=",    (uint64_t)N);
+        log_kv(" ud_delta=", ud_a - ud_b);
+        log_kv(" pf_delta=", pf_a - pf_b);
+        log_kv(" gp_delta=", gp_a - gp_b);
+        log_kv(" de_delta=", de_a - de_b);
+        log_kv(" bp_delta=", bp_a - bp_b);
+        log_kv(" kf_delta=", kf_a - kf_b);
+
+        if (ud_a - ud_b != N || pf_a - pf_b != N || gp_a - gp_b != N ||
+            de_a - de_b != N || bp_a - bp_b != N) {
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 29 burst delta mismatch\n");
+            return;
+        }
+        if (kf_a != kf_b) {
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 29 burst polluted kernel fault snapshot\n");
+            return;
+        }
+        if (arch_x86_64_idt_ud_probe_is_armed() ||
+            arch_x86_64_idt_pf_probe_is_armed() ||
+            arch_x86_64_idt_gp_probe_is_armed() ||
+            arch_x86_64_idt_de_probe_is_armed() ||
+            arch_x86_64_idt_bp_probe_is_armed()) {
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 29 burst left a probe armed\n");
+            return;
+        }
+        early_console64_write(" PASS");
+    }
+
     if (ap_n > 0) {
-        early_console64_write("\n[x86_64][smp-selftest] PASS: all APs idle on private GDT/TSS/IDT+GS + sched-registered + LAPIC-timer driving sched_on_tick + distributed kthreads switched per-CPU + cross-CPU reschedule IPI delivered + cross-CPU migration verified + IPI tail-hook dispatch verified + preempt-disable gate verified + timer-tick honours gate + swapgs MSR pair OK + syscall RSP save-area OK + sched-slot kind/kstack tagging OK + USER-slot AP dispatch verified + LAPIC timer calibrated + NMI live-trigger verified + #UD probe recoverable + #PF probe recoverable + #GP probe recoverable + #DE probe recoverable + #BP probe recoverable\n");
+        early_console64_write("\n[x86_64][smp-selftest] PASS: all APs idle on private GDT/TSS/IDT+GS + sched-registered + LAPIC-timer driving sched_on_tick + distributed kthreads switched per-CPU + cross-CPU reschedule IPI delivered + cross-CPU migration verified + IPI tail-hook dispatch verified + preempt-disable gate verified + timer-tick honours gate + swapgs MSR pair OK + syscall RSP save-area OK + sched-slot kind/kstack tagging OK + USER-slot AP dispatch verified + LAPIC timer calibrated + NMI live-trigger verified + #UD probe recoverable + #PF probe recoverable + #GP probe recoverable + #DE probe recoverable + #BP probe recoverable + fault-injection burst (5x5) verified\n");
     } else {
-        early_console64_write("\n[x86_64][smp-selftest] PASS: no APs (UP system, BSP idle slot only) + preempt-disable gate verified + timer-tick honours gate + swapgs MSR pair OK + syscall RSP save-area OK + sched-slot kind/kstack tagging OK + USER-slot dispatch SKIPPED (ap<3) + LAPIC timer calibrated + NMI live-trigger verified + #UD probe recoverable + #PF probe recoverable + #GP probe recoverable + #DE probe recoverable + #BP probe recoverable\n");
+        early_console64_write("\n[x86_64][smp-selftest] PASS: no APs (UP system, BSP idle slot only) + preempt-disable gate verified + timer-tick honours gate + swapgs MSR pair OK + syscall RSP save-area OK + sched-slot kind/kstack tagging OK + USER-slot dispatch SKIPPED (ap<3) + LAPIC timer calibrated + NMI live-trigger verified + #UD probe recoverable + #PF probe recoverable + #GP probe recoverable + #DE probe recoverable + #BP probe recoverable + fault-injection burst (5x5) verified\n");
     }
 }
