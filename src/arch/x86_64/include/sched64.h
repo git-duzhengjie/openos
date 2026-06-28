@@ -264,6 +264,15 @@ void arch_x86_64_sched_set_need_resched(void);
 void arch_x86_64_sched_set_need_resched_remote(uint32_t cpu_idx);
 uint32_t arch_x86_64_sched_check_and_dispatch(void);
 
+/* G.6.7c: read-and-clear the need_resched latch on a CPU WITHOUT
+ * going through the dispatch gate (preempt_disable_depth check).
+ * Returns the old latch value. Intended for selftest cleanup paths
+ * that need to discard a coincidental latch (e.g. a PIT tick caught
+ * inside a measurement window) without triggering the deferred-
+ * dispatch behaviour that preempt_enable() would otherwise produce
+ * on the 1->0 edge. */
+uint32_t arch_x86_64_sched_drain_need_resched(uint32_t cpu_idx);
+
 /* Observer for selftests. Returns the per-CPU resched_dispatch_count
  * read directly from the percpu slot (not via %gs). Returns 0 for
  * unknown cpu_idx. */

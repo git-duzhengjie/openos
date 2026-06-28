@@ -89,4 +89,11 @@ void arch_x86_64_pit_irq0_handler(void) {
         arch_x86_64_pic_send_eoi(0x20u);
     }
     (void)arch_x86_64_sched_on_tick();
+
+    /* G.6.7c: tail dispatch. sched_on_tick no longer yields inline; if
+     * quantum expired it set need_resched and returned. We honour the
+     * latch here, AFTER EOI, so the IRQ is fully acknowledged before
+     * we may context-switch. Indistinguishable in shape from the
+     * LAPIC-timer IRQ handler on AP and the resched-IPI handler. */
+    (void)arch_x86_64_sched_check_and_dispatch();
 }

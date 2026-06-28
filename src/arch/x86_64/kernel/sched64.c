@@ -422,26 +422,39 @@ uint32_t arch_x86_64_sched_on_tick(void) {
     if (sched_pc_quantum() != 0u) {
         return 0u;
     }
-    /* G.2: re-arm quantum from incoming (post-switch) thread's priority.
-     * We compute it twice — once now using the current (about-to-leave)
-     * thread, and once after yield using the newly-current thread. The
-     * value that sticks is the one we set AFTER yield. */
+    /* G.2: re-arm quantum from the current (about-to-leave) thread's
+     * priority. The post-switch re-arm happens in check_and_dispatch()
+     * after sched_yield(), see the symmetric block there. */
     sched_pc_set_quantum(arch_x86_64_sched_quantum_for_priority(
         sched_slots[sched_pc_current()].priority));
 
     if (!sched_has_other_ready(sched_pc_current())) {
         return 0u;
     }
-    uint32_t prev = sched_pc_current();
-    uint32_t nxt  = arch_x86_64_sched_yield();
-    /* Re-arm again using the NEW current thread's priority so HIGH
-     * threads get their full slice on resume. */
-    sched_pc_set_quantum(arch_x86_64_sched_quantum_for_priority(
-        sched_slots[sched_pc_current()].priority));
-    if (nxt != 0u || sched_pc_current() != prev) {
-        sched_pc_inc_preempts();
-        return 1u;
-    }
+
+    /* G.6.7c: timer-tick path is now unified with the resched-IPI path.
+     * Instead of yielding inline (which bypassed preempt_disable and
+     * left us with two independent dispatch sites), we set the per-CPU
+     * need_resched latch and let the ISR-tail dispatch hook decide
+     * whether to actually yield.
+     *
+     * This achieves three things:
+     *   1. preempt_disable() now uniformly defers timer-driven
+     *      preemption as well as IPI-driven preemption.
+     *   2. dispatch accounting (resched_dispatch_count) is incremented
+     *      in exactly one place -- the ISR-tail hook -- regardless of
+     *      whether the wakeup came from a timer or an IPI.
+     *   3. The historical "preempts" counter is no longer bumped here;
+     *      it would double-count with resched_dispatch_count. The new
+     *      single source of truth is resched_dispatch_count, which is
+     *      what selftests (Stage 14/15/16) read.
+     *
+     * We do NOT call check_and_dispatch() here: that is the ISR-tail's
+     * job and runs *after* EOI, in a context where the IRQ stub has
+     * saved caller-saved regs and is ready to context-switch via
+     * iretq. Calling it here, in the middle of timer handling, would
+     * re-enter sched_yield while the IRQ is not yet acknowledged. */
+    arch_x86_64_sched_set_need_resched();
     return 0u;
 }
 
@@ -650,6 +663,30 @@ void arch_x86_64_sched_set_need_resched_remote(uint32_t cpu_idx) {
     p->need_resched = 1u;
 }
 
+uint32_t arch_x86_64_sched_drain_need_resched(uint32_t cpu_idx) {
+    /* G.6.7c: read-and-clear the need_resched latch WITHOUT going
+     * through the dispatch gate. The gate (check_and_dispatch) is
+     * the normal way to consume the latch, but it short-circuits
+     * when preempt_disable_depth>0 -- it returns 0 with the latch
+     * STILL SET so a later preempt_enable() can pick it up. That
+     * deferred-fire behaviour is exactly what we want during normal
+     * operation, but selftests sometimes need to drain a coincidental
+     * latch (e.g. a PIT tick happening to fire inside a measurement
+     * window) without triggering deferred-dispatch on the way out.
+     *
+     * Returns the old value so callers can log/check it. Safe to call
+     * cross-CPU as long as the caller can tolerate the inherent race
+     * with the remote CPU's own check_and_dispatch (the canonical use
+     * is to call it for the current CPU while the gate is held, which
+     * is race-free by construction). */
+    if (cpu_idx >= OPENOS_X86_64_PERCPU_MAX_CPUS) return 0u;
+    arch_x86_64_percpu_t *p = arch_x86_64_percpu_slot(cpu_idx);
+    if (!p) return 0u;
+    uint32_t old = p->need_resched;
+    p->need_resched = 0u;
+    return old;
+}
+
 uint32_t arch_x86_64_sched_check_and_dispatch(void) {
     arch_x86_64_percpu_t *p = arch_x86_64_this_cpu_ptr();
     if (!p) return 0u;
@@ -682,6 +719,20 @@ uint32_t arch_x86_64_sched_check_and_dispatch(void) {
      * the same EOI-last + iretq-restores-IF discipline used by the
      * timer tick path; see F.3 commit for the full proof. */
     arch_x86_64_sched_yield();
+
+    /* G.6.7c: post-switch quantum re-arm. After yielding, sched_pc_current()
+     * now refers to the NEW thread on this CPU. Re-arm its quantum from
+     * its own priority so HIGH threads get their full slice on resume.
+     * This was previously done inside sched_on_tick; now that the timer
+     * path no longer yields inline, the only place where a yield triggered
+     * by tick-expiry actually executes is right here. Re-arming here keeps
+     * the per-priority slice contract intact for both timer- and IPI-driven
+     * dispatches. (For IPI-driven dispatches there is no quantum-expiry
+     * implied, but giving the incoming thread a fresh slice is still the
+     * right call: the previous thread voluntarily lost the CPU.) */
+    sched_pc_set_quantum(arch_x86_64_sched_quantum_for_priority(
+        sched_slots[sched_pc_current()].priority));
+    sched_pc_inc_preempts();
     return 1u;
 }
 

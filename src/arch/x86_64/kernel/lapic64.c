@@ -416,6 +416,15 @@ bool arch_x86_64_lapic_timer_init_periodic(uint8_t vector,
  *             during the switch window. Keeping EOI last delays the
  *             next timer interrupt until we have fully returned.
  *
+ *         G.6.7c: sched_on_tick no longer yields inline. It now sets
+ *         need_resched when quantum expires and returns. The actual
+ *         dispatch happens via check_and_dispatch() called AFTER EOI,
+ *         which makes the timer path indistinguishable from the
+ *         resched-IPI path (both end with EOI -> check_and_dispatch).
+ *         The historical "EOI last" ordering inside sched_on_tick is
+ *         therefore preserved at the handler level: we still send EOI
+ *         BEFORE the path that may context-switch.
+ *
  *         On the BSP this handler should never run (BSP does not arm
  *         its LAPIC timer in G.6.5), but if it ever does we still
  *         do the right thing: BSP's slot 0 is the bootstrap thread,
@@ -442,4 +451,11 @@ void arch_x86_64_lapic_timer_irq_handler(void) {
     (void)arch_x86_64_sched_on_tick();
 
     arch_x86_64_lapic_send_eoi();
+
+    /* G.6.7c: tail dispatch -- this is where the actual context switch
+     * happens if quantum expired (sched_on_tick set need_resched) AND
+     * preempt_disable_depth==0 on this CPU. May not return on this
+     * stack; if it does, the stub iretqs back to the interrupted
+     * context. Same contract as the resched-IPI handler. */
+    (void)arch_x86_64_sched_check_and_dispatch();
 }

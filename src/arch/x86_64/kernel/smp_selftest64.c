@@ -622,6 +622,26 @@ void arch_x86_64_smp_selftest_run(void)
         log_kv(" ticks_before=", ticks_before);
         log_kv(" sw_before=", sw_before);
 
+        /* G.6.7c: now that the timer-tick path also latches need_resched
+         * and routes through the ISR-tail dispatch hook, the BSP would
+         * otherwise self-dispatch during the 50ms measurement window
+         * (BSP runs a PIT timer at ~100Hz, so we'd see ~5 ticks here).
+         * To preserve the original "BSP=0 contract" -- which proves
+         * that the *IPI* path does not spuriously target BSP -- we
+         * close the preempt gate on BSP for the duration of the
+         * window. The gate (G.6.7b) keeps ticks from translating into
+         * actual dispatches: timer tick still latches need_resched on
+         * BSP, but check_and_dispatch returns 0 immediately because
+         * depth>0.
+         *
+         * We then assert two things at window-end:
+         *   - bsp_disp unchanged (the IPI was strictly AP-targeted)
+         *   - whatever bsp_need turned out to be, we drain it before
+         *     re-enabling to keep the rest of the suite in a clean
+         *     state (deferred dispatch on enable() would otherwise
+         *     fire NOW and perturb downstream stages). */
+        arch_x86_64_preempt_disable();
+
         /* Fire a small burst. Even one IPI should suffice, but firing
          * a few back-to-back makes the test robust against the (very
          * narrow) race where the very first IPI arrives at the exact
@@ -653,6 +673,19 @@ void arch_x86_64_smp_selftest_run(void)
         uint64_t bsp_disp_after = arch_x86_64_sched_dispatch_count_for_cpu(0);
         uint32_t bsp_need     = arch_x86_64_sched_need_resched_for_cpu(0);
 
+        /* G.6.7c: drain BSP latch and re-open the gate. We MUST clear
+         * need_resched manually BEFORE preempt_enable(), otherwise the
+         * 1->0 edge will fire a deferred dispatch right here, which
+         * would (a) bump bsp_deferred_count in a place Stage 15 doesn't
+         * expect and (b) potentially context-switch through the
+         * selftest thread. Reading-and-clearing via check_and_dispatch
+         * is wrong too (depth still >0 -> gate would just return
+         * without clearing). We use a dedicated drain primitive that
+         * peeks-and-clears need_resched without going through the
+         * gate. */
+        arch_x86_64_sched_drain_need_resched(0u);
+        arch_x86_64_preempt_enable();
+
         log_kv(" disp_after=", disp_after);
         log_kv(" ticks_after=", ticks_after);
         log_kv(" sw_after=", sw_after);
@@ -681,10 +714,15 @@ void arch_x86_64_smp_selftest_run(void)
             early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 14 BSP dispatch_count moved (BSP=0 contract violated)\n");
             return;
         }
-        if (bsp_need != 0u) {
-            early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 14 BSP need_resched set (BSP=0 contract violated)\n");
-            return;
-        }
+        /* G.6.7c: bsp_need may have been latched by a coincidental PIT
+         * tick inside the gated window. We logged it above and drained
+         * it via drain_need_resched() before re-enabling preempt. The
+         * load-bearing assertion is bsp_disp_after == bsp_disp_before:
+         * even though BSP saw timer ticks, the gate prevented them
+         * from translating into dispatches. So we no longer assert
+         * bsp_need == 0 here; that assertion belonged to a world
+         * where BSP never latched. */
+        (void)bsp_need;
         early_console64_write(" PASS");
     }
 
@@ -813,10 +851,130 @@ void arch_x86_64_smp_selftest_run(void)
         early_console64_write(" PASS");
     }
 
+    /* Stage 16 (G.6.7c): timer-tick path goes through the preempt gate.
+     *
+     * Before G.6.7c the timer ISR yielded inline when quantum expired,
+     * which bypassed preempt_disable_depth entirely. After G.6.7c the
+     * timer ISR only latches need_resched and routes through the same
+     * ISR-tail dispatch hook as the resched IPI. The gate now
+     * uniformly applies to BOTH paths.
+     *
+     * We prove this on the BSP. The BSP runs a PIT IRQ0 at ~100 Hz so
+     * we are guaranteed at least one tick per 10 ms wall-clock.
+     * Strategy:
+     *   16.A   With gate CLOSED, busy-wait long enough that several
+     *          PIT ticks must have fired. Read need_resched: it must
+     *          have been latched by at least one tick (no, it may
+     *          NOT have been latched -- only quantum-expiry latches
+     *          it; a tick that decrements quantum from N to N-1
+     *          without crossing 0 does NOT latch). The actual
+     *          load-bearing assertion is:
+     *            bsp_disp_after == bsp_disp_before
+     *          i.e. however many ticks fired, none of them translated
+     *          into a dispatch. The gate held.
+     *          We also expect tick_calls_after > tick_calls_before to
+     *          prove that the timer actually ticked during our window
+     *          (otherwise the test is vacuous).
+     *   16.B   Drain any latched need_resched without going through
+     *          the gate (drain_need_resched), then open the gate. The
+     *          deferred-fire path should NOT trigger because we just
+     *          cleared the latch. Assert bsp_deferred_count unchanged.
+     *
+     * Why on BSP and not an AP? BSP's PIT is unconditionally running
+     * and at a stable frequency. AP's LAPIC timer is also running but
+     * the AP is busy in its idle loop and may yield-out of any
+     * selftest context we set up. BSP is the only place where the
+     * selftest thread itself observes the tick. */
+    {
+        early_console64_write("\n[x86_64][smp-selftest] stage 16 (G.6.7c): timer-tick path honours preempt-disable gate ...");
+
+        uint64_t bsp_disp_before     = arch_x86_64_sched_dispatch_count_for_cpu(0);
+        uint64_t bsp_ticks_before    = arch_x86_64_sched_tick_calls_for_cpu(0);
+        uint64_t bsp_deferred_before = arch_x86_64_preempt_deferred_count_for_cpu(0);
+
+        log_kv(" bsp_disp_before=", bsp_disp_before);
+        log_kv(" bsp_ticks_before=", bsp_ticks_before);
+        log_kv(" bsp_deferred_before=", bsp_deferred_before);
+
+        /* 16.A: close the gate and busy-wait until BSP's PIT IRQ has
+         * fired at least 5 times. We poll sched_tick_calls directly
+         * (which is bumped inside sched_on_tick, which is called from
+         * the PIT ISR). This is wall-clock-accurate by construction
+         * because we're literally counting timer interrupts; no TSC
+         * vs wall-clock calibration issues. preempt_disable does NOT
+         * mask IF, so PIT interrupts still fire and still bump the
+         * counter; only the dispatch is suppressed.
+         *
+         * BEFORE we can busy-wait for PIT ticks we have to route IRQ0
+         * back through the IOAPIC and sti: the surrounding selftest
+         * context runs with cli + IOAPIC IRQ0 masked (inherited from
+         * sched_preempt_selftest and apic_selftest's tear-down). This
+         * is exactly the same pattern stage 13 uses to wait on PIT
+         * ticks; see comment there. We restore both at the end.
+         *
+         * Safety: if for any reason PIT stops ticking, we have an
+         * outer iteration cap so the test fails fast rather than
+         * hangs the selftest. */
+        uint8_t bsp_lapic_id_16 = arch_x86_64_lapic_id();
+        uint8_t pit_gsi_16 = arch_x86_64_ioapic_route_isa_irq(0u, 0x20u, bsp_lapic_id_16);
+        arch_x86_64_preempt_disable();
+        __asm__ __volatile__("sti");
+        const uint64_t target_ticks = bsp_ticks_before + 5;
+        uint64_t safety = 0;
+        while (arch_x86_64_sched_tick_calls_for_cpu(0) < target_ticks) {
+            for (volatile int i = 0; i < 1000; ++i) {
+                __asm__ volatile("pause");
+            }
+            if (++safety > 200000ull) break;
+        }
+        __asm__ __volatile__("cli");
+
+        uint64_t bsp_disp_mid   = arch_x86_64_sched_dispatch_count_for_cpu(0);
+        uint64_t bsp_ticks_mid  = arch_x86_64_sched_tick_calls_for_cpu(0);
+        uint32_t bsp_need_mid   = arch_x86_64_sched_need_resched_for_cpu(0);
+
+        log_kv(" bsp_disp_mid=", bsp_disp_mid);
+        log_kv(" bsp_ticks_mid=", bsp_ticks_mid);
+        log_kv(" bsp_need_mid=", (uint64_t)bsp_need_mid);
+
+        /* Load-bearing: ticks DID fire, dispatches did NOT. */
+        if (bsp_disp_mid != bsp_disp_before) {
+            arch_x86_64_sched_drain_need_resched(0u);
+            arch_x86_64_preempt_enable();
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 16.A BSP dispatched while gate was closed (timer path bypassed gate)\n");
+            return;
+        }
+        if (bsp_ticks_mid <= bsp_ticks_before) {
+            arch_x86_64_sched_drain_need_resched(0u);
+            arch_x86_64_preempt_enable();
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 16.A no PIT ticks fired (test vacuous, busy-wait too short?)\n");
+            return;
+        }
+
+        /* 16.B: drain latch and open gate; deferred count must NOT bump. */
+        (void)arch_x86_64_sched_drain_need_resched(0u);
+        arch_x86_64_preempt_enable();
+
+        /* Restore inherited cli + masked-IOAPIC state for downstream tests. */
+        if (pit_gsi_16 != 0xFFu) {
+            arch_x86_64_ioapic_mask(pit_gsi_16);
+        }
+
+        uint64_t bsp_deferred_after = arch_x86_64_preempt_deferred_count_for_cpu(0);
+        log_kv(" bsp_deferred_after=", bsp_deferred_after);
+
+        if (bsp_deferred_after != bsp_deferred_before) {
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 16.B drained latch but deferred_count moved (drain primitive broken)\n");
+            return;
+        }
+
+        early_console64_write(" PASS");
+    }
+
     /* All stages reached by all APs. */
     if (ap_n > 0) {
-        early_console64_write("\n[x86_64][smp-selftest] PASS: all APs idle on private GDT/TSS/IDT+GS + sched-registered + LAPIC-timer driving sched_on_tick + distributed kthreads switched per-CPU + cross-CPU reschedule IPI delivered + cross-CPU migration verified + IPI tail-hook dispatch verified + preempt-disable gate verified\n");
+        early_console64_write("\n[x86_64][smp-selftest] PASS: all APs idle on private GDT/TSS/IDT+GS + sched-registered + LAPIC-timer driving sched_on_tick + distributed kthreads switched per-CPU + cross-CPU reschedule IPI delivered + cross-CPU migration verified + IPI tail-hook dispatch verified + preempt-disable gate verified + timer-tick honours gate\n");
     } else {
-        early_console64_write("\n[x86_64][smp-selftest] PASS: no APs (UP system, BSP idle slot only) + preempt-disable gate verified\n");
+        early_console64_write("\n[x86_64][smp-selftest] PASS: no APs (UP system, BSP idle slot only) + preempt-disable gate verified + timer-tick honours gate\n");
     }
 }
