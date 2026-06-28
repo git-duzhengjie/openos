@@ -238,6 +238,11 @@ x86_64_stack_ptr_t arch_x86_64_percpu_set_rsp0(uint32_t cpu_idx,
 uint64_t arch_x86_64_percpu_baseline_rsp0(uint32_t cpu_idx);
 uint64_t arch_x86_64_percpu_user_dispatch_count(uint32_t cpu_idx);
 
+/* G.7f: read cpu_idx's LAPIC-timer count (bumped at the head of the
+ * LAPIC timer ISR, in lapic64.c). Used by stage 30 to prove that the
+ * timer IRQ actually preempts a ring3 busy loop on the target CPU. */
+uint64_t arch_x86_64_percpu_lapic_timer_count(uint32_t cpu_idx);
+
 /* G.7a: read a 1-based IST entry (1..OPENOS_X86_64_PERCPU_IST_COUNT)
  * from cpu_idx's TSS. Returns 0 for out-of-range cpu or ist index. */
 x86_64_stack_ptr_t arch_x86_64_percpu_ist(uint32_t cpu_idx, uint32_t ist_index);

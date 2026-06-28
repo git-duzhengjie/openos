@@ -244,6 +244,13 @@ uint64_t arch_x86_64_percpu_user_dispatch_count(uint32_t cpu_idx) {
     return *(volatile uint64_t *)&g_percpu[cpu_idx].user_dispatch_count;
 }
 
+uint64_t arch_x86_64_percpu_lapic_timer_count(uint32_t cpu_idx) {
+    if (cpu_idx >= OPENOS_X86_64_PERCPU_MAX_CPUS) {
+        return 0;
+    }
+    return *(volatile uint64_t *)&g_percpu[cpu_idx].lapic_timer_count;
+}
+
 x86_64_stack_ptr_t arch_x86_64_percpu_ist(uint32_t cpu_idx, uint32_t ist_index) {
     if (cpu_idx >= OPENOS_X86_64_PERCPU_MAX_CPUS) {
         return 0;

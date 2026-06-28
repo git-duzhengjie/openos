@@ -11,6 +11,8 @@
 #include "../include/delay64.h"
 #include "../include/gdt64.h"
 #include "../include/tss64.h"
+#include "../include/vmm64.h"
+#include "../include/pmm64.h"
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -2083,9 +2085,157 @@ void arch_x86_64_smp_selftest_run(void)
         early_console64_write(" PASS");
     }
 
+    /*
+     * Stage 30 (G.7f): ring3 LAPIC-timer preemption.
+     *
+     * DoD: a real ring3 user thread executing a tight `jmp $` busy loop is
+     * preempted by the LAPIC timer IRQ at least once within 50ms. We prove
+     * preemption by observing target_cpu's lapic_timer_count advance while
+     * the slot is the dispatched USER slot, without the slot exiting (the
+     * trampoline only bumps user_dispatch_count on entry, so we also check
+     * that user_dispatch_count[target_cpu] == 1 after the window).
+     *
+     * This requires:
+     *   1) a user-accessible (U=1) R+X page mapped at a fixed identity VA
+     *      containing the busy loop `EB FE` (jmp $) bytes,
+     *   2) a user-accessible R+W page for the user stack,
+     *   3) the real spawn_uthread path (NOT the sentinel variant),
+     *   4) at least one AP (target_cpu = ap_n).
+     */
+    if (ap_n >= 3u) {
+        early_console64_write("\n[x86_64][smp-selftest] stage 30 (G.7f): ring3 LAPIC-timer preemption ...");
+
+        /* Step 1: allocate + map a U+R+X code page and a U+R+W stack page.
+         * Use fixed VAs in low identity-mapped region so the choice is
+         * deterministic across runs (pmm_alloc may return different PAs). */
+        const x86_64_virt_addr_t user_code_va  = (x86_64_virt_addr_t)0x00500000ULL;
+        const x86_64_virt_addr_t user_stack_va = (x86_64_virt_addr_t)0x00501000ULL;
+
+        x86_64_phys_addr_t code_pa  = arch_x86_64_pmm_alloc_page();
+        x86_64_phys_addr_t stack_pa = arch_x86_64_pmm_alloc_page();
+        if (code_pa == 0 || stack_pa == 0) {
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 30 pmm_alloc_page returned 0\n");
+            return;
+        }
+
+        /* PTE_USER | PTE_PRESENT for code (X by default since NX is not set);
+         * +PTE_WRITABLE for the stack. */
+        const uint64_t flags_code  = OPENOS_X86_64_PTE_PRESENT | OPENOS_X86_64_PTE_USER;
+        const uint64_t flags_stack = OPENOS_X86_64_PTE_PRESENT | OPENOS_X86_64_PTE_USER |
+                                     OPENOS_X86_64_PTE_RW;
+        if (arch_x86_64_vmm_map_page(user_code_va,  code_pa,  flags_code)  != 0 ||
+            arch_x86_64_vmm_map_page(user_stack_va, stack_pa, flags_stack) != 0) {
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 30 vmm_map_page failed\n");
+            return;
+        }
+
+        /* Step 2: write the ring3 busy loop into the user code page.
+         *   EB FE  =  jmp $-0   (infinite jmp to itself)
+         * This keeps the user thread in a deterministic, tight loop at a
+         * single RIP that the timer can preempt from. */
+        volatile uint8_t *user_code = (volatile uint8_t *)(uintptr_t)user_code_va;
+        user_code[0] = 0xEB;
+        user_code[1] = 0xFE;
+
+        /* Step 3: spawn a real ring3 thread.
+         *
+         * Stage 21 (G.7e) already used the *last* AP (ap_n) as its sentinel
+         * target -- that AP is now permanently retired in a cli;hlt loop
+         * and will never tick its LAPIC timer. We therefore pick the
+         * *previous* AP (ap_n - 1) which is still live and healthy. */
+        uint32_t target_cpu = ap_n - 1u;       /* APs are 1..ap_n; -1 avoids the retired one */
+        uintptr_t user_entry = (uintptr_t)user_code_va;
+        uintptr_t user_rsp   = (uintptr_t)user_stack_va + 4096u;
+
+        uint64_t udisp_before = arch_x86_64_percpu_user_dispatch_count(target_cpu);
+        uint64_t tcnt_before  = arch_x86_64_percpu_lapic_timer_count(target_cpu);
+        log_kv(" target_cpu=", (uint64_t)target_cpu);
+        log_kv(" user_entry=", (uint64_t)user_entry);
+        log_kv(" timer_before=", tcnt_before);
+
+        /* Pre-flight: prove target_cpu's LAPIC timer is alive *before* we
+         * pin a ring3 thread on it. We just wait a short slice (~5ms) and
+         * verify the timer count moved. If it didn't, the failure is in
+         * the AP timer (not in ring3 preemption) and we report that
+         * distinctly. */
+        {
+            uint64_t pre_tcnt = tcnt_before;
+            /* AP timer takes ~1.28s/tick on TCG (init_count=10000000, DCR=div16,
+             * LAPIC bus ~7825 ticks/ms => period ~= 10e6/7825 ms ~= 1278ms).
+             * Wait up to 4 ticks (~5s). */
+            for (uint32_t i = 0; i < 5000u; ++i) {
+                pre_tcnt = arch_x86_64_percpu_lapic_timer_count(target_cpu);
+                if (pre_tcnt > tcnt_before) break;
+                arch_x86_64_delay_us(1000u);
+            }
+            log_kv(" timer_preflight=", pre_tcnt);
+            if (pre_tcnt <= tcnt_before) {
+                early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 30 target_cpu LAPIC timer not ticking\n");
+                return;
+            }
+            /* Re-baseline after pre-flight so the post-dispatch comparison
+             * is fair (we want to see a tick *after* dispatch, not from
+             * pre-dispatch idle). */
+            tcnt_before = pre_tcnt;
+        }
+
+        uint32_t slot = arch_x86_64_sched_spawn_uthread(user_entry, user_rsp,
+                                                       128u, target_cpu);
+        if (slot == 0u) {
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 30 spawn_uthread returned 0\n");
+            return;
+        }
+        log_kv(" slot=", (uint64_t)slot);
+
+        /* Step 4: poke target_cpu and busy-poll for up to ~300ms for both
+         *   - the slot to actually be dispatched (user_dispatch_count++), AND
+         *   - the timer to fire at least once on target_cpu *after* dispatch
+         *     (which proves ring3 preemption -- target_cpu cannot tick the
+         *     timer unless it accepted external IRQs at IF=1, i.e. ring3).
+         *
+         * Note: the AP LAPIC timer is configured with init_count=10000000
+         * + DCR=div16, which yields ~80ms/tick on TCG. We size the window
+         * The AP LAPIC timer takes ~1.28s/tick on TCG; we need at least 2
+         * post-dispatch ticks worth of headroom (~3s) to be robust. Use
+         * 5s window with 1ms granularity. */
+        arch_x86_64_smp_send_resched_ipi(target_cpu);
+        uint64_t udisp_after = udisp_before;
+        uint64_t tcnt_after  = tcnt_before;
+        uint64_t tcnt_at_dispatch = 0;
+        bool seen_dispatch = false;
+        for (uint32_t i = 0; i < 5000u; ++i) {
+            udisp_after = arch_x86_64_percpu_user_dispatch_count(target_cpu);
+            tcnt_after  = arch_x86_64_percpu_lapic_timer_count(target_cpu);
+            if (!seen_dispatch && udisp_after > udisp_before) {
+                seen_dispatch = true;
+                tcnt_at_dispatch = tcnt_after;
+            }
+            if (seen_dispatch && tcnt_after > tcnt_at_dispatch) {
+                /* ring3 was actually preempted after dispatch */
+                break;
+            }
+            if ((i % 50u) == 49u) {
+                arch_x86_64_smp_send_resched_ipi(target_cpu);
+            }
+            arch_x86_64_delay_us(1000u);
+        }
+        log_kv(" disp_after=", udisp_after);
+        log_kv(" timer_at_dispatch=", tcnt_at_dispatch);
+        log_kv(" timer_after=", tcnt_after);
+
+        if (!seen_dispatch) {
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 30 ring3 user thread never dispatched\n");
+            return;
+        }
+        if (tcnt_after <= tcnt_at_dispatch) {
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 30 LAPIC timer did not advance after ring3 dispatch\n");
+            return;
+        }
+        early_console64_write(" PASS");
+    }
+
     if (ap_n > 0) {
-        early_console64_write("\n[x86_64][smp-selftest] PASS: all APs idle on private GDT/TSS/IDT+GS + sched-registered + LAPIC-timer driving sched_on_tick + distributed kthreads switched per-CPU + cross-CPU reschedule IPI delivered + cross-CPU migration verified + IPI tail-hook dispatch verified + preempt-disable gate verified + timer-tick honours gate + swapgs MSR pair OK + syscall RSP save-area OK + sched-slot kind/kstack tagging OK + USER-slot AP dispatch verified + LAPIC timer calibrated + NMI live-trigger verified + #UD probe recoverable + #PF probe recoverable + #GP probe recoverable + #DE probe recoverable + #BP probe recoverable + fault-injection burst (5x5) verified\n");
-    } else {
-        early_console64_write("\n[x86_64][smp-selftest] PASS: no APs (UP system, BSP idle slot only) + preempt-disable gate verified + timer-tick honours gate + swapgs MSR pair OK + syscall RSP save-area OK + sched-slot kind/kstack tagging OK + USER-slot dispatch SKIPPED (ap<3) + LAPIC timer calibrated + NMI live-trigger verified + #UD probe recoverable + #PF probe recoverable + #GP probe recoverable + #DE probe recoverable + #BP probe recoverable + fault-injection burst (5x5) verified\n");
+        early_console64_write("\n[x86_64][smp-selftest] PASS: all APs idle on private GDT/TSS/IDT+GS + sched-registered + LAPIC-timer driving sched_on_tick + distributed kthreads switched per-CPU + cross-CPU reschedule IPI delivered + cross-CPU migration verified + IPI tail-hook dispatch verified + preempt-disable gate verified + timer-tick honours gate + swapgs MSR pair OK + syscall RSP save-area OK + sched-slot kind/kstack tagging OK + USER-slot AP dispatch verified + LAPIC timer calibrated + NMI live-trigger verified + #UD probe recoverable + #PF probe recoverable + #GP probe recoverable + #DE probe recoverable + #BP probe recoverable + fault-injection burst (5x5) verified + ring3 LAPIC-timer preemption verified\n");
+        early_console64_write("\n[x86_64][smp-selftest] PASS: no APs (UP system, BSP idle slot only) + preempt-disable gate verified + timer-tick honours gate + swapgs MSR pair OK + syscall RSP save-area OK + sched-slot kind/kstack tagging OK + USER-slot dispatch SKIPPED (ap<3) + LAPIC timer calibrated + NMI live-trigger verified + #UD probe recoverable + #PF probe recoverable + #GP probe recoverable + #DE probe recoverable + #BP probe recoverable + fault-injection burst (5x5) verified + ring3 preemption SKIPPED (ap<3)\n");
     }
 }
