@@ -1352,18 +1352,45 @@ void arch_x86_64_smp_selftest_run(void)
                 return;
             }
 
-            /* Poke the target CPU so it picks up the new slot promptly. */
+            /* G.7e-fix: poke the target CPU so it picks up the new slot.
+             * A single IPI is racy under SMP=4 + TCG: if target_cpu happens
+             * to be inside a CLI window (or its sti;hlt re-arm has not yet
+             * re-enabled IF when the IPI lands), need_resched latches but
+             * the dispatch path is never entered until the next external
+             * event, which may exceed our 100 ms window. We instead retry
+             * the IPI periodically inside the wait loop. */
             arch_x86_64_smp_send_resched_ipi(target_cpu);
 
-            /* Spin up to ~100ms waiting for the trampoline to fire. */
+            /* Spin up to ~100ms waiting for the trampoline to fire,
+             * re-poking target_cpu every ~5ms to be robust against missed
+             * deliveries. */
             uint64_t after = before;
             for (uint32_t i = 0; i < 100000u; ++i) {
                 after = arch_x86_64_percpu_user_dispatch_count(target_cpu);
                 if (after > before) break;
+                if ((i % 5000u) == 4999u) {
+                    arch_x86_64_smp_send_resched_ipi(target_cpu);
+                }
                 arch_x86_64_delay_us(1u);
             }
             log_kv(" disp_after=", after);
             if (after <= before) {
+                /* G.7e-fix diagnostic: dump target-CPU sched state so we can
+                 * see whether the spawned USER slot is even visible/READY on
+                 * target_cpu, whether need_resched latched, and how many
+                 * context switches actually happened on target_cpu during
+                 * the wait window. */
+                log_kv(" diag_slot=", (uint64_t)slot);
+                log_kv(" diag_slot_kind=",
+                    (uint64_t)arch_x86_64_sched_slot_kind(slot));
+                log_kv(" diag_slot_kstack_top=",
+                    (uint64_t)arch_x86_64_sched_slot_kstack_top(slot));
+                log_kv(" diag_need_resched_target=",
+                    (uint64_t)arch_x86_64_sched_need_resched_for_cpu(target_cpu));
+                log_kv(" diag_dispatch_count_target=",
+                    arch_x86_64_sched_dispatch_count_for_cpu(target_cpu));
+                log_kv(" diag_user_dispatch_target=",
+                    arch_x86_64_percpu_user_dispatch_count(target_cpu));
                 early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 21 user_dispatch_count did not advance\n");
                 return;
             }
