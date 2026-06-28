@@ -196,4 +196,11 @@ x86_64_stack_ptr_t arch_x86_64_percpu_set_rsp0(uint32_t cpu_idx,
  * from cpu_idx's TSS. Returns 0 for out-of-range cpu or ist index. */
 x86_64_stack_ptr_t arch_x86_64_percpu_ist(uint32_t cpu_idx, uint32_t ist_index);
 
+/* G.7b: read the current CPU's IA32_GS_BASE / IA32_KERNEL_GS_BASE pair.
+ * Either out pointer may be NULL. Used by Stage 18 to verify that both
+ * MSRs are populated and reference the same percpu slot (precondition
+ * for the no-op swapgs scaffolding installed in this commit). */
+void arch_x86_64_percpu_read_gs_pair(uint64_t *out_gs_base,
+                                     uint64_t *out_kernel_gs_base);
+
 #endif /* OPENOS_ARCH_X86_64_PERCPU64_H */

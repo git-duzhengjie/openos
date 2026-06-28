@@ -284,3 +284,20 @@ bool arch_x86_64_percpu_gs_ok(void) {
     if (p->cpu_idx >= OPENOS_X86_64_PERCPU_MAX_CPUS) return false;
     return true;
 }
+
+/* G.7b: read the raw IA32_GS_BASE / IA32_KERNEL_GS_BASE pair on the
+ * current CPU. Used by Stage 18 of the SMP selftest to prove that
+ * percpu_install_gs() has populated *both* MSRs and that they point
+ * to the same percpu slot (the foundation on which the swapgs paths
+ * added in this commit rely). Kept out-of-line because callers should
+ * not need to know the MSR numbers, and to keep wrmsr/rdmsr helpers
+ * file-local. */
+void arch_x86_64_percpu_read_gs_pair(uint64_t *out_gs_base,
+                                     uint64_t *out_kernel_gs_base) {
+    if (out_gs_base) {
+        *out_gs_base = rdmsr64(OPENOS_X86_64_MSR_GS_BASE);
+    }
+    if (out_kernel_gs_base) {
+        *out_kernel_gs_base = rdmsr64(OPENOS_X86_64_MSR_KERNEL_GS_BASE);
+    }
+}

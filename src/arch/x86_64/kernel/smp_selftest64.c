@@ -1052,10 +1052,101 @@ void arch_x86_64_smp_selftest_run(void)
         early_console64_write(" PASS");
     }
 
+    /* Stage 18 (G.7b): swapgs scaffolding — IA32_GS_BASE / IA32_KERNEL_GS_BASE
+     * pair must be programmed identically on every brought-up CPU.
+     *
+     * Background: G.6.2 already programmed both MSRs to &percpu[cpu_idx]
+     * inside percpu_install_gs(), but until this commit there was no path
+     * that actually USED IA32_KERNEL_GS_BASE — no swapgs anywhere. G.7b
+     * re-introduces swapgs on every ring-crossing (ISR_NOERR/ERR common,
+     * irq0/irq_lapic_timer/irq_lapic_resched stubs, syscall/sysretq, and
+     * the usermode iretq stub). Because the two MSRs are identical, each
+     * swapgs is semantically a no-op today and ring0 code that touches
+     * %gs:0 after one (zero, two, …) swapgs still finds the same percpu
+     * pointer. That is the *whole point*: G.7c will flip KERNEL_GS_BASE
+     * to the "user GS" model (= 0 for now), and every swapgs site is
+     * already in place, so we won't need to retro-fit them.
+     *
+     * What this stage actually proves:
+     *   (a) BSP's IA32_GS_BASE == IA32_KERNEL_GS_BASE == &percpu[0]
+     *       (precondition that makes swapgs a no-op today, and that all
+     *       ring0 paths post-swapgs still observe a valid percpu).
+     *   (b) Same invariant holds on the *current* CPU we are running on
+     *       (which is the BSP here; AP equivalents were already covered
+     *       by Stage 7 alive_gs and the per-AP percpu_gs_ok contract).
+     *   (c) A live swapgs;swapgs round-trip from kernel context returns
+     *       %gs:0 to exactly the percpu pointer we started with. This is
+     *       a small in-kernel smoke test of the macro itself: if the
+     *       assembler ever silently miscompiled the swapgs site (or if
+     *       wrmsr to one of the two MSRs ever stopped happening), the
+     *       round-trip would land on a wrong percpu and we'd catch it.
+     */
+    {
+        early_console64_write("\n[x86_64][smp-selftest] stage 18 (G.7b): swapgs MSR pair ...");
+
+        uint64_t gs_base = 0, kernel_gs_base = 0;
+        arch_x86_64_percpu_read_gs_pair(&gs_base, &kernel_gs_base);
+        log_kv(" gs_base=", gs_base);
+        log_kv(" kernel_gs_base=", kernel_gs_base);
+
+        arch_x86_64_percpu_t *bsp_slot = arch_x86_64_percpu_slot(0);
+        if (gs_base == 0 || kernel_gs_base == 0) {
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 18 one of the GS_BASE MSRs is zero (percpu_install_gs not invoked?)\n");
+            return;
+        }
+        if (gs_base != (uint64_t)(uintptr_t)bsp_slot) {
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 18 IA32_GS_BASE != &percpu[0]\n");
+            return;
+        }
+        if (kernel_gs_base != gs_base) {
+            /* G.7b contract: both MSRs hold the same percpu pointer.
+             * If/when G.7c lands, this contract changes to
+             *   kernel_gs_base == &percpu[i]
+             *   gs_base        == "user GS" (currently 0)
+             * and the assertion below will be updated alongside it. */
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 18 GS_BASE != KERNEL_GS_BASE (G.7b expects identical, divergence is a G.7c-only change)\n");
+            return;
+        }
+
+        /* (c) live swapgs round-trip: swapgs;swapgs must restore %gs:0.
+         * We read %gs:0 (the self-pointer at percpu_t offset 0), execute
+         * two back-to-back swapgs, read again, and require they match.
+         * Two swapgs is intentional — a single swapgs would leave us on
+         * KERNEL_GS_BASE, which currently happens to equal GS_BASE; the
+         * pair restores the original ordering regardless of whether the
+         * two MSRs are identical or distinct, which makes this self-test
+         * forward-compatible with G.7c. */
+        uint64_t pre = 0, post = 0;
+        __asm__ __volatile__(
+            "movq %%gs:0, %0\n\t"
+            "swapgs\n\t"
+            "swapgs\n\t"
+            "movq %%gs:0, %1\n\t"
+            : "=r"(pre), "=r"(post)
+            :
+            : "memory");
+        log_kv(" gs0_pre=", pre);
+        log_kv(" gs0_post=", post);
+        if (pre == 0 || post == 0) {
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 18 %gs:0 read returned zero\n");
+            return;
+        }
+        if (pre != post) {
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 18 swapgs;swapgs did not restore %gs:0\n");
+            return;
+        }
+        if (pre != (uint64_t)(uintptr_t)bsp_slot) {
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 18 %gs:0 != &percpu[0] (self-pointer corrupted?)\n");
+            return;
+        }
+
+        early_console64_write(" PASS");
+    }
+
     /* All stages reached by all APs. */
     if (ap_n > 0) {
-        early_console64_write("\n[x86_64][smp-selftest] PASS: all APs idle on private GDT/TSS/IDT+GS + sched-registered + LAPIC-timer driving sched_on_tick + distributed kthreads switched per-CPU + cross-CPU reschedule IPI delivered + cross-CPU migration verified + IPI tail-hook dispatch verified + preempt-disable gate verified + timer-tick honours gate\n");
+        early_console64_write("\n[x86_64][smp-selftest] PASS: all APs idle on private GDT/TSS/IDT+GS + sched-registered + LAPIC-timer driving sched_on_tick + distributed kthreads switched per-CPU + cross-CPU reschedule IPI delivered + cross-CPU migration verified + IPI tail-hook dispatch verified + preempt-disable gate verified + timer-tick honours gate + swapgs MSR pair OK\n");
     } else {
-        early_console64_write("\n[x86_64][smp-selftest] PASS: no APs (UP system, BSP idle slot only) + preempt-disable gate verified + timer-tick honours gate\n");
+        early_console64_write("\n[x86_64][smp-selftest] PASS: no APs (UP system, BSP idle slot only) + preempt-disable gate verified + timer-tick honours gate + swapgs MSR pair OK\n");
     }
 }

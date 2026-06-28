@@ -4,6 +4,37 @@
 .extern arch_x86_64_lapic_timer_irq_handler
 .extern arch_x86_64_lapic_resched_irq_handler
 
+/*
+ * G.7b — swapgs scaffolding.
+ *
+ * Goal: establish the swapgs entry/exit pairing on every ring-crossing path
+ * (ISR common, IRQ stubs, syscall) without yet introducing a divergent
+ * KERNEL_GS_BASE. percpu_install_gs() currently writes both IA32_GS_BASE and
+ * IA32_KERNEL_GS_BASE to the same &g_percpu[cpu_idx] value, so each swapgs
+ * here is semantically a no-op (the MSRs swap to identical contents). What
+ * we gain is the discipline: when G.7c later flips IA32_KERNEL_GS_BASE to
+ * the "user GS" (= 0) model, every entry/exit pair already exists and we
+ * only have to change percpu_install_gs(), not retro-fit every stub.
+ *
+ * The SWAPGS_IF_FROM_USER macro inspects the saved CS selector on the stack
+ * (low 2 bits = RPL) and only runs swapgs when CS came from ring 3. Each
+ * call site must pass the byte offset of the saved CS relative to current
+ * %rsp. We use byte offsets because the saved CS is always 8 bytes wide and
+ * 8-byte-aligned in the long-mode IRET frame, so testb on the low byte is
+ * sufficient to inspect RPL.
+ *
+ * NOTE: NMI/MCE deliberately do not get swapgs. Per Linux, those vectors
+ * need the IST + GS_BASE-range comparison dance to handle the swapgs window
+ * race, and our NMI path currently only increments a counter without touching
+ * percpu data, so leaving it alone is the safe choice for now.
+ */
+.macro SWAPGS_IF_FROM_USER cs_off
+    testb $3, \cs_off(%rsp)
+    jz 1001f
+    swapgs
+1001:
+.endm
+
 .macro ISR_NOERR vector
 .global x86_64_isr\vector
 x86_64_isr\vector:
@@ -59,6 +90,10 @@ ISR_NOERR 31
  * and iretq. The PIC EOI is sent inside the C handler. */
 .global x86_64_irq0
 x86_64_irq0:
+    /* G.7b: swap to kernel GS if we interrupted ring3. Must happen before
+     * any push so a later C handler that uses %gs:0 sees the percpu pointer.
+     * Hardware iret frame is intact: CS sits at (%rsp+8). */
+    SWAPGS_IF_FROM_USER 8
     /* Diagnostic: snapshot the hardware iret frame to a fixed memory region
      * so we can examine it post-mortem if anything goes wrong. The stack
      * shape on entry is (top-down):
@@ -106,6 +141,9 @@ x86_64_irq0:
     popq %rdx
     popq %rcx
     popq %rax
+    /* G.7b: pair swapgs back before iretq. CS is at (%rsp+8) again because
+     * the caller-saved frame has been fully unwound. */
+    SWAPGS_IF_FROM_USER 8
     iretq
 
 .section .bss,"aw",@nobits
@@ -122,6 +160,8 @@ irq0_iret_dump:
  * is responsible for sending the LAPIC EOI. */
 .global x86_64_irq_lapic_timer
 x86_64_irq_lapic_timer:
+    /* G.7b: see x86_64_irq0 for rationale. */
+    SWAPGS_IF_FROM_USER 8
     pushq %rax
     pushq %rcx
     pushq %rdx
@@ -142,6 +182,7 @@ x86_64_irq_lapic_timer:
     popq %rdx
     popq %rcx
     popq %rax
+    SWAPGS_IF_FROM_USER 8
     iretq
 
 /* G.6.6a — LAPIC reschedule-IPI stub (vector 0x41).
@@ -151,6 +192,8 @@ x86_64_irq_lapic_timer:
  * deferred to the next timer tick. */
 .global x86_64_irq_lapic_resched
 x86_64_irq_lapic_resched:
+    /* G.7b: see x86_64_irq0 for rationale. */
+    SWAPGS_IF_FROM_USER 8
     pushq %rax
     pushq %rcx
     pushq %rdx
@@ -171,10 +214,16 @@ x86_64_irq_lapic_resched:
     popq %rdx
     popq %rcx
     popq %rax
+    SWAPGS_IF_FROM_USER 8
     iretq
 
 .global x86_64_isr_common
 x86_64_isr_common:
+    /* G.7b: at this point the stack has err_code(0)/vector(8)/RIP(16)/CS(24).
+     * If we crossed from ring3, swap %gs so kernel code sees the percpu GS.
+     * (Currently a no-op because KERNEL_GS_BASE == GS_BASE; the path is
+     * established for G.7c when the two MSRs will diverge.) */
+    SWAPGS_IF_FROM_USER 24
     pushq %rax
     pushq %rbx
     pushq %rcx
@@ -210,5 +259,8 @@ x86_64_isr_common:
     popq %rcx
     popq %rbx
     popq %rax
+    /* G.7b: same stack shape as entry (err_code(0)/vector(8)/RIP(16)/CS(24)).
+     * Pair the swapgs back to user GS before iretq if returning to ring3. */
+    SWAPGS_IF_FROM_USER 24
     addq $16, %rsp
     iretq

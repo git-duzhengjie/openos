@@ -44,6 +44,14 @@ arch_x86_64_iretq_enter_user:
     xorq %r13, %r13
     xorq %r14, %r14
     xorq %r15, %r15
+    /*
+     * G.7b: swap to "user GS" (currently still == percpu, because
+     * percpu_install_gs() programs KERNEL_GS_BASE to the same value). The
+     * kernel-side counterpart on every ring0 entry (ISR_NOERR, ISR_ERR,
+     * irq*, syscall) will swapgs back. Establishing the path here lets G.7c
+     * later flip KERNEL_GS_BASE to 0 without touching this stub.
+     */
+    swapgs
     iretq
 
 1:

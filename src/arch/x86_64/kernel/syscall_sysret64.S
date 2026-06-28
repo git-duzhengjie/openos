@@ -12,16 +12,16 @@
  */
 x86_64_syscall_entry:
     /*
-     * Step D.2: removed swapgs pair. We had no %gs: accesses anywhere in the
-     * kernel and KERNEL_GS_BASE was never wrmsr'd, so the swapgs/swapgs
-     * dance only loaded a random GS_BASE during dispatch -- and, more
-     * importantly, on the very first syscall the CPU's IA32_KERNEL_GS_BASE
-     * was still zero, so the post-swapgs %gs:0 layout was garbage. We
-     * currently run on the user stack throughout the syscall (single-stack
-     * model); push/pop happens on the user-stack page mapped U=1, which is
-     * safe for ring0 because CPL trumps U on supervisor accesses. A proper
-     * per-CPU TSS RSP0 switch is tracked as Step D.3.
+     * G.7b: re-introduce the swapgs pair removed in D.2. By the time we
+     * reach this stub, percpu_install_gs() has already wrmsr'd both
+     * IA32_GS_BASE and IA32_KERNEL_GS_BASE to &g_percpu[cpu_idx]. That makes
+     * the post-swapgs %gs:0 layout valid (it is the same percpu pointer),
+     * which fixes the original D.2 hazard. Note we are still running on
+     * the user stack here -- a proper per-CPU TSS RSP0 switch is Step G.7c.
+     *
+     * No conditional check needed: SYSCALL only ever traps from ring 3.
      */
+    swapgs
     pushq %r11
     pushq %rcx
     pushq %r10
@@ -46,6 +46,8 @@ x86_64_syscall_entry:
     popq %r10
     popq %rcx
     popq %r11
+    /* G.7b: pair swapgs back to user GS before sysretq. */
+    swapgs
     sysretq
 
 /*
