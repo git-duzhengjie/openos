@@ -186,6 +186,29 @@ uint32_t arch_x86_64_sched_spawn_kthread_prio_on(x86_64_thread_entry_t entry,
                                                  uint32_t priority,
                                                  uint32_t target_cpu);
 
+/*
+ * G.7e: spawn a ring-3 user thread on a specific CPU.
+ *
+ *   user_entry  : ring-3 RIP (must be mapped user-executable; for the
+ *                 self-test we point this at the embedded usermode blob).
+ *   user_rsp    : initial user-mode RSP (must be 16-aligned, mapped
+ *                 user-writable). Pass 0 to default to the embedded blob's
+ *                 reserved user stack slot.
+ *   priority    : same semantics as kthread variants.
+ *   target_cpu  : 0..ncpu-1 (ncpu => use any).
+ *
+ * The slot's kernel stack is allocated internally (OPENOS_X86_64_SCHED_KSTACK_BYTES).
+ * sched_slot.kind is set to SCHED_KIND_USER and kernel_stack_top is recorded
+ * so sched_apply_rsp0_for_next can program TSS.RSP0 on dispatch. The first
+ * dispatch lands at arch_x86_64_user_thread_trampoline, which swapgs + iretq
+ * into ring 3.
+ *
+ * Returns slot id (>=1) on success, 0 on failure. */
+uint32_t arch_x86_64_sched_spawn_uthread(uintptr_t user_entry,
+                                         uintptr_t user_rsp,
+                                         uint32_t priority,
+                                         uint32_t target_cpu);
+
 uint32_t arch_x86_64_sched_set_priority(uint32_t slot, uint32_t priority);
 uint32_t arch_x86_64_sched_get_priority(uint32_t slot);
 uint32_t arch_x86_64_sched_quantum_for_priority(uint32_t priority);

@@ -2,6 +2,25 @@
 .code64
 
 .global arch_x86_64_iretq_enter_user
+.global arch_x86_64_user_thread_trampoline
+
+/*
+ * G.7e: arch_x86_64_user_thread_trampoline
+ *
+ * Invoked via context_switch when a USER slot is dispatched. The slot's
+ * ctx.rsp points at a pre-built iretq frame (5 qwords: rip, cs, rflags,
+ * user_rsp, ss); ctx.rip is &arch_x86_64_user_thread_trampoline; ctx.rflags
+ * is 0 (IF=0) so the dispatch sequence (pushq %rax / popfq / jmp *rax) does
+ * not re-enable interrupts before iretq. swapgs flips KERNEL_GS_BASE/GS_BASE
+ * to the user-side mapping (currently same value, G.7c no-op), then iretq
+ * atomically restores user CS:RIP, RFLAGS (IF=1 from the prebuilt frame),
+ * and SS:RSP. Entry rsp already points exactly at the iretq frame; no
+ * adjustment needed.
+ */
+arch_x86_64_user_thread_trampoline:
+    swapgs
+    iretq
+
 
 /*
  * void arch_x86_64_iretq_enter_user(const x86_64_user_iretq_frame_t *frame)

@@ -4,9 +4,16 @@
 #include <stdint.h>
 
 #include "../include/early_console64.h"
+#include "../include/gdt64.h"
 #include "../include/heap64.h"
 #include "../include/percpu64.h"
 #include "../include/smp64.h"  /* G.6.5c: OPENOS_X86_64_SMP_MAX_CPUS for spawn_on clamp */
+#include "../include/usermode64.h"
+
+/* G.7e: trampoline implemented in usermode64.S. context_switch dispatches
+ * a USER slot by loading ctx.rsp (-> iretq frame) and jumping to ctx.rip,
+ * which is this label. */
+extern void arch_x86_64_user_thread_trampoline(void);
 
 /* G.6.3: per-CPU scheduler cursors / counters live in arch_x86_64_percpu_t,
  * addressable via %gs. The sched_slots[] pool itself is still a single
@@ -337,6 +344,105 @@ uint32_t arch_x86_64_sched_spawn_kthread_prio_on(x86_64_thread_entry_t entry,
      * TSS.RSP0 at every dispatch of that slot. */
     sched_slots[idx].kind             = OPENOS_X86_64_SCHED_KIND_KERNEL;
     sched_slots[idx].kernel_stack_top = stack_top;
+    return idx;
+}
+
+uint32_t arch_x86_64_sched_spawn_uthread(uintptr_t user_entry,
+                                         uintptr_t user_rsp,
+                                         uint32_t priority,
+                                         uint32_t target_cpu) {
+    if (user_entry == 0u) {
+        return 0u;
+    }
+    if (priority > OPENOS_X86_64_SCHED_PRIO_MAX) {
+        priority = OPENOS_X86_64_SCHED_PRIO_DEFAULT;
+    }
+    if (target_cpu >= OPENOS_X86_64_SMP_MAX_CPUS) {
+        target_cpu = arch_x86_64_this_cpu_ptr()->cpu_idx;
+    }
+
+    /* If the caller did not supply an explicit user_rsp, fall back to the
+     * embedded usermode blob's reserved bootstrap stack. usermode64.c
+     * keeps it identity-mapped user-writable, so it is safe to reuse from
+     * any CPU as long as only one user thread is live at a time (Stage 21
+     * spawns exactly one). */
+    if (user_rsp == 0u) {
+        x86_64_user_iretq_frame_t tmp;
+        const x86_64_user_iretq_frame_t *prepared =
+            arch_x86_64_usermode_get_prepared_frame();
+        tmp = *prepared;
+        if (tmp.rsp == 0u) {
+            return 0u; /* usermode subsystem not initialized yet */
+        }
+        user_rsp = (uintptr_t)tmp.rsp;
+    }
+
+    uint32_t idx = sched_alloc_slot();
+    if (idx == 0u) {
+        return 0u;
+    }
+
+    void *stack = arch_x86_64_kmalloc(OPENOS_X86_64_SCHED_KSTACK_BYTES);
+    if (stack == NULL) {
+        sched_slots[idx].state = SCHED_SLOT_FREE;
+        return 0u;
+    }
+    sched_slots[idx].stack_base = stack;
+
+    uintptr_t kstack_top = (uintptr_t)stack + OPENOS_X86_64_SCHED_KSTACK_BYTES;
+
+    /* G.7e: build the iretq frame at the very top of the kernel stack so
+     * that ctx.rsp points exactly at it. context_switch's restore path uses
+     * `pushq %rax + popfq` which temporarily writes rsp-8, so the iretq
+     * frame must live strictly at and above the value loaded into rsp.
+     *
+     * Layout (low -> high): rip, cs, rflags, rsp, ss
+     */
+    uintptr_t frame_base = kstack_top - (5u * sizeof(uint64_t));
+    /* Align the iretq RSP slot (the kernel rsp loaded into the context) to
+     * a 16-byte boundary. iretq itself does not require 16B alignment of
+     * the kernel rsp, but keeping it aligned avoids surprises in any
+     * future entry-stub spill. */
+    frame_base &= ~((uintptr_t)0xFu);
+    uint64_t *frame = (uint64_t *)frame_base;
+    frame[0] = (uint64_t)user_entry;                          /* RIP */
+    frame[1] = (uint64_t)(OPENOS_X86_64_GDT_USER_CODE | 3u);  /* CS */
+    frame[2] = 0x202ULL;                                      /* RFLAGS: IF=1 */
+    frame[3] = (uint64_t)user_rsp;                            /* RSP */
+    frame[4] = (uint64_t)(OPENOS_X86_64_GDT_USER_DATA | 3u);  /* SS */
+
+    /* Hand-craft the slot context. context_switch64.S restore sequence:
+     *   mov ctx.rsp,    %rsp      ; rsp = frame_base
+     *   mov ctx.rflags, %rax      ; rax = 0 (IF=0)
+     *   pushq %rax                ; uses rsp-8 (below frame, scratch)
+     *   popfq                     ; rflags loaded; rsp back to frame_base
+     *   mov ctx.rip,    %rax      ; rax = trampoline addr
+     *   jmp *%rax                 ; -> trampoline; rsp == frame_base
+     * Trampoline then does swapgs + iretq, popping the 5-qword frame and
+     * atomically restoring user CS:RIP, RFLAGS (IF=1), and SS:RSP. */
+    x86_64_context_t ctx;
+    ctx.rsp    = (x86_64_stack_ptr_t)frame_base;
+    ctx.rip    = (x86_64_entry_t)&arch_x86_64_user_thread_trampoline;
+    ctx.rflags = 0u; /* IF cleared until iretq atomically restores user IF */
+    ctx.rbx    = 0u;
+    ctx.rbp    = 0u;
+    ctx.r12    = 0u;
+    ctx.r13    = 0u;
+    ctx.r14    = 0u;
+    ctx.r15    = 0u;
+    ctx.r8     = 0u;
+    ctx.r9     = 0u;
+    ctx.r10    = 0u;
+    ctx.r11    = 0u;
+
+    sched_slots[idx].ctx              = ctx;
+    sched_slots[idx].state            = SCHED_SLOT_READY;
+    sched_slots[idx].id               = idx;
+    sched_slots[idx].priority         = priority;
+    sched_slots[idx].owner_cpu        = target_cpu;
+    sched_slots[idx].is_idle          = 0u;
+    sched_slots[idx].kind             = OPENOS_X86_64_SCHED_KIND_USER;
+    sched_slots[idx].kernel_stack_top = kstack_top;
     return idx;
 }
 
