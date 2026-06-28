@@ -134,6 +134,17 @@ typedef struct {
     uint32_t            priority;     /* G.2: scheduling priority band */
     uint32_t            owner_cpu;    /* G.6.4: per-CPU affinity */
     uint32_t            is_idle;      /* G.6.4: 1 = idle thread for owner_cpu */
+    /* G.7d: thread kind tagging --------------------------------------
+     * KERNEL = ring0-only; USER = scheduled to ring3 (G.7e+).
+     *
+     * `kernel_stack_top` is the saved-stack-top value that would be
+     * loaded into TSS.RSP0 each time a USER slot gets dispatched. For
+     * KERNEL slots it is informational (equals stack_base + KSTACK_BYTES)
+     * and is NOT applied to TSS.RSP0 (those use the per-CPU shared RSP0).
+     * For slot 0 (BSP bootstrap) both fields stay zero -- BSP uses the
+     * per-CPU RSP0 baked into TSS at percpu_setup. */
+    uint32_t            kind;
+    uintptr_t           kernel_stack_top;
 } sched_slot_t;
 
 static sched_slot_t  sched_slots[OPENOS_X86_64_SCHED_MAX_KTHREADS];
@@ -155,6 +166,12 @@ static void sched_ensure_bootstrap_slot(void) {
      * work is ready, slot 0 simply stays RUNNING and the bootstrap
      * code continues to spin/yield/hlt as it sees fit. */
     sched_slots[0].is_idle   = 0u;
+    /* G.7d: BSP bootstrap is a kernel thread; it never owns a per-thread
+     * kernel stack (it runs on whatever stack the boot path set up and
+     * then on the BSP's per-CPU RSP0 once percpu_setup(0) ran). Leave
+     * kernel_stack_top=0 to signal "do not touch TSS.RSP0 for this slot". */
+    sched_slots[0].kind             = OPENOS_X86_64_SCHED_KIND_KERNEL;
+    sched_slots[0].kernel_stack_top = 0u;
     sched_pc_set_current(0u);
 }
 
@@ -174,6 +191,10 @@ static uint32_t sched_alloc_slot(void) {
             sched_slots[i].state    = SCHED_SLOT_FREE;
             sched_slots[i].id       = i;
             sched_slots[i].is_idle  = 0u;
+            /* G.7d: reset kind back to KERNEL on slot reuse; spawn_kthread
+             * will (re-)set kind + kernel_stack_top with the fresh stack. */
+            sched_slots[i].kind             = OPENOS_X86_64_SCHED_KIND_KERNEL;
+            sched_slots[i].kernel_stack_top = 0u;
             /* owner_cpu set by caller (spawn pins to spawning CPU). */
             return i;
         }
@@ -280,6 +301,14 @@ uint32_t arch_x86_64_sched_spawn_kthread_prio_on(x86_64_thread_entry_t entry,
     sched_slots[idx].priority  = priority;
     sched_slots[idx].owner_cpu = target_cpu; /* G.6.5c: explicit pin */
     sched_slots[idx].is_idle   = 0u;
+    /* G.7d: tag the new slot as KERNEL and record the stack top.
+     * For KERNEL slots kernel_stack_top is informational only -- the
+     * dispatcher leaves TSS.RSP0 alone for them (KERNEL stays on the
+     * per-CPU shared RSP0). G.7e introduces spawn_uthread which sets
+     * kind=USER and the same kernel_stack_top is then applied to
+     * TSS.RSP0 at every dispatch of that slot. */
+    sched_slots[idx].kind             = OPENOS_X86_64_SCHED_KIND_KERNEL;
+    sched_slots[idx].kernel_stack_top = stack_top;
     return idx;
 }
 
@@ -515,6 +544,11 @@ uint32_t arch_x86_64_sched_register_ap_idle(void) {
     sched_slots[cpu].owner_cpu  = cpu;
     sched_slots[cpu].is_idle    = 1u;
     sched_slots[cpu].stack_base = NULL;  /* AP runs on its trampoline stack */
+    /* G.7d: AP idle slots are KERNEL; they ride the per-CPU RSP0 that
+     * was baked into the AP's TSS by percpu_setup(cpu) on AP bringup,
+     * so kernel_stack_top stays 0 ("don't touch TSS.RSP0"). */
+    sched_slots[cpu].kind             = OPENOS_X86_64_SCHED_KIND_KERNEL;
+    sched_slots[cpu].kernel_stack_top = 0u;
     sched_pc_set_current(cpu);
     return cpu;
 }
@@ -583,6 +617,24 @@ uint32_t arch_x86_64_sched_slot_owner(uint32_t slot_idx) {
     sched_slot_t *s = &sched_slots[slot_idx];
     if (s->state == SCHED_SLOT_FREE) return 0xFFFFFFFFu;
     return s->owner_cpu;
+}
+
+/* G.7d observers ------------------------------------------------------
+ * Reads from the static slot array; safe from any CPU (no locking, u32
+ * naturally aligned). Return 0xFFFFFFFFu / 0 for FREE/out-of-bounds so
+ * Stage 20 can sanity-check what was just spawned. */
+uint32_t arch_x86_64_sched_slot_kind(uint32_t slot_idx) {
+    if (slot_idx >= OPENOS_X86_64_SCHED_MAX_KTHREADS) return 0xFFFFFFFFu;
+    sched_slot_t *s = &sched_slots[slot_idx];
+    if (s->state == SCHED_SLOT_FREE) return 0xFFFFFFFFu;
+    return s->kind;
+}
+
+uintptr_t arch_x86_64_sched_slot_kstack_top(uint32_t slot_idx) {
+    if (slot_idx >= OPENOS_X86_64_SCHED_MAX_KTHREADS) return 0u;
+    sched_slot_t *s = &sched_slots[slot_idx];
+    if (s->state == SCHED_SLOT_FREE) return 0u;
+    return s->kernel_stack_top;
 }
 
 /* G.6.6b: migrate a READY slot to target_cpu and poke the target with a

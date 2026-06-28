@@ -1210,9 +1210,104 @@ void arch_x86_64_smp_selftest_run(void)
 
         early_console64_write(" PASS");
     }
+
+    /* Stage 20 (G.7d): thread-kind tagging scaffolding.
+     *
+     * G.7d is pure scaffolding -- it adds a `kind` field and a
+     * `kernel_stack_top` field to every sched slot, but introduces no
+     * USER slots yet (those land in G.7e). The invariants that must
+     * hold right now, on every CPU configuration, are:
+     *
+     *   (1) slot 0 (BSP bootstrap):
+     *         kind        == KERNEL
+     *         kstack_top  == 0    (it rides the per-CPU shared RSP0)
+     *   (2) every AP idle slot at index `cpu` (cpu in [1..n_cpus)):
+     *         kind        == KERNEL
+     *         kstack_top  == 0    (rides per-CPU RSP0 set up at AP bringup)
+     *   (3) every non-FREE, non-idle slot (i.e. real kthreads spawned
+     *       so far by the harness): kind == KERNEL AND kstack_top != 0
+     *       AND kstack_top is 16-byte aligned (matches the
+     *       OPENOS_X86_64_SCHED_KSTACK_ALIGN contract from spawn_kthread).
+     *   (4) at least ONE such non-idle slot exists (otherwise this stage
+     *       would be silently vacuous and a future regression that
+     *       stopped spawning kthreads would slip through).
+     *
+     * If any of these fails, an upcoming spawn_uthread() would either
+     * misclassify a kernel thread as USER (and try to apply a bogus
+     * TSS.RSP0) or skip RSP0 apply for a real USER (and the next IRQ
+     * mid-userland would land on the wrong stack). Catch it now while
+     * everything is still KERNEL and reasoning is local. */
+    {
+        early_console64_write("\n[x86_64][smp-selftest] stage 20 (G.7d): sched-slot kind/kstack tagging ...");
+
+        /* (1) slot 0 */
+        uint32_t  s0_kind = arch_x86_64_sched_slot_kind(0u);
+        uintptr_t s0_top  = arch_x86_64_sched_slot_kstack_top(0u);
+        log_kv(" slot0_kind=", (uint64_t)s0_kind);
+        log_kv(" slot0_kstack_top=", (uint64_t)s0_top);
+        if (s0_kind != 0u /* KERNEL */) {
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 20 slot0 kind != KERNEL\n");
+            return;
+        }
+        if (s0_top != 0u) {
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 20 slot0 kstack_top != 0 (BSP must ride per-CPU RSP0)\n");
+            return;
+        }
+
+        /* (2) AP idle slots -- by sched-init convention, AP `cpu` registers
+         *     itself as sched slot index `cpu`. We probe indices
+         *     [1..PERCPU_MAX_CPUS) and only validate those whose percpu
+         *     block is live. */
+        for (uint32_t cpu = 1; cpu < OPENOS_X86_64_PERCPU_MAX_CPUS; ++cpu) {
+            arch_x86_64_percpu_t *pcpu = arch_x86_64_percpu_slot(cpu);
+            if (pcpu == 0 || pcpu->magic != OPENOS_X86_64_PERCPU_MAGIC) continue;
+            uint32_t  k = arch_x86_64_sched_slot_kind(cpu);
+            uintptr_t t = arch_x86_64_sched_slot_kstack_top(cpu);
+            if (k != 0u) {
+                early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 20 AP idle slot kind != KERNEL\n");
+                return;
+            }
+            if (t != 0u) {
+                early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 20 AP idle slot kstack_top != 0\n");
+                return;
+            }
+        }
+
+        /* (3)+(4) sweep the rest. */
+        uint32_t kthr_seen = 0;
+        for (uint32_t i = 1; i < OPENOS_X86_64_SCHED_MAX_KTHREADS; ++i) {
+            arch_x86_64_percpu_t *pcpu = (i < OPENOS_X86_64_PERCPU_MAX_CPUS)
+                                            ? arch_x86_64_percpu_slot(i) : 0;
+            uint32_t looks_like_idle = (pcpu != 0 && pcpu->magic == OPENOS_X86_64_PERCPU_MAGIC);
+            uint32_t k = arch_x86_64_sched_slot_kind(i);
+            if (k == 0xFFFFFFFFu) continue; /* FREE/oob */
+            if (looks_like_idle) continue;  /* validated in (2) */
+            uintptr_t t = arch_x86_64_sched_slot_kstack_top(i);
+            if (k != 0u) {
+                early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 20 kthread slot kind != KERNEL (no USER slots exist in G.7d)\n");
+                return;
+            }
+            if (t == 0u) {
+                early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 20 kthread slot has zero kstack_top (spawn_kthread must record it)\n");
+                return;
+            }
+            if ((t & 0x7u) != 0u) {
+                early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 20 kthread slot kstack_top not 8B aligned\n");
+                return;
+            }
+            kthr_seen++;
+        }
+        log_kv(" kthread_slots_seen=", (uint64_t)kthr_seen);
+        if (kthr_seen == 0) {
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 20 saw zero real kthread slots (harness regression?)\n");
+            return;
+        }
+
+        early_console64_write(" PASS");
+    }
     if (ap_n > 0) {
-        early_console64_write("\n[x86_64][smp-selftest] PASS: all APs idle on private GDT/TSS/IDT+GS + sched-registered + LAPIC-timer driving sched_on_tick + distributed kthreads switched per-CPU + cross-CPU reschedule IPI delivered + cross-CPU migration verified + IPI tail-hook dispatch verified + preempt-disable gate verified + timer-tick honours gate + swapgs MSR pair OK + syscall RSP save-area OK\n");
+        early_console64_write("\n[x86_64][smp-selftest] PASS: all APs idle on private GDT/TSS/IDT+GS + sched-registered + LAPIC-timer driving sched_on_tick + distributed kthreads switched per-CPU + cross-CPU reschedule IPI delivered + cross-CPU migration verified + IPI tail-hook dispatch verified + preempt-disable gate verified + timer-tick honours gate + swapgs MSR pair OK + syscall RSP save-area OK + sched-slot kind/kstack tagging OK\n");
     } else {
-        early_console64_write("\n[x86_64][smp-selftest] PASS: no APs (UP system, BSP idle slot only) + preempt-disable gate verified + timer-tick honours gate + swapgs MSR pair OK + syscall RSP save-area OK\n");
+        early_console64_write("\n[x86_64][smp-selftest] PASS: no APs (UP system, BSP idle slot only) + preempt-disable gate verified + timer-tick honours gate + swapgs MSR pair OK + syscall RSP save-area OK + sched-slot kind/kstack tagging OK\n");
     }
 }

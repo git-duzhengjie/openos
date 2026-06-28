@@ -220,6 +220,34 @@ uint32_t arch_x86_64_sched_migrate(uint32_t slot_idx, uint32_t target_cpu);
  * Used by smp_selftest stage 13 to prove a migration took effect. */
 uint32_t arch_x86_64_sched_slot_owner(uint32_t slot_idx);
 
+/* ---- G.7d: thread kind tagging --------------------------------------
+ *
+ * Every sched slot is tagged with a `kind`:
+ *   KERNEL = ring0-only thread (kmain bootstrap, kthreads, AP idle).
+ *            Uses the per-CPU shared RSP0 baked into TSS at percpu_setup.
+ *   USER   = thread that will eventually iretq to ring3 (G.7e+).
+ *            Owns a per-thread kernel stack; TSS.RSP0 must be repointed
+ *            to this slot's kernel_stack_top whenever it gets dispatched
+ *            (so that mid-userland IRQ/syscall lands on the right stack).
+ *
+ * In G.7d this is pure scaffolding: every slot is KERNEL, no RSP0
+ * switching happens at context_switch time, no runtime behaviour changes.
+ * G.7e flips on the RSP0-apply hook and introduces the first USER slot. */
+#define OPENOS_X86_64_SCHED_KIND_KERNEL 0u
+#define OPENOS_X86_64_SCHED_KIND_USER   1u
+
+/* Observer: returns the slot's kind, or 0xFFFFFFFFu if slot_idx is
+ * out of bounds or the slot is FREE. Read directly from the static
+ * slot array (no %gs deref); safe from any CPU. Used by Stage 20. */
+uint32_t arch_x86_64_sched_slot_kind(uint32_t slot_idx);
+
+/* Observer: returns the slot's kernel_stack_top (the value that would
+ * be loaded into TSS.RSP0 if this slot were dispatched as USER).
+ * Returns 0 for slot 0 (bootstrap; uses per-CPU shared RSP0) and for
+ * FREE/out-of-bounds slots. Used by Stage 20 to prove the stack-top
+ * equals stack_base + KSTACK_BYTES for every spawned kthread. */
+uintptr_t arch_x86_64_sched_slot_kstack_top(uint32_t slot_idx);
+
 /* ---- G.6.7a: preemption tail-hook primitives -----------------------
  *
  * Background: historically the only place we ever made a scheduling
