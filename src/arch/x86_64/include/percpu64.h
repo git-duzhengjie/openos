@@ -182,4 +182,18 @@ uint32_t           arch_x86_64_percpu_max(void);
 x86_64_stack_ptr_t arch_x86_64_percpu_rsp0(uint32_t cpu_idx);
 x86_64_virt_addr_t arch_x86_64_percpu_tss_base(uint32_t cpu_idx);
 
+/* G.7a: update the RSP0 field of cpu_idx's TSS at runtime. Returns the
+ * previous value, or 0 if cpu_idx is out of range. Required by the
+ * upcoming syscall / ring3-thread paths so that each thread can install
+ * its own kernel stack on entry; the value is reloaded by hardware on
+ * every ring3->ring0 transition. Does NOT touch the underlying per-CPU
+ * RSP0 backing-stack buffer in this module — callers are responsible
+ * for keeping the new pointer alive. */
+x86_64_stack_ptr_t arch_x86_64_percpu_set_rsp0(uint32_t cpu_idx,
+                                                x86_64_stack_ptr_t new_rsp0);
+
+/* G.7a: read a 1-based IST entry (1..OPENOS_X86_64_PERCPU_IST_COUNT)
+ * from cpu_idx's TSS. Returns 0 for out-of-range cpu or ist index. */
+x86_64_stack_ptr_t arch_x86_64_percpu_ist(uint32_t cpu_idx, uint32_t ist_index);
+
 #endif /* OPENOS_ARCH_X86_64_PERCPU64_H */

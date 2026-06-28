@@ -191,6 +191,27 @@ x86_64_virt_addr_t arch_x86_64_percpu_tss_base(uint32_t cpu_idx) {
     return (x86_64_virt_addr_t)(uintptr_t)&g_tss[cpu_idx];
 }
 
+x86_64_stack_ptr_t arch_x86_64_percpu_set_rsp0(uint32_t cpu_idx,
+                                                x86_64_stack_ptr_t new_rsp0) {
+    if (cpu_idx >= OPENOS_X86_64_PERCPU_MAX_CPUS) {
+        return 0;
+    }
+    x86_64_stack_ptr_t old = g_tss[cpu_idx].rsp[0];
+    g_tss[cpu_idx].rsp[0]  = new_rsp0;
+    return old;
+}
+
+x86_64_stack_ptr_t arch_x86_64_percpu_ist(uint32_t cpu_idx, uint32_t ist_index) {
+    if (cpu_idx >= OPENOS_X86_64_PERCPU_MAX_CPUS) {
+        return 0;
+    }
+    /* 1-based: caller passes 1..7, TSS field is 0-based. */
+    if (ist_index == 0u || ist_index > OPENOS_X86_64_PERCPU_IST_COUNT) {
+        return 0;
+    }
+    return g_tss[cpu_idx].ist[ist_index - 1u];
+}
+
 /* ---------------- G.6.2: per-CPU "current" via GS_BASE ---------------- */
 
 static arch_x86_64_percpu_t g_percpu[OPENOS_X86_64_PERCPU_MAX_CPUS]

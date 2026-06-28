@@ -8,6 +8,8 @@
 #include "../include/lapic64.h"
 #include "../include/ioapic64.h"
 #include "../include/delay64.h"
+#include "../include/gdt64.h"
+#include "../include/tss64.h"
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -965,6 +967,85 @@ void arch_x86_64_smp_selftest_run(void)
 
         if (bsp_deferred_after != bsp_deferred_before) {
             early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 16.B drained latch but deferred_count moved (drain primitive broken)\n");
+            return;
+        }
+
+        early_console64_write(" PASS");
+    }
+
+    /* Stage 17 (G.7a): per-CPU TSS distinctness.
+     *
+     * G.7a routes the legacy arch_x86_64_tss_* surface through the
+     * per-CPU GDT/TSS farm in percpu64.c. The invariant we want to
+     * lock in *before* we start running ring3 on multiple cores is:
+     *
+     *   1. Each brought-up CPU has a distinct &tss[cpu_idx] base in
+     *      its own GDT (no two CPUs share a TSS descriptor).
+     *   2. Each CPU's RSP0 backing stack is a distinct address (no two
+     *      CPUs would clobber each other's ring0 stack on a ring3->0
+     *      transition).
+     *   3. The BSP's STR matches OPENOS_X86_64_GDT_TSS (i.e. percpu_load
+     *      actually installed the per-CPU TSS into TR).
+     *
+     * We only inspect the percpu farm from the BSP — no need to bounce
+     * onto each AP, because the storage and descriptor encoding are all
+     * computed on the BSP at smp_init time (APs only run `lgdt+ltr` on
+     * the descriptor we built for them, they don't *create* it).
+     */
+    {
+        early_console64_write("\n[x86_64][smp-selftest] stage 17: per-CPU TSS distinctness ...");
+
+        uint32_t cpu_total = arch_x86_64_smp_cpu_count();
+        if (cpu_total == 0u) {
+            cpu_total = 1u;
+        }
+        log_kv(" cpu_total=", (uint64_t)cpu_total);
+
+        /* (3) BSP's TR encoding. */
+        uint16_t tr_sel = 0;
+        __asm__ __volatile__("str %0" : "=r"(tr_sel));
+        log_kv(" bsp_tr=", (uint64_t)tr_sel);
+        if (tr_sel != arch_x86_64_gdt_tss_selector()) {
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 17 BSP TR mismatch (percpu_load did not LTR)\n");
+            return;
+        }
+
+        /* (1)+(2) distinct TSS bases and distinct RSP0 stacks. */
+        x86_64_virt_addr_t bases[OPENOS_X86_64_PERCPU_MAX_CPUS] = {0};
+        x86_64_stack_ptr_t rsp0s[OPENOS_X86_64_PERCPU_MAX_CPUS] = {0};
+        for (uint32_t i = 0; i < cpu_total && i < OPENOS_X86_64_PERCPU_MAX_CPUS; ++i) {
+            bases[i] = arch_x86_64_percpu_tss_base(i);
+            rsp0s[i] = arch_x86_64_percpu_rsp0(i);
+            if (bases[i] == 0) {
+                early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 17 cpu has zero TSS base (percpu_setup not invoked?)\n");
+                return;
+            }
+            if (rsp0s[i] == 0) {
+                early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 17 cpu has zero RSP0 (percpu_setup not invoked?)\n");
+                return;
+            }
+        }
+        for (uint32_t i = 0; i < cpu_total && i < OPENOS_X86_64_PERCPU_MAX_CPUS; ++i) {
+            for (uint32_t j = i + 1u; j < cpu_total && j < OPENOS_X86_64_PERCPU_MAX_CPUS; ++j) {
+                if (bases[i] == bases[j]) {
+                    early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 17 two CPUs share a TSS base (per-CPU TSS not unique)\n");
+                    return;
+                }
+                if (rsp0s[i] == rsp0s[j]) {
+                    early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 17 two CPUs share an RSP0 (ring0 stack would clobber)\n");
+                    return;
+                }
+            }
+        }
+
+        /* Also: cpu0's TSS base must equal the legacy arch_x86_64_tss_base()
+         * wrapper (BSP shim still exposes cpu0 through the old surface). */
+        if (arch_x86_64_tss_base() != bases[0]) {
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 17 legacy tss_base() != percpu cpu0 base (tss64.c shim broken)\n");
+            return;
+        }
+        if (arch_x86_64_tss_rsp0() != rsp0s[0]) {
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 17 legacy tss_rsp0() != percpu cpu0 rsp0\n");
             return;
         }
 
