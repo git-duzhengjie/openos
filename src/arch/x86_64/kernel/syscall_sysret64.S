@@ -16,12 +16,30 @@ x86_64_syscall_entry:
      * reach this stub, percpu_install_gs() has already wrmsr'd both
      * IA32_GS_BASE and IA32_KERNEL_GS_BASE to &g_percpu[cpu_idx]. That makes
      * the post-swapgs %gs:0 layout valid (it is the same percpu pointer),
-     * which fixes the original D.2 hazard. Note we are still running on
-     * the user stack here -- a proper per-CPU TSS RSP0 switch is Step G.7c.
+     * which fixes the original D.2 hazard.
      *
      * No conditional check needed: SYSCALL only ever traps from ring 3.
      */
     swapgs
+
+    /*
+     * G.7c: swap from the (untrusted) user stack to this CPU's kernel
+     * stack BEFORE we touch memory. We park the user %rsp in the
+     * percpu save-slot so the sysretq exit path can restore it.
+     *
+     * Hardware does NOT do this for us on `syscall` (unlike int/iretq,
+     * which consults TSS.RSP0). Doing it manually here is what lets
+     * us drop the old "keep using the user stack" hack and start
+     * routing syscall through a trusted per-CPU stack -- the same
+     * stack TSS.RSP0 will deliver interrupts onto, so an IRQ taken
+     * mid-syscall is now safe.
+     *
+     * The displacements 0x68 (syscall_user_rsp) and 0x60
+     * (syscall_kernel_rsp) are pinned by _Static_assert in percpu64.c.
+     */
+    movq %rsp, %gs:0x68          /* save user rsp */
+    movq %gs:0x60, %rsp          /* load kernel rsp (== TSS.RSP0) */
+
     pushq %r11
     pushq %rcx
     pushq %r10
@@ -46,7 +64,12 @@ x86_64_syscall_entry:
     popq %r10
     popq %rcx
     popq %r11
-    /* G.7b: pair swapgs back to user GS before sysretq. */
+
+    /*
+     * G.7c: restore user stack pointer that we saved on entry, then
+     * pair swapgs back to user GS and sysretq.
+     */
+    movq %gs:0x68, %rsp
     swapgs
     sysretq
 

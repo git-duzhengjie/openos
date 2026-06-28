@@ -95,7 +95,28 @@ typedef struct openos_x86_64_percpu {
      * latch-during-critical-section -> immediate-dispatch-on-exit
      * property. */
     uint64_t preempt_deferred_count; /* offset 0x58 */
-    uint64_t _pad[4];             /* pad to 128 bytes for cache-line alignment */
+    /* G.7c: per-CPU syscall save-area for the ring3->ring0 stack swap.
+     *
+     * The native syscall instruction does NOT switch stacks for us: on
+     * entry %rsp still points at the user stack, and we must move to a
+     * trusted kernel stack BEFORE we push the GPR save frame (otherwise
+     * a hostile user could supply an unmapped / kernel-aliasing %rsp
+     * and #PF us on the very first push, mid-swapgs window).
+     *
+     * The protocol used by syscall_sysret64.S is:
+     *   - on entry, right after swapgs:
+     *       movq %rsp, %gs:syscall_user_rsp
+     *       movq %gs:syscall_kernel_rsp, %rsp
+     *   - on exit, right before the closing swapgs + sysretq:
+     *       movq %gs:syscall_user_rsp, %rsp
+     *
+     * syscall_kernel_rsp is kept in sync with the TSS RSP0 field by
+     * arch_x86_64_percpu_set_rsp0() so that the syscall path and the
+     * hardware ring3->ring0 path (used by interrupts) always land on
+     * the same physical kernel stack for a given CPU/thread. */
+    uint64_t syscall_kernel_rsp;     /* offset 0x60 */
+    uint64_t syscall_user_rsp;       /* offset 0x68 */
+    uint64_t _pad[2];             /* pad to 128 bytes for cache-line alignment */
 } __attribute__((aligned(64))) arch_x86_64_percpu_t;
 
 /* Per-field offsets (compile-time, for asm or sanity checks). */
@@ -113,6 +134,8 @@ typedef struct openos_x86_64_percpu {
 #define OPENOS_X86_64_PERCPU_OFF_RESCHED_DISPATCH 0x48
 #define OPENOS_X86_64_PERCPU_OFF_PREEMPT_DEPTH    0x50
 #define OPENOS_X86_64_PERCPU_OFF_PREEMPT_DEFERRED 0x58
+#define OPENOS_X86_64_PERCPU_OFF_SYSCALL_KRSP     0x60
+#define OPENOS_X86_64_PERCPU_OFF_SYSCALL_URSP     0x68
 
 /* IA32_GS_BASE MSR */
 #define OPENOS_X86_64_MSR_GS_BASE        0xC0000101u

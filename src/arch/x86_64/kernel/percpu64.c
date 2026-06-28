@@ -54,6 +54,19 @@ static uint8_t            g_ist_stack[OPENOS_X86_64_PERCPU_MAX_CPUS]
                                       [OPENOS_X86_64_PERCPU_IST_SIZE]
     __attribute__((aligned(16)));
 
+/* G.6.2 / G.7c: per-CPU control block selected by GS_BASE. Defined up here
+ * (before any function reaching for it through g_percpu[]) so the back-
+ * references in arch_x86_64_percpu_set_rsp0() etc. resolve cleanly. */
+static arch_x86_64_percpu_t g_percpu[OPENOS_X86_64_PERCPU_MAX_CPUS]
+    __attribute__((aligned(64)));
+
+_Static_assert(__builtin_offsetof(arch_x86_64_percpu_t, syscall_kernel_rsp)
+                   == OPENOS_X86_64_PERCPU_OFF_SYSCALL_KRSP,
+               "syscall_kernel_rsp offset must match asm constant");
+_Static_assert(__builtin_offsetof(arch_x86_64_percpu_t, syscall_user_rsp)
+                   == OPENOS_X86_64_PERCPU_OFF_SYSCALL_URSP,
+               "syscall_user_rsp offset must match asm constant");
+
 static uint64_t make_descriptor(uint32_t base, uint32_t limit,
                                 uint8_t access, uint8_t flags) {
     uint64_t d = 0;
@@ -198,6 +211,13 @@ x86_64_stack_ptr_t arch_x86_64_percpu_set_rsp0(uint32_t cpu_idx,
     }
     x86_64_stack_ptr_t old = g_tss[cpu_idx].rsp[0];
     g_tss[cpu_idx].rsp[0]  = new_rsp0;
+    /* G.7c: keep the per-CPU syscall save-area's kernel stack pointer in
+     * lock-step with the TSS RSP0 field. The syscall path swaps to this
+     * cached value through %gs (it cannot read the TSS), and the iretq/
+     * interrupt path swaps to TSS.RSP0 in hardware. They MUST agree so
+     * that an interrupt taken mid-syscall lands on the same kernel
+     * stack we are already using. */
+    g_percpu[cpu_idx].syscall_kernel_rsp = (uint64_t)new_rsp0;
     return old;
 }
 
@@ -214,8 +234,9 @@ x86_64_stack_ptr_t arch_x86_64_percpu_ist(uint32_t cpu_idx, uint32_t ist_index) 
 
 /* ---------------- G.6.2: per-CPU "current" via GS_BASE ---------------- */
 
-static arch_x86_64_percpu_t g_percpu[OPENOS_X86_64_PERCPU_MAX_CPUS]
-    __attribute__((aligned(64)));
+/* (g_percpu storage definition lives at the top of the file alongside the
+ * other per-CPU arrays; the _Static_assert layout guards are right next to
+ * it.) */
 
 arch_x86_64_percpu_t *arch_x86_64_percpu_slot(uint32_t cpu_idx) {
     if (cpu_idx >= OPENOS_X86_64_PERCPU_MAX_CPUS) return (void *)0;
@@ -263,6 +284,15 @@ void arch_x86_64_percpu_install_gs(uint32_t cpu_idx) {
     p->preempt_disable_depth    = 0;
     p->_resv_after_pdd          = 0;
     p->preempt_deferred_count   = 0;
+    /* G.7c: seed the syscall stack-swap save-area.
+     *
+     * syscall_kernel_rsp must come up matching the TSS RSP0 we just
+     * latched into g_tss[cpu_idx].rsp[0] via percpu_setup(); otherwise
+     * the very first syscall on this CPU would jump to RSP=0 and
+     * triple-fault on the first push. syscall_user_rsp is a scratch
+     * slot and starts cleared. */
+    p->syscall_kernel_rsp       = (uint64_t)g_tss[cpu_idx].rsp[0];
+    p->syscall_user_rsp         = 0;
 
     /* Write IA32_GS_BASE directly. Note: a subsequent `mov <selector>, %gs`
      * would reload the hidden base from the GDT descriptor and *clobber*

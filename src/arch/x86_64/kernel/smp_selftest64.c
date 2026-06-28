@@ -1143,10 +1143,76 @@ void arch_x86_64_smp_selftest_run(void)
         early_console64_write(" PASS");
     }
 
-    /* All stages reached by all APs. */
+    /* Stage 19 (G.7c): syscall stack-swap save-area must match TSS.RSP0
+     * on every CPU.
+     *
+     * The new syscall_sysret64.S entry sequence is:
+     *     swapgs
+     *     movq  %rsp, %gs:0x68          // park user rsp
+     *     movq  %gs:0x60, %rsp          // load kernel rsp (== TSS.RSP0)
+     *
+     * If syscall_kernel_rsp (offset 0x60 in the percpu block) ever
+     * diverges from g_tss[cpu_idx].rsp[0], then:
+     *   - the syscall path lands on stack A
+     *   - an interrupt taken mid-syscall lands on stack B (via TSS.RSP0)
+     * which corrupts the saved frame the moment any IRQ fires inside
+     * a syscall. arch_x86_64_percpu_set_rsp0() updates both atomically;
+     * this stage proves the BSP came up with both halves in sync, and
+     * also that the cached kernel rsp values are distinct across CPUs
+     * (i.e. no accidental shared stack between cores).
+     */
+    {
+        early_console64_write("\n[x86_64][smp-selftest] stage 19 (G.7c): syscall RSP save-area ...");
+
+        /* (a) on the BSP: percpu[0].syscall_kernel_rsp must equal the
+         *     RSP0 we just programmed for cpu0, and must be non-zero. */
+        uint64_t bsp_rsp0     = (uint64_t)arch_x86_64_percpu_rsp0(0);
+        uint64_t bsp_krsp_pc  = arch_x86_64_percpu_slot(0)->syscall_kernel_rsp;
+        log_kv(" cpu0_tss_rsp0=",  bsp_rsp0);
+        log_kv(" cpu0_pcpu_krsp=", bsp_krsp_pc);
+        if (bsp_rsp0 == 0 || bsp_krsp_pc == 0) {
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 19 cpu0 rsp0/syscall_kernel_rsp is zero\n");
+            return;
+        }
+        if (bsp_rsp0 != bsp_krsp_pc) {
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 19 cpu0 TSS.RSP0 != percpu.syscall_kernel_rsp (set_rsp0 didn't mirror both)\n");
+            return;
+        }
+        /* user-rsp slot must come up zeroed; it is only ever written by
+         * the syscall entry path itself. */
+        if (arch_x86_64_percpu_slot(0)->syscall_user_rsp != 0) {
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 19 cpu0 syscall_user_rsp not zero at boot\n");
+            return;
+        }
+
+        /* (b) on each brought-up AP: same invariant, AND the kernel-rsp
+         *     differs from the BSP (no shared stack). */
+        for (uint32_t i = 1; i < OPENOS_X86_64_PERCPU_MAX_CPUS; ++i) {
+            arch_x86_64_percpu_t *slot = arch_x86_64_percpu_slot(i);
+            if (slot == 0 || slot->magic != OPENOS_X86_64_PERCPU_MAGIC) {
+                continue; /* CPU not brought up */
+            }
+            uint64_t rsp0    = (uint64_t)arch_x86_64_percpu_rsp0(i);
+            uint64_t krsp_pc = slot->syscall_kernel_rsp;
+            if (rsp0 == 0 || krsp_pc == 0) {
+                early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 19 AP rsp0/syscall_kernel_rsp is zero\n");
+                return;
+            }
+            if (rsp0 != krsp_pc) {
+                early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 19 AP TSS.RSP0 != percpu.syscall_kernel_rsp\n");
+                return;
+            }
+            if (krsp_pc == bsp_krsp_pc) {
+                early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 19 AP syscall_kernel_rsp == BSP (shared kernel stack would be unsafe)\n");
+                return;
+            }
+        }
+
+        early_console64_write(" PASS");
+    }
     if (ap_n > 0) {
-        early_console64_write("\n[x86_64][smp-selftest] PASS: all APs idle on private GDT/TSS/IDT+GS + sched-registered + LAPIC-timer driving sched_on_tick + distributed kthreads switched per-CPU + cross-CPU reschedule IPI delivered + cross-CPU migration verified + IPI tail-hook dispatch verified + preempt-disable gate verified + timer-tick honours gate + swapgs MSR pair OK\n");
+        early_console64_write("\n[x86_64][smp-selftest] PASS: all APs idle on private GDT/TSS/IDT+GS + sched-registered + LAPIC-timer driving sched_on_tick + distributed kthreads switched per-CPU + cross-CPU reschedule IPI delivered + cross-CPU migration verified + IPI tail-hook dispatch verified + preempt-disable gate verified + timer-tick honours gate + swapgs MSR pair OK + syscall RSP save-area OK\n");
     } else {
-        early_console64_write("\n[x86_64][smp-selftest] PASS: no APs (UP system, BSP idle slot only) + preempt-disable gate verified + timer-tick honours gate + swapgs MSR pair OK\n");
+        early_console64_write("\n[x86_64][smp-selftest] PASS: no APs (UP system, BSP idle slot only) + preempt-disable gate verified + timer-tick honours gate + swapgs MSR pair OK + syscall RSP save-area OK\n");
     }
 }
