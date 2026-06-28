@@ -1607,9 +1607,115 @@ void arch_x86_64_smp_selftest_run(void)
         early_console64_write(" PASS");
     }
 
+    /* ------------------------------------------------------------------
+     * Stage 26 (G.3b-5): recoverable #GP probe.
+     *
+     * Same single-shot pattern as stages 24/25, but for a synchronous
+     * general-protection fault. Reproducer: load an invalid (non-NULL,
+     * out-of-GDT-range) selector into %fs. Specifically:
+     *
+     *     mov %ax, %fs      ; 8e e0  -> 2-byte instruction
+     *
+     * with %ax preloaded to 0xDEAD. The selector 0xDEAD is neither the
+     * NULL selector (which would silently load) nor a valid GDT slot, so
+     * the CPU raises #GP(selector & 0xFFFC). The faulting RIP recorded
+     * in the iret frame is exactly the address of the mov.
+     *
+     * Wiring is even simpler than #PF because there is no aux value to
+     * match: precise RIP equality is the strict gate. The dispatcher
+     * matches, increments gp_probe_count, advances rip by 2, and returns.
+     *
+     * Invariants asserted post-iretq:
+     *   - gp probe count delta == 1
+     *   - probe disarmed (single-shot)
+     *   - g_kfault not updated (clean recovery, no sentry pollution)
+     *   - ud/pf probe counts unchanged (no cross-contamination)
+     *   - %fs reloaded with NULL selector before returning, so kernel
+     *     never observes a half-broken segment register (the #GP itself
+     *     leaves %fs unchanged per Intel SDM Vol.3, but we defensively
+     *     re-zero it after recovery).
+     * ------------------------------------------------------------------ */
+    {
+        early_console64_write("\n[x86_64][smp-selftest] stage 26 (G.3b-5): recoverable #GP probe ...");
+        uint64_t gp_before    = arch_x86_64_idt_gp_probe_count();
+        uint64_t ud_baseline  = arch_x86_64_idt_ud_probe_count();
+        uint64_t pf_baseline  = arch_x86_64_idt_pf_probe_count();
+        uint64_t kf_count_before;
+        {
+            struct x86_64_kernel_fault_snapshot snap_before;
+            arch_x86_64_idt_kernel_fault_snapshot(&snap_before);
+            kf_count_before = snap_before.count;
+        }
+
+        uint64_t site_rip = 0;
+        /*
+         * %r12 (callee-saved) holds &1f across the arm_gp_probe() call.
+         * SysV AMD64: arg0=rdi (rip), arg1=rsi (insn_len).
+         * After the call, %ax = 0xDEAD, then the 2-byte `mov %ax,%fs`
+         * at label 1: faults synchronously.
+         */
+        __asm__ __volatile__(
+            "leaq    1f(%%rip), %%r12\n\t"   /* r12 = &1f                  */
+            "movq    %%r12, %%rdi\n\t"        /* arg0 = expected_rip        */
+            "movl    $2, %%esi\n\t"           /* arg1 = insn_len (8e e0)    */
+            "call    arch_x86_64_idt_arm_gp_probe\n\t"
+            "movq    %%r12, %0\n\t"           /* recover site_rip           */
+            "movw    $0xDEAD, %%ax\n\t"       /* invalid selector           */
+            "1:\n\t"
+            "movw    %%ax, %%fs\n\t"          /* 8e e0 — 2 bytes, faults   */
+            "xorw    %%ax, %%ax\n\t"          /* defensive: reload %fs=NULL */
+            "movw    %%ax, %%fs\n\t"
+            : "=r"(site_rip)
+            :
+            : "rdi", "rsi", "rax", "rcx", "rdx", "r8", "r9", "r10", "r11",
+              "r12", "memory", "cc"
+        );
+
+        uint64_t gp_after = arch_x86_64_idt_gp_probe_count();
+        int      armed   = arch_x86_64_idt_gp_probe_is_armed();
+        uint64_t ud_now  = arch_x86_64_idt_ud_probe_count();
+        uint64_t pf_now  = arch_x86_64_idt_pf_probe_count();
+        uint64_t kf_count_after;
+        {
+            struct x86_64_kernel_fault_snapshot snap_after;
+            arch_x86_64_idt_kernel_fault_snapshot(&snap_after);
+            kf_count_after = snap_after.count;
+        }
+
+        log_kv(" site_rip=", site_rip);
+        log_kv(" gp_before=", gp_before);
+        log_kv(" gp_after=",  gp_after);
+        log_kv(" armed=",     (uint64_t)(uint32_t)armed);
+        log_kv(" kf_delta=",  kf_count_after - kf_count_before);
+        log_kv(" ud_delta=",  ud_now - ud_baseline);
+        log_kv(" pf_delta=",  pf_now - pf_baseline);
+
+        if (gp_after != gp_before + 1u) {
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 26 gp probe count delta != 1\n");
+            return;
+        }
+        if (armed != 0) {
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 26 gp probe still armed (not single-shot)\n");
+            return;
+        }
+        if (kf_count_after != kf_count_before) {
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 26 probed #GP polluted kernel fault snapshot\n");
+            return;
+        }
+        if (ud_now != ud_baseline) {
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 26 perturbed ud probe count\n");
+            return;
+        }
+        if (pf_now != pf_baseline) {
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 26 perturbed pf probe count\n");
+            return;
+        }
+        early_console64_write(" PASS");
+    }
+
     if (ap_n > 0) {
-        early_console64_write("\n[x86_64][smp-selftest] PASS: all APs idle on private GDT/TSS/IDT+GS + sched-registered + LAPIC-timer driving sched_on_tick + distributed kthreads switched per-CPU + cross-CPU reschedule IPI delivered + cross-CPU migration verified + IPI tail-hook dispatch verified + preempt-disable gate verified + timer-tick honours gate + swapgs MSR pair OK + syscall RSP save-area OK + sched-slot kind/kstack tagging OK + USER-slot AP dispatch verified + LAPIC timer calibrated + NMI live-trigger verified + #UD probe recoverable + #PF probe recoverable\n");
+        early_console64_write("\n[x86_64][smp-selftest] PASS: all APs idle on private GDT/TSS/IDT+GS + sched-registered + LAPIC-timer driving sched_on_tick + distributed kthreads switched per-CPU + cross-CPU reschedule IPI delivered + cross-CPU migration verified + IPI tail-hook dispatch verified + preempt-disable gate verified + timer-tick honours gate + swapgs MSR pair OK + syscall RSP save-area OK + sched-slot kind/kstack tagging OK + USER-slot AP dispatch verified + LAPIC timer calibrated + NMI live-trigger verified + #UD probe recoverable + #PF probe recoverable + #GP probe recoverable\n");
     } else {
-        early_console64_write("\n[x86_64][smp-selftest] PASS: no APs (UP system, BSP idle slot only) + preempt-disable gate verified + timer-tick honours gate + swapgs MSR pair OK + syscall RSP save-area OK + sched-slot kind/kstack tagging OK + USER-slot dispatch SKIPPED (ap<3) + LAPIC timer calibrated + NMI live-trigger verified + #UD probe recoverable + #PF probe recoverable\n");
+        early_console64_write("\n[x86_64][smp-selftest] PASS: no APs (UP system, BSP idle slot only) + preempt-disable gate verified + timer-tick honours gate + swapgs MSR pair OK + syscall RSP save-area OK + sched-slot kind/kstack tagging OK + USER-slot dispatch SKIPPED (ap<3) + LAPIC timer calibrated + NMI live-trigger verified + #UD probe recoverable + #PF probe recoverable + #GP probe recoverable\n");
     }
 }

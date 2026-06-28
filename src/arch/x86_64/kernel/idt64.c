@@ -114,6 +114,43 @@ int arch_x86_64_idt_pf_probe_is_armed(void)
     return (int)g_pf_probe_armed;
 }
 
+/*
+ * G.3b-5: single-shot recoverable #GP probe. Same structure as the #UD probe
+ * (no aux value needed — the precise RIP match is the strict gate). On hit
+ * we disarm, bump the counter, and advance frame->rip by insn_len so iretq
+ * resumes past the faulting instruction.
+ */
+static volatile uint32_t g_gp_probe_armed   = 0;
+static volatile uint32_t g_gp_probe_insnlen = 0;
+static volatile uint64_t g_gp_probe_rip     = 0;
+static volatile uint64_t g_gp_probe_count   = 0;
+
+void arch_x86_64_idt_arm_gp_probe(uint64_t expected_rip, uint32_t insn_len)
+{
+    g_gp_probe_rip     = expected_rip;
+    g_gp_probe_insnlen = insn_len;
+    __asm__ __volatile__("" ::: "memory");
+    g_gp_probe_armed   = 1u;
+}
+
+void arch_x86_64_idt_disarm_gp_probe(void)
+{
+    g_gp_probe_armed   = 0u;
+    __asm__ __volatile__("" ::: "memory");
+    g_gp_probe_rip     = 0;
+    g_gp_probe_insnlen = 0;
+}
+
+uint64_t arch_x86_64_idt_gp_probe_count(void)
+{
+    return g_gp_probe_count;
+}
+
+int arch_x86_64_idt_gp_probe_is_armed(void)
+{
+    return (int)g_gp_probe_armed;
+}
+
 struct idt64_entry {
     uint16_t offset_low;
     uint16_t selector;
@@ -342,6 +379,21 @@ void arch_x86_64_exception_dispatch(struct x86_64_exception_frame *frame) {
             frame->rip = (x86_64_entry_t)((uint64_t)frame->rip + step);
             return;
         }
+    }
+
+    /*
+     * G.3b-5: single-shot recoverable #GP probe. Strict RIP match (no aux
+     * value: the selftest's selector-load reproducer is precise enough).
+     * Disarm + bump + skip past the faulting insn, NO kernel-fault sentry
+     * pollution. Mismatched #GP falls through to the fatal kernel path.
+     */
+    if (frame && g_gp_probe_armed && frame->vector == 13u &&
+        (uint64_t)frame->rip == g_gp_probe_rip) {
+        uint32_t step = g_gp_probe_insnlen;
+        g_gp_probe_armed = 0u;
+        ++g_gp_probe_count;
+        frame->rip = (x86_64_entry_t)((uint64_t)frame->rip + step);
+        return;
     }
 
     /*

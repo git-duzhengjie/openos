@@ -151,4 +151,29 @@ void     arch_x86_64_idt_disarm_pf_probe(void);
 uint64_t arch_x86_64_idt_pf_probe_count(void);
 int      arch_x86_64_idt_pf_probe_is_armed(void);
 
+/*
+ * G.3b-5: recoverable single-shot #GP probe.
+ *
+ * arm_gp_probe(rip, len): the very next #GP whose frame->rip exactly matches
+ *   `rip` is treated as expected — the dispatcher increments gp_probe_count,
+ *   advances frame->rip by `len` bytes (so iretq resumes past the faulting
+ *   instruction), and returns WITHOUT polluting the kernel fault snapshot.
+ *   Single-shot: probe disarms itself on hit.
+ *
+ * Unlike #PF, #GP does not have a hardware-captured aux value (no CR2 — the
+ * error code IS the selector for selector-related #GPs, but the selftest's
+ * expected_rip match is already strict enough). If a wild #GP occurs at a
+ * different RIP the probe stays armed and the fault falls through to the
+ * normal fatal path.
+ *
+ * Intended use: selftest places a `mov %ax, %fs` (2 bytes: 8e e0) at a known
+ *   label with %ax preloaded with a non-NULL invalid selector (e.g. 0xDEAD).
+ *   Loading an out-of-GDT selector to a segment register raises
+ *   #GP(selector & 0xFFFC) with the faulting RIP at the mov.
+ */
+void     arch_x86_64_idt_arm_gp_probe(uint64_t expected_rip, uint32_t insn_len);
+void     arch_x86_64_idt_disarm_gp_probe(void);
+uint64_t arch_x86_64_idt_gp_probe_count(void);
+int      arch_x86_64_idt_gp_probe_is_armed(void);
+
 #endif /* OPENOS_ARCH_X86_64_IDT64_H */
