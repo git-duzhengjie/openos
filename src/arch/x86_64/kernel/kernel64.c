@@ -29,6 +29,7 @@
 #include "../include/apic_selftest64.h"
 #include "../include/acpi_selftest64.h"
 #include "../include/smp_selftest64.h"
+#include "../include/lapic64.h"  /* G.7g-1: lapic_timer_calibrate */
 #include "../include/sched_prio_selftest64.h"
 
 /* Step F.2: IRQ0 ISR entry implemented in isr64.S. Declared here so the
@@ -254,6 +255,20 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
      * way it was after F.2 / F.3, so the system keeps booting on the
      * legacy path. */
     (void)arch_x86_64_apic_selftest_run();
+
+    /* G.7g-1: LAPIC bus-frequency calibration. Must run AFTER apic_selftest
+     * (LAPIC mapped + SVR enabled) and BEFORE smp_selftest (which wakes APs
+     * that will read g_lapic_bus_ticks_per_ms). TSC was already calibrated
+     * at Step E.4 above, so we have a stable wall-clock reference. */
+    {
+        bool cal_ok = arch_x86_64_lapic_timer_calibrate();
+        uint32_t cal_tpm = arch_x86_64_lapic_timer_ticks_per_ms();
+        early_console64_write("[x86_64][lapic-cal] ok=");
+        early_console64_write_hex64((uint64_t)(cal_ok ? 1u : 0u));
+        early_console64_write(" ticks_per_ms=");
+        early_console64_write_hex64((uint64_t)cal_tpm);
+        early_console64_write("\n");
+    }
 
     /* Step G.4.1: SMP topology snapshot (no AP wakeup yet). Must run AFTER
      * apic_selftest so LAPIC is initialized and BSP apic_id is readable. */

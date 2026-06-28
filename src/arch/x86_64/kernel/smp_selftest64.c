@@ -1369,9 +1369,34 @@ void arch_x86_64_smp_selftest_run(void)
             early_console64_write(" PASS");
         }
     }
+
+    /* ------------------------------------------------------------------
+     * Stage 22 (G.7g-1): LAPIC timer bus-frequency calibration.
+     *
+     * The BSP ran arch_x86_64_lapic_timer_calibrate() before SMP bring-up.
+     * Verify that g_lapic_bus_ticks_per_ms is non-zero and falls inside a
+     * sane envelope. We don't pin a tight number because QEMU's emulated
+     * LAPIC bus frequency varies (TCG ~125 MHz pre-div, ~7800 ticks/ms
+     * after div16; KVM passthrough can differ). Accept [1000, 1_000_000]
+     * which catches "calibration didn't run" and "obviously bogus".
+     * ------------------------------------------------------------------ */
+    {
+        early_console64_write("\n[x86_64][smp-selftest] stage 22 (G.7g-1): LAPIC timer calibrated ...");
+        uint32_t tpm = arch_x86_64_lapic_timer_ticks_per_ms();
+        log_kv(" ticks_per_ms=", (uint64_t)tpm);
+        if (tpm == 0u) {
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 22 calibration didn't run\n");
+            return;
+        }
+        if (tpm < 1000u || tpm > 1000000u) {
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 22 ticks_per_ms outside sane envelope\n");
+            return;
+        }
+        early_console64_write(" PASS");
+    }
     if (ap_n > 0) {
-        early_console64_write("\n[x86_64][smp-selftest] PASS: all APs idle on private GDT/TSS/IDT+GS + sched-registered + LAPIC-timer driving sched_on_tick + distributed kthreads switched per-CPU + cross-CPU reschedule IPI delivered + cross-CPU migration verified + IPI tail-hook dispatch verified + preempt-disable gate verified + timer-tick honours gate + swapgs MSR pair OK + syscall RSP save-area OK + sched-slot kind/kstack tagging OK + USER-slot AP dispatch verified\n");
+        early_console64_write("\n[x86_64][smp-selftest] PASS: all APs idle on private GDT/TSS/IDT+GS + sched-registered + LAPIC-timer driving sched_on_tick + distributed kthreads switched per-CPU + cross-CPU reschedule IPI delivered + cross-CPU migration verified + IPI tail-hook dispatch verified + preempt-disable gate verified + timer-tick honours gate + swapgs MSR pair OK + syscall RSP save-area OK + sched-slot kind/kstack tagging OK + USER-slot AP dispatch verified + LAPIC timer calibrated\n");
     } else {
-        early_console64_write("\n[x86_64][smp-selftest] PASS: no APs (UP system, BSP idle slot only) + preempt-disable gate verified + timer-tick honours gate + swapgs MSR pair OK + syscall RSP save-area OK + sched-slot kind/kstack tagging OK + USER-slot dispatch SKIPPED (ap<3)\n");
+        early_console64_write("\n[x86_64][smp-selftest] PASS: no APs (UP system, BSP idle slot only) + preempt-disable gate verified + timer-tick honours gate + swapgs MSR pair OK + syscall RSP save-area OK + sched-slot kind/kstack tagging OK + USER-slot dispatch SKIPPED (ap<3) + LAPIC timer calibrated\n");
     }
 }

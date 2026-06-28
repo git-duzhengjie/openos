@@ -212,4 +212,27 @@ bool arch_x86_64_lapic_send_fixed_ipi(uint8_t apic_id, uint8_t vector);
  * works end-to-end. */
 void arch_x86_64_lapic_resched_irq_handler(void);
 
+/* G.7g-1 — LAPIC timer bus-frequency calibration.
+ *
+ * Use the TSC (already PIT-calibrated by arch_x86_64_tsc_init) as a stable
+ * reference clock to measure how many LAPIC-timer ticks elapse during a
+ * known 50 ms window. The timer is programmed in one-shot mode with
+ * divide-by-16 and the maximum initial-count (0xFFFFFFFF), then both TSC
+ * and TIMER_CCR are sampled at window start and end; (CCR_start - CCR_end)
+ * gives the LAPIC bus ticks consumed in the elapsed TSC-delta wall time.
+ *
+ * Strictly read-only w.r.t. interrupts — the timer is masked the entire
+ * time, so no IRQs fire from the calibration window. Idempotent: only the
+ * first successful call updates state.
+ *
+ * Returns true on success, false if TSC is uncalibrated or the LAPIC
+ * isn't ready. Must run on the BSP before APs start their timers; APs
+ * read g_lapic_bus_ticks_per_ms via arch_x86_64_lapic_timer_ticks_per_ms().
+ */
+bool arch_x86_64_lapic_timer_calibrate(void);
+
+/* LAPIC bus ticks per millisecond (after divide-by-16). 0 before
+ * calibration succeeds. */
+uint32_t arch_x86_64_lapic_timer_ticks_per_ms(void);
+
 #endif /* OPENOS_ARCH_X86_64_LAPIC64_H */

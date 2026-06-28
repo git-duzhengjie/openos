@@ -2,6 +2,7 @@
 #include "../include/acpi64.h"
 #include "../include/percpu64.h"
 #include "../include/sched64.h"   /* G.6.7a: check_and_dispatch tail hook */
+#include "../include/tsc64.h"     /* G.7g-1: TSC-gated LAPIC timer calibration */
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -24,6 +25,10 @@
 
 static volatile uint8_t *g_lapic_mmio = (void *)0;
 static bool g_lapic_ready = false;
+
+/* G.7g-1: Calibrated LAPIC bus ticks per millisecond (after divide-by-16).
+ * Zero until arch_x86_64_lapic_timer_calibrate() succeeds on the BSP. */
+static uint32_t g_lapic_bus_ticks_per_ms = 0;
 
 static inline uint64_t rdmsr_u64(uint32_t msr) {
     uint32_t lo, hi;
@@ -458,4 +463,85 @@ void arch_x86_64_lapic_timer_irq_handler(void) {
      * stack; if it does, the stub iretqs back to the interrupted
      * context. Same contract as the resched-IPI handler. */
     (void)arch_x86_64_sched_check_and_dispatch();
+}
+
+/* G.7g-1 — TSC-gated LAPIC bus-frequency calibration.
+ *
+ * Procedure (BSP only, IRQs may be on or off — we mask the timer LVT
+ * during the whole window so no LAPIC-timer IRQ fires regardless):
+ *   1. Require TSC already calibrated (arch_x86_64_tsc_init done in
+ *      kernel64.c before SMP bring-up).
+ *   2. Program TIMER_DCR = divide-by-16, LVT_TIMER masked + one-shot,
+ *      then arm TIMER_ICR = 0xFFFFFFFF so CCR starts counting down.
+ *   3. Snapshot tsc_start, ccr_start = TIMER_CCR.
+ *   4. Busy-poll TSC until 50 ms of wall time elapsed.
+ *   5. Snapshot ccr_end = TIMER_CCR.
+ *   6. bus_ticks_50ms = ccr_start - ccr_end. Per-ms = /50, rounded.
+ *   7. Stop the timer (TIMER_ICR=0, leave LVT masked) and publish.
+ *
+ * Returns false if TSC isn't ready or the LAPIC isn't mapped. The result
+ * is read via arch_x86_64_lapic_timer_ticks_per_ms(). Idempotent.
+ */
+bool arch_x86_64_lapic_timer_calibrate(void)
+{
+    if (!g_lapic_ready) {
+        return false;
+    }
+    if (g_lapic_bus_ticks_per_ms != 0) {
+        return true; /* already calibrated */
+    }
+
+    const uint64_t tsc_per_ms = arch_x86_64_tsc_per_ms();
+    if (tsc_per_ms == 0u) {
+        return false; /* TSC not yet calibrated */
+    }
+
+    /* Mask + one-shot mode on a benign vector. We will not be servicing
+     * IRQs from this run; just keep CCR ticking until we stop it. */
+    const uint32_t lvt_masked_oneshot =
+        OPENOS_X86_64_LAPIC_LVT_MASKED |
+        OPENOS_X86_64_LAPIC_TIMER_VECTOR;
+    arch_x86_64_lapic_write(OPENOS_X86_64_LAPIC_REG_LVT_TIMER, lvt_masked_oneshot);
+    arch_x86_64_lapic_write(OPENOS_X86_64_LAPIC_REG_TIMER_DCR,
+                            OPENOS_X86_64_LAPIC_TIMER_DCR_DIV16);
+
+    /* Arm with max count and immediately snapshot. */
+    arch_x86_64_lapic_write(OPENOS_X86_64_LAPIC_REG_TIMER_ICR, 0xFFFFFFFFu);
+    const uint64_t tsc_start = arch_x86_64_tsc_rdtsc();
+    const uint32_t ccr_start =
+        arch_x86_64_lapic_read(OPENOS_X86_64_LAPIC_REG_TIMER_CCR);
+
+    /* Wait exactly 50 ms by TSC. tsc_per_ms is uint64_t so no overflow. */
+    const uint64_t tsc_target = tsc_start + (tsc_per_ms * 50ull);
+    while (arch_x86_64_tsc_rdtsc() < tsc_target) {
+        __asm__ volatile ("pause" ::: "memory");
+    }
+
+    const uint32_t ccr_end =
+        arch_x86_64_lapic_read(OPENOS_X86_64_LAPIC_REG_TIMER_CCR);
+
+    /* Stop the timer cleanly: writing 0 to ICR disarms it. */
+    arch_x86_64_lapic_write(OPENOS_X86_64_LAPIC_REG_TIMER_ICR, 0u);
+
+    /* If the timer somehow expired (CCR wrapped to 0 and stayed), bail out
+     * — we'd need a wider window or a different divider. ccr_end == 0
+     * means we exhausted the counter, so the measurement is invalid. */
+    if (ccr_end == 0u || ccr_end >= ccr_start) {
+        return false;
+    }
+
+    const uint32_t ticks_50ms = ccr_start - ccr_end;
+    /* Round-to-nearest division by 50. */
+    const uint32_t ticks_per_ms = (ticks_50ms + 25u) / 50u;
+    if (ticks_per_ms == 0u) {
+        return false;
+    }
+
+    g_lapic_bus_ticks_per_ms = ticks_per_ms;
+    return true;
+}
+
+uint32_t arch_x86_64_lapic_timer_ticks_per_ms(void)
+{
+    return g_lapic_bus_ticks_per_ms;
 }
