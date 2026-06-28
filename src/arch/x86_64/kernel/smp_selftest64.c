@@ -1305,6 +1305,70 @@ void arch_x86_64_smp_selftest_run(void)
 
         early_console64_write(" PASS");
     }
+
+    /* ------------------------------------------------------------------
+     * Stage 21 (G.7e): user-thread dispatch on AP.
+     *
+     * Spawn a USER sched slot whose ctx.rip points at the sentinel
+     * trampoline; that trampoline bumps a per-CPU dispatch counter and
+     * cli;hlt's the owning CPU forever. The counter is the witness: if
+     * it transitions 0 -> 1 on the target CPU, then
+     *   - sched dispatch picked up the USER slot on its owner CPU,
+     *   - sched_apply_rsp0_for_next wrote TSS.RSP0 = slot.kernel_stack_top
+     *     (otherwise the trampoline's stack touches would fault),
+     *   - context_switch64.S restore path jumped to the trampoline.
+     *
+     * Because the sentinel retires its CPU, we require ap_n >= 3 so that
+     * at least one AP remains for prio-selftest. SMP=1/2 -> SKIP.
+     * ------------------------------------------------------------------ */
+    {
+        early_console64_write("\n[x86_64][smp-selftest] stage 21 (G.7e): user-thread dispatch on AP ...");
+        if (ap_n < 3u) {
+            log_kv(" ap_n=", (uint64_t)ap_n);
+            early_console64_write(" SKIP (need ap_n>=3 to spare a sacrifice CPU)");
+        } else {
+            uint32_t target_cpu = ap_n; /* last AP gets retired */
+            uint64_t before = arch_x86_64_percpu_user_dispatch_count(target_cpu);
+            uint32_t slot = arch_x86_64_sched_spawn_uthread_sentinel(
+                OPENOS_X86_64_SCHED_PRIO_DEFAULT, target_cpu);
+            log_kv(" target_cpu=", (uint64_t)target_cpu);
+            log_kv(" slot=", (uint64_t)slot);
+            log_kv(" disp_before=", before);
+            if (slot == 0u) {
+                early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 21 spawn_uthread_sentinel returned 0\n");
+                return;
+            }
+            uint32_t  s_kind = arch_x86_64_sched_slot_kind(slot);
+            uintptr_t s_top  = arch_x86_64_sched_slot_kstack_top(slot);
+            log_kv(" slot_kind=", (uint64_t)s_kind);
+            log_kv(" slot_kstack_top=", (uint64_t)s_top);
+            if (s_kind != 1u /* USER */) {
+                early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 21 spawned slot kind != USER\n");
+                return;
+            }
+            if (s_top == 0u || (s_top & 0x7u) != 0u) {
+                early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 21 spawned slot kstack_top invalid\n");
+                return;
+            }
+
+            /* Poke the target CPU so it picks up the new slot promptly. */
+            arch_x86_64_smp_send_resched_ipi(target_cpu);
+
+            /* Spin up to ~100ms waiting for the trampoline to fire. */
+            uint64_t after = before;
+            for (uint32_t i = 0; i < 100000u; ++i) {
+                after = arch_x86_64_percpu_user_dispatch_count(target_cpu);
+                if (after > before) break;
+                arch_x86_64_delay_us(1u);
+            }
+            log_kv(" disp_after=", after);
+            if (after <= before) {
+                early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 21 user_dispatch_count did not advance\n");
+                return;
+            }
+            early_console64_write(" PASS");
+        }
+    }
     if (ap_n > 0) {
         early_console64_write("\n[x86_64][smp-selftest] PASS: all APs idle on private GDT/TSS/IDT+GS + sched-registered + LAPIC-timer driving sched_on_tick + distributed kthreads switched per-CPU + cross-CPU reschedule IPI delivered + cross-CPU migration verified + IPI tail-hook dispatch verified + preempt-disable gate verified + timer-tick honours gate + swapgs MSR pair OK + syscall RSP save-area OK + sched-slot kind/kstack tagging OK\n");
     } else {

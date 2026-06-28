@@ -14,6 +14,7 @@
  * a USER slot by loading ctx.rsp (-> iretq frame) and jumping to ctx.rip,
  * which is this label. */
 extern void arch_x86_64_user_thread_trampoline(void);
+extern void arch_x86_64_user_thread_sentinel_trampoline(void);
 
 /* G.6.3: per-CPU scheduler cursors / counters live in arch_x86_64_percpu_t,
  * addressable via %gs. The sched_slots[] pool itself is still a single
@@ -424,6 +425,77 @@ uint32_t arch_x86_64_sched_spawn_uthread(uintptr_t user_entry,
     ctx.rsp    = (x86_64_stack_ptr_t)frame_base;
     ctx.rip    = (x86_64_entry_t)&arch_x86_64_user_thread_trampoline;
     ctx.rflags = 0u; /* IF cleared until iretq atomically restores user IF */
+    ctx.rbx    = 0u;
+    ctx.rbp    = 0u;
+    ctx.r12    = 0u;
+    ctx.r13    = 0u;
+    ctx.r14    = 0u;
+    ctx.r15    = 0u;
+    ctx.r8     = 0u;
+    ctx.r9     = 0u;
+    ctx.r10    = 0u;
+    ctx.r11    = 0u;
+
+    sched_slots[idx].ctx              = ctx;
+    sched_slots[idx].state            = SCHED_SLOT_READY;
+    sched_slots[idx].id               = idx;
+    sched_slots[idx].priority         = priority;
+    sched_slots[idx].owner_cpu        = target_cpu;
+    sched_slots[idx].is_idle          = 0u;
+    sched_slots[idx].kind             = OPENOS_X86_64_SCHED_KIND_USER;
+    sched_slots[idx].kernel_stack_top = kstack_top;
+    return idx;
+}
+
+uint32_t arch_x86_64_sched_spawn_uthread_sentinel(uint32_t priority,
+                                                 uint32_t target_cpu) {
+    /* G.7e-3: spawn a USER slot whose dispatch lands on the sentinel
+     * trampoline. The trampoline bumps the per-CPU user_dispatch_count
+     * via the same offset the real trampoline uses, then halts the CPU.
+     * Used by Stage 21 to prove that:
+     *   (a) sched_alloc_slot + scheduler picks up a USER slot pinned to
+     *       target_cpu,
+     *   (b) sched_apply_rsp0_for_next correctly writes TSS.RSP0 =
+     *       slot.kernel_stack_top (visible indirectly via the trampoline
+     *       not faulting),
+     *   (c) context_switch64.S restore path successfully jumps to the
+     *       trampoline with ctx.rflags=0 (IF off across the gs touch).
+     *
+     * No real ring3 transition happens, so no user page-tables are
+     * required and sys_exit semantics do not matter. The owner CPU is
+     * retired (cli;hlt loop); pick a spare AP. */
+    if (priority > OPENOS_X86_64_SCHED_PRIO_MAX) {
+        priority = OPENOS_X86_64_SCHED_PRIO_DEFAULT;
+    }
+    if (target_cpu >= OPENOS_X86_64_SMP_MAX_CPUS) {
+        target_cpu = arch_x86_64_this_cpu_ptr()->cpu_idx;
+    }
+
+    uint32_t idx = sched_alloc_slot();
+    if (idx == 0u) {
+        return 0u;
+    }
+
+    void *stack = arch_x86_64_kmalloc(OPENOS_X86_64_SCHED_KSTACK_BYTES);
+    if (stack == NULL) {
+        sched_slots[idx].state = SCHED_SLOT_FREE;
+        return 0u;
+    }
+    sched_slots[idx].stack_base = stack;
+
+    uintptr_t kstack_top = (uintptr_t)stack + OPENOS_X86_64_SCHED_KSTACK_BYTES;
+
+    /* The sentinel trampoline never returns and never executes iretq, so
+     * we do not need to pre-build a 5-qword frame. We still must give
+     * ctx.rsp a 16-byte-aligned slot inside the allocated stack so that
+     * context_switch's `pushq %rax + popfq` scratch write (rsp-8) lands
+     * inside our own buffer. */
+    uintptr_t rsp = (kstack_top - 16u) & ~((uintptr_t)0xFu);
+
+    x86_64_context_t ctx;
+    ctx.rsp    = (x86_64_stack_ptr_t)rsp;
+    ctx.rip    = (x86_64_entry_t)&arch_x86_64_user_thread_sentinel_trampoline;
+    ctx.rflags = 0u; /* IF=0; trampoline does cli;hlt loop, no iretq */
     ctx.rbx    = 0u;
     ctx.rbp    = 0u;
     ctx.r12    = 0u;

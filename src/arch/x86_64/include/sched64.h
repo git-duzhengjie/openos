@@ -209,6 +209,17 @@ uint32_t arch_x86_64_sched_spawn_uthread(uintptr_t user_entry,
                                          uint32_t priority,
                                          uint32_t target_cpu);
 
+/* G.7e-3: diagnostic spawn variant. Allocates a USER slot exactly like
+ * the real spawn, but ctx.rip is set to a sentinel trampoline that bumps
+ * the per-CPU user_dispatch_count and then cli;hlt's forever. No ring3
+ * transition happens, so user page-tables and user code are NOT required;
+ * the test verifies only the spawn -> schedule -> context_switch ->
+ * trampoline pipeline. Picks the indicated AP as a sacrifice CPU.
+ *
+ * Returns slot id (>=1) on success, 0 on failure. */
+uint32_t arch_x86_64_sched_spawn_uthread_sentinel(uint32_t priority,
+                                                  uint32_t target_cpu);
+
 uint32_t arch_x86_64_sched_set_priority(uint32_t slot, uint32_t priority);
 uint32_t arch_x86_64_sched_get_priority(uint32_t slot);
 uint32_t arch_x86_64_sched_quantum_for_priority(uint32_t priority);

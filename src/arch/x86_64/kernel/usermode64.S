@@ -1,8 +1,14 @@
 .section .text,"ax"
 .code64
 
+/* Must match OPENOS_X86_64_PERCPU_OFF_USER_DISPATCH in percpu64.h.
+ * percpu64.c carries a _Static_assert tying the struct field offset
+ * to that constant, so any drift here is caught at compile time. */
+#define PERCPU_OFF_USER_DISPATCH 0x78
+
 .global arch_x86_64_iretq_enter_user
 .global arch_x86_64_user_thread_trampoline
+.global arch_x86_64_user_thread_sentinel_trampoline
 
 /*
  * G.7e: arch_x86_64_user_thread_trampoline
@@ -18,8 +24,37 @@
  * adjustment needed.
  */
 arch_x86_64_user_thread_trampoline:
+    /* G.7e-3: bump per-CPU dispatch counter before crossing to ring3.
+     * %gs at this point is still kernel GS (KERNEL_GS_BASE was inactive
+     * since we never SWAPGS'd in this dispatch path). swapgs below then
+     * flips to user GS just before iretq. */
+    incq %gs:PERCPU_OFF_USER_DISPATCH
     swapgs
     iretq
+
+
+/*
+ * G.7e-3: arch_x86_64_user_thread_sentinel_trampoline
+ *
+ * Diagnostic-only trampoline used by Stage 21 (smp_selftest) and other
+ * scaffolding that wants to verify the spawn/dispatch path WITHOUT a real
+ * ring3 transition. The dispatched USER slot's ctx.rip is set to here;
+ * we bump the same per-CPU counter so the same observer (
+ * arch_x86_64_percpu_user_dispatch_count) covers both real and sentinel
+ * variants, then halt this CPU. The slot stays "running" forever on its
+ * owner CPU; the BSP / other APs are unaffected.
+ *
+ * Interrupts are masked here (ctx.rflags=0 ensured by the spawn helper),
+ * so the hlt loop is a hard freeze of this CPU only. The caller must
+ * therefore pick a CPU it is willing to retire (typically a spare AP
+ * picked by the test).
+ */
+arch_x86_64_user_thread_sentinel_trampoline:
+    incq %gs:PERCPU_OFF_USER_DISPATCH
+1:
+    cli
+    hlt
+    jmp 1b
 
 
 /*

@@ -124,7 +124,12 @@ typedef struct openos_x86_64_percpu {
      * baseline kernel stack. Set exactly once, during the very
      * first arch_x86_64_percpu_set_rsp0() call on this CPU. */
     uint64_t baseline_rsp0;          /* offset 0x70 */
-    uint64_t _pad[1];             /* pad to 128 bytes for cache-line alignment */
+    /* G.7e: counter of user-thread dispatches on this CPU.
+     * Incremented atomically by the trampoline (sentinel or real)
+     * right before it transitions to ring3. Used by smp_selftest
+     * Stage 21 to verify that a USER sched slot actually got
+     * dispatched on its owning CPU. */
+    uint64_t user_dispatch_count;    /* offset 0x78 */
 } __attribute__((aligned(64))) arch_x86_64_percpu_t;
 
 /* Per-field offsets (compile-time, for asm or sanity checks). */
@@ -145,6 +150,7 @@ typedef struct openos_x86_64_percpu {
 #define OPENOS_X86_64_PERCPU_OFF_SYSCALL_KRSP     0x60
 #define OPENOS_X86_64_PERCPU_OFF_SYSCALL_URSP     0x68
 #define OPENOS_X86_64_PERCPU_OFF_BASELINE_RSP0    0x70
+#define OPENOS_X86_64_PERCPU_OFF_USER_DISPATCH    0x78
 
 /* IA32_GS_BASE MSR */
 #define OPENOS_X86_64_MSR_GS_BASE        0xC0000101u
@@ -230,6 +236,7 @@ x86_64_stack_ptr_t arch_x86_64_percpu_set_rsp0(uint32_t cpu_idx,
  * of a USER sched slot back to a KERNEL slot. Returns 0 for an
  * out-of-range cpu_idx or before this CPU's percpu install. */
 uint64_t arch_x86_64_percpu_baseline_rsp0(uint32_t cpu_idx);
+uint64_t arch_x86_64_percpu_user_dispatch_count(uint32_t cpu_idx);
 
 /* G.7a: read a 1-based IST entry (1..OPENOS_X86_64_PERCPU_IST_COUNT)
  * from cpu_idx's TSS. Returns 0 for out-of-range cpu or ist index. */

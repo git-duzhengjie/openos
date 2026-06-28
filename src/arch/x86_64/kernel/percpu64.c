@@ -69,6 +69,9 @@ _Static_assert(__builtin_offsetof(arch_x86_64_percpu_t, syscall_user_rsp)
 _Static_assert(__builtin_offsetof(arch_x86_64_percpu_t, baseline_rsp0)
                    == OPENOS_X86_64_PERCPU_OFF_BASELINE_RSP0,
                "baseline_rsp0 offset must match asm constant");
+_Static_assert(__builtin_offsetof(arch_x86_64_percpu_t, user_dispatch_count)
+                   == OPENOS_X86_64_PERCPU_OFF_USER_DISPATCH,
+               "user_dispatch_count offset must match asm constant");
 
 static uint64_t make_descriptor(uint32_t base, uint32_t limit,
                                 uint8_t access, uint8_t flags) {
@@ -229,6 +232,16 @@ uint64_t arch_x86_64_percpu_baseline_rsp0(uint32_t cpu_idx) {
         return 0;
     }
     return g_percpu[cpu_idx].baseline_rsp0;
+}
+
+uint64_t arch_x86_64_percpu_user_dispatch_count(uint32_t cpu_idx) {
+    if (cpu_idx >= OPENOS_X86_64_PERCPU_MAX_CPUS) {
+        return 0;
+    }
+    /* Read the field via its address: the trampoline updates it via
+     * `incq %gs:OFF_USER_DISPATCH`, so a plain volatile-style read is
+     * sufficient as observer. */
+    return *(volatile uint64_t *)&g_percpu[cpu_idx].user_dispatch_count;
 }
 
 x86_64_stack_ptr_t arch_x86_64_percpu_ist(uint32_t cpu_idx, uint32_t ist_index) {
