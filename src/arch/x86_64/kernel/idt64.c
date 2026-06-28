@@ -189,6 +189,42 @@ int arch_x86_64_idt_de_probe_is_armed(void)
     return (int)g_de_probe_armed;
 }
 
+/*
+ * G.3b-7: single-shot recoverable #BP (int3) probe globals.
+ *
+ * #BP is a TRAP, not a fault: the hardware-pushed RIP already points to the
+ * byte AFTER the int3 (0xCC). We therefore arm with the post-int3 RIP and
+ * compare that directly; on hit we do NOT advance frame->rip (the trap
+ * already did that for us), we just disarm and bump the counter.
+ */
+static volatile uint32_t g_bp_probe_armed   = 0;
+static volatile uint64_t g_bp_probe_rip     = 0;
+static volatile uint64_t g_bp_probe_count   = 0;
+
+void arch_x86_64_idt_arm_bp_probe(uint64_t expected_rip_after)
+{
+    g_bp_probe_rip   = expected_rip_after;
+    __asm__ __volatile__("" ::: "memory");
+    g_bp_probe_armed = 1u;
+}
+
+void arch_x86_64_idt_disarm_bp_probe(void)
+{
+    g_bp_probe_armed = 0u;
+    __asm__ __volatile__("" ::: "memory");
+    g_bp_probe_rip   = 0;
+}
+
+uint64_t arch_x86_64_idt_bp_probe_count(void)
+{
+    return g_bp_probe_count;
+}
+
+int arch_x86_64_idt_bp_probe_is_armed(void)
+{
+    return (int)g_bp_probe_armed;
+}
+
 struct idt64_entry {
     uint16_t offset_low;
     uint16_t selector;
@@ -446,6 +482,23 @@ void arch_x86_64_exception_dispatch(struct x86_64_exception_frame *frame) {
         g_de_probe_armed = 0u;
         ++g_de_probe_count;
         frame->rip = (x86_64_entry_t)((uint64_t)frame->rip + step);
+        return;
+    }
+
+    /*
+     * G.3b-7: single-shot recoverable #BP (int3, vector 3) probe.
+     *
+     * #BP is a TRAP: the hardware-pushed RIP already points to the byte
+     * AFTER the int3 instruction. The probe arms with the post-int3 RIP
+     * and matches it directly; on hit we do NOT advance frame->rip (the
+     * trap already did), we just disarm + bump and return so iretq
+     * resumes naturally. NO kernel-fault sentry pollution. Mismatched
+     * #BP falls through to the fatal path.
+     */
+    if (frame && g_bp_probe_armed && frame->vector == 3u &&
+        (uint64_t)frame->rip == g_bp_probe_rip) {
+        g_bp_probe_armed = 0u;
+        ++g_bp_probe_count;
         return;
     }
 

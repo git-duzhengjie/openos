@@ -1820,9 +1820,114 @@ void arch_x86_64_smp_selftest_run(void)
         early_console64_write(" PASS");
     }
 
+    /* ------------------------------------------------------------------
+     * Stage 28 (G.3b-7): recoverable single-shot #BP probe.
+     *
+     * #BP (vector 3, int3, 0xCC) is a TRAP — the hardware-pushed RIP
+     * already points to the byte AFTER the int3. We therefore capture
+     * that post-int3 RIP via a local label, arm the probe with it, and
+     * verify on hit that:
+     *   - bp_probe count increments by exactly 1
+     *   - probe is no longer armed (single-shot)
+     *   - g_kfault not updated (no sentry pollution)
+     *   - ud/pf/gp/de probe counts unchanged (no cross-contamination)
+     * ------------------------------------------------------------------ */
+    {
+        early_console64_write("\n[x86_64][smp-selftest] stage 28 (G.3b-7): recoverable #BP probe ...");
+        uint64_t bp_before    = arch_x86_64_idt_bp_probe_count();
+        uint64_t ud_baseline  = arch_x86_64_idt_ud_probe_count();
+        uint64_t pf_baseline  = arch_x86_64_idt_pf_probe_count();
+        uint64_t gp_baseline  = arch_x86_64_idt_gp_probe_count();
+        uint64_t de_baseline  = arch_x86_64_idt_de_probe_count();
+        uint64_t kf_count_before;
+        {
+            struct x86_64_kernel_fault_snapshot snap_before;
+            arch_x86_64_idt_kernel_fault_snapshot(&snap_before);
+            kf_count_before = snap_before.count;
+        }
+
+        uint64_t resume_rip = 0;
+        /*
+         * Emit `int3` (0xCC, 1 byte) at label 1f. Label 2f is the byte
+         * immediately after, i.e. the post-trap RIP that the dispatcher
+         * will see in frame->rip. We arm the probe with &2f, then execute
+         * the int3; the dispatcher matches, disarms, bumps the counter,
+         * and returns — iretq resumes naturally at label 2f.
+         *
+         * SysV AMD64: arg0=rdi (rip).
+         */
+        __asm__ __volatile__(
+            "leaq    2f(%%rip), %%r12\n\t"   /* r12 = &2f (post-int3 RIP) */
+            "movq    %%r12, %%rdi\n\t"        /* arg0 = expected_rip_after */
+            "call    arch_x86_64_idt_arm_bp_probe\n\t"
+            "movq    %%r12, %0\n\t"           /* recover resume_rip        */
+            "1:\n\t"
+            "int3\n\t"                        /* 0xCC — 1 byte, traps      */
+            "2:\n\t"
+            "nop\n\t"
+            : "=r"(resume_rip)
+            :
+            : "rdi", "rax", "rcx", "rdx", "rsi", "r8", "r9", "r10", "r11",
+              "r12", "memory", "cc"
+        );
+
+        uint64_t bp_after = arch_x86_64_idt_bp_probe_count();
+        int      armed   = arch_x86_64_idt_bp_probe_is_armed();
+        uint64_t ud_now  = arch_x86_64_idt_ud_probe_count();
+        uint64_t pf_now  = arch_x86_64_idt_pf_probe_count();
+        uint64_t gp_now  = arch_x86_64_idt_gp_probe_count();
+        uint64_t de_now  = arch_x86_64_idt_de_probe_count();
+        uint64_t kf_count_after;
+        {
+            struct x86_64_kernel_fault_snapshot snap_after;
+            arch_x86_64_idt_kernel_fault_snapshot(&snap_after);
+            kf_count_after = snap_after.count;
+        }
+
+        log_kv(" resume_rip=", resume_rip);
+        log_kv(" bp_before=",  bp_before);
+        log_kv(" bp_after=",   bp_after);
+        log_kv(" armed=",      (uint64_t)(uint32_t)armed);
+        log_kv(" kf_delta=",   kf_count_after - kf_count_before);
+        log_kv(" ud_delta=",   ud_now - ud_baseline);
+        log_kv(" pf_delta=",   pf_now - pf_baseline);
+        log_kv(" gp_delta=",   gp_now - gp_baseline);
+        log_kv(" de_delta=",   de_now - de_baseline);
+
+        if (bp_after != bp_before + 1u) {
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 28 bp probe count delta != 1\n");
+            return;
+        }
+        if (armed != 0) {
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 28 bp probe still armed (not single-shot)\n");
+            return;
+        }
+        if (kf_count_after != kf_count_before) {
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 28 probed #BP polluted kernel fault snapshot\n");
+            return;
+        }
+        if (ud_now != ud_baseline) {
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 28 perturbed ud probe count\n");
+            return;
+        }
+        if (pf_now != pf_baseline) {
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 28 perturbed pf probe count\n");
+            return;
+        }
+        if (gp_now != gp_baseline) {
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 28 perturbed gp probe count\n");
+            return;
+        }
+        if (de_now != de_baseline) {
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 28 perturbed de probe count\n");
+            return;
+        }
+        early_console64_write(" PASS");
+    }
+
     if (ap_n > 0) {
-        early_console64_write("\n[x86_64][smp-selftest] PASS: all APs idle on private GDT/TSS/IDT+GS + sched-registered + LAPIC-timer driving sched_on_tick + distributed kthreads switched per-CPU + cross-CPU reschedule IPI delivered + cross-CPU migration verified + IPI tail-hook dispatch verified + preempt-disable gate verified + timer-tick honours gate + swapgs MSR pair OK + syscall RSP save-area OK + sched-slot kind/kstack tagging OK + USER-slot AP dispatch verified + LAPIC timer calibrated + NMI live-trigger verified + #UD probe recoverable + #PF probe recoverable + #GP probe recoverable + #DE probe recoverable\n");
+        early_console64_write("\n[x86_64][smp-selftest] PASS: all APs idle on private GDT/TSS/IDT+GS + sched-registered + LAPIC-timer driving sched_on_tick + distributed kthreads switched per-CPU + cross-CPU reschedule IPI delivered + cross-CPU migration verified + IPI tail-hook dispatch verified + preempt-disable gate verified + timer-tick honours gate + swapgs MSR pair OK + syscall RSP save-area OK + sched-slot kind/kstack tagging OK + USER-slot AP dispatch verified + LAPIC timer calibrated + NMI live-trigger verified + #UD probe recoverable + #PF probe recoverable + #GP probe recoverable + #DE probe recoverable + #BP probe recoverable\n");
     } else {
-        early_console64_write("\n[x86_64][smp-selftest] PASS: no APs (UP system, BSP idle slot only) + preempt-disable gate verified + timer-tick honours gate + swapgs MSR pair OK + syscall RSP save-area OK + sched-slot kind/kstack tagging OK + USER-slot dispatch SKIPPED (ap<3) + LAPIC timer calibrated + NMI live-trigger verified + #UD probe recoverable + #PF probe recoverable + #GP probe recoverable + #DE probe recoverable\n");
+        early_console64_write("\n[x86_64][smp-selftest] PASS: no APs (UP system, BSP idle slot only) + preempt-disable gate verified + timer-tick honours gate + swapgs MSR pair OK + syscall RSP save-area OK + sched-slot kind/kstack tagging OK + USER-slot dispatch SKIPPED (ap<3) + LAPIC timer calibrated + NMI live-trigger verified + #UD probe recoverable + #PF probe recoverable + #GP probe recoverable + #DE probe recoverable + #BP probe recoverable\n");
     }
 }

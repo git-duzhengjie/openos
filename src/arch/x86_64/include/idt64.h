@@ -198,4 +198,31 @@ void     arch_x86_64_idt_disarm_de_probe(void);
 uint64_t arch_x86_64_idt_de_probe_count(void);
 int      arch_x86_64_idt_de_probe_is_armed(void);
 
+/*
+ * G.3b-7: recoverable single-shot #BP probe (int3, vector 3).
+ *
+ * arm_bp_probe(rip): the very next #BP whose frame->rip exactly matches
+ *   `rip` is treated as expected — the dispatcher increments bp_probe_count,
+ *   leaves frame->rip ALONE (because #BP is a trap: the hardware-pushed RIP
+ *   already points past the int3 byte), and returns WITHOUT polluting the
+ *   kernel fault snapshot. Single-shot: probe disarms itself on hit.
+ *
+ * Important: unlike #UD/#PF/#GP/#DE (all faults, where insn_len > 0 is used
+ * to advance past the faulting instruction), #BP is a trap. iretq resumes
+ * naturally at frame->rip, which is the byte AFTER the int3. The strict
+ * gate is therefore `rip == address_of_int3 + 1`.
+ *
+ * Intended use: selftest emits `int3` (0xCC, 1 byte) at a known label, arms
+ *   the probe with the post-int3 RIP, and verifies the counter delta + the
+ *   absence of cross-contamination on other probes / kernel-fault sentry.
+ *
+ * This primitive is the foundation for breakpoint patching and emulation
+ * traps: the kernel can later swap any instruction's first byte for 0xCC,
+ * arm a #BP-probe-like dispatcher entry, and resume from the patched site.
+ */
+void     arch_x86_64_idt_arm_bp_probe(uint64_t expected_rip_after);
+void     arch_x86_64_idt_disarm_bp_probe(void);
+uint64_t arch_x86_64_idt_bp_probe_count(void);
+int      arch_x86_64_idt_bp_probe_is_armed(void);
+
 #endif /* OPENOS_ARCH_X86_64_IDT64_H */
