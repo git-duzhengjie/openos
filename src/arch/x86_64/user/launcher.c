@@ -1,14 +1,13 @@
 #include "openos64.h"
 
 /*
- * H.3 demo: a tiny launcher that exercises the SYS_EXEC trampoline.
+ * H.4 demo: launcher exercises the SYS_EXEC trampoline AND the new
+ * argv plumbing.
  *
- * The kernel boots into /bin/launcher (instead of /bin/hello64 like in
- * H.2). launcher prints a banner so we can prove it really ran in ring3,
- * then calls execve("/bin/hello64_v2"). On a working execve the kernel
- * longjmps back to ring0, reloads the image, and re-enters ring3 on
- * hello64_v2's entry point. hello64_v2 then runs the full Step C demo
- * and exits via SYS_EXIT as usual.
+ * The kernel boots into /bin/launcher (H.3) and now spawns it with
+ * argv = {"/bin/launcher"} (kernel-side, see kernel64.c). We forward
+ * an extended argv vector through execve so /bin/hello64_v2 will see
+ * argc>=2 and print the strings back to confirm the round-trip.
  *
  * If execve returns at all, it failed -- we print a diagnostic and exit
  * with a unique code so regressions are grep-able from the serial log.
@@ -19,14 +18,56 @@ static void write_str(int fd, const char *s) {
     (void)openos64_write(fd, s, n);
 }
 
+static void write_dec(int fd, long v) {
+    char buf[24];
+    openos64_size_t n = 0;
+    if (v < 0) { buf[n++] = '-'; v = -v; }
+    char tmp[24];
+    openos64_size_t t = 0;
+    if (v == 0) tmp[t++] = '0';
+    while (v > 0) { tmp[t++] = (char)('0' + (v % 10)); v /= 10; }
+    while (t > 0) buf[n++] = tmp[--t];
+    (void)openos64_write(fd, buf, n);
+}
+
 int openos64_main(int argc, char **argv) {
-    (void)argc;
-    (void)argv;
+    write_str(OPENOS64_STDOUT_FILENO,
+              "[launcher] H.4: hello from launcher\n");
+
+    /*
+     * Print our own argv first to prove kernel-side initial-spawn argv
+     * seeding works (kernel64.c calls set_args({"/bin/launcher"})).
+     */
+    write_str(OPENOS64_STDOUT_FILENO, "[launcher] argc=");
+    write_dec(OPENOS64_STDOUT_FILENO, (long)argc);
+    write_str(OPENOS64_STDOUT_FILENO, "\n");
+    for (int i = 0; i < argc; ++i) {
+        write_str(OPENOS64_STDOUT_FILENO, "[launcher] argv[");
+        write_dec(OPENOS64_STDOUT_FILENO, (long)i);
+        write_str(OPENOS64_STDOUT_FILENO, "]=");
+        write_str(OPENOS64_STDOUT_FILENO, argv && argv[i] ? argv[i] : "(null)");
+        write_str(OPENOS64_STDOUT_FILENO, "\n");
+    }
 
     write_str(OPENOS64_STDOUT_FILENO,
-              "[launcher] H.3: from launcher, about to execve /bin/hello64_v2\n");
+              "[launcher] H.4: about to execve /bin/hello64_v2 with argv\n");
 
-    long rc = openos64_execve("/bin/hello64_v2", (char *const *)0, (char *const *)0);
+    /*
+     * Hand-rolled argv: must be a NULL-terminated array of char*.
+     * Strings live in launcher's .rodata; the kernel snapshots them
+     * before elf64_load_image clobbers the VA.
+     */
+    static const char *child_argv[] = {
+        "hello64_v2",
+        "from",
+        "launcher",
+        "H.4",
+        (const char *)0,
+    };
+
+    long rc = openos64_execve("/bin/hello64_v2",
+                              (char *const *)child_argv,
+                              (char *const *)0);
 
     /* Reaching here means execve failed. Print rc in hex for diagnosis. */
     static const char hexd[] = "0123456789abcdef";

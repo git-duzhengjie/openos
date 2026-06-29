@@ -1,15 +1,14 @@
 #include "openos64.h"
 
 /*
- * H.3 demo: hello64_v2 -- the program that /bin/launcher execve's into.
+ * H.4 demo: hello64_v2 -- the program that /bin/launcher execve's into.
  *
- * Deliberately a *different* binary from /bin/hello64 so we can prove:
- *   (a) the kernel really swapped the image -- output text is unique
- *   (b) the second-round ring3 entry works (no stale state from round 1)
- *   (c) SYS_EXIT after execve still tears down the proc cleanly
+ * Compared to H.3 we now print the full argc/argv to the serial log so we
+ * can eyeball the SysV startup frame end-to-end:
+ *   kernel scratch -> seed_user_stack -> crt0.S -> openos64_main
  *
- * We keep it minimal: print a banner, read pid/tid (should match what
- * /bin/launcher had since execve preserves pid), and exit(42).
+ * We keep it minimal: print banner, pid/tid/ppid (must match what
+ * /bin/launcher had since execve preserves pid), dump argv, exit(42).
  */
 
 static void write_str(int fd, const char *s) {
@@ -17,12 +16,21 @@ static void write_str(int fd, const char *s) {
     (void)openos64_write(fd, s, n);
 }
 
-int openos64_main(int argc, char **argv) {
-    (void)argc;
-    (void)argv;
+static void write_dec(int fd, long v) {
+    char buf[24];
+    openos64_size_t n = 0;
+    if (v < 0) { buf[n++] = '-'; v = -v; }
+    char tmp[24];
+    openos64_size_t t = 0;
+    if (v == 0) tmp[t++] = '0';
+    while (v > 0) { tmp[t++] = (char)('0' + (v % 10)); v /= 10; }
+    while (t > 0) buf[n++] = tmp[--t];
+    (void)openos64_write(fd, buf, n);
+}
 
+int openos64_main(int argc, char **argv) {
     write_str(OPENOS64_STDOUT_FILENO,
-              "[hello64_v2] H.3: I am the post-execve image, pid preserved\n");
+              "[hello64_v2] H.4: I am the post-execve image, pid preserved\n");
 
     long pid  = openos64_getpid();
     long tid  = openos64_gettid();
@@ -40,8 +48,20 @@ int openos64_main(int argc, char **argv) {
     line[i++] = '\n';
     (void)openos64_write(OPENOS64_STDOUT_FILENO, line, i);
 
+    /* H.4: print argv vector to prove SysV startup frame is intact. */
+    write_str(OPENOS64_STDOUT_FILENO, "[hello64_v2] argc=");
+    write_dec(OPENOS64_STDOUT_FILENO, (long)argc);
+    write_str(OPENOS64_STDOUT_FILENO, "\n");
+    for (int k = 0; k < argc; ++k) {
+        write_str(OPENOS64_STDOUT_FILENO, "[hello64_v2] argv[");
+        write_dec(OPENOS64_STDOUT_FILENO, (long)k);
+        write_str(OPENOS64_STDOUT_FILENO, "]=");
+        write_str(OPENOS64_STDOUT_FILENO, argv && argv[k] ? argv[k] : "(null)");
+        write_str(OPENOS64_STDOUT_FILENO, "\n");
+    }
+
     write_str(OPENOS64_STDOUT_FILENO,
-              "[hello64_v2] H.3: exiting with code 42\n");
+              "[hello64_v2] H.4: exiting with code 42\n");
 
     return 42;
 }

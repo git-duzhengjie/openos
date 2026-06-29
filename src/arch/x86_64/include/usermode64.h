@@ -59,4 +59,41 @@ uint64_t arch_x86_64_usermode_exec_count(void);
 uint64_t arch_x86_64_usermode_exec_fail_count(void);
 void arch_x86_64_usermode_note_exec_fail(void);
 
+/*
+ * H.4 argv plumbing.
+ *
+ * arch_x86_64_usermode_set_args():
+ *   Called by the kernel (either from kernel64.c at initial spawn or from
+ *   the SYS_EXEC backend after a successful ELF reload). Copies up to
+ *   X86_64_USER_ARGV_MAX strings, each truncated to X86_64_USER_ARG_MAX-1
+ *   bytes, into a kernel-side scratch buffer. The strings live in kernel
+ *   memory which is *not* about to be overwritten by elf64_load_image
+ *   (unlike the source argv which may live in the current ring3 image's
+ *   .rodata at the same VA as the new image). This is the H.3 path-lifetime
+ *   workaround applied to argv.
+ *
+ * arch_x86_64_usermode_seed_user_stack():
+ *   Called by arch_x86_64_usermode_run() right before it composes the
+ *   iretq frame. Lays out the SysV ABI program-startup frame at the top
+ *   of the user stack:
+ *       [argv strings...]            <- top of stack, NUL terminated
+ *       [16-byte alignment pad]
+ *       [argv[N] = NULL]
+ *       [argv[N-1]]
+ *       ...
+ *       [argv[0]]                    <- pointed to by 8(%rsp)
+ *       [argc]                       <- 0(%rsp)
+ *   Returns the (already 16-byte aligned) new stack top that should be
+ *   used as the iretq frame's user RSP. When no args are queued the
+ *   returned value equals stack_top_in and the frame collapses to
+ *   argc=0, argv={NULL}.
+ */
+#define X86_64_USER_ARGV_MAX 8u
+#define X86_64_USER_ARG_MAX  128u
+
+void arch_x86_64_usermode_set_args(int argc, const char *const *argv);
+void arch_x86_64_usermode_clear_args(void);
+int arch_x86_64_usermode_pending_argc(void);
+x86_64_virt_addr_t arch_x86_64_usermode_seed_user_stack(x86_64_virt_addr_t stack_top_in);
+
 #endif /* OPENOS_ARCH_X86_64_USERMODE64_H */

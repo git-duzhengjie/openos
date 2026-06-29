@@ -140,7 +140,6 @@ static uint64_t do_close(uint64_t fd) {
  * the *current* image and can handle it (typically by calling exit()).
  */
 static uint64_t do_exec(uint64_t path_ptr, uint64_t argv_ptr, uint64_t envp_ptr) {
-    (void)argv_ptr;
     (void)envp_ptr;
     if (path_ptr == 0) {
         arch_x86_64_usermode_note_exec_fail();
@@ -167,6 +166,39 @@ static uint64_t do_exec(uint64_t path_ptr, uint64_t argv_ptr, uint64_t envp_ptr)
         path_buf[sizeof(path_buf) - 1u] = '\0';
     }
     const char *path = path_buf;
+
+    /*
+     * H.4: snapshot argv onto kernel-side storage BEFORE elf load. Same
+     * hazard as `path` above -- the source pointers may live in the
+     * ring3 image about to be overwritten. We cap at
+     * X86_64_USER_ARGV_MAX entries and X86_64_USER_ARG_MAX-1 bytes per
+     * entry; anything beyond is silently truncated (POSIX-equivalent
+     * E2BIG is not exposed yet). NULL argv is acceptable -> argc=0.
+     * The storage is `static` because do_exec is single-entrant under
+     * the current uniprocessor scheduling model and we want it out of
+     * the (limited) kernel stack budget.
+     */
+    static char argv_storage[X86_64_USER_ARGV_MAX][X86_64_USER_ARG_MAX];
+    static const char *argv_ptrs[X86_64_USER_ARGV_MAX];
+    int argc_kern = 0;
+    if (argv_ptr != 0) {
+        const char *const *uargv =
+            (const char *const *)(uintptr_t)argv_ptr;
+        for (unsigned i = 0; i < X86_64_USER_ARGV_MAX; ++i) {
+            const char *u = uargv[i];
+            if (u == NULL) break;
+            x86_64_size_t j = 0;
+            for (; j < X86_64_USER_ARG_MAX - 1u; ++j) {
+                char c = u[j];
+                argv_storage[i][j] = c;
+                if (c == '\0') break;
+            }
+            argv_storage[i][X86_64_USER_ARG_MAX - 1u] = '\0';
+            argv_ptrs[i] = argv_storage[i];
+            argc_kern = (int)i + 1;
+        }
+    }
+
     const x86_64_initrd_file_t *file = arch_x86_64_initrd_find(path);
     if (file == NULL) {
         arch_x86_64_usermode_note_exec_fail();
@@ -191,14 +223,18 @@ static uint64_t do_exec(uint64_t path_ptr, uint64_t argv_ptr, uint64_t envp_ptr)
     early_console64_write_hex64((uint64_t)lr.entry);
     early_console64_write(" size=");
     early_console64_write_hex64((uint64_t)file->size);
+    early_console64_write(" argc=");
+    early_console64_write_hex64((uint64_t)(uint32_t)argc_kern);
     early_console64_write("\n");
 
     /*
-     * Commit the replacement. mark_exec stashes the new entry and flips
+     * Commit the replacement. set_args queues argv for the next
+     * usermode_run; mark_exec stashes the new entry and flips
      * usermode_exited=1 / pending_exec=1, then return_to_kernel longjmps
      * back to usermode_run()'s saved kernel frame. Crucially we do NOT
      * call proc_exit -- the pid lives on.
      */
+    arch_x86_64_usermode_set_args(argc_kern, argv_ptrs);
     arch_x86_64_usermode_mark_exec(lr.entry);
     arch_x86_64_usermode_return_to_kernel();
     return 0;  /* unreachable */

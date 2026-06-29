@@ -203,7 +203,8 @@ static inline openos64_ssize_t openos64_recvfrom(int fd,
 
 openos64_size_t openos64_strlen(const char *text);
 int openos64_main(int argc, char **argv);
-void openos64_start(void) __attribute__((noreturn));
+/* H.4: receives argc/argv from crt0.S, never returns (calls openos64_exit). */
+void openos64_start(int argc, char **argv) __attribute__((noreturn));
 const openos64_runtime_info_t *openos64_runtime_get_info(void);
 
 #endif /* OPENOS_ARCH_X86_64_USER_OPENOS64_H */

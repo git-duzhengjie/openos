@@ -1463,7 +1463,8 @@
 
 > 目标：在 Step E/F/G 闭环基础上，继续推进 x86_64 ring3 真实工作负载所需的 OS 能力（ELF 真加载、exec、文件系统持久化、网络等），逐项保持基线不退化。
 
-- [ ] **H.1 ELF 真加载 / exec 体系**
+  - [ ] H.1 ELF 真加载 / exec 体系
+    （注：父项保持开放，H.5+ 尚待规划）
   - [√] **H.2 hello64 image 由编译期硬塞改为运行时 initrd 查找**
     - [√] `src/arch/x86_64/kernel/initrd64.c` 注册路径 `/bin/hello64` → 复用 `embed_hello64.h` 作为唯一编译期数据源
     - [√] `kernel64.c` 移除 `#include "../include/embed_hello64.h"`，改走 `arch_x86_64_initrd_find("/bin/hello64")` → `arch_x86_64_elf64_load_image()`
@@ -1481,5 +1482,17 @@
     - [√] 串口证据：`[launcher] H.3: from launcher, about to execve /bin/hello64_v2` → `[x86_64][exec] path=/bin/hello64_v2 entry=0x400000 size=0x21D8` → `[x86_64][usermode] exec round=1 next_entry=0x400000` → `[hello64_v2] H.3: I am the post-execve image, pid preserved` → `[hello64_v2] pid=2 tid=2 ppid=1` → `[hello64_v2] H.3: exiting with code 42`
     - [√] post-exec sentry：canary=2 / kfault_delta=0 / exec_count=1 / exec_fail=0 / pending_exec=0 / exec_rounds=1
     - [√] SMP=1 + SMP=4 双矩阵 Stages 1-30 全 PASS，基线条款保住
-  - [ ] H.4+ 待规划：argv/argc/envp 传参链路、ELF 解释器、动态库、独立地址空间 + CR3 切换、fork、wait/waitpid
+  - [√] **H.4 SysV-style argv/argc 传参链路（initial spawn + execve 双路径）**（commit 待写入）
+    - [√] `user/crt0.S` + `user/crt0.c`：新增独立 `_start` —— `pop argc` / `mov rsp argv` → `andq $-16, %rsp` 对齐 → 调用 `openos64_start(argc, argv)`，再调用 user main，最后 `SYS_EXIT`
+    - [√] `user/openos64.h`：新增 `X86_64_USER_ARGV_MAX=8` / `X86_64_USER_ARG_MAX=64` 限额 + `openos64_runtime_info_t` 运行时元数据
+    - [√] `usermode64.{h,c}`：新增 `arch_x86_64_usermode_set_args(argc, argv)` / `clear_args()` API，内核侧 `usermode_arg_storage[ARGV_MAX][ARG_MAX]` 静态缓冲拷贝（避开 ring3 字符串 lifetime）；`seed_user_stack` 改造为标准 SysV 程序启动帧布局：① 字符串拷到栈顶 ② 16B 对齐 padding ③ NULL envp + NULL argv terminator ④ argv 指针数组 ⑤ argc word —— crt0 直接 `(rsp)=argc, 8(rsp)=argv` 提取
+    - [√] `syscall_dispatch64.c`：SYS_EXEC dispatch 在拷 path 后再拷 argv 字符串到 `usermode_arg_storage` 然后 `mark_exec`
+    - [√] `kernel64.c`：initial spawn 前调 `arch_x86_64_usermode_set_args(1, {"/bin/launcher"})` —— 关键修复见下
+    - [√] `user/launcher.c` 改造为 H.4 demo：execve("/bin/hello64_v2", ["hello64_v2", "from", "launcher", "H.4"], NULL)
+    - [√] `user/hello64_v2.c` 改造为 argv-aware 打印：`for i in argc: print argv[i]`
+    - [√] **修 bug：`.data` 段 file-scope `static const char *initial_argv[]` 在 UEFI kernel 加载后运行时读出 ptr=0**（ELF 文件中 .data filesz=0x19 已写入正确指针 0x80011064，但运行时读到 0；rodata `"/bin/launcher"` 字符串本身在 .rodata 正常）→ 改为 stack-local `const char *initial_argv[2]; initial_argv[0]="/bin/launcher"; ...` 绕开。**根因 TODO**：UEFI 路径 .data PT_LOAD 高半区映射或 ELF loader 对 paddr/vaddr 划分的某种细节问题，留 H.x 清理时回头修
+    - [√] 串口证据：`[launcher] argc=1` / `[launcher] argv[0]=/bin/launcher` / `[x86_64][exec] path=/bin/hello64_v2 entry=0x400000 size=0x2568 argc=0x4` / `[hello64_v2] argc=4` / `[hello64_v2] argv[0..3]=hello64_v2/from/launcher/H.4`
+    - [√] post-exec sentry：canary=2 / kfault_delta=0 / exec_count=1 / exec_fail=0 / pending_exec=0 / exit_code=42
+    - [√] SMP=1 + SMP=4 双矩阵 Stages 1-30 全 PASS，基线条款保住
+  - [ ] H.5+ 待规划：envp 链路、独立地址空间 + CR3 切换、fork、wait/waitpid、ELF 解释器、动态库
 

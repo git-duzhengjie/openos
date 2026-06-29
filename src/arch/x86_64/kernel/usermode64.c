@@ -158,9 +158,21 @@ int arch_x86_64_usermode_run(x86_64_entry_t entry) {
         return -1;
     }
 
+    /*
+     * H.4: seed the user stack with the SysV program-startup frame so
+     * that ring3 _start can `(rsp)` -> argc, `8(rsp)` -> argv. Any args
+     * queued by arch_x86_64_usermode_set_args() are consumed here; when
+     * none are queued seed_user_stack still lays out the minimal
+     * argc=0/argv={NULL} frame to satisfy the ABI.
+     */
+    x86_64_virt_addr_t user_rsp =
+        arch_x86_64_usermode_seed_user_stack((x86_64_virt_addr_t)bootstrap_user_stack_top());
+    if (user_rsp == 0) {
+        return -3;
+    }
     arch_x86_64_usermode_prepare_iretq(&prepared_user_frame,
                                        entry,
-                                       (x86_64_virt_addr_t)bootstrap_user_stack_top());
+                                       user_rsp);
     if (!arch_x86_64_usermode_validate_frame(&prepared_user_frame)) {
         return -2;
     }
@@ -345,4 +357,172 @@ uint64_t arch_x86_64_usermode_canary(void) {
 
 uint64_t arch_x86_64_usermode_kfault_delta(void) {
     return usermode_kfault_after - usermode_kfault_before;
+}
+
+/* ===================================================================
+ * H.4: argv plumbing.
+ * ===================================================================
+ *
+ * The kernel keeps an N-slot scratch table of argv strings owned by the
+ * kernel data segment. The lifetime of these strings is independent of
+ * the ring3 image, which is critical because:
+ *   1. SYS_EXEC may receive an argv pointer that lives inside the
+ *      current ring3 image's .rodata at the very VA elf64_load_image()
+ *      is about to overwrite (H.3 path-lifetime hazard).
+ *   2. The newly loaded ring3 image has no idea what arguments were
+ *      passed; the kernel must inject them by writing onto the user
+ *      stack of the *new* program before iretq.
+ *
+ * The table is single-threaded by construction: the kernel is BSP-only
+ * during initial spawn (H.3 baseline) and SYS_EXEC runs under the
+ * current task's syscall stack with interrupts disabled by the trap
+ * gate. No locking is needed at this stage; when SMP scheduling lands
+ * the table will become per-task in the PCB.
+ */
+
+static char     usermode_arg_storage[X86_64_USER_ARGV_MAX][X86_64_USER_ARG_MAX];
+static int      usermode_arg_count = 0;
+
+static x86_64_size_t k_strlen_u(const char *s) {
+    x86_64_size_t n = 0;
+    if (!s) return 0;
+    while (s[n] != '\0') ++n;
+    return n;
+}
+
+void arch_x86_64_usermode_clear_args(void) {
+    usermode_arg_count = 0;
+    for (unsigned i = 0; i < X86_64_USER_ARGV_MAX; ++i) {
+        usermode_arg_storage[i][0] = '\0';
+    }
+}
+
+int arch_x86_64_usermode_pending_argc(void) {
+    return usermode_arg_count;
+}
+
+void arch_x86_64_usermode_set_args(int argc, const char *const *argv) {
+    arch_x86_64_usermode_clear_args();
+    if (argc <= 0 || argv == NULL) {
+        return;
+    }
+    int cap = (int)X86_64_USER_ARGV_MAX;
+    int n = argc < cap ? argc : cap;
+    for (int i = 0; i < n; ++i) {
+        const char *src = argv[i];
+        if (src == NULL) {
+            usermode_arg_storage[i][0] = '\0';
+            continue;
+        }
+        x86_64_size_t len = k_strlen_u(src);
+        if (len >= X86_64_USER_ARG_MAX) {
+            len = X86_64_USER_ARG_MAX - 1;
+        }
+        for (x86_64_size_t j = 0; j < len; ++j) {
+            usermode_arg_storage[i][j] = src[j];
+        }
+        usermode_arg_storage[i][len] = '\0';
+    }
+    usermode_arg_count = n;
+}
+
+/*
+ * Compose the SysV program-startup frame at the top of the user stack.
+ *
+ * Stack image (high address at top):
+ *   ...untouched user-stack reserve...
+ *   stack_top_in -> +---------------------+
+ *                   | argv strings (NUL)  |  copied top-down, packed
+ *                   +---------------------+
+ *                   | 8-byte zero pad     |  (alignment scratch)
+ *                   +---------------------+
+ *                   | argv[N] = NULL      |
+ *                   | argv[N-1]           |
+ *                   | ...                 |
+ *                   | argv[0]             |
+ *                   +---------------------+
+ *                   | argc (64-bit)       |  <- returned RSP, % 16 == 0
+ *                   +---------------------+
+ *
+ * We round the final RSP down to a 16-byte boundary so that crt0.S's
+ * `andq $-16, %rsp` is a no-op and `call openos64_start` lands inside
+ * the C ABI's usual rsp % 16 == 8 contract.
+ */
+x86_64_virt_addr_t arch_x86_64_usermode_seed_user_stack(x86_64_virt_addr_t stack_top_in) {
+    if (stack_top_in == 0) {
+        return 0;
+    }
+
+    int argc = usermode_arg_count;
+    if (argc < 0) argc = 0;
+    if (argc > (int)X86_64_USER_ARGV_MAX) argc = (int)X86_64_USER_ARGV_MAX;
+
+    /* 1) copy argv strings to the very top of the user stack. */
+    uint8_t *sp = (uint8_t *)(uintptr_t)stack_top_in;
+    uintptr_t arg_va[X86_64_USER_ARGV_MAX];
+    for (int i = argc - 1; i >= 0; --i) {
+        const char *s = usermode_arg_storage[i];
+        x86_64_size_t len = k_strlen_u(s) + 1; /* incl. NUL */
+        sp -= len;
+        for (x86_64_size_t j = 0; j < len; ++j) {
+            sp[j] = (uint8_t)s[j];
+        }
+        arg_va[i] = (uintptr_t)sp;
+    }
+
+    /* 2) 16-byte alignment scratch so the final RSP lands on a 16-byte
+     *    boundary regardless of how many argv slots / bytes we pushed.
+     *
+     *    Math: after this base align we will push (argc + 1) argv slots
+     *    (incl. the NULL terminator) plus 1 slot for argc itself, each
+     *    8 bytes. Total = 8*(argc + 2). For the result to be 16-aligned
+     *    we need (argc + 2) % 2 == 0, i.e. argc must be even. When argc
+     *    is odd we prepend an 8-byte zero pad here (it lives between the
+     *    string area and argv[N]=NULL, so doesn't affect argv pointers). */
+    uintptr_t cursor = (uintptr_t)sp;
+    cursor &= ~((uintptr_t)15);
+    if ((argc & 1) != 0) {
+        cursor -= 8;
+        *(uint64_t *)cursor = 0;
+    }
+
+    /* 3) argv[argc] = NULL terminator, then argv[argc-1..0] in descending
+     *    address order so argv[0] sits at the lowest address (which is
+     *    what argv[] expects in C). */
+    cursor -= 8;
+    *(uint64_t *)cursor = 0;
+    for (int i = argc - 1; i >= 0; --i) {
+        cursor -= 8;
+        *(uint64_t *)cursor = (uint64_t)arg_va[i];
+    }
+    uintptr_t argv_base = cursor; /* points to argv[0] */
+
+    /* 4) push argc; this is what (rsp) reads in crt0.S. The expected
+     *    layout is argc at (rsp), argv at 8(rsp). To make that hold
+     *    we must ensure argv_base == argc_slot + 8. cursor currently
+     *    points to argv[0]; subtract 8 -> argc slot. */
+    cursor -= 8;
+    *(uint64_t *)cursor = (uint64_t)(uint32_t)argc;
+
+    /* sanity: argv_base should be exactly cursor + 8 by construction. */
+    (void)argv_base;
+
+    /* 5) final alignment check: SysV mandates rsp % 16 == 0 *at* _start. */
+    if ((cursor & 15ULL) != 0ULL) {
+        /* Should never happen given the design but bail gracefully. */
+        return 0;
+    }
+
+    early_console64_write("[x86_64][usermode] seed_user_stack argc=");
+    early_console64_write_hex64((uint64_t)(uint32_t)argc);
+    early_console64_write(" rsp=");
+    early_console64_write_hex64((uint64_t)cursor);
+    early_console64_write("\n");
+
+    /* H.4: arg table is one-shot per usermode_run/exec round. Clear it
+     * here so a subsequent run/exec that forgets to set args sees a
+     * clean argc=0 frame. */
+    arch_x86_64_usermode_clear_args();
+
+    return (x86_64_virt_addr_t)cursor;
 }

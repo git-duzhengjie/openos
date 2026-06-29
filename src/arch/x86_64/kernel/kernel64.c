@@ -329,6 +329,31 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
         early_console64_write_hex64((uint64_t)hello64.entry);
         early_console64_write("\n");
         x86_64_entry_t next_entry = hello64.entry;
+        /*
+         * H.4: seed argv for the initial program. We pass argv[0] =
+         * "/bin/launcher" to mimic the convention that argv[0] is
+         * always the program name as seen by the caller. /bin/launcher
+         * will print this to confirm initial-spawn argv works the
+         * same as execve-spawned argv (they share the same
+         * arch_x86_64_usermode_seed_user_stack path).
+         */
+        {
+            /*
+             * H.4: stack-local argv array.
+             *
+             * NOTE: A `static const char *initial_argv[]` at file scope lives
+             * in .data and we observed under UEFI that .data pointer slots
+             * read back as 0 at runtime (FileSize loaded but pointer value
+             * came out zero — likely an ELF loader / paging mismatch for
+             * the .data PT_LOAD on the high-half mapping). Stack locals
+             * dodge the issue completely. Root-cause for the .data quirk
+             * is filed as a TODO under H series clean-up.
+             */
+            const char *initial_argv[2];
+            initial_argv[0] = "/bin/launcher";
+            initial_argv[1] = (const char *)0;
+            arch_x86_64_usermode_set_args(1, initial_argv);
+        }
         const int kExecRoundCap = 4;
         int round = 0;
         for (;;) {
