@@ -292,8 +292,12 @@ static uint64_t do_exec(uint64_t path_ptr, uint64_t argv_ptr, uint64_t envp_ptr)
 /*
  * SYS_EXIT backend.
  * Marks the current user-mode thread as exited so the kernel can reclaim it.
- * Note: the syscall-instruction entry path additionally needs to repair rcx/r11
- * before sysret; that fixup stays in syscall64.c (entry-path concern).
+ *
+ * CONTRACT (A2.P0): this function MUST NOT return. It longjmps via
+ * arch_x86_64_usermode_return_to_kernel(), restoring the kernel stack saved
+ * by arch_x86_64_usermode_run(). Returning would let the syscall entry
+ * wrapper sysretq into a stale ring3 RIP (#GP at CPL=3); the wrapper in
+ * syscall64.c trips a loud assert if that ever happens.
  */
 static uint64_t do_exit(uint64_t status) {
     arch_x86_64_usermode_mark_exited((int)status);

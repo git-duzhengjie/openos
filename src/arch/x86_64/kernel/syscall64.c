@@ -100,9 +100,13 @@ uint64_t arch_x86_64_int80_dispatch(x86_64_int80_frame_t *frame) {
  *     r10 = arg3   r8  = arg4   r9  = arg5
  * (rcx/r11 are clobbered by the syscall instruction itself.)
  *
- * For SYS_EXIT we must also repair rcx/r11 so sysret returns to the
- * usermode trampoline that flips the thread to "exited" cleanly. This
- * frame-level fixup stays here because it is an entry-path concern.
+ * Contract for non-returning syscalls (SYS_EXIT / SYS_EXECVE):
+ *   The dispatch backend in syscall_dispatch64.c MUST longjmp back to the
+ *   kernel stack via arch_x86_64_usermode_return_to_kernel() before it
+ *   reaches this wrapper. If we ever observe such a syscall returning here
+ *   it means the backend regressed and the caller is about to sysretq into
+ *   a stale ring3 RIP -- which would #GP at CPL=3. We trip a loud assert in
+ *   that case rather than silently sysret.
  */
 uint64_t arch_x86_64_syscall_dispatch(x86_64_syscall_frame_t *frame) {
     uint64_t result;
@@ -121,14 +125,23 @@ uint64_t arch_x86_64_syscall_dispatch(x86_64_syscall_frame_t *frame) {
         frame->r8,
         frame->r9);
 
-    /* Post-dispatch fixup for SYS_EXIT taken via syscall instruction:
-     * spin in kernel after dispatch instead of sysretting -- the previous
-     * approach pointed RCX at a kernel-address trampoline which ring3 cannot
-     * fetch. Since SYS_EXIT semantically does not return to userspace, we
-     * just halt here; arch_x86_64_usermode_run will observe usermode_exited
-     * from the dispatch backend on its next poll. */
+    /*
+     * A2.P0 hardening: SYS_EXIT must never return to this wrapper.
+     *
+     * do_exit() in syscall_dispatch64.c calls
+     * arch_x86_64_usermode_return_to_kernel(), which restores the kernel
+     * stack saved by usermode_run() and `ret`s directly back into the
+     * cooperative scheduler loop. Hitting the code below means that contract
+     * is broken (regression). Log it and halt LOUDLY -- the previous
+     * "silent cli; hlt" hid the failure mode and the old comment claiming
+     * "usermode_run will observe usermode_exited on its next poll" was wrong
+     * for the syscall path because there is no poll: the wrapper would
+     * otherwise sysretq into ring3 with a stale RIP and #GP.
+     */
     if (frame->rax == SYS_EXIT) {
-        early_console64_write("[x86_64][usermode] SYS_EXIT taken via syscall; halting\n");
+        early_console64_write(
+            "[x86_64][syscall] BUG: SYS_EXIT returned to entry wrapper -- "
+            "do_exit() must longjmp via usermode_return_to_kernel().\n");
         for (;;) {
             __asm__ __volatile__("cli; hlt");
         }
