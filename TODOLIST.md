@@ -1490,9 +1490,15 @@
     - [√] `kernel64.c`：initial spawn 前调 `arch_x86_64_usermode_set_args(1, {"/bin/launcher"})` —— 关键修复见下
     - [√] `user/launcher.c` 改造为 H.4 demo：execve("/bin/hello64_v2", ["hello64_v2", "from", "launcher", "H.4"], NULL)
     - [√] `user/hello64_v2.c` 改造为 argv-aware 打印：`for i in argc: print argv[i]`
-    - [√] **修 bug：`.data` 段 file-scope `static const char *initial_argv[]` 在 UEFI kernel 加载后运行时读出 ptr=0**（ELF 文件中 .data filesz=0x19 已写入正确指针 0x80011064，但运行时读到 0；rodata `"/bin/launcher"` 字符串本身在 .rodata 正常）→ 改为 stack-local `const char *initial_argv[2]; initial_argv[0]="/bin/launcher"; ...` 绕开。**根因 TODO**：UEFI 路径 .data PT_LOAD 高半区映射或 ELF loader 对 paddr/vaddr 划分的某种细节问题，留 H.x 清理时回头修
-    - [√] 串口证据：`[launcher] argc=1` / `[launcher] argv[0]=/bin/launcher` / `[x86_64][exec] path=/bin/hello64_v2 entry=0x400000 size=0x2568 argc=0x4` / `[hello64_v2] argc=4` / `[hello64_v2] argv[0..3]=hello64_v2/from/launcher/H.4`
-    - [√] post-exec sentry：canary=2 / kfault_delta=0 / exec_count=1 / exec_fail=0 / pending_exec=0 / exit_code=42
+    - [√] **修 bug：`.data` 段 file-scope `static const char *initial_argv[]` 在 UEFI kernel 加载后运行时读出 ptr=0**（ELF 文件中 .data filesz=0x19 已写入正确指针 0x80011064，但运行时读到 0；rodata `"/bin/launcher"` 字符串本身在 .rodata 正常）→ H.4 commit 内临时用 stack-local `const char *initial_argv[2]` 绕开，**根因已在 H.4-fix commit 修复**（见下）
+  - [√] **H.4-fix `.data` 段根因修复（linker PHDRS 拆分 .bss 独立 PT_LOAD）**（commit 待写入）
+    - [√] **根因定位**：`readelf -lW kernel64.elf` 显示 `.data + .bss` 被 ld 合并到同一 PT_LOAD，p_memsz=0x24A000（2.3 MB，全是 .bss 静态数组）→ UEFI `AllocateAddress(0x220000)` 因该物理区被占用而失败 → fallback `AllocateAnyPages` 把段落到 `0x1DC34000` → 但 kernel boot64.asm 写死页表把虚拟 `0xFFFFFFFF80020000+` 映射到物理 `0x220000+`（空白页全 0）→ kernel 读 .data 全部读到 0
+    - [√] 铁证证据链：`[UEFI][elf-dbg] PT_LOAD vaddr=FFFFFFFF80020000 paddr=00220000 filesz=0x19 memsz=0x24A000` / `AllocateAddress FAILED status=0x8000000000000009 (EFI_NOT_FOUND)` / `fallback AllocateAnyPages` / `landed at phys=0x1DC34000` / `[argv-dbg] &initial_argv_dbg=0xFFFFFFFF80020000 [0]=0x0000000000000000`（vs `objdump -s -j .data` 显示文件中是 `0x80011064`）
+    - [√] `linker64.ld`：新增显式 `PHDRS { text PT_LOAD FLAGS(5); rodata PT_LOAD FLAGS(4); data PT_LOAD FLAGS(6); bss PT_LOAD FLAGS(6); }`，每个段 `: :phdrname` 显式归属 → 现在 .bss 独立成 PT_LOAD，p_filesz=0、p_memsz=0x23A000；.data 单独成 PT_LOAD，p_filesz=0x88、p_memsz=0x88（4KB align 后 1 页），AllocateAddress 必成功
+    - [√] `kernel64.c`：把 H.4 的 stack-local workaround 改回 `static const char *initial_argv[2] = { "/bin/launcher", NULL }`（语义洁净），运行时验证 argv[0] 正确读到 `/bin/launcher`
+    - [√] `elf64.h`：清理 H.4-fix 调试期 `[UEFI][elf-dbg]` 输出，仅保留 AllocateAddress 失败路径的诊断日志（带 vaddr/req/pages/status，便于未来回归）
+    - [√] `readelf -lW kernel64.elf` 验证：PT_LOAD ×4（text/rodata/data/bss），bss 段 p_filesz=0 已落实
+    - [√] 串口证据：`[launcher] argv[0]=/bin/launcher` ✓ / `[hello64_v2] argv[0..3]=hello64_v2/from/launcher/H.4` ✓ / `exit_code=0x2A` / `kfault_delta=0` / `exec_count=1 exec_fail=0`
     - [√] SMP=1 + SMP=4 双矩阵 Stages 1-30 全 PASS，基线条款保住
   - [ ] H.5+ 待规划：envp 链路、独立地址空间 + CR3 切换、fork、wait/waitpid、ELF 解释器、动态库
 

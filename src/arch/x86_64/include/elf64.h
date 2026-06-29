@@ -144,20 +144,43 @@ static inline efi_status_t elf64_load_segments(efi_system_table64_t *system_tabl
 
         /* 分配内存 - 先试 AllocateAddress（保留 ELF 原定 paddr），失败则
          * 回退 AllocateAnyPages。为了内核 boot64.asm 该都在开分页前只依赖
-         * UEFI identity map，AnyPages 后的地址仍能被访问。 */
+         * UEFI identity map，AnyPages 后的地址仍能被访问。
+         *
+         * NOTE: For PT_LOAD segments with filesz=0 (e.g. .bss split out
+         * via PHDRS in linker64.ld), the physical landing spot does not
+         * carry any file payload — the kernel's boot page tables already
+         * map the virtual range, and entry64.S zero-fills via virt addr.
+         * So AnyPages fallback is harmless for those. For non-bss
+         * segments (.text/.rodata/.data) AllocateAddress must succeed
+         * or the kernel's hard-coded page tables would deref bogus phys.
+         */
+        uint64_t requested_addr = aligned_addr;
         status = system_table->boot_services->allocate_pages(
             1, /* AllocateAddress */
             memory_type,
             pages,
             &aligned_addr);
         if (status != EFI_SUCCESS) {
+            uefi64_serial_write("[UEFI][elf] AllocateAddress FAILED vaddr=");
+            uefi64_serial_write_hex64(ph->vaddr);
+            uefi64_serial_write(" req=");
+            uefi64_serial_write_hex64(requested_addr);
+            uefi64_serial_write(" pages=");
+            uefi64_serial_write_hex64(pages);
+            uefi64_serial_write(" status=");
+            uefi64_serial_write_hex64(status);
+            uefi64_serial_write(" → fallback AllocateAnyPages\n");
             /* 回退：AnyPages，让 UEFI 选位置 */
+            aligned_addr = requested_addr; /* reset (impl may clobber) */
             status = system_table->boot_services->allocate_pages(
                 0, /* AllocateAnyPages */
                 memory_type,
                 pages,
                 &aligned_addr);
             if (status != EFI_SUCCESS) {
+                uefi64_serial_write("[UEFI][elf] AllocateAnyPages FAILED status=");
+                uefi64_serial_write_hex64(status);
+                uefi64_serial_write("\n");
                 return status;
             }
             /* AnyPages 下 load_addr 不再是原始 paddr，调整 dest */
