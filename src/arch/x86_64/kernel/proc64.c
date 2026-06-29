@@ -126,6 +126,19 @@ uint32_t arch_x86_64_proc_current_ppid(void) { return proc_table[current_index].
 uint32_t arch_x86_64_proc_current_uid(void)  { return proc_table[current_index].uid; }
 uint32_t arch_x86_64_proc_current_gid(void)  { return proc_table[current_index].gid; }
 
+struct x86_64_address_space *arch_x86_64_proc_current_get_as(void) {
+    return proc_table[current_index].as;
+}
+
+void arch_x86_64_proc_current_set_as(struct x86_64_address_space *as) {
+    /* H.5b.2 step A: bind AS to current PCB. Ownership transfers in;
+     * proc_exit() / future destroy paths will free it. We deliberately
+     * do NOT activate CR3 here — step A keeps the boot identity path
+     * live so ring3 still runs unchanged. Step B will follow with an
+     * arch_x86_64_as_activate(as) in usermode_run() right before iretq. */
+    proc_table[current_index].as = as;
+}
+
 int arch_x86_64_proc_yield(void) {
     ++yield_count;
     /* Hand off to the cooperative kthread runqueue. If no other

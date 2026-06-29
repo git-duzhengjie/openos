@@ -23,6 +23,7 @@
 
 #include "../include/early_console64.h"
 #include "../include/elf64_loader.h"
+#include "../include/address_space64.h"
 #include "../include/fdtable64.h"
 #include "../include/heap64.h"
 #include "../include/initrd64.h"
@@ -233,7 +234,15 @@ static uint64_t do_exec(uint64_t path_ptr, uint64_t argv_ptr, uint64_t envp_ptr)
         early_console64_write("\n");
         return (uint64_t)-1;
     }
-    elf64_load_result_t lr = arch_x86_64_elf64_load_image(file->data, file->size);
+    /*
+     * H.5b.2 step A: create a fresh AS for the replacement image and mirror
+     * the PT_LOADs into it via _load_image_into. CR3 is NOT switched here;
+     * the legacy boot-identity ring3 path continues to back the actual
+     * iretq. Step B will: (1) destroy old PCB.as, (2) set PCB.as=new_as,
+     * (3) arch_x86_64_as_activate(new_as) right before iretq.
+     */
+    struct x86_64_address_space *new_as = arch_x86_64_as_create();
+    elf64_load_result_t lr = arch_x86_64_elf64_load_image_into(file->data, file->size, new_as);
     if (lr.status != ELF64_LOADER_OK) {
         arch_x86_64_usermode_note_exec_fail();
         early_console64_write("[x86_64][exec] elf-load-failed path=");
@@ -241,7 +250,18 @@ static uint64_t do_exec(uint64_t path_ptr, uint64_t argv_ptr, uint64_t envp_ptr)
         early_console64_write(" status=");
         early_console64_write_hex64((uint64_t)(uint32_t)lr.status);
         early_console64_write("\n");
+        if (new_as != ((struct x86_64_address_space *)0)) {
+            arch_x86_64_as_destroy(new_as);
+        }
         return (uint64_t)-1;
+    }
+    {
+        /* Replace PCB.as: take ownership of new_as, destroy the old one. */
+        struct x86_64_address_space *old_as = arch_x86_64_proc_current_get_as();
+        arch_x86_64_proc_current_set_as(new_as);
+        if (old_as != ((struct x86_64_address_space *)0)) {
+            arch_x86_64_as_destroy(old_as);
+        }
     }
     early_console64_write("[x86_64][exec] path=");
     early_console64_write(path);

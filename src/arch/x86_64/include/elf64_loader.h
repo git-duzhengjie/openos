@@ -5,6 +5,9 @@
 
 #include "arch64_types.h"
 
+/* Forward decl — full definition lives in address_space64.h. */
+struct x86_64_address_space;
+
 #define OPENOS_ELF64_MAGIC0 0x7FU
 #define OPENOS_ELF64_MAGIC1 'E'
 #define OPENOS_ELF64_MAGIC2 'L'
@@ -56,6 +59,20 @@ typedef struct elf64_loader_info {
 
 void arch_x86_64_elf64_loader_init(void);
 elf64_load_result_t arch_x86_64_elf64_load_image(const void *image, x86_64_size_t image_size);
+
+/*
+ * H.5b.2 step A: variant that also mirrors every loaded PT_LOAD segment
+ * into the given target address space at va = USER_VBASE + p_vaddr.
+ * Phys==va writes into the low identity region still happen exactly as
+ * in arch_x86_64_elf64_load_image (so the legacy CR3=boot path keeps
+ * working byte-for-byte). If target_as is NULL this is equivalent to
+ * arch_x86_64_elf64_load_image. The mirrored mapping flags are derived
+ * from PHDR: PF_W -> AS_FLAG_RW, !PF_X -> AS_FLAG_NX.
+ */
+elf64_load_result_t arch_x86_64_elf64_load_image_into(
+    const void *image, x86_64_size_t image_size,
+    struct x86_64_address_space *target_as);
+
 const elf64_loader_info_t *arch_x86_64_elf64_loader_get_info(void);
 void arch_x86_64_elf64_loader_print_status(void);
 

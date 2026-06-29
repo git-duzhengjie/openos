@@ -1,5 +1,6 @@
 #include "../include/early_console64.h"
 #include "../include/elf64_loader.h"
+#include "../include/address_space64.h"
 #include "../include/pmm64.h"
 #include "../include/vmm64.h"
 
@@ -116,10 +117,22 @@ static elf64_loader_status_t validate_header(const elf64_ehdr_t *ehdr, x86_64_si
     return ELF64_LOADER_OK;
 }
 
+static uint64_t as_flags_from_phdr(const elf64_phdr_t *phdr) {
+    uint64_t flags = OPENOS_X86_64_AS_FLAG_US;
+    if ((phdr->p_flags & OPENOS_ELF64_PF_W) != 0) {
+        flags |= OPENOS_X86_64_AS_FLAG_RW;
+    }
+    if ((phdr->p_flags & OPENOS_ELF64_PF_X) == 0) {
+        flags |= OPENOS_X86_64_AS_FLAG_NX;
+    }
+    return flags;
+}
+
 static elf64_loader_status_t map_segment(const uint8_t *image,
                                          x86_64_size_t image_size,
                                          const elf64_phdr_t *phdr,
-                                         elf64_load_result_t *result) {
+                                         elf64_load_result_t *result,
+                                         struct x86_64_address_space *target_as) {
     x86_64_virt_addr_t seg_start;
     x86_64_virt_addr_t seg_end;
     x86_64_virt_addr_t va;
@@ -163,6 +176,21 @@ static elf64_loader_status_t map_segment(const uint8_t *image,
          * ...), ring3 still works via the boot identity map. */
         (void)arch_x86_64_vmm_map_page(va, phys, flags);
         ++elf64_loader_info.mapped_pages;
+
+        /*
+         * H.5b.2 step A: additionally mirror the segment into the target
+         * address space, at the high-half user VA derived from p_vaddr.
+         * Phys==va writes above keep the legacy boot-identity ring3 path
+         * alive byte-for-byte (zero behavior change DoD); this mirror is
+         * what step B will switch CR3 onto once the user link script
+         * relocates ELF entry/_start to OPENOS_X86_64_USER_VBASE+offset.
+         */
+        if (target_as != NULL) {
+            x86_64_virt_addr_t user_va = OPENOS_X86_64_USER_VBASE + va;
+            (void)arch_x86_64_as_map_user(target_as, user_va, phys,
+                                     OPENOS_X86_64_VMM_PAGE_SIZE,
+                                     as_flags_from_phdr(phdr));
+        }
     }
 
     /*
@@ -194,6 +222,12 @@ void arch_x86_64_elf64_loader_init(void) {
 }
 
 elf64_load_result_t arch_x86_64_elf64_load_image(const void *image, x86_64_size_t image_size) {
+    return arch_x86_64_elf64_load_image_into(image, image_size, NULL);
+}
+
+elf64_load_result_t arch_x86_64_elf64_load_image_into(
+    const void *image, x86_64_size_t image_size,
+    struct x86_64_address_space *target_as) {
     const uint8_t *bytes = (const uint8_t *)image;
     const elf64_ehdr_t *ehdr = (const elf64_ehdr_t *)image;
     elf64_load_result_t result;
@@ -223,7 +257,7 @@ elf64_load_result_t arch_x86_64_elf64_load_image(const void *image, x86_64_size_
         if (phdr->p_type != OPENOS_ELF64_PT_LOAD) {
             continue;
         }
-        status = map_segment(bytes, image_size, phdr, &result);
+        status = map_segment(bytes, image_size, phdr, &result, target_as);
         if (status != ELF64_LOADER_OK) {
             goto finish;
         }

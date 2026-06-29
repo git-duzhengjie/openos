@@ -79,6 +79,12 @@ uint32_t arch_x86_64_proc_current_ppid(void);
 uint32_t arch_x86_64_proc_current_uid(void);
 uint32_t arch_x86_64_proc_current_gid(void);
 
+/* H.5b.2: per-process address-space accessors. as_create() ownership
+ * is transferred into the PCB by set_as(); proc_exit() will destroy it
+ * if non-NULL. Returns NULL when no AS is bound (boot/legacy paths). */
+struct x86_64_address_space *arch_x86_64_proc_current_get_as(void);
+void arch_x86_64_proc_current_set_as(struct x86_64_address_space *as);
+
 /* Cooperative yield. No other runnable thread exists yet, so this just
  * bumps the global yield counter and returns. Wired up so callers can
  * compile against the real syscall today; sched64 will plug in later. */

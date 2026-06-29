@@ -1,4 +1,5 @@
 #include "../include/arch64.h"
+#include "../include/address_space64.h"
 #include "../include/compat32.h"
 #include "../include/early_console64.h"
 #include "../include/elf64_loader.h"
@@ -299,6 +300,10 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
     const char *initial_path = "/bin/launcher";
     const x86_64_initrd_file_t *initial_file = arch_x86_64_initrd_find(initial_path);
     elf64_load_result_t hello64;
+    /* H.5b.2 step A: AS shared across the else-branch and the
+     * post-load PCB-binding block. Declared NULL so the
+     * not-found / load-failure paths fall through cleanly. */
+    struct x86_64_address_space *initial_as = ((struct x86_64_address_space *)0);
     if (initial_file == NULL) {
         early_console64_write("[x86_64][user] initial program not found in initrd path=");
         early_console64_write(initial_path);
@@ -315,13 +320,31 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
         early_console64_write(" from initrd size=");
         early_console64_write_hex64((uint64_t)initial_file->size);
         early_console64_write("\n");
-        hello64 = arch_x86_64_elf64_load_image(initial_file->data, initial_file->size);
+        /*
+         * H.5b.2 step A: pre-create an address space for the initial
+         * user image. We mirror every PT_LOAD into it via the new
+         * arch_x86_64_elf64_load_image_into() helper so that step B can
+         * promote CR3 into this AS without losing any user page. The
+         * legacy boot-identity ring3 path stays live (phys==va writes
+         * still happen), so this commit must be a strict zero-behavior
+         * change for SMP=1/4 Stages 1-30.
+         */
+        initial_as = arch_x86_64_as_create();
+        if (initial_as == ((struct x86_64_address_space *)0)) {
+            early_console64_write("[x86_64][as] create FAILED -- falling back to boot identity\n");
+        }
+        hello64 = arch_x86_64_elf64_load_image_into(initial_file->data, initial_file->size, initial_as);
     }
     if (hello64.status == ELF64_LOADER_OK) {
         /* Step E.1: register the ring3 program as a real PCB so SYS_GETPID
          * returns the spawned pid (=2) instead of the old hard-coded 1.
          * H.3: pid is preserved across execve -- we spawn once. */
         uint32_t hello_pid = arch_x86_64_proc_spawn_user("launcher");
+        /* H.5b.2 step A: bind the pre-created AS to the launcher PCB
+         * now that current_index has switched to it. */
+        if (initial_as != ((struct x86_64_address_space *)0)) {
+            arch_x86_64_proc_current_set_as(initial_as);
+        }
         early_console64_write("[x86_64][proc] spawned launcher pid=");
         early_console64_write_hex64((uint64_t)hello_pid);
         early_console64_write("\n");

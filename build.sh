@@ -532,6 +532,7 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         "$ARCH64_BUILD/syscall_sysret64.o" \
         "$ARCH64_BUILD/pmm64.o" \
         "$ARCH64_BUILD/vmm64.o" \
+        "$ARCH64_BUILD/address_space64.o" \
         "$ARCH64_BUILD/heap64.o" \
         "$ARCH64_BUILD/elf64_loader.o" \
         "$ARCH64_BUILD/usermode64.o" \

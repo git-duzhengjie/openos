@@ -149,6 +149,11 @@ x86_64_address_space_t *arch_x86_64_as_create(void) {
     as->user_pages = 0;
     as->generation = 0;
     pool_used++;
+    early_console64_write("[x86_64][as] create pml4_pa=");
+    early_console64_write_hex64((uint64_t)pml4_phys);
+    early_console64_write(" pool_used=");
+    early_console64_write_hex64(pool_used);
+    early_console64_write("\n");
     return as;
 }
 
