@@ -139,9 +139,25 @@ x86_64_address_space_t *arch_x86_64_as_create(void) {
      * 0..4 GiB identity map (kernel + boot user stack + PMM frames) lives.
      * Everything else stays zero. */
     boot_va = phys_to_va(arch_x86_64_as_boot_pml4());
-    pml4_va[0] = boot_va[0];
-    for (i = 1; i < AS_ENTRIES_PER_TABLE; ++i) {
-        pml4_va[i] = 0;
+    /*
+     * H.5b.2 step B: pointer-copy every PML4 slot except PML4[1] from
+     * the boot PML4. Rationale:
+     *   PML4[0]    : boot 0..4 GiB identity (kernel low half + boot user
+     *                stack + PMM frames + initrd) -- must stay reachable.
+     *   PML4[1]    : user-space high half, owned by this AS (zero-init).
+     *   PML4[2..255] : currently empty in the boot PML4 (no canonical),
+     *                  but pointer-copy is harmless.
+     *   PML4[256..511]: kernel high half. The kernel image itself is
+     *                   linked at -2 GiB (PML4[511]), so failing to copy
+     *                   these slots would triple-fault on the very next
+     *                   instruction after `mov cr3`.
+     */
+    for (i = 0; i < AS_ENTRIES_PER_TABLE; ++i) {
+        if (i == 1U) {
+            pml4_va[i] = 0;
+        } else {
+            pml4_va[i] = boot_va[i];
+        }
     }
 
     as->pml4_phys = pml4_phys;

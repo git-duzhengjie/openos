@@ -2,6 +2,7 @@
 
 #include <stddef.h>
 
+#include "../include/address_space64.h"
 #include "../include/early_console64.h"
 #include "../include/gdt64.h"
 #include "../include/idt64.h"
@@ -170,6 +171,36 @@ int arch_x86_64_usermode_run(x86_64_entry_t entry) {
     if (user_rsp == 0) {
         return -3;
     }
+
+    /*
+     * H.5b.2 step B: ring3 now executes from PML4[1] (USER_VBASE). The
+     * bootstrap stack is still allocated in low identity-mapped memory
+     * (so seed_user_stack can write argv/envp via the low alias), but the
+     * VA handed to ring3 must live in the high half so that after we flip
+     * CR3 to the per-PCB AS the stack is still reachable.
+     *
+     * Map the 4 stack pages into the current task's AS at
+     * va = USER_VBASE + phys, then rewrite user_rsp to its high-half
+     * alias.
+     */
+    {
+        x86_64_address_space_t *as = arch_x86_64_proc_current_get_as();
+        if (as != NULL) {
+            uintptr_t stk_base_phys = (uintptr_t)bootstrap_user_stack_base;
+            for (uintptr_t off = 0; off < OPENOS_X86_64_USER_STACK_SIZE;
+                 off += OPENOS_X86_64_VMM_PAGE_SIZE) {
+                x86_64_virt_addr_t hi =
+                    (x86_64_virt_addr_t)(OPENOS_X86_64_USER_VBASE + stk_base_phys + off);
+                x86_64_phys_addr_t ph =
+                    (x86_64_phys_addr_t)(stk_base_phys + off);
+                (void)arch_x86_64_as_map_user(as, hi, ph,
+                    OPENOS_X86_64_VMM_PAGE_SIZE,
+                    OPENOS_X86_64_AS_FLAG_RW);
+            }
+            user_rsp = (x86_64_virt_addr_t)(OPENOS_X86_64_USER_VBASE + user_rsp);
+        }
+    }
+
     arch_x86_64_usermode_prepare_iretq(&prepared_user_frame,
                                        entry,
                                        user_rsp);
@@ -207,6 +238,19 @@ int arch_x86_64_usermode_run(x86_64_entry_t entry) {
      */
     int exited_local = 0;
     int code_local = 0;
+    /*
+     * H.5b.2 step B: flip CR3 onto the per-PCB address space right before
+     * the iretq drop. PML4[0] is the shared boot identity mirror, so kernel
+     * text/data/stack/IDT/GDT remain reachable both before and after the
+     * load. On SYS_EXIT we restore CR3 to the boot PML4 so the rest of
+     * the kernel code path returns to a known table.
+     */
+    {
+        x86_64_address_space_t *as = arch_x86_64_proc_current_get_as();
+        if (as != NULL) {
+            arch_x86_64_as_activate(as);
+        }
+    }
     /*
      * Step D.4: stack layout (low -> high) right before iretq_enter_user:
      *   [rsp+ 0] = label-1 RIP   <-- saved_rsp points here
@@ -252,6 +296,13 @@ int arch_x86_64_usermode_run(x86_64_entry_t entry) {
           "memory", "cc"
     );
     (void)exited_local; (void)code_local;
+
+    /*
+     * H.5b.2 step B: ring3 has returned (via SYS_EXIT trampoline). Drop
+     * back onto the boot PML4 so subsequent kernel paths -- selftest,
+     * exec respawn, idle, smp -- see the same CR3 they entered with.
+     */
+    arch_x86_64_as_activate_boot();
 
     /* Step G.x: end of the ring3 round-trip. Mark canary=2 and sample the
      * kfault counter again. The exported helpers below let the selftest

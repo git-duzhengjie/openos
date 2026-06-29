@@ -352,8 +352,8 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
     ARCH64_BIN_BUILD="$ARCH64_BUILD/bin"
     ARCH64_CFLAGS="-m64 -mcmodel=kernel -mno-red-zone -ffreestanding -nostdlib -Wall -Wextra -O2 -fno-pic -fno-pie -fno-PIE -fno-stack-protector -fno-builtin -I$ARCH64_SRC/include -Isrc/kernel/include"
     ARCH64_ASFLAGS="-m64 -mcmodel=kernel -mno-red-zone -fno-pic -fno-pie -fno-PIE -I$ARCH64_SRC/include -Isrc/kernel/include"
-    ARCH64_USER_CFLAGS="-m64 -ffreestanding -nostdlib -Wall -Wextra -O2 -fno-pic -fno-pie -fno-PIE -fno-stack-protector -fno-builtin -I$ARCH64_SRC/user"
-    ARCH64_USER_ASFLAGS="-m64 -fno-pic -fno-pie -fno-PIE -I$ARCH64_SRC/user"
+    ARCH64_USER_CFLAGS="-m64 -mcmodel=large -ffreestanding -nostdlib -Wall -Wextra -O2 -fno-pic -fno-pie -fno-PIE -fno-stack-protector -fno-builtin -I$ARCH64_SRC/user"
+    ARCH64_USER_ASFLAGS="-m64 -mcmodel=large -fno-pic -fno-pie -fno-PIE -I$ARCH64_SRC/user"
     ARCH64_LDFLAGS="-m elf_x86_64 -T $ARCH64_SRC/linker64.ld -nostdlib"
     ARCH64_USER_LDFLAGS="-m elf_x86_64 -T $ARCH64_SRC/user/user64.ld -nostdlib"
     # UEFI 编译链：使用 mingw-w64 直接产出标准 PE/COFF 格式 BOOTX64.EFI

@@ -154,53 +154,49 @@ static elf64_loader_status_t map_segment(const uint8_t *image,
         return ELF64_LOADER_ERR_BAD_SEGMENT;
     }
 
+    /*
+     * H.5b.2 step B: the user link script now places PT_LOADs at
+     * USER_VBASE+0x400000 (high-half, PML4[1]). The kernel boot PML4 has
+     * nothing mapped there yet, so we cannot write the ELF bytes through
+     * p_vaddr anymore. Instead we keep the same *physical* footprint as
+     * before -- phys := p_vaddr - USER_VBASE, still inside the boot 0..4 GiB
+     * identity window -- and write the image bytes through that low-half
+     * identity alias. The per-PCB AS then maps the high-half user VA to
+     * exactly those phys pages, so ring3 sees the segment once CR3 flips.
+     */
+    if (phdr->p_vaddr < OPENOS_X86_64_USER_VBASE) {
+        return ELF64_LOADER_ERR_BAD_SEGMENT;
+    }
+
     seg_start = align_down_addr(phdr->p_vaddr);
     seg_end = align_up_addr(phdr->p_vaddr + phdr->p_memsz);
     flags = flags_from_phdr(phdr);
 
     for (va = seg_start; va < seg_end; va += OPENOS_X86_64_VMM_PAGE_SIZE) {
-        /*
-         * Step D.2: we are still running on the boot trampoline page tables
-         * (vmm PML4 not yet promoted to CR3 -- Step D.3). Those tables
-         * identity-map phys 0..4 GiB with U=1, so the simplest way to make
-         * ring3 see the segment is to demand phys == va and write the bytes
-         * directly through the identity mapping. p_vaddr lives in [0..16 MiB)
-         * for our hello64 layout, well inside the identity region; reserve
-         * the exact phys page so PMM/other subsystems don't hand it out.
-         */
-        x86_64_phys_addr_t phys = (x86_64_phys_addr_t)va;
+        x86_64_phys_addr_t phys =
+            (x86_64_phys_addr_t)(va - OPENOS_X86_64_USER_VBASE);
         arch_x86_64_pmm_reserve_range(phys, OPENOS_X86_64_VMM_PAGE_SIZE);
-        /* Best-effort: also publish the mapping in the vmm PML4 so that
-         * Step D.3 can promote CR3 without losing this region. Ignore the
-         * return value here -- if vmm rejects (already mapped, table full,
-         * ...), ring3 still works via the boot identity map. */
-        (void)arch_x86_64_vmm_map_page(va, phys, flags);
         ++elf64_loader_info.mapped_pages;
 
-        /*
-         * H.5b.2 step A: additionally mirror the segment into the target
-         * address space, at the high-half user VA derived from p_vaddr.
-         * Phys==va writes above keep the legacy boot-identity ring3 path
-         * alive byte-for-byte (zero behavior change DoD); this mirror is
-         * what step B will switch CR3 onto once the user link script
-         * relocates ELF entry/_start to OPENOS_X86_64_USER_VBASE+offset.
-         */
         if (target_as != NULL) {
-            x86_64_virt_addr_t user_va = OPENOS_X86_64_USER_VBASE + va;
-            (void)arch_x86_64_as_map_user(target_as, user_va, phys,
+            (void)arch_x86_64_as_map_user(target_as, va, phys,
                                      OPENOS_X86_64_VMM_PAGE_SIZE,
                                      as_flags_from_phdr(phdr));
         }
+        (void)flags;  /* boot-vmm mirror retired in step B */
     }
 
     /*
-     * Boot tables identity-map this range, so writing through p_vaddr lands
-     * in the reserved phys pages the loader just took.
+     * Zero+copy the image bytes through the low-half boot identity alias
+     * (phys < 4 GiB by construction of the reserve above).
      */
-    mem_zero((void *)(uintptr_t)phdr->p_vaddr, (x86_64_size_t)phdr->p_memsz);
-    mem_copy((void *)(uintptr_t)phdr->p_vaddr,
-             image + phdr->p_offset,
-             (x86_64_size_t)phdr->p_filesz);
+    {
+        uintptr_t low = (uintptr_t)(phdr->p_vaddr - OPENOS_X86_64_USER_VBASE);
+        mem_zero((void *)low, (x86_64_size_t)phdr->p_memsz);
+        mem_copy((void *)low,
+                 image + phdr->p_offset,
+                 (x86_64_size_t)phdr->p_filesz);
+    }
 
     if (result->load_segments == 0 || seg_start < result->low_addr) {
         result->low_addr = seg_start;

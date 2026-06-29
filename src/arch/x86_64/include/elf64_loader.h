@@ -26,8 +26,9 @@ struct x86_64_address_space;
 #define OPENOS_ELF64_PF_W 0x2U
 #define OPENOS_ELF64_PF_R 0x4U
 
-#define OPENOS_X86_64_USER_BASE 0x0000000000400000ULL
-#define OPENOS_X86_64_USER_TOP  0x0000800000000000ULL
+/* H.5b.2 step B: user code/data now lives in PML4[1] high-half. */
+#define OPENOS_X86_64_USER_BASE 0x0000008000400000ULL
+#define OPENOS_X86_64_USER_TOP  0x0000008100000000ULL
 
 typedef enum elf64_loader_status {
     ELF64_LOADER_OK = 0,
@@ -61,13 +62,14 @@ void arch_x86_64_elf64_loader_init(void);
 elf64_load_result_t arch_x86_64_elf64_load_image(const void *image, x86_64_size_t image_size);
 
 /*
- * H.5b.2 step A: variant that also mirrors every loaded PT_LOAD segment
- * into the given target address space at va = USER_VBASE + p_vaddr.
- * Phys==va writes into the low identity region still happen exactly as
- * in arch_x86_64_elf64_load_image (so the legacy CR3=boot path keeps
- * working byte-for-byte). If target_as is NULL this is equivalent to
- * arch_x86_64_elf64_load_image. The mirrored mapping flags are derived
- * from PHDR: PF_W -> AS_FLAG_RW, !PF_X -> AS_FLAG_NX.
+ * H.5b.2 step B: PT_LOAD p_vaddr now lives in the high half
+ * (>= OPENOS_X86_64_USER_VBASE). The image bytes are still written via
+ * the low-half boot identity alias (phys = p_vaddr - USER_VBASE, kept
+ * < 4 GiB by ld script), and the per-PCB target_as gets the high-half
+ * VA -> low-half phys mapping with AS flags derived from PHDR
+ * (PF_W -> AS_FLAG_RW, !PF_X -> AS_FLAG_NX, US always set). The boot
+ * vmm PML4 is no longer touched for user segments; CR3 must flip onto
+ * target_as before ring3 can fetch entry.
  */
 elf64_load_result_t arch_x86_64_elf64_load_image_into(
     const void *image, x86_64_size_t image_size,
