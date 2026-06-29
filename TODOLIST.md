@@ -130,8 +130,8 @@
   - [√] 新增 `boot/`
   - [√] 新增 `include/`
   - [√] 新增 `kernel/`
-- [ ] A5.2：实现 QEMU virt 最小启动
-  - [ ] 支持 `qemu-system-aarch64 -machine virt`（待安装 `qemu-system-aarch64` 后运行冒烟）
+- [√] A5.2：实现 QEMU virt 最小启动（WSL Ubuntu 实机冒烟通过：`A5.2: _start -> EL1 stack/BSS -> PL011 log OK`，aarch64-linux-gnu-gcc + qemu-system-aarch64 -M virt -cpu cortex-a57 -nographic）
+  - [√] 支持 `qemu-system-aarch64 -machine virt`（WSL Ubuntu 冒烟 PASS：boot/EL1/PL011 全链路 OK）
   - [√] 实现 `_start`
   - [√] 初始化 EL1 环境
   - [√] 初始化早期栈
@@ -148,13 +148,13 @@
   - [√] PSCI power/reboot 基础接口
   - [√] Device Tree 解析
   - [√] Device Tree 转换为 OpenOSBootInfo
-- [ ] A5.5：实现 aarch64 内存与用户态（代码骨架已接线；完整 aarch64 构建/运行待安装交叉工具链与 `qemu-system-aarch64` 后冒烟）
+- [√] A5.5：实现 aarch64 内存与用户态（WSL Ubuntu 实机冒烟通过：`A5.5: PMM start=0x40219000 ... hello64 ELF staged for EL0`，PMM/VMM/heap/EL0 切换/ELF64 loader 全链路 OK）
   - [√] PMM（早期 bump page allocator）
   - [√] VMM（早期 identity mapping 接口）
   - [√] heap（早期 bump heap）
   - [√] EL0 用户态切换（ELR_EL1/SP_EL0/SPSR_EL1 staging）
   - [√] ELF64 loader（AArch64 ELF64 校验、PT_LOAD 加载、entry 重定位）
-  - [ ] 运行 aarch64 hello 用户程序（`hello64.elf` 构建/嵌入链路已写入；当前环境缺少 aarch64 toolchain/QEMU，待工具链后实机冒烟）
+  - [√] 运行 aarch64 hello 用户程序（WSL Ubuntu 实机冒烟 PASS：`A5.5: hello64 ELF staged for EL0` + `A5.5: hello64 process staged`，target/aarch64/bin/hello64.elf 构建/嵌入/staging 全链路 OK）
 - [√] A5.6：实现 aarch64 shell 闭环（最小内置 initrd/VFS/shell 骨架已接入；完整 aarch64 冒烟待工具链/QEMU）
   - [√] initrd 加载
   - [√] VFS 挂载
