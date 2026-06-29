@@ -59,6 +59,7 @@ static uint16_t proc_alloc_slot(void) {
 void arch_x86_64_proc_init(void) {
     for (unsigned i = 0; i < OPENOS_X86_64_PROC_MAX; ++i) {
         proc_table[i].state = OPENOS_X86_64_PROC_FREE;
+        proc_table[i].as = (struct x86_64_address_space *)0;
     }
     /* slot 0 = kernel proc (pid=1, tid=1, ppid=0). */
     proc_table[0].pid = 1;
@@ -89,6 +90,9 @@ uint32_t arch_x86_64_proc_spawn_user(const char *name) {
     p->exit_code = 0;
     p->state = OPENOS_X86_64_PROC_RUNNING;
     proc_copy_name(p->name, name);
+    /* H.5b.1: AS slot reserved; CR3 still points at the shared
+     * boot-time PML4 until H.5b.3 wires up per-process AS. */
+    p->as = (struct x86_64_address_space *)0;
 
     current_index = slot;
     ++spawn_count;
@@ -104,6 +108,9 @@ void arch_x86_64_proc_exit(int code) {
     }
     p->exit_code = code;
     p->state = OPENOS_X86_64_PROC_FREE; /* immediate reap (no wait4 yet) */
+    /* H.5b.1: AS pointer is always NULL today; H.5b.3 will replace
+     * this with a destroy-AS call before rotating CR3 back. */
+    p->as = (struct x86_64_address_space *)0;
     ++exit_count;
     /* rotate back to the kernel proc */
     current_index = 0;

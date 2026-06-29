@@ -446,6 +446,7 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         kernel/handoff64.c \
         kernel/pmm64.c \
         kernel/vmm64.c \
+        kernel/address_space64.c \
         kernel/heap64.c \
         kernel/elf64_loader.c \
         kernel/usermode64.c \

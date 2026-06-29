@@ -31,6 +31,11 @@
 
 #include "arch64_types.h"
 
+/* Forward decl: H.5b.1 wiring. The full definition lives in
+ * address_space64.h; PCBs only need a pointer field today (NULL on every
+ * existing path; populated by later H.5b.* sub-steps). */
+struct x86_64_address_space;
+
 #define OPENOS_X86_64_PROC_MAX 8u
 #define OPENOS_X86_64_PROC_NAME_MAX 16u
 
@@ -49,6 +54,12 @@ typedef struct x86_64_proc {
     int32_t  exit_code;
     x86_64_proc_state_t state;
     char     name[OPENOS_X86_64_PROC_NAME_MAX];
+    /* H.5b.1: per-process address space pointer. Kept NULL on every
+     * code path until H.5b.3 enables CR3 switching; carrying the slot
+     * now lets the rest of the kernel be plumbed without further PCB
+     * layout churn. Owned by proc64 (allocated in spawn_user, freed in
+     * proc_exit). */
+    struct x86_64_address_space *as;
 } x86_64_proc_t;
 
 /* Lifecycle ---------------------------------------------------------- */
