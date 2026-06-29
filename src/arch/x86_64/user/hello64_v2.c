@@ -28,7 +28,7 @@ static void write_dec(int fd, long v) {
     (void)openos64_write(fd, buf, n);
 }
 
-int openos64_main(int argc, char **argv) {
+int openos64_main(int argc, char **argv, char **envp) {
     write_str(OPENOS64_STDOUT_FILENO,
               "[hello64_v2] H.4: I am the post-execve image, pid preserved\n");
 
@@ -57,6 +57,22 @@ int openos64_main(int argc, char **argv) {
         write_dec(OPENOS64_STDOUT_FILENO, (long)k);
         write_str(OPENOS64_STDOUT_FILENO, "]=");
         write_str(OPENOS64_STDOUT_FILENO, argv && argv[k] ? argv[k] : "(null)");
+        write_str(OPENOS64_STDOUT_FILENO, "\n");
+    }
+
+    /* H.5a: print envp vector to prove SysV envp frame is intact. */
+    int envc = 0;
+    if (envp) {
+        while (envp[envc]) ++envc;
+    }
+    write_str(OPENOS64_STDOUT_FILENO, "[hello64_v2] envc=");
+    write_dec(OPENOS64_STDOUT_FILENO, (long)envc);
+    write_str(OPENOS64_STDOUT_FILENO, "\n");
+    for (int k = 0; k < envc; ++k) {
+        write_str(OPENOS64_STDOUT_FILENO, "[hello64_v2] envp[");
+        write_dec(OPENOS64_STDOUT_FILENO, (long)k);
+        write_str(OPENOS64_STDOUT_FILENO, "]=");
+        write_str(OPENOS64_STDOUT_FILENO, envp[k]);
         write_str(OPENOS64_STDOUT_FILENO, "\n");
     }
 

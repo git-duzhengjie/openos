@@ -383,6 +383,10 @@ uint64_t arch_x86_64_usermode_kfault_delta(void) {
 static char     usermode_arg_storage[X86_64_USER_ARGV_MAX][X86_64_USER_ARG_MAX];
 static int      usermode_arg_count = 0;
 
+/* H.5a: envp snapshot table, same lifetime rationale as argv. */
+static char     usermode_env_storage[X86_64_USER_ENVP_MAX][X86_64_USER_ENV_MAX];
+static int      usermode_env_count = 0;
+
 static x86_64_size_t k_strlen_u(const char *s) {
     x86_64_size_t n = 0;
     if (!s) return 0;
@@ -427,6 +431,50 @@ void arch_x86_64_usermode_set_args(int argc, const char *const *argv) {
 }
 
 /*
+ * H.5a envp snapshot helpers, mirror of set_args/clear_args/pending_argc.
+ *
+ * Same single-threaded-by-construction rationale: today only the BSP
+ * touches this on the spawn path or while executing SYS_EXEC under a
+ * trap gate. When SMP scheduling lands these tables will migrate into
+ * the PCB along with argv.
+ */
+void arch_x86_64_usermode_clear_envs(void) {
+    usermode_env_count = 0;
+    for (unsigned i = 0; i < X86_64_USER_ENVP_MAX; ++i) {
+        usermode_env_storage[i][0] = '\0';
+    }
+}
+
+int arch_x86_64_usermode_pending_envc(void) {
+    return usermode_env_count;
+}
+
+void arch_x86_64_usermode_set_envs(int envc, const char *const *envp) {
+    arch_x86_64_usermode_clear_envs();
+    if (envc <= 0 || envp == NULL) {
+        return;
+    }
+    int cap = (int)X86_64_USER_ENVP_MAX;
+    int n = envc < cap ? envc : cap;
+    for (int i = 0; i < n; ++i) {
+        const char *src = envp[i];
+        if (src == NULL) {
+            usermode_env_storage[i][0] = '\0';
+            continue;
+        }
+        x86_64_size_t len = k_strlen_u(src);
+        if (len >= X86_64_USER_ENV_MAX) {
+            len = X86_64_USER_ENV_MAX - 1;
+        }
+        for (x86_64_size_t j = 0; j < len; ++j) {
+            usermode_env_storage[i][j] = src[j];
+        }
+        usermode_env_storage[i][len] = '\0';
+    }
+    usermode_env_count = n;
+}
+
+/*
  * Compose the SysV program-startup frame at the top of the user stack.
  *
  * Stack image (high address at top):
@@ -457,8 +505,25 @@ x86_64_virt_addr_t arch_x86_64_usermode_seed_user_stack(x86_64_virt_addr_t stack
     if (argc < 0) argc = 0;
     if (argc > (int)X86_64_USER_ARGV_MAX) argc = (int)X86_64_USER_ARGV_MAX;
 
-    /* 1) copy argv strings to the very top of the user stack. */
+    int envc = usermode_env_count;
+    if (envc < 0) envc = 0;
+    if (envc > (int)X86_64_USER_ENVP_MAX) envc = (int)X86_64_USER_ENVP_MAX;
+
+    /* 1) Copy env strings to the very top of the user stack first, then
+     *    argv strings below them. Both grow downward. */
     uint8_t *sp = (uint8_t *)(uintptr_t)stack_top_in;
+
+    uintptr_t env_va[X86_64_USER_ENVP_MAX];
+    for (int i = envc - 1; i >= 0; --i) {
+        const char *s = usermode_env_storage[i];
+        x86_64_size_t len = k_strlen_u(s) + 1; /* incl. NUL */
+        sp -= len;
+        for (x86_64_size_t j = 0; j < len; ++j) {
+            sp[j] = (uint8_t)s[j];
+        }
+        env_va[i] = (uintptr_t)sp;
+    }
+
     uintptr_t arg_va[X86_64_USER_ARGV_MAX];
     for (int i = argc - 1; i >= 0; --i) {
         const char *s = usermode_arg_storage[i];
@@ -471,43 +536,56 @@ x86_64_virt_addr_t arch_x86_64_usermode_seed_user_stack(x86_64_virt_addr_t stack
     }
 
     /* 2) 16-byte alignment scratch so the final RSP lands on a 16-byte
-     *    boundary regardless of how many argv slots / bytes we pushed.
+     *    boundary regardless of how many slots / bytes we pushed.
      *
-     *    Math: after this base align we will push (argc + 1) argv slots
-     *    (incl. the NULL terminator) plus 1 slot for argc itself, each
-     *    8 bytes. Total = 8*(argc + 2). For the result to be 16-aligned
-     *    we need (argc + 2) % 2 == 0, i.e. argc must be even. When argc
-     *    is odd we prepend an 8-byte zero pad here (it lives between the
-     *    string area and argv[N]=NULL, so doesn't affect argv pointers). */
+     *    H.5a math: after the base align we push, top-down:
+     *      envp NULL terminator   : 1 slot
+     *      envp[envc-1 .. 0]      : envc slots
+     *      argv NULL terminator   : 1 slot
+     *      argv[argc-1 .. 0]      : argc slots
+     *      argc                   : 1 slot
+     *    Total = 8 * (argc + envc + 3) bytes. For 16-alignment we need
+     *    (argc + envc + 3) to be even, i.e. (argc + envc) odd. When the
+     *    sum is even we prepend an 8-byte zero pad here (lives above
+     *    the envp NULL terminator, doesn't affect any pointer slot). */
     uintptr_t cursor = (uintptr_t)sp;
     cursor &= ~((uintptr_t)15);
-    if ((argc & 1) != 0) {
+    if (((argc + envc) & 1) == 0) {
         cursor -= 8;
         *(uint64_t *)cursor = 0;
     }
 
-    /* 3) argv[argc] = NULL terminator, then argv[argc-1..0] in descending
-     *    address order so argv[0] sits at the lowest address (which is
-     *    what argv[] expects in C). */
+    /* 3) envp[envc] = NULL terminator, then envp[envc-1..0]. */
+    cursor -= 8;
+    *(uint64_t *)cursor = 0;
+    for (int i = envc - 1; i >= 0; --i) {
+        cursor -= 8;
+        *(uint64_t *)cursor = (uint64_t)env_va[i];
+    }
+    uintptr_t envp_base = cursor; /* envp[0] (or terminator when envc==0) */
+
+    /* 4) argv[argc] = NULL terminator, then argv[argc-1..0]. */
     cursor -= 8;
     *(uint64_t *)cursor = 0;
     for (int i = argc - 1; i >= 0; --i) {
         cursor -= 8;
         *(uint64_t *)cursor = (uint64_t)arg_va[i];
     }
-    uintptr_t argv_base = cursor; /* points to argv[0] */
+    uintptr_t argv_base = cursor; /* argv[0] */
 
-    /* 4) push argc; this is what (rsp) reads in crt0.S. The expected
-     *    layout is argc at (rsp), argv at 8(rsp). To make that hold
-     *    we must ensure argv_base == argc_slot + 8. cursor currently
-     *    points to argv[0]; subtract 8 -> argc slot. */
+    /* 5) push argc; (rsp) reads it in crt0.S. Final SysV layout for crt0:
+     *      0(rsp)                       = argc
+     *      8(rsp)                       = argv[0]
+     *      8 + (argc+1)*8 (rsp)         = envp[0]
+     */
     cursor -= 8;
     *(uint64_t *)cursor = (uint64_t)(uint32_t)argc;
 
-    /* sanity: argv_base should be exactly cursor + 8 by construction. */
+    /* sanity: argv_base == cursor + 8, envp_base == argv_base + (argc+1)*8. */
     (void)argv_base;
+    (void)envp_base;
 
-    /* 5) final alignment check: SysV mandates rsp % 16 == 0 *at* _start. */
+    /* 6) final alignment check: SysV mandates rsp % 16 == 0 *at* _start. */
     if ((cursor & 15ULL) != 0ULL) {
         /* Should never happen given the design but bail gracefully. */
         return 0;
@@ -515,14 +593,17 @@ x86_64_virt_addr_t arch_x86_64_usermode_seed_user_stack(x86_64_virt_addr_t stack
 
     early_console64_write("[x86_64][usermode] seed_user_stack argc=");
     early_console64_write_hex64((uint64_t)(uint32_t)argc);
+    early_console64_write(" envc=");
+    early_console64_write_hex64((uint64_t)(uint32_t)envc);
     early_console64_write(" rsp=");
     early_console64_write_hex64((uint64_t)cursor);
     early_console64_write("\n");
 
-    /* H.4: arg table is one-shot per usermode_run/exec round. Clear it
-     * here so a subsequent run/exec that forgets to set args sees a
-     * clean argc=0 frame. */
+    /* H.5a: arg+env tables are one-shot per usermode_run/exec round. Clear
+     * them here so a subsequent run/exec that forgets to set them sees a
+     * clean argc=0 envc=0 frame. */
     arch_x86_64_usermode_clear_args();
+    arch_x86_64_usermode_clear_envs();
 
     return (x86_64_virt_addr_t)cursor;
 }

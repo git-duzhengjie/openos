@@ -22,12 +22,12 @@ const openos64_runtime_info_t *openos64_runtime_get_info(void) {
 }
 
 /*
- * H.4: receive argc/argv from the ABI-defined positions on the user
- * stack (set up by crt0.S which loads them from %rsp into rdi/rsi)
+ * H.5a: receive argc/argv/envp from the ABI-defined positions on the user
+ * stack (set up by crt0.S which loads them from %rsp into rdi/rsi/rdx)
  * and forward them to the user main. Programs that don't care can
- * still cast (argc, argv) to (void) just like Linux user-space.
+ * still cast (argc, argv, envp) to (void) just like Linux user-space.
  */
-void openos64_start(int argc, char **argv) {
-    int rc = openos64_main(argc, argv);
+void openos64_start(int argc, char **argv, char **envp) {
+    int rc = openos64_main(argc, argv, envp);
     openos64_exit(rc);
 }

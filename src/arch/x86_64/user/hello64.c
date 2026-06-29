@@ -23,9 +23,10 @@ static void write_str(int fd, const char *s) {
     (void)openos64_write(fd, s, n);
 }
 
-int openos64_main(int argc, char **argv) {
+int openos64_main(int argc, char **argv, char **envp) {
     (void)argc;
     (void)argv;
+    (void)envp;
 
     write_str(OPENOS64_STDOUT_FILENO,
               "[hello64] step C: open/read/write demo\n");

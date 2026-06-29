@@ -140,7 +140,6 @@ static uint64_t do_close(uint64_t fd) {
  * the *current* image and can handle it (typically by calling exit()).
  */
 static uint64_t do_exec(uint64_t path_ptr, uint64_t argv_ptr, uint64_t envp_ptr) {
-    (void)envp_ptr;
     if (path_ptr == 0) {
         arch_x86_64_usermode_note_exec_fail();
         return (uint64_t)-1;
@@ -199,6 +198,33 @@ static uint64_t do_exec(uint64_t path_ptr, uint64_t argv_ptr, uint64_t envp_ptr)
         }
     }
 
+    /*
+     * H.5a: snapshot envp onto kernel-side storage with the same lifetime
+     * rationale as argv above. NULL envp -> envc=0. We reuse the
+     * ARG_MAX-sized slots for env strings; KEY=VALUE pairs longer than
+     * that get truncated silently (no E2BIG yet).
+     */
+    static char envp_storage[X86_64_USER_ENVP_MAX][X86_64_USER_ENV_MAX];
+    static const char *envp_ptrs[X86_64_USER_ENVP_MAX];
+    int envc_kern = 0;
+    if (envp_ptr != 0) {
+        const char *const *uenvp =
+            (const char *const *)(uintptr_t)envp_ptr;
+        for (unsigned i = 0; i < X86_64_USER_ENVP_MAX; ++i) {
+            const char *u = uenvp[i];
+            if (u == NULL) break;
+            x86_64_size_t j = 0;
+            for (; j < X86_64_USER_ENV_MAX - 1u; ++j) {
+                char c = u[j];
+                envp_storage[i][j] = c;
+                if (c == '\0') break;
+            }
+            envp_storage[i][X86_64_USER_ENV_MAX - 1u] = '\0';
+            envp_ptrs[i] = envp_storage[i];
+            envc_kern = (int)i + 1;
+        }
+    }
+
     const x86_64_initrd_file_t *file = arch_x86_64_initrd_find(path);
     if (file == NULL) {
         arch_x86_64_usermode_note_exec_fail();
@@ -225,16 +251,19 @@ static uint64_t do_exec(uint64_t path_ptr, uint64_t argv_ptr, uint64_t envp_ptr)
     early_console64_write_hex64((uint64_t)file->size);
     early_console64_write(" argc=");
     early_console64_write_hex64((uint64_t)(uint32_t)argc_kern);
+    early_console64_write(" envc=");
+    early_console64_write_hex64((uint64_t)(uint32_t)envc_kern);
     early_console64_write("\n");
 
     /*
-     * Commit the replacement. set_args queues argv for the next
-     * usermode_run; mark_exec stashes the new entry and flips
+     * Commit the replacement. set_args / set_envs queue argv/envp for the
+     * next usermode_run; mark_exec stashes the new entry and flips
      * usermode_exited=1 / pending_exec=1, then return_to_kernel longjmps
      * back to usermode_run()'s saved kernel frame. Crucially we do NOT
      * call proc_exit -- the pid lives on.
      */
     arch_x86_64_usermode_set_args(argc_kern, argv_ptrs);
+    arch_x86_64_usermode_set_envs(envc_kern, envp_ptrs);
     arch_x86_64_usermode_mark_exec(lr.entry);
     arch_x86_64_usermode_return_to_kernel();
     return 0;  /* unreachable */

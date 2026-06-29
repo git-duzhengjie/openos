@@ -1500,5 +1500,23 @@
     - [√] `readelf -lW kernel64.elf` 验证：PT_LOAD ×4（text/rodata/data/bss），bss 段 p_filesz=0 已落实
     - [√] 串口证据：`[launcher] argv[0]=/bin/launcher` ✓ / `[hello64_v2] argv[0..3]=hello64_v2/from/launcher/H.4` ✓ / `exit_code=0x2A` / `kfault_delta=0` / `exec_count=1 exec_fail=0`
     - [√] SMP=1 + SMP=4 双矩阵 Stages 1-30 全 PASS，基线条款保住
-  - [ ] H.5+ 待规划：envp 链路、独立地址空间 + CR3 切换、fork、wait/waitpid、ELF 解释器、动态库
+  - [ ] H.5+ 待规划：~~envp 链路~~（✓ H.5a）、独立地址空间 + CR3 切换、fork、wait/waitpid、ELF 解释器、动态库
+  - [√] **H.5a envp 真传参链路（initial spawn + execve 双路径）**（commit 待写入）
+    - [√] `usermode64.h`：新增 `X86_64_USER_ENVP_MAX=8` / `X86_64_USER_ENV_MAX=128` 限额 + `arch_x86_64_usermode_set_envs/clear_envs/pending_envc` 三件套 API（与 argv 三件套对称）
+    - [√] `usermode64.c`：新增 `usermode_env_storage[ENVP_MAX][ENV_MAX]` 静态缓冲（与 argv storage 同生命周期）；`seed_user_stack` 改造为标准 SysV 完整 program-startup frame：① env strings 拷到栈顶（最高地址）② argv strings 紧跟其下 ③ 16B 对齐 padding（依据 `(argc+envc) & 1` 决定是否补 8B 字）④ NULL envp terminator + envp 指针数组 ⑤ NULL argv terminator + argv 指针数组 ⑥ argc word —— crt0 通过 `envp = argv + (argc+1)*8` 计算出 envp
+    - [√] `syscall_dispatch64.c`：SYS_EXEC dispatch 在拷 argv 后再拷 envp 字符串到内核侧 `envp_storage[ENVP_MAX][ENV_MAX]` 静态缓冲然后 `set_envs(envc, envp_ptrs)`；日志输出 `[x86_64][exec] ... argc=N envc=M`
+    - [√] `kernel64.c`：initial spawn 前补调 `arch_x86_64_usermode_set_envs(2, {"BOOT_STAGE=H.5a", "OPENOS_BOOT=uefi"})`，验证 spawn 路径与 execve 路径 envp 处理一致
+    - [√] `user/crt0.S`：扩展为 SysV 三参 ABI —— `(rsp)=argc` → rdi、`8(rsp)=argv` → rsi、`envp = argv + (argc+1)*8` → rdx，然后 `andq $-16, %rsp` 对齐 → call openos64_start
+    - [√] `user/crt0.c` + `user/openos64.h`：`openos64_start` / `openos64_main` 签名扩展为 `(int argc, char **argv, char **envp)`，三个 main 都升级（hello64 / hello64_v2 / launcher）
+    - [√] `user/launcher.c`：execve 第三参数从 NULL 改为 `{"PATH=/bin", "HOME=/", "OPENOS_STAGE=H.5a", NULL}`；自身也打印 argc/argv + envc/envp 证明 initial spawn 链路
+    - [√] `user/hello64_v2.c`：增加 envp 遍历打印 `for j in envc: print envp[j]`
+    - [√] 串口证据：
+      - `[launcher] argc=1 / argv[0]=/bin/launcher` ✓
+      - `[launcher] envc=2 / envp[0]=BOOT_STAGE=H.5a / envp[1]=OPENOS_BOOT=uefi` ✓
+      - `[x86_64][exec] path=/bin/hello64_v2 ... argc=0x4 envc=0x3` ✓
+      - `[hello64_v2] argc=4 argv[0..3]=hello64_v2/from/launcher/H.4` ✓
+      - `[hello64_v2] envc=3 envp[0..2]=PATH=/bin/HOME=//OPENOS_STAGE=H.5a` ✓
+      - `exit_code=0x2A` / `exec_count=1 exec_fail=0` / `pending_exec=0` / `kfault_delta=0` / `post-exit-sentry PASS`
+    - [√] SMP=1 + SMP=4 双矩阵 Stages 1-30 全 PASS，基线条款保住
+  - [ ] H.5b+ 待续：独立地址空间 + CR3 切换、fork、wait/waitpid、ELF 解释器、动态库
 

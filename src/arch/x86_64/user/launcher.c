@@ -30,7 +30,7 @@ static void write_dec(int fd, long v) {
     (void)openos64_write(fd, buf, n);
 }
 
-int openos64_main(int argc, char **argv) {
+int openos64_main(int argc, char **argv, char **envp) {
     write_str(OPENOS64_STDOUT_FILENO,
               "[launcher] H.4: hello from launcher\n");
 
@@ -46,6 +46,20 @@ int openos64_main(int argc, char **argv) {
         write_dec(OPENOS64_STDOUT_FILENO, (long)i);
         write_str(OPENOS64_STDOUT_FILENO, "]=");
         write_str(OPENOS64_STDOUT_FILENO, argv && argv[i] ? argv[i] : "(null)");
+        write_str(OPENOS64_STDOUT_FILENO, "\n");
+    }
+
+    /* H.5a: prove kernel-side initial-spawn envp seeding works too. */
+    int envc = 0;
+    if (envp) while (envp[envc]) ++envc;
+    write_str(OPENOS64_STDOUT_FILENO, "[launcher] envc=");
+    write_dec(OPENOS64_STDOUT_FILENO, (long)envc);
+    write_str(OPENOS64_STDOUT_FILENO, "\n");
+    for (int i = 0; i < envc; ++i) {
+        write_str(OPENOS64_STDOUT_FILENO, "[launcher] envp[");
+        write_dec(OPENOS64_STDOUT_FILENO, (long)i);
+        write_str(OPENOS64_STDOUT_FILENO, "]=");
+        write_str(OPENOS64_STDOUT_FILENO, envp[i]);
         write_str(OPENOS64_STDOUT_FILENO, "\n");
     }
 
@@ -65,9 +79,19 @@ int openos64_main(int argc, char **argv) {
         (const char *)0,
     };
 
+    /* H.5a: stage envp for the child so SYS_EXEC plumbs the full ABI
+     * frame. We pass three string slots that hello64_v2 will echo back
+     * to stdout; the kernel snapshots them just like argv. */
+    static const char *child_envp[] = {
+        "PATH=/bin",
+        "HOME=/",
+        "OPENOS_STAGE=H.5a",
+        (const char *)0,
+    };
+
     long rc = openos64_execve("/bin/hello64_v2",
                               (char *const *)child_argv,
-                              (char *const *)0);
+                              (char *const *)child_envp);
 
     /* Reaching here means execve failed. Print rc in hex for diagnosis. */
     static const char hexd[] = "0123456789abcdef";

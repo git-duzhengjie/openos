@@ -359,6 +359,19 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
                 (const char *)0,
             };
             arch_x86_64_usermode_set_args(1, initial_argv);
+
+            /*
+             * H.5a: seed an initial envp for the very first user image so
+             * launcher (and anyone after it that forgets to override) sees
+             * a non-empty environment. This proves the envp plumbing on
+             * the *spawn* path mirrors the *execve* path.
+             */
+            static const char *initial_envp[3] = {
+                "BOOT_STAGE=H.5a",
+                "OPENOS_BOOT=uefi",
+                (const char *)0,
+            };
+            arch_x86_64_usermode_set_envs(2, initial_envp);
         }
         const int kExecRoundCap = 4;
         int round = 0;

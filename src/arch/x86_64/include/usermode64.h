@@ -91,9 +91,25 @@ void arch_x86_64_usermode_note_exec_fail(void);
 #define X86_64_USER_ARGV_MAX 8u
 #define X86_64_USER_ARG_MAX  128u
 
+/* H.5a: independent env table sized like argv (kept symmetric for simplicity). */
+#define X86_64_USER_ENVP_MAX 8u
+#define X86_64_USER_ENV_MAX  128u
+
 void arch_x86_64_usermode_set_args(int argc, const char *const *argv);
 void arch_x86_64_usermode_clear_args(void);
 int arch_x86_64_usermode_pending_argc(void);
+
+/*
+ * H.5a env plumbing.
+ *
+ * Same lifetime rules as set_args: kernel snapshots the strings before the
+ * ELF loader gets to clobber them. envp == NULL or envc == 0 clears the
+ * table; the seeded user stack then collapses to envp = { NULL }.
+ */
+void arch_x86_64_usermode_set_envs(int envc, const char *const *envp);
+void arch_x86_64_usermode_clear_envs(void);
+int arch_x86_64_usermode_pending_envc(void);
+
 x86_64_virt_addr_t arch_x86_64_usermode_seed_user_stack(x86_64_virt_addr_t stack_top_in);
 
 #endif /* OPENOS_ARCH_X86_64_USERMODE64_H */
