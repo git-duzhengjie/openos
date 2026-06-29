@@ -1375,7 +1375,7 @@
   - [√] **修复 `x86_64_syscall_frame_t` 字段顺序错位**（push 反序 → 结构低到高，原先把 r11/RFLAGS=0x46 当成 num，导致全部 ENOSYS 后 ring3 撞 hlt #GP）
   - [√] 端到端 ring3 hello64 在 UEFI/OVMF 下完整跑通：WRITE → OPEN → READ → WRITE → CLOSE → WRITE → EXIT 全部正确分派
   - [√] **清理 SYS_EXIT 之后 `usermode_return_to_kernel` 栈恢复路径残留的内核态 #UD** — 实测 OVMF `-d int` 下 `v=06` 计数 = 0，post-EXIT 路径完全干净（commit `0b14358` 已修复，本轮 hook `scripts/run_uefi_int.sh` 留作长期回归探针）
-- [ ] **Step E（进行中）**：覆盖率继续上探
+- [√] **Step E + Step F + Step G 全量完成（基线锁定：Stages 1-30 SMP=1/4 双矩阵 PASS @ commit `b4e3ad8`）**：覆盖率上探到 ring3 LAPIC-timer preemption
   - [√] **E.1 proc64 接入**：新增 `proc64.{h,c}`（8 槽 PCB，slot 0=kernel pid=1），dispatch 的 `GETPID/GETTID/GETPPID/GETUID/GETGID/YIELD` 改为读 proc64 当前 PCB；`kernel64.c` ring3 启动前 `proc_spawn_user("hello64")` → pid=2/tid=2/ppid=1；`usermode64.c` `mark_exited` 调 `proc_exit` 回退到内核 PCB。`hello64` 加 step E 验证段：`[hello64] step E: pid=2 tid=2 ppid=1 yield=0` 精确字串作回归探针。
   - [√] **E.2 sched64 真实化**：`sched64.c` 新增 8 槽协作式 runqueue（slot 0 = bootstrap/kmain，slot 1..N = 动态 spawn 的 kthread，每个 8KB 堆栈）。新增 `arch_x86_64_sched_spawn_kthread()` / `arch_x86_64_sched_yield()`（round-robin 选下一个 READY 槽，无可调度时 no-op）/ `arch_x86_64_sched_exit_self()`（kthread 自回收）；`proc64.yield()` 改为转发到 `sched64.yield()`；trampoline 在 entry 返回后调用 `sched_exit_self`。`context_switch64.S` 复用 `from==NULL` 跳过 save 分支处理首次进入与 exit-self。新增 `sched_selftest64.{h,c}`：spawn 两个 kthread (A/B 各迭代 3 次)，boot context 协同 yield，预期 12 次 context switch、两个 kthread 全部 done。OVMF 下一次性 PASS：`A_iters=3 B_iters=3 switches=0xC PASS`，hello64 ring3 链路无回归，干净返回 kmain。
   - [√] **E.3 net64 桥接**：新增 `net64.{h,c}` — 8 槽 loopback DGRAM socket 表，每 socket 一个 16 项环形队列（pkt ≤ 256B），端口 1..65535（0=未绑定）。dispatch 单点新增 4 case：`SYS_SOCKET(283)` / `SYS_BIND(284)` / `SYS_SENDTO(290)` / `SYS_RECVFROM(291)`，全部走 user-buffer 校验；socket fd 与文件 fd 同空间隔离（高位标记 0x80000000）。`net_selftest64.{h,c}`：建 2 socket A(4242)/B(5353)，A→B 发 "ping"，B→A 回 "pong"，校验 payload + src_port；填满队列后多投一包触发 drop 计数。`hello64.c` 末尾新增 ring3 demo：bind 4242/5353 → A 投 "net64" → B recvfrom 校验。OVMF 下一次性 PASS：`[net-selftest] PASS sendto=5 recvfrom=5 drops=1`，ring3 `[hello64] step E.3: net loopback got='net64' src=0x1092`，sched-selftest / syscall-selftest / hello64 全链路无回归，干净返回 kmain。修复 ABI 错位（user header SENDTO 286→290 / RECVFROM 287→291 对齐内核）。
@@ -1384,6 +1384,23 @@
   - [√] **E.4-ring3 验证补丁**：`openos64.h` 新增 `OPENOS64_SYS_UPTIME_MS=317` 与 `openos64_uptime_ms()` inline wrapper；`hello64.c` 末尾追加 ring3 端到端 uptime 验证段：两次 `uptime_ms()` 之间嵌套 busy-loop+yield，校验 `t1>=t0`（monotonic），并打印 `[hello64] step E.4: t0=0x.. t1=0x.. dt>0/dt=0 OK`。OVMF 实测 `t0=0xBD t1=0xD8`（dt=27ms `dt>0 OK`）。新增 `scripts/run_uefi_int.sh` 作为 `-d int,cpu_reset` 异常追踪 + serial 回归探针，自动统计 `v=06` (#UD) 计数。
   - [√] **E.6 Step D 残留清理**：post-EXIT 内核态 #UD（曾报 rip=0x10781B 的 `movq saved,%rsp; ret` 路径）经 `scripts/run_uefi_int.sh` 跑 QEMU `-d int,cpu_reset` 验证 `v=06 count=0`，已完全消失；保留脚本作长期回归探针。
   - [√] **F.1 IDT + TSS + 异常 handler 骨架激活验证**：发现 `idt64.{c,h}` / `tss64.{c,h}` / `isr64.S`（32 个 CPU 异常 ISR stub + C dispatch + TSS rsp0/IST + lidt+ltr）历史上已完整接入启动序（`tss_init → idt_init → enable interrupts`），本里程碑补足读回验证：`include/idt64.h` 暴露 `arch_x86_64_idt_query_gate()` 非破坏性读回 API（重组 64bit offset、回报 selector/IST/type_attr）。新增 `kernel/idt_selftest64.c`：扫 vec 0..31（DPL=0）+ vec 0x80（DPL=3），校验 P 位、gate type (0xE/0xF)、selector==kernel CS、offset≥1 MiB。`kernel64.c` 在 `idt_init` 后立即调 `arch_x86_64_idt_selftest_run()`。OVMF 一次性 PASS：`[x86_64][idt-selftest] PASS exceptions=0x20 int80=ok` + `result=0x0`，sched/net/syscall/hello64 全链路无回归；`run_uefi_int.sh` `v=06 (#UD) count=0`；i386 build clean。
+  - [√] **F.2 LAPIC + IOAPIC + SMP AP 拉起 + PIT/HPET tickless 调度时钟**：`lapic64.{c,h}` TSC 校准 + LAPIC timer + self-IPI NMI + ring3 抢占；`smp64.{c,h}` AP 拉起 + per-CPU TSS/GDT/IDT 共享；`percpu64.{c,h}` percpu 区 + `_Static_assert` 锁死偏移（this_cpu/timer/dispatch counters）。OVMF SMP=1/4 一次性 PASS。
+  - [√] **F.3 SMP self-test harness（stages 1-20）**：`smp_selftest64.c` 覆盖 percpu 偏移、AP boot、LAPIC ID 一致性、TSC 单调、IPI broadcast/unicast、sched yield、kernel/user 切换、跨核 ABA 安全等 20 个 stage，SMP=1/4 双矩阵全绿，作为后续所有里程碑的强制回归基线。
+  - [√] **G.1-G.2 ring3 用户态最小闭环**：`usermode64.{S,h}` ring3 trampoline + iretq frame、`syscall64.{c,h}` + `syscall_sysret64.S` SYSCALL/SYSRET 路径、`gdt64.c` user CS/SS、`tss64.c` rsp0 切回；hello64 在 ring3 跑通 SYS_WRITE + SYS_EXIT。
+  - [√] **G.3 同步异常恢复原语全家桶**：vector 0(#DE)/3(#BP)/6(#UD)/13(#GP)/14(#PF) 全部接入 exception_dispatch，精确 RIP 匹配 → count+1+armed=0+RIP 推进（#BP 例外：trap 语义，return RIP 已指向下一条不推进）→ iretq；探针变量 `g_*_probe_{armed,rip,insn_len,count}` 在 `idt64.h` 统一暴露。
+    - [√] **G.3b-3 #UD**（commit `22808c9`）
+    - [√] **G.3b-4 #PF**（commit `d597343`）
+    - [√] **G.3b-5 #GP**（commit `b9e9f24`，含 error code 出栈对齐）
+    - [√] **G.3b-6 #DE**（commit `2bfa8d7`，含 %edx:%eax 非零短路坑）
+    - [√] **G.3b-7 #BP**（trap 语义特例，不推进 RIP）
+    - [√] **G.3c fault-injection harness**：5 异常 × 5 矩阵注入维度（armed/rip 校验/insn_len 推进/count 单调/跨核隔离）统一 harness。
+  - [√] **G.4-G.6 调度器 + ELF 加载 + per-CPU runqueue**：`sched64.{c,h}` MLFQ + 时间片，spawn/yield/exit；ELF64 嵌入式加载 hello64.elf；per-CPU runqueue 跨核负载均衡。
+  - [√] **G.7 LAPIC NMI + ring3 timer preemption**：
+    - [√] **G.7a-d** LAPIC timer 校准 + self-IPI 路径
+    - [√] **G.7e/g-1/g-2 NMI**（commit `82ed4d5` / `1a29319`）SWAPGS_IF_FROM_USER + NMI re-entrancy + iretq frame safety
+    - [√] **G.7e-fix retry resched IPI**（commit `b9ea379`）
+    - [√] **G.7f ring3 LAPIC-timer preemption**（commit `b4e3ad8`，stage 30）：ring3 用户态被 LAPIC timer 抢占 → kernel sched → 恢复或切换 → SYSRET 返回 ring3，端到端闭环。
+  - [√] **基线锁定（commit `b4e3ad8`）**：`smp_selftest64.c` Stages 1-30 SMP=1/4 双矩阵全 PASS；同步异常面 #DE/#BP/#UD/#GP/#PF + 异步 NMI = 6 个 CPU 异常面全覆盖；后续所有 H 系列工作必须保持 stage 1-30 双矩阵全绿。
 
 #### 21.2 其他平台与启动能力
 
