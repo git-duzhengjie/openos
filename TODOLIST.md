@@ -1469,5 +1469,17 @@
     - [√] `kernel64.c` 移除 `#include "../include/embed_hello64.h"`，改走 `arch_x86_64_initrd_find("/bin/hello64")` → `arch_x86_64_elf64_load_image()`
     - [√] 串口新增 `[x86_64][user] loading /bin/hello64 from initrd size=0x...` 日志
     - [√] SMP=1 + SMP=4 双矩阵 Stages 1-30 全 PASS，post-exit sentry canary=2 / kfault_delta=0，vfs.nodes=5（新增 `/bin/hello64`）
-  - [ ] H.3+ 待规划：真 `execve` 系统调用、ELF 解释器、动态库、多进程 image 切换
+  - [√] **H.3 真 execve 系统调用（trampoline 风格，零汇编改动）**（commit 待写入）：基线锁定 @ b4e3ad8，H.3 在 c0b5dab 之后落地
+    - [√] `usermode64.{h,c}` 新增 pending_exec 状态机：`mark_exec(entry)` 标记 + 复用 SYS_EXIT trampoline longjmp 回 kernel；`has_pending_exec/take_pending_exec` 给外层 kernel 驱动查询；`exec_count` / `exec_fail_count` 计数器；**关键**：mark_exec **不**调用 `proc_exit`（pid 跨 execve 保留，POSIX 语义）
+    - [√] `syscall_dispatch64.c` 新增 `case SYS_EXEC` → `do_exec(path, argv, envp)`：① `path` 必须先拷到内核栈缓冲（因 ring3 .rodata 与新 image 在同一 VA 范围被覆盖，**execve path 字符串 lifetime 坑**）② `initrd_find` 失败 → ENOENT，note_exec_fail() ③ `elf64_load_image` 失败 → status 写日志，note_exec_fail() ④ `mark_exec(lr.entry) + return_to_kernel`
+    - [√] `kernel64.c` ring3 启动改循环：`for { usermode_run(entry); if !has_pending_exec break; entry = take_pending_exec; round++; if round>=4 panic; }` —— exec_chain_cap=4 防 fork-bomb 等价物
+    - [√] `user/launcher.c` + `user/hello64_v2.c` 新增 demo 对：launcher 打印 banner → `openos64_execve("/bin/hello64_v2", NULL, NULL)` → 不返回；hello64_v2 打印 banner + pid/tid/ppid + exit(42)
+    - [√] `user/openos64.h` 新增 `OPENOS64_SYS_EXEC=221` + `openos64_execve()` inline wrapper（syscall3 → SYS_EXEC）
+    - [√] `build.sh` 新增 [1b/5] hello64_v2.elf + [1c/5] launcher.elf 编译链接 + `embed_hello64_v2.h` / `embed_launcher.h` 生成
+    - [√] `initrd64.c` 注册 `/bin/launcher` + `/bin/hello64_v2`，vfs.nodes 6→7
+    - [√] **修 bug**：execve 时 `path` 字符串被新加载 image 覆盖（identity-map 直写策略下 ring3 .rodata @ 0x400000+ 与 hello64_v2 .rodata 同址）→ do_exec 入口先 strcpy 到 kernel 栈 128B 缓冲
+    - [√] 串口证据：`[launcher] H.3: from launcher, about to execve /bin/hello64_v2` → `[x86_64][exec] path=/bin/hello64_v2 entry=0x400000 size=0x21D8` → `[x86_64][usermode] exec round=1 next_entry=0x400000` → `[hello64_v2] H.3: I am the post-execve image, pid preserved` → `[hello64_v2] pid=2 tid=2 ppid=1` → `[hello64_v2] H.3: exiting with code 42`
+    - [√] post-exec sentry：canary=2 / kfault_delta=0 / exec_count=1 / exec_fail=0 / pending_exec=0 / exec_rounds=1
+    - [√] SMP=1 + SMP=4 双矩阵 Stages 1-30 全 PASS，基线条款保住
+  - [ ] H.4+ 待规划：argv/argc/envp 传参链路、ELF 解释器、动态库、独立地址空间 + CR3 切换、fork、wait/waitpid
 

@@ -10,6 +10,8 @@
  * 但已把 image 来源抽象到 initrd 路径 /bin/hello64 之后，
  * 将来要换成真正的 boot-loaded initrd 也只动这一处。 */
 #include "../include/embed_hello64.h"
+#include "../include/embed_hello64_v2.h"  /* H.3: execve target image */
+#include "../include/embed_launcher.h"     /* H.3: initial /bin/launcher  */
 
 static const uint8_t init_script[] =
     "echo OpenOS x86_64 initrd mounted\n"
@@ -36,6 +38,10 @@ static const x86_64_initrd_file_t initrd_files[] = {
     /* H.2: ring3 demo ELF。kernel64.c 通过 initrd_find("/bin/hello64")
      * 拿到 image 后喂给 arch_x86_64_elf64_load_image。 */
     { .name = "/bin/hello64", .data = hello64_elf, .size = (x86_64_size_t)hello64_elf_size, .mode = 0755u },
+    /* H.3: execve demo pair. /bin/launcher is what the kernel jumps into
+     * first; it execve's /bin/hello64_v2 to prove the trampoline works. */
+    { .name = "/bin/launcher",    .data = launcher_elf,    .size = (x86_64_size_t)launcher_elf_size,    .mode = 0755u },
+    { .name = "/bin/hello64_v2", .data = hello64_v2_elf, .size = (x86_64_size_t)hello64_v2_elf_size, .mode = 0755u },
 };
 
 static const x86_64_initrd_image_t builtin_initrd = {

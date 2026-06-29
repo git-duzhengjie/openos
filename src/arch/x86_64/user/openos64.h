@@ -16,6 +16,7 @@
 #define OPENOS64_SYS_OPEN    225ULL
 #define OPENOS64_SYS_CLOSE   226ULL
 #define OPENOS64_SYS_GETPPID 224ULL
+#define OPENOS64_SYS_EXEC    221ULL
 
 /* Step E.3: loopback datagram sockets. Numbers mirror the kernel
  * SYS_SOCKET/BIND/SENDTO/RECVFROM in src/kernel/include/syscall.h. */
@@ -138,6 +139,19 @@ static inline void openos64_exit(int code) {
 
 static inline void openos64_yield(void) {
     (void)openos64_syscall0(OPENOS64_SYS_YIELD);
+}
+
+/* H.3 execve: replace the current process image with the program loaded
+ * from `path` in the initrd. On success this call DOES NOT return (the
+ * kernel longjmps back to its outer driver and re-enters ring3 on the new
+ * image). On failure it returns -1 and the caller keeps running. argv and
+ * envp are accepted but currently ignored by the kernel; pass NULL for
+ * forward-compatibility. */
+static inline long openos64_execve(const char *path, char *const argv[], char *const envp[]) {
+    return openos64_syscall3(OPENOS64_SYS_EXEC,
+                             (uint64_t)(uintptr_t)path,
+                             (uint64_t)(uintptr_t)argv,
+                             (uint64_t)(uintptr_t)envp);
 }
 
 /* ------------------ Step E.4 monotonic clock helper ------------------

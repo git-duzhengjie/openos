@@ -38,4 +38,25 @@ void arch_x86_64_usermode_return_to_kernel(void) __attribute__((noreturn));
 uint64_t arch_x86_64_usermode_canary(void);
 uint64_t arch_x86_64_usermode_kfault_delta(void);
 
+/*
+ * H.3 execve support (trampoline-style, zero-asm-diff).
+ *
+ * arch_x86_64_usermode_mark_exec(entry):
+ *   Called by the SYS_EXEC backend from inside ring0 after a successful
+ *   ELF reload. Sets `usermode_pending_exec=1` + stashes the new entry,
+ *   then control falls through to arch_x86_64_usermode_return_to_kernel()
+ *   which longjmps back to the saved kernel context inside
+ *   arch_x86_64_usermode_run(). The kernel side observes the pending_exec
+ *   flag instead of `exited` and loops back into ring3 with the new entry.
+ *
+ * This deliberately keeps the syscall-entry asm untouched and reuses the
+ * already-verified G.x exit trampoline.
+ */
+void arch_x86_64_usermode_mark_exec(x86_64_entry_t entry);
+uint8_t arch_x86_64_usermode_has_pending_exec(void);
+x86_64_entry_t arch_x86_64_usermode_take_pending_exec(void);
+uint64_t arch_x86_64_usermode_exec_count(void);
+uint64_t arch_x86_64_usermode_exec_fail_count(void);
+void arch_x86_64_usermode_note_exec_fail(void);
+
 #endif /* OPENOS_ARCH_X86_64_USERMODE64_H */

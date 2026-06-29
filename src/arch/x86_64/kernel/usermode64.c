@@ -56,6 +56,23 @@ static uint64_t usermode_exit_count;
 static uintptr_t usermode_kernel_return_rsp;
 static x86_64_phys_addr_t bootstrap_user_stack_base;  /* phys == virt (identity) */
 
+/*
+ * H.3 execve trampoline state.
+ *
+ * On SYS_EXEC the dispatcher loads the new ELF, then calls
+ * arch_x86_64_usermode_mark_exec(new_entry). That sets exited=1 +
+ * pending_exec=1 + pending_exec_entry=new_entry and longjmps back to
+ * the saved kernel context (same path SYS_EXIT uses). The outer kernel
+ * driver inspects has_pending_exec() after usermode_run() returns and,
+ * if set, calls usermode_run(take_pending_exec_entry()) to reenter ring3
+ * on the freshly loaded image. The pid stays the same -- mark_exec does
+ * NOT call arch_x86_64_proc_exit().
+ */
+static volatile uint8_t usermode_pending_exec;
+static volatile x86_64_entry_t usermode_pending_exec_entry;
+static volatile uint64_t usermode_exec_count;
+static volatile uint64_t usermode_exec_fail_count;
+
 static uintptr_t bootstrap_user_stack_top(void) {
     if (bootstrap_user_stack_base == 0) {
         x86_64_phys_addr_t p = 0;
@@ -83,6 +100,10 @@ void arch_x86_64_usermode_init(void) {
     usermode_run_count = 0;
     usermode_exit_count = 0;
     usermode_kernel_return_rsp = 0;
+    usermode_pending_exec = 0;
+    usermode_pending_exec_entry = 0;
+    usermode_exec_count = 0;
+    usermode_exec_fail_count = 0;
     prepared_user_frame.rip = 0;
     prepared_user_frame.cs = (uint64_t)(OPENOS_X86_64_GDT_USER_CODE | 3u);
     prepared_user_frame.rflags = 0x202ULL;
@@ -241,6 +262,44 @@ void arch_x86_64_usermode_mark_exited(int code) {
     arch_x86_64_proc_exit(code);
 }
 
+void arch_x86_64_usermode_mark_exec(x86_64_entry_t entry) {
+    /*
+     * H.3 execve: stash the new entry, mark pending_exec, and reuse the
+     * SYS_EXIT trampoline back to the kernel context inside usermode_run().
+     * Crucially we do NOT call arch_x86_64_proc_exit() -- the process
+     * lives on with the same pid, just running a different image.
+     */
+    usermode_pending_exec_entry = entry;
+    usermode_pending_exec = 1;
+    usermode_last_exit_code = 0;
+    usermode_exited = 1;
+    usermode_running = 0;
+    ++usermode_exec_count;
+}
+
+uint8_t arch_x86_64_usermode_has_pending_exec(void) {
+    return usermode_pending_exec;
+}
+
+x86_64_entry_t arch_x86_64_usermode_take_pending_exec(void) {
+    x86_64_entry_t e = usermode_pending_exec_entry;
+    usermode_pending_exec = 0;
+    usermode_pending_exec_entry = 0;
+    return e;
+}
+
+uint64_t arch_x86_64_usermode_exec_count(void) {
+    return usermode_exec_count;
+}
+
+uint64_t arch_x86_64_usermode_exec_fail_count(void) {
+    return usermode_exec_fail_count;
+}
+
+void arch_x86_64_usermode_note_exec_fail(void) {
+    ++usermode_exec_fail_count;
+}
+
 void arch_x86_64_usermode_return_to_kernel(void) {
     if (usermode_kernel_return_rsp != 0) {
         __asm__ __volatile__("movq %0, %%rsp\n\tret" : : "r"(usermode_kernel_return_rsp) : "memory");
@@ -271,6 +330,12 @@ void arch_x86_64_usermode_print_status(void) {
     early_console64_write_hex64(usermode_canary);
     early_console64_write(" kfault_delta=");
     early_console64_write_hex64(usermode_kfault_after - usermode_kfault_before);
+    early_console64_write(" exec_count=");
+    early_console64_write_hex64(usermode_exec_count);
+    early_console64_write(" exec_fail=");
+    early_console64_write_hex64(usermode_exec_fail_count);
+    early_console64_write(" pending_exec=");
+    early_console64_write_hex64(usermode_pending_exec);
     early_console64_write("\n");
 }
 

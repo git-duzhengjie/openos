@@ -22,6 +22,7 @@
 #include <stdint.h>
 
 #include "../include/early_console64.h"
+#include "../include/elf64_loader.h"
 #include "../include/fdtable64.h"
 #include "../include/heap64.h"
 #include "../include/initrd64.h"
@@ -116,6 +117,91 @@ static uint64_t do_open(uint64_t path_ptr, uint64_t flags, uint64_t mode) {
 static uint64_t do_close(uint64_t fd) {
     int r = arch_x86_64_fd_close((int)fd);
     return (r < 0) ? (uint64_t)-1 : 0;
+}
+
+/*
+ * H.3 SYS_EXEC backend.
+ *
+ * execve(path, argv, envp) -- the POSIX-like "replace this process image"
+ * call. argv/envp are accepted but ignored for now (H.x will wire them up
+ * once we have a real userspace stack-arg builder).
+ *
+ * Flow:
+ *   1) Look up `path` in the initrd. ENOENT -> -1 (no replacement happened,
+ *      caller may handle gracefully).
+ *   2) Hand the file off to elf64_loader. If load fails -> -1.
+ *   3) Stash the new entry in usermode64 via mark_exec() and longjmp back
+ *      to the kernel stack via return_to_kernel(). The outer driver in
+ *      kernel64.c observes pending_exec and loops back into ring3 on the
+ *      new image -- pid stays the same.
+ *
+ * On the -1 paths we explicitly do NOT touch usermode state, so a failing
+ * execve looks just like a normal failing syscall: ring3 keeps running on
+ * the *current* image and can handle it (typically by calling exit()).
+ */
+static uint64_t do_exec(uint64_t path_ptr, uint64_t argv_ptr, uint64_t envp_ptr) {
+    (void)argv_ptr;
+    (void)envp_ptr;
+    if (path_ptr == 0) {
+        arch_x86_64_usermode_note_exec_fail();
+        return (uint64_t)-1;
+    }
+    /*
+     * IMPORTANT: copy `path` onto the kernel stack BEFORE we touch the
+     * loader. Reason: under the H.2/H.3 identity-mapped layout the ring3
+     * .rodata lives inside the very VA range (e.g. 0x400000..) that
+     * elf64_load_image is about to overwrite with the *new* image. If we
+     * keep using the original ring3 pointer past load_image, subsequent
+     * dereferences (logging, find()) would read garbage from the new image
+     * mapped at the same address.
+     */
+    char path_buf[128];
+    {
+        const char *src = (const char *)(uintptr_t)path_ptr;
+        x86_64_size_t i = 0;
+        for (; i < sizeof(path_buf) - 1u; ++i) {
+            char c = src[i];
+            path_buf[i] = c;
+            if (c == '\0') break;
+        }
+        path_buf[sizeof(path_buf) - 1u] = '\0';
+    }
+    const char *path = path_buf;
+    const x86_64_initrd_file_t *file = arch_x86_64_initrd_find(path);
+    if (file == NULL) {
+        arch_x86_64_usermode_note_exec_fail();
+        early_console64_write("[x86_64][exec] ENOENT path=");
+        early_console64_write(path);
+        early_console64_write("\n");
+        return (uint64_t)-1;
+    }
+    elf64_load_result_t lr = arch_x86_64_elf64_load_image(file->data, file->size);
+    if (lr.status != ELF64_LOADER_OK) {
+        arch_x86_64_usermode_note_exec_fail();
+        early_console64_write("[x86_64][exec] elf-load-failed path=");
+        early_console64_write(path);
+        early_console64_write(" status=");
+        early_console64_write_hex64((uint64_t)(uint32_t)lr.status);
+        early_console64_write("\n");
+        return (uint64_t)-1;
+    }
+    early_console64_write("[x86_64][exec] path=");
+    early_console64_write(path);
+    early_console64_write(" entry=");
+    early_console64_write_hex64((uint64_t)lr.entry);
+    early_console64_write(" size=");
+    early_console64_write_hex64((uint64_t)file->size);
+    early_console64_write("\n");
+
+    /*
+     * Commit the replacement. mark_exec stashes the new entry and flips
+     * usermode_exited=1 / pending_exec=1, then return_to_kernel longjmps
+     * back to usermode_run()'s saved kernel frame. Crucially we do NOT
+     * call proc_exit -- the pid lives on.
+     */
+    arch_x86_64_usermode_mark_exec(lr.entry);
+    arch_x86_64_usermode_return_to_kernel();
+    return 0;  /* unreachable */
 }
 
 /*
@@ -268,6 +354,8 @@ uint64_t arch_x86_64_syscall_dispatch_common(uint64_t num,
     case SYS_READ_FD:     return do_read(a0, a1, a2);
     case SYS_OPEN:        return do_open(a0, a1, a2);
     case SYS_CLOSE:       return do_close(a0);
+    /* -------- H.3 execve -------- */
+    case SYS_EXEC:        return do_exec(a0, a1, a2);
 
     /* -------- memory -------- */
     case SYS_MALLOC:      return do_malloc(a0);

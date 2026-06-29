@@ -286,10 +286,23 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
      * 不再 #include embed_hello64.h；image 真正的 single source of truth
      * 是 initrd 路径 /bin/hello64。将来换成 boot-loaded initrd 时，只动
      * initrd64.c 的 file table，无需再碰 kernel64.c。 */
-    const x86_64_initrd_file_t *hello64_file = arch_x86_64_initrd_find("/bin/hello64");
+    /* Step C: initrd & fdtable demo for ring3 hello64. open(/hello.txt)
+     * reads the embedded text file.
+     * H.2: ELF image source switched from compile-time embed_hello64.h to
+     * the initrd path /bin/hello64. kernel64.c no longer #includes the
+     * embed header directly -- single source of truth lives in initrd.
+     * H.3: initial program is now /bin/launcher, which execve's into
+     * /bin/hello64_v2 to exercise the SYS_EXEC trampoline. After ring3
+     * returns we inspect usermode_has_pending_exec(): if set, we reload
+     * the new image and re-enter ring3 with the same proc slot. Bounded
+     * loop (max 4 rounds) to make a runaway execve chain panic-safe. */
+    const char *initial_path = "/bin/launcher";
+    const x86_64_initrd_file_t *initial_file = arch_x86_64_initrd_find(initial_path);
     elf64_load_result_t hello64;
-    if (hello64_file == NULL) {
-        early_console64_write("[x86_64][user] /bin/hello64 not found in initrd\n");
+    if (initial_file == NULL) {
+        early_console64_write("[x86_64][user] initial program not found in initrd path=");
+        early_console64_write(initial_path);
+        early_console64_write("\n");
         hello64.status = ELF64_LOADER_ERR_BAD_ARGUMENT;
         hello64.entry = 0u;
         hello64.low_addr = 0u;
@@ -297,29 +310,54 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
         hello64.brk_start = 0u;
         hello64.load_segments = 0u;
     } else {
-        early_console64_write("[x86_64][user] loading /bin/hello64 from initrd size=");
-        early_console64_write_hex64((uint64_t)hello64_file->size);
+        early_console64_write("[x86_64][user] loading ");
+        early_console64_write(initial_path);
+        early_console64_write(" from initrd size=");
+        early_console64_write_hex64((uint64_t)initial_file->size);
         early_console64_write("\n");
-        hello64 = arch_x86_64_elf64_load_image(hello64_file->data, hello64_file->size);
+        hello64 = arch_x86_64_elf64_load_image(initial_file->data, initial_file->size);
     }
     if (hello64.status == ELF64_LOADER_OK) {
         /* Step E.1: register the ring3 program as a real PCB so SYS_GETPID
-         * returns the spawned pid (=2) instead of the old hard-coded 1. */
-        uint32_t hello_pid = arch_x86_64_proc_spawn_user("hello64");
-        early_console64_write("[x86_64][proc] spawned hello64 pid=");
+         * returns the spawned pid (=2) instead of the old hard-coded 1.
+         * H.3: pid is preserved across execve -- we spawn once. */
+        uint32_t hello_pid = arch_x86_64_proc_spawn_user("launcher");
+        early_console64_write("[x86_64][proc] spawned launcher pid=");
         early_console64_write_hex64((uint64_t)hello_pid);
         early_console64_write("\n");
-        early_console64_write("[x86_64][user] entering ring3 hello64 entry=");
+        early_console64_write("[x86_64][user] entering ring3 entry=");
         early_console64_write_hex64((uint64_t)hello64.entry);
         early_console64_write("\n");
-        (void)arch_x86_64_usermode_run(hello64.entry);
-        early_console64_write("[x86_64][user] hello64 returned exit_code=");
+        x86_64_entry_t next_entry = hello64.entry;
+        const int kExecRoundCap = 4;
+        int round = 0;
+        for (;;) {
+            (void)arch_x86_64_usermode_run(next_entry);
+            if (!arch_x86_64_usermode_has_pending_exec()) {
+                break;
+            }
+            next_entry = arch_x86_64_usermode_take_pending_exec();
+            ++round;
+            early_console64_write("[x86_64][usermode] exec round=");
+            early_console64_write_hex64((uint64_t)(uint32_t)round);
+            early_console64_write(" next_entry=");
+            early_console64_write_hex64((uint64_t)next_entry);
+            early_console64_write("\n");
+            if (round >= kExecRoundCap) {
+                early_console64_write("[x86_64][usermode] exec-chain cap reached, refusing further execve\n");
+                arch_x86_64_usermode_mark_exited(127);
+                break;
+            }
+        }
+        early_console64_write("[x86_64][user] ring3 returned exit_code=");
         early_console64_write_hex64((uint64_t)(uint32_t)arch_x86_64_usermode_exit_code());
         early_console64_write(" exited=");
         early_console64_write_hex64(arch_x86_64_usermode_has_exited());
+        early_console64_write(" exec_rounds=");
+        early_console64_write_hex64((uint64_t)(uint32_t)round);
         early_console64_write("\n");
     } else {
-        early_console64_write("[x86_64][user] hello64 load failed status=");
+        early_console64_write("[x86_64][user] initial-program load failed status=");
         early_console64_write_hex64((uint64_t)(uint32_t)hello64.status);
         early_console64_write("\n");
     }
