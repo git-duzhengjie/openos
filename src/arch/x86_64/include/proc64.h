@@ -28,9 +28,11 @@
  */
 
 #include <stdint.h>
+#include <stdbool.h>
 
 #include "arch64_types.h"
 #include "usermode64.h"  /* for x86_64_user_iretq_frame_t (saved_user_frame) */
+#include "syscall64.h"   /* A2.P3-B: x86_64_int80_frame_t / x86_64_syscall_frame_t */
 
 /* Forward decl: H.5b.1 wiring. The full definition lives in
  * address_space64.h; PCBs only need a pointer field today (NULL on every
@@ -90,6 +92,32 @@ typedef struct x86_64_proc {
     x86_64_user_iretq_frame_t saved_user_frame;
     uint64_t                  kernel_return_rsp;
     uint64_t                  usermode_canary;
+
+    /* ------------------------------------------------------------------
+     * A2.P3-B — vfork-semantics minimal fork.
+     *
+     * When ring3 issues SYS_FORK (220), the syscall wrapper short-circuits
+     * BEFORE dispatch_common so that we still have the architectural
+     * trapframe. The wrapper:
+     *   1. snapshots the trapframe into one of saved_fork_frame_int80 /
+     *      saved_fork_frame_sysc (depending on which entry path fired,
+     *      indicated by fork_via_syscall=0|1),
+     *   2. for the SYSCALL path it ALSO snapshots the user %rsp out of
+     *      %gs:syscall_user_rsp into fork_user_rsp (the syscall trapframe
+     *      doesn't carry user rsp, unlike int80),
+     *   3. sets fork_pending=1,
+     *   4. returns child_pid (placeholder 2) to the parent in %rax.
+     *
+     * After arch_x86_64_usermode_run() returns to the main loop, kernel64
+     * checks fork_pending and re-enters ring3 from the saved frame with
+     * %rax=0 — that becomes the child. The child shares the parent's
+     * address space AND stack (vfork semantics): it MUST call _exit
+     * before touching anything the parent will look at later. */
+    bool                      fork_pending;
+    uint8_t                   fork_via_syscall;   /* 0=int80, 1=syscall */
+    uint64_t                  fork_user_rsp;      /* only valid when fork_via_syscall=1 */
+    x86_64_int80_frame_t      saved_fork_frame_int80;
+    x86_64_syscall_frame_t    saved_fork_frame_sysc;
 } x86_64_proc_t;
 
 /* Lifecycle ---------------------------------------------------------- */

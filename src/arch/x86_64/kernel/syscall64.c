@@ -16,6 +16,8 @@
 
 #include "../include/early_console64.h"
 #include "../include/gdt64.h"
+#include "../include/percpu64.h"
+#include "../include/proc64.h"
 #include "../include/syscall_dispatch64.h"
 #include "../include/usermode64.h"
 #include "syscall.h" /* canonical SYS_* numbers (shared with i386) */
@@ -63,6 +65,70 @@ void arch_x86_64_syscall_init(void) {
     configure_syscall_sysret();
 }
 
+/* ------------------------------------------------------------------
+ * A2.P3-B — vfork-semantics SYS_FORK short-circuit.
+ *
+ * Reached from BOTH wrappers below before the canonical dispatch_common()
+ * call, because dispatch_common() doesn't see the architectural trapframe
+ * and we need that frame to re-enter ring3 as the child later.
+ *
+ * Snapshots:
+ *   - the trapframe into the PCB (one of two unions, picked by via_syscall),
+ *   - for the SYSCALL path: %gs:syscall_user_rsp into PCB.fork_user_rsp
+ *     (the syscall trapframe carries kernel rsp, not user rsp; user rsp
+ *      was stashed at entry by syscall_sysret64.S).
+ *
+ * Sets fork_pending=1. The main loop in kernel64 picks this up after the
+ * parent's usermode_run() returns (via SYS_EXIT) and re-enters ring3 from
+ * the saved frame with %rax=0.
+ *
+ * Returns the child PID (placeholder 2 — no allocator yet) to the parent
+ * in %rax via the wrapper's normal return path. dispatch_common() is NOT
+ * called for the parent's fork.
+ */
+static uint64_t arch_x86_64_syscall_fork_capture(
+    void *frame, uint8_t via_syscall) {
+    x86_64_proc_t *p = arch_x86_64_proc_current();
+    if (p == NULL) {
+        early_console64_write(
+            "[x86_64][fork] no current proc -- refusing fork.\n");
+        return (uint64_t)-1;
+    }
+    if (p->fork_pending) {
+        /* Another fork is already queued; reject (no nested vfork). */
+        early_console64_write(
+            "[x86_64][fork] nested fork attempt -- refusing.\n");
+        return (uint64_t)-1;
+    }
+
+    p->fork_via_syscall = via_syscall;
+    if (via_syscall) {
+        /* Byte copy (avoid dragging in libc string.h). */
+        const uint8_t *src = (const uint8_t *)frame;
+        uint8_t       *dst = (uint8_t *)&p->saved_fork_frame_sysc;
+        for (x86_64_size_t i = 0; i < sizeof(x86_64_syscall_frame_t); ++i)
+            dst[i] = src[i];
+        /* Read user rsp stashed at syscall entry via %gs:syscall_user_rsp.
+         * percpu_t.syscall_user_rsp is the canonical slot (see
+         * percpu64.h:108 and syscall_sysret64.S). */
+        arch_x86_64_percpu_t *pc = arch_x86_64_this_cpu_ptr();
+        p->fork_user_rsp = pc->syscall_user_rsp;
+    } else {
+        const uint8_t *src = (const uint8_t *)frame;
+        uint8_t       *dst = (uint8_t *)&p->saved_fork_frame_int80;
+        for (x86_64_size_t i = 0; i < sizeof(x86_64_int80_frame_t); ++i)
+            dst[i] = src[i];
+        p->fork_user_rsp = 0; /* int80 frame carries user rsp natively */
+    }
+    p->fork_pending = 1;
+    early_console64_write("[fork:capture] pending set via_syscall=");
+    early_console64_write_hex64((uint64_t)(uint32_t)via_syscall);
+    early_console64_write("\n");
+
+    /* Placeholder child PID -- A2.P2 will replace with a real allocator. */
+    return 2u;
+}
+
 /*
  * int 0x80 compat path.
  *
@@ -79,6 +145,11 @@ uint64_t arch_x86_64_int80_dispatch(x86_64_int80_frame_t *frame) {
     ++int80_dispatch_count;
     if (frame == NULL) {
         return (uint64_t)-1;
+    }
+
+    /* A2.P3-B: short-circuit SYS_FORK before dispatch_common (needs frame). */
+    if (frame->rax == SYS_FORK) {
+        return arch_x86_64_syscall_fork_capture(frame, /*via_syscall=*/0);
     }
 
     return arch_x86_64_syscall_dispatch_common(
@@ -114,6 +185,11 @@ uint64_t arch_x86_64_syscall_dispatch(x86_64_syscall_frame_t *frame) {
     ++syscall_dispatch_count;
     if (frame == NULL) {
         return (uint64_t)-1;
+    }
+
+    /* A2.P3-B: short-circuit SYS_FORK before dispatch_common (needs frame). */
+    if (frame->rax == SYS_FORK) {
+        return arch_x86_64_syscall_fork_capture(frame, /*via_syscall=*/1);
     }
 
     result = arch_x86_64_syscall_dispatch_common(

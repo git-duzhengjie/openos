@@ -300,6 +300,14 @@ static uint64_t do_exec(uint64_t path_ptr, uint64_t argv_ptr, uint64_t envp_ptr)
  * syscall64.c trips a loud assert if that ever happens.
  */
 static uint64_t do_exit(uint64_t status) {
+    early_console64_write("[do_exit] enter status=");
+    early_console64_write_hex64(status);
+    {
+        x86_64_proc_t *pdbg = arch_x86_64_proc_current();
+        early_console64_write(" fork_pending=");
+        early_console64_write_hex64(pdbg ? (uint64_t)pdbg->fork_pending : 0xFFFFu);
+        early_console64_write("\n");
+    }
     arch_x86_64_usermode_mark_exited((int)status);
     /*
      * Step D.3 fix: do NOT return -- otherwise dispatch_common returns,

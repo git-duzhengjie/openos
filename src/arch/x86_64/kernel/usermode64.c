@@ -166,10 +166,36 @@ int arch_x86_64_usermode_exit_code(void) {
 }
 
 int arch_x86_64_usermode_run(x86_64_entry_t entry) {
-    if (!usermode_ready || entry == 0) {
-        return -1;
+    /*
+     * A2.P3-B-alpha: detect fork-resume path. When PCB.fork_pending is
+     * set, the SYS_FORK wrapper has stashed the parent's trapframe into
+     * PCB and the caller (main loop) wants us to drop into ring3 *as the
+     * child*: same address space, same user stack, rax=0, rip=next-after-
+     * syscall. We skip seed_user_stack / stack remap / prepare_iretq and
+     * fill PREPARED_USER_FRAME directly from the saved trapframe. Every-
+     * thing else (longjmp anchor, kfault snapshot, iretq, post-cleanup) is
+     * reused verbatim, which is the whole point of routing through
+     * usermode_run() instead of a parallel resume path -- it gives the
+     * child the same SYS_EXIT-via-longjmp landing zone the parent has.
+     */
+    x86_64_proc_t *p_fork = arch_x86_64_proc_current();
+    int fork_resume = (p_fork != NULL && p_fork->fork_pending);
+
+    if (!fork_resume) {
+        if (!usermode_ready || entry == 0) {
+            return -1;
+        }
+    } else {
+        if (!usermode_ready) {
+            return -1;
+        }
+        /* entry is ignored on the fork-resume path; the rip comes from
+         * the stashed trapframe. */
     }
 
+    x86_64_virt_addr_t user_rsp = 0;
+
+    if (!fork_resume) {
     /*
      * H.4: seed the user stack with the SysV program-startup frame so
      * that ring3 _start can `(rsp)` -> argc, `8(rsp)` -> argv. Any args
@@ -177,8 +203,8 @@ int arch_x86_64_usermode_run(x86_64_entry_t entry) {
      * none are queued seed_user_stack still lays out the minimal
      * argc=0/argv={NULL} frame to satisfy the ABI.
      */
-    x86_64_virt_addr_t user_rsp =
-        arch_x86_64_usermode_seed_user_stack((x86_64_virt_addr_t)bootstrap_user_stack_top());
+    user_rsp = arch_x86_64_usermode_seed_user_stack(
+        (x86_64_virt_addr_t)bootstrap_user_stack_top());
     if (user_rsp == 0) {
         return -3;
     }
@@ -215,6 +241,32 @@ int arch_x86_64_usermode_run(x86_64_entry_t entry) {
     arch_x86_64_usermode_prepare_iretq(&PREPARED_USER_FRAME,
                                        entry,
                                        user_rsp);
+    } else {
+        /* fork_resume path: synthesize PREPARED_USER_FRAME from PCB's
+         * stashed trapframe. cs/ss are ring3 selectors; rip/rsp/rflags
+         * come from the SYS_FORK call site so the child returns to the
+         * exact instruction right after the syscall, on the same shared
+         * user stack. arch_x86_64_iretq_enter_user (invoked by the
+         * inline asm below) will then zero every GPR before the iretq,
+         * which gives the child rax==0 -- the fork-returns-0 ABI. */
+        PREPARED_USER_FRAME.cs =
+            (uint64_t)(OPENOS_X86_64_GDT_USER_CODE | 3u);
+        PREPARED_USER_FRAME.ss =
+            (uint64_t)(OPENOS_X86_64_GDT_USER_DATA | 3u);
+        if (p_fork->fork_via_syscall) {
+            PREPARED_USER_FRAME.rip    = p_fork->saved_fork_frame_sysc.rcx;
+            PREPARED_USER_FRAME.rflags = p_fork->saved_fork_frame_sysc.r11;
+            PREPARED_USER_FRAME.rsp    = p_fork->fork_user_rsp;
+        } else {
+            PREPARED_USER_FRAME.rip    = p_fork->saved_fork_frame_int80.rip;
+            PREPARED_USER_FRAME.rflags = p_fork->saved_fork_frame_int80.rflags;
+            PREPARED_USER_FRAME.rsp    = p_fork->saved_fork_frame_int80.rsp;
+        }
+        /* One-shot: clear pending before the no-return iretq so a future
+         * re-entry sees a clean state. */
+        p_fork->fork_pending = 0;
+        early_console64_write("[fork:resume] entering child (rax=0)\n");
+    }
     if (!arch_x86_64_usermode_validate_frame(&PREPARED_USER_FRAME)) {
         return -2;
     }

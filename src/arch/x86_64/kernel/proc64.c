@@ -94,6 +94,12 @@ uint32_t arch_x86_64_proc_spawn_user(const char *name) {
      * boot-time PML4 until H.5b.3 wires up per-process AS. */
     p->as = (struct x86_64_address_space *)0;
 
+    /* A2.P3-B: ensure a freshly-spawned proc never inherits stale
+     * fork-pending state from a previously-freed slot. */
+    p->fork_pending     = 0;
+    p->fork_via_syscall = 0;
+    p->fork_user_rsp    = 0;
+
     current_index = slot;
     ++spawn_count;
     return p->pid;
@@ -104,6 +110,18 @@ void arch_x86_64_proc_exit(int code) {
     if (current_index == 0) {
         /* Kernel proc never really exits; record the code for diagnostics. */
         p->exit_code = code;
+        return;
+    }
+    /* A2.P3-B-alpha: if this exiting proc has a pending fork queued, do
+     * NOT free its slot or rotate back to the kernel proc yet. The main
+     * loop needs to find the same PCB with fork_pending still set so it
+     * can re-enter ring3 as the child. The child's own SYS_EXIT will
+     * fall through to this function with fork_pending cleared (resume
+     * path zeros it) and complete the teardown. */
+    if (p->fork_pending) {
+        p->exit_code = code;
+        /* leave state / current_index / as untouched */
+        ++exit_count;
         return;
     }
     p->exit_code = code;

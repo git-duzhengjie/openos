@@ -112,4 +112,35 @@ int arch_x86_64_usermode_pending_envc(void);
 
 x86_64_virt_addr_t arch_x86_64_usermode_seed_user_stack(x86_64_virt_addr_t stack_top_in);
 
+/*
+ * A2.P3-B (vfork-flavored fork, alpha cut).
+ *
+ * arch_x86_64_usermode_resume_child():
+ *   Re-enters ring3 using the trapframe snapshot the SYS_FORK wrapper
+ *   stashed into the current PCB (see proc64.h::fork_pending et al.).
+ *   The frame is reconstructed so that:
+ *     - rip = parent's next-after-syscall PC
+ *         (int80 path: saved_fork_frame_int80.rip;
+ *          syscall path: saved_fork_frame_sysc.rcx, which the SYSCALL
+ *          instruction itself parked the return PC into.)
+ *     - rsp = parent's user rsp at fork time
+ *         (int80 path: in-frame rsp; syscall path: PCB.fork_user_rsp
+ *          read from %gs:syscall_user_rsp at wrapper entry.)
+ *     - rflags = parent's user rflags
+ *         (int80 path: in-frame rflags; syscall path: saved r11.)
+ *     - cs/ss = ring3 user code/data selectors.
+ *   GPRs are zeroed by arch_x86_64_iretq_enter_user, so the child sees
+ *   rax == 0 (the fork-returns-0-in-child convention). Caller-saved
+ *   registers being clobbered is acceptable: the user-side openos64_fork()
+ *   wrapper marks them as such ("memory" + GPR clobber list).
+ *
+ *   Clears fork_pending before returning to ring3 so this is idempotent.
+ *   Does NOT save a kernel-side resume context: in P3-B-alpha the kernel
+ *   does not plan to come back to the parent (parent return is P3-B-beta).
+ *   The child therefore behaves like the only ring3 thread once resumed,
+ *   and on SYS_EXIT the regular usermode_return_to_kernel longjmp pops
+ *   us back to the original arch_x86_64_usermode_run() invocation.
+ */
+void arch_x86_64_usermode_resume_child(void);
+
 #endif /* OPENOS_ARCH_X86_64_USERMODE64_H */

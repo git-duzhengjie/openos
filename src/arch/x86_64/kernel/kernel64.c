@@ -409,23 +409,50 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
         }
         const int kExecRoundCap = 4;
         int round = 0;
+        int fork_rounds = 0;
+        const int kForkRoundCap = 2; /* alpha: at most one child */
         for (;;) {
             (void)arch_x86_64_usermode_run(next_entry);
-            if (!arch_x86_64_usermode_has_pending_exec()) {
-                break;
+            if (arch_x86_64_usermode_has_pending_exec()) {
+                next_entry = arch_x86_64_usermode_take_pending_exec();
+                ++round;
+                early_console64_write("[x86_64][usermode] exec round=");
+                early_console64_write_hex64((uint64_t)(uint32_t)round);
+                early_console64_write(" next_entry=");
+                early_console64_write_hex64((uint64_t)next_entry);
+                early_console64_write("\n");
+                if (round >= kExecRoundCap) {
+                    early_console64_write("[x86_64][usermode] exec-chain cap reached, refusing further execve\n");
+                    arch_x86_64_usermode_mark_exited(127);
+                    break;
+                }
+                continue;
             }
-            next_entry = arch_x86_64_usermode_take_pending_exec();
-            ++round;
-            early_console64_write("[x86_64][usermode] exec round=");
-            early_console64_write_hex64((uint64_t)(uint32_t)round);
-            early_console64_write(" next_entry=");
-            early_console64_write_hex64((uint64_t)next_entry);
-            early_console64_write("\n");
-            if (round >= kExecRoundCap) {
-                early_console64_write("[x86_64][usermode] exec-chain cap reached, refusing further execve\n");
-                arch_x86_64_usermode_mark_exited(127);
-                break;
+            /* A2.P3-B-alpha: after parent SYS_EXIT, check whether a fork
+             * was queued. If so, re-enter usermode_run(0) on the fork-
+             * resume path. usermode_run() reads PCB.fork_pending and
+             * builds PREPARED_USER_FRAME from the stashed trapframe
+             * (rip = saved syscall-return PC, rsp = saved user rsp,
+             *  rax cleared to 0 by iretq_enter_user). entry=0 is fine
+             * because the fork-resume branch ignores entry. */
+            {
+                x86_64_proc_t *pf = arch_x86_64_proc_current();
+                if (pf != NULL && pf->fork_pending) {
+                    ++fork_rounds;
+                    early_console64_write("[x86_64][usermode] fork round=");
+                    early_console64_write_hex64((uint64_t)(uint32_t)fork_rounds);
+                    early_console64_write("\n");
+                    if (fork_rounds > kForkRoundCap) {
+                        early_console64_write("[x86_64][usermode] fork-chain cap reached, dropping pending fork\n");
+                        pf->fork_pending = 0;
+                        break;
+                    }
+                    /* usermode_run() resets usermode_exited at entry. */
+                    next_entry = 0;
+                    continue;
+                }
             }
+            break;
         }
         early_console64_write("[x86_64][user] ring3 returned exit_code=");
         early_console64_write_hex64((uint64_t)(uint32_t)arch_x86_64_usermode_exit_code());
