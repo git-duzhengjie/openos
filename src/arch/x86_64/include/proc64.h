@@ -30,6 +30,7 @@
 #include <stdint.h>
 
 #include "arch64_types.h"
+#include "usermode64.h"  /* for x86_64_user_iretq_frame_t (saved_user_frame) */
 
 /* Forward decl: H.5b.1 wiring. The full definition lives in
  * address_space64.h; PCBs only need a pointer field today (NULL on every
@@ -60,6 +61,35 @@ typedef struct x86_64_proc {
      * layout churn. Owned by proc64 (allocated in spawn_user, freed in
      * proc_exit). */
     struct x86_64_address_space *as;
+
+    /* ------------------------------------------------------------------
+     * A2.P1 — PCB-ize the cooperative ring3 longjmp core.
+     *
+     * usermode64.c used to hold these three pieces of per-thread state
+     * as file-scope statics, which served fine as long as exactly one
+     * ring3 thread could be alive. Real fork() needs multiple ring3
+     * PCBs to coexist, so the state lives here now.
+     *
+     *   saved_user_frame   — IRETQ frame prepared by
+     *                        arch_x86_64_usermode_prepare_iretq().
+     *                        Read by the inline-asm trampoline in
+     *                        arch_x86_64_usermode_run().
+     *
+     *   kernel_return_rsp  — kernel %rsp saved just before the IRETQ.
+     *                        arch_x86_64_usermode_return_to_kernel()
+     *                        does `mov %rsp,<this>; ret` to long-jump
+     *                        back into usermode_run().
+     *
+     *   usermode_canary    — magic word planted at the bottom of the
+     *                        kernel-side save area; checked after the
+     *                        longjmp to detect stack corruption from
+     *                        ring3.
+     *
+     * Only `current` is touched today; other slots keep these fields
+     * zeroed until A2.P3 wires real fork(). */
+    x86_64_user_iretq_frame_t saved_user_frame;
+    uint64_t                  kernel_return_rsp;
+    uint64_t                  usermode_canary;
 } x86_64_proc_t;
 
 /* Lifecycle ---------------------------------------------------------- */
@@ -72,6 +102,12 @@ uint32_t arch_x86_64_proc_spawn_user(const char *name);
 void arch_x86_64_proc_exit(int code);
 
 /* Queries used by the syscall dispatcher ----------------------------- */
+
+/* A2.P1: direct PCB accessor for usermode64.c. Returns the PCB of the
+ * thread that the cooperative scheduler is currently running, or NULL
+ * before arch_x86_64_proc_init() has registered slot 0. Never returns
+ * a pointer into a FREE slot. */
+x86_64_proc_t *arch_x86_64_proc_current(void);
 
 uint32_t arch_x86_64_proc_current_pid(void);
 uint32_t arch_x86_64_proc_current_tid(void);

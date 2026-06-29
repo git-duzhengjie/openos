@@ -29,7 +29,6 @@ extern void arch_x86_64_iretq_enter_user(const x86_64_user_iretq_frame_t *frame)
  * somehow gets to 2 by accident, a #UD/#GP/#PF on the way there bumps the
  * kfault counter and the selftest still catches it.
  */
-static volatile uint64_t usermode_canary = 0;
 static volatile uint64_t usermode_kfault_before = 0;
 static volatile uint64_t usermode_kfault_after = 0;
 
@@ -47,14 +46,26 @@ static volatile uint64_t usermode_kfault_after = 0;
 #define OPENOS_X86_64_USER_STACK_PAGES 4U
 #define OPENOS_X86_64_USER_STACK_SIZE (OPENOS_X86_64_USER_STACK_PAGES * 0x1000U)
 
-static x86_64_user_iretq_frame_t prepared_user_frame;
 static uint8_t usermode_ready;
 static uint8_t usermode_running;
 static uint8_t usermode_exited;
 static int usermode_last_exit_code;
 static uint64_t usermode_run_count;
 static uint64_t usermode_exit_count;
-static uintptr_t usermode_kernel_return_rsp;
+
+/*
+ * A2.P1: the three pieces of per-thread state that the cooperative
+ * longjmp core used to keep as file-scope statics now live in the PCB.
+ * The macros below expand to lvalue references on the current thread's
+ * PCB so the rest of this file can keep reading/writing them with
+ * one-line expressions and one-operand inline-asm constraints. After
+ * arch_x86_64_proc_init() runs (slot 0 = kernel PCB), the accessor
+ * never returns NULL, and the cooperative scheduler only ever calls
+ * into usermode64.c from kernel context, so the indirection is safe.
+ */
+#define PREPARED_USER_FRAME (arch_x86_64_proc_current()->saved_user_frame)
+#define USERMODE_RETURN_RSP (arch_x86_64_proc_current()->kernel_return_rsp)
+#define USERMODE_CANARY     (arch_x86_64_proc_current()->usermode_canary)
 static x86_64_phys_addr_t bootstrap_user_stack_base;  /* phys == virt (identity) */
 
 /*
@@ -100,16 +111,16 @@ void arch_x86_64_usermode_init(void) {
     usermode_last_exit_code = 0;
     usermode_run_count = 0;
     usermode_exit_count = 0;
-    usermode_kernel_return_rsp = 0;
+    USERMODE_RETURN_RSP = 0;
     usermode_pending_exec = 0;
     usermode_pending_exec_entry = 0;
     usermode_exec_count = 0;
     usermode_exec_fail_count = 0;
-    prepared_user_frame.rip = 0;
-    prepared_user_frame.cs = (uint64_t)(OPENOS_X86_64_GDT_USER_CODE | 3u);
-    prepared_user_frame.rflags = 0x202ULL;
-    prepared_user_frame.rsp = (uint64_t)bootstrap_user_stack_top();
-    prepared_user_frame.ss = (uint64_t)(OPENOS_X86_64_GDT_USER_DATA | 3u);
+    PREPARED_USER_FRAME.rip = 0;
+    PREPARED_USER_FRAME.cs = (uint64_t)(OPENOS_X86_64_GDT_USER_CODE | 3u);
+    PREPARED_USER_FRAME.rflags = 0x202ULL;
+    PREPARED_USER_FRAME.rsp = (uint64_t)bootstrap_user_stack_top();
+    PREPARED_USER_FRAME.ss = (uint64_t)(OPENOS_X86_64_GDT_USER_DATA | 3u);
 }
 
 void arch_x86_64_usermode_prepare_iretq(x86_64_user_iretq_frame_t *frame,
@@ -139,7 +150,7 @@ uint8_t arch_x86_64_usermode_validate_frame(const x86_64_user_iretq_frame_t *fra
 }
 
 const x86_64_user_iretq_frame_t *arch_x86_64_usermode_get_prepared_frame(void) {
-    return &prepared_user_frame;
+    return &PREPARED_USER_FRAME;
 }
 
 uint8_t arch_x86_64_usermode_is_running(void) {
@@ -201,10 +212,10 @@ int arch_x86_64_usermode_run(x86_64_entry_t entry) {
         }
     }
 
-    arch_x86_64_usermode_prepare_iretq(&prepared_user_frame,
+    arch_x86_64_usermode_prepare_iretq(&PREPARED_USER_FRAME,
                                        entry,
                                        user_rsp);
-    if (!arch_x86_64_usermode_validate_frame(&prepared_user_frame)) {
+    if (!arch_x86_64_usermode_validate_frame(&PREPARED_USER_FRAME)) {
         return -2;
     }
 
@@ -219,7 +230,7 @@ int arch_x86_64_usermode_run(x86_64_entry_t entry) {
      * through the syscall path, not the IDT, so the sentry's "total"
      * counter must not advance for a healthy run. */
     usermode_kfault_before = arch_x86_64_idt_kernel_fault_count();
-    usermode_canary = 1;
+    USERMODE_CANARY = 1;
 
     /*
      * Step D.3: save a real longjmp-style return context.
@@ -287,10 +298,10 @@ int arch_x86_64_usermode_run(x86_64_entry_t entry) {
         "popq %%r12\n\t"
         "popq %%rbx\n\t"
         "popq %%rbp\n\t"
-        : "=m"(usermode_kernel_return_rsp),
+        : "=m"(USERMODE_RETURN_RSP),
           "=m"(exited_local),
           "=m"(code_local)
-        : "r"(&prepared_user_frame)
+        : "r"(&PREPARED_USER_FRAME)
         : "rax", "rcx", "rdx", "rsi", "rdi",
           "r8", "r9", "r10", "r11",
           "memory", "cc"
@@ -307,7 +318,7 @@ int arch_x86_64_usermode_run(x86_64_entry_t entry) {
     /* Step G.x: end of the ring3 round-trip. Mark canary=2 and sample the
      * kfault counter again. The exported helpers below let the selftest
      * verify (after_total - before_total) == 0. */
-    usermode_canary = 2;
+    USERMODE_CANARY = 2;
     usermode_kfault_after = arch_x86_64_idt_kernel_fault_count();
 
     usermode_running = 0;
@@ -364,8 +375,8 @@ void arch_x86_64_usermode_note_exec_fail(void) {
 }
 
 void arch_x86_64_usermode_return_to_kernel(void) {
-    if (usermode_kernel_return_rsp != 0) {
-        __asm__ __volatile__("movq %0, %%rsp\n\tret" : : "r"(usermode_kernel_return_rsp) : "memory");
+    if (USERMODE_RETURN_RSP != 0) {
+        __asm__ __volatile__("movq %0, %%rsp\n\tret" : : "r"(USERMODE_RETURN_RSP) : "memory");
     }
     for (;;) {
         __asm__ __volatile__("hlt");
@@ -386,11 +397,11 @@ void arch_x86_64_usermode_print_status(void) {
     early_console64_write(" exits=");
     early_console64_write_hex64(usermode_exit_count);
     early_console64_write(" frame_rip=");
-    early_console64_write_hex64(prepared_user_frame.rip);
+    early_console64_write_hex64(PREPARED_USER_FRAME.rip);
     early_console64_write(" frame_rsp=");
-    early_console64_write_hex64(prepared_user_frame.rsp);
+    early_console64_write_hex64(PREPARED_USER_FRAME.rsp);
     early_console64_write(" canary=");
-    early_console64_write_hex64(usermode_canary);
+    early_console64_write_hex64(USERMODE_CANARY);
     early_console64_write(" kfault_delta=");
     early_console64_write_hex64(usermode_kfault_after - usermode_kfault_before);
     early_console64_write(" exec_count=");
@@ -403,7 +414,7 @@ void arch_x86_64_usermode_print_status(void) {
 }
 
 uint64_t arch_x86_64_usermode_canary(void) {
-    return usermode_canary;
+    return USERMODE_CANARY;
 }
 
 uint64_t arch_x86_64_usermode_kfault_delta(void) {

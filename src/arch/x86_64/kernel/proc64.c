@@ -120,6 +120,15 @@ void arch_x86_64_proc_exit(int code) {
 /* queries                                                              */
 /* ------------------------------------------------------------------- */
 
+x86_64_proc_t *arch_x86_64_proc_current(void) {
+    /* current_index is initialised to 0 in arch_x86_64_proc_init() and
+     * proc_table[0] is the long-lived kernel PCB, so this is always a
+     * valid pointer after kernel init. Returning the address lets
+     * usermode64.c stash per-thread longjmp state without leaking the
+     * proc_table symbol. */
+    return &proc_table[current_index];
+}
+
 uint32_t arch_x86_64_proc_current_pid(void)  { return proc_table[current_index].pid; }
 uint32_t arch_x86_64_proc_current_tid(void)  { return proc_table[current_index].tid; }
 uint32_t arch_x86_64_proc_current_ppid(void) { return proc_table[current_index].ppid; }
