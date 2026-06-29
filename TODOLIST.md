@@ -1519,4 +1519,11 @@
       - `exit_code=0x2A` / `exec_count=1 exec_fail=0` / `pending_exec=0` / `kfault_delta=0` / `post-exit-sentry PASS`
     - [√] SMP=1 + SMP=4 双矩阵 Stages 1-30 全 PASS，基线条款保住
   - [ ] H.5b+ 待续：独立地址空间 + CR3 切换、fork、wait/waitpid、ELF 解释器、动态库
+    - [√] H.5b.1 @ `0d092bf`：接线骨架（零行为变化）
+      - `build.sh` 注册 `kernel/address_space64.c`，`address_space64.{c,h}` 入库（PML4 克隆/内核高半区镜像/CR3 load/destroy 全 API 就位但未被调用）
+      - `proc64.h` PCB 新增 `struct x86_64_address_space *as`（前置 forward decl），生命周期三处（init/spawn_user/proc_exit）显式置 NULL
+      - 编译通过 + 双矩阵 SMP=1/4 Stages 1-30 全 PASS，`exit_code=0x2A`，`kfault_delta=0`，`vfs.nodes=7`，`mapped_pages=5`
+    - [ ] H.5b.2：ELF loader 加载到目标 AS（PMM 分页 + map_to_as，initial spawn 用之；CR3 暂不切）
+    - [ ] H.5b.3：用户栈搬家到 PML4[1] + trampoline iretq 前 CR3 切换
+    - [ ] H.5b.4：去 U 位收口（PML4[0] 内核低 4GiB 叶子去 U，只保留必须共享的项）
 
