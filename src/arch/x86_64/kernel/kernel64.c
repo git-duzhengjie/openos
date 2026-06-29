@@ -2,7 +2,6 @@
 #include "../include/compat32.h"
 #include "../include/early_console64.h"
 #include "../include/elf64_loader.h"
-#include "../include/embed_hello64.h"
 #include "../include/fdtable64.h"
 #include "../include/percpu64.h"
 #include "../include/gdt64.h"
@@ -282,11 +281,27 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
      * keeps inheriting "IRQs-off" precondition. */
     (void)arch_x86_64_sched_prio_selftest_run();
 
-    /* Step C: initrd & fdtable 就绪后再跳 ring3 hello64，否则 open(/hello.txt) 会看不到文件。 */
-    early_console64_write("[x86_64][user] loading embedded hello64.elf size=");
-    early_console64_write_hex64((uint64_t)hello64_elf_size);
-    early_console64_write("\n");
-    elf64_load_result_t hello64 = arch_x86_64_elf64_load_image(hello64_elf, (x86_64_size_t)hello64_elf_size);
+    /* Step C: initrd & fdtable 就绪后再跳 ring3 hello64，否则 open(/hello.txt) 会看不到文件。
+     * H.2: image 不再直连 embed_hello64 数组，改走 initrd 通路。kernel64.c
+     * 不再 #include embed_hello64.h；image 真正的 single source of truth
+     * 是 initrd 路径 /bin/hello64。将来换成 boot-loaded initrd 时，只动
+     * initrd64.c 的 file table，无需再碰 kernel64.c。 */
+    const x86_64_initrd_file_t *hello64_file = arch_x86_64_initrd_find("/bin/hello64");
+    elf64_load_result_t hello64;
+    if (hello64_file == NULL) {
+        early_console64_write("[x86_64][user] /bin/hello64 not found in initrd\n");
+        hello64.status = ELF64_LOADER_ERR_BAD_ARGUMENT;
+        hello64.entry = 0u;
+        hello64.low_addr = 0u;
+        hello64.high_addr = 0u;
+        hello64.brk_start = 0u;
+        hello64.load_segments = 0u;
+    } else {
+        early_console64_write("[x86_64][user] loading /bin/hello64 from initrd size=");
+        early_console64_write_hex64((uint64_t)hello64_file->size);
+        early_console64_write("\n");
+        hello64 = arch_x86_64_elf64_load_image(hello64_file->data, hello64_file->size);
+    }
     if (hello64.status == ELF64_LOADER_OK) {
         /* Step E.1: register the ring3 program as a real PCB so SYS_GETPID
          * returns the spawned pid (=2) instead of the old hard-coded 1. */

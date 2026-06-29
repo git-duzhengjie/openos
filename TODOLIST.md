@@ -1456,3 +1456,18 @@
   - [√] `scripts/qemu-smoke.sh --timeout 25`
   - [√] 重新生成 `src/kernel/include/embed_browser.h`
   - [√] 提交修改
+
+---
+
+## H 系列：x86_64 ring3 进阶（基线锁定 @ `b4e3ad8`，必须保持 Stages 1-30 SMP=1/4 双矩阵全绿）
+
+> 目标：在 Step E/F/G 闭环基础上，继续推进 x86_64 ring3 真实工作负载所需的 OS 能力（ELF 真加载、exec、文件系统持久化、网络等），逐项保持基线不退化。
+
+- [ ] **H.1 ELF 真加载 / exec 体系**
+  - [√] **H.2 hello64 image 由编译期硬塞改为运行时 initrd 查找**
+    - [√] `src/arch/x86_64/kernel/initrd64.c` 注册路径 `/bin/hello64` → 复用 `embed_hello64.h` 作为唯一编译期数据源
+    - [√] `kernel64.c` 移除 `#include "../include/embed_hello64.h"`，改走 `arch_x86_64_initrd_find("/bin/hello64")` → `arch_x86_64_elf64_load_image()`
+    - [√] 串口新增 `[x86_64][user] loading /bin/hello64 from initrd size=0x...` 日志
+    - [√] SMP=1 + SMP=4 双矩阵 Stages 1-30 全 PASS，post-exit sentry canary=2 / kfault_delta=0，vfs.nodes=5（新增 `/bin/hello64`）
+  - [ ] H.3+ 待规划：真 `execve` 系统调用、ELF 解释器、动态库、多进程 image 切换
+

@@ -4,6 +4,13 @@
 
 #include "../include/early_console64.h"
 
+/* H.2: hello64.elf 经由 initrd 通路供 ELF loader 在运行时查找加载，
+ * 不再让 kernel64.c 直接 #include embed_hello64.h。此处是
+ * embed_hello64.h 的唯一 consumer，保留"编译期嵌入"的当前形态，
+ * 但已把 image 来源抽象到 initrd 路径 /bin/hello64 之后，
+ * 将来要换成真正的 boot-loaded initrd 也只动这一处。 */
+#include "../include/embed_hello64.h"
+
 static const uint8_t init_script[] =
     "echo OpenOS x86_64 initrd mounted\n"
     "cat /etc/motd\n"
@@ -26,6 +33,9 @@ static const x86_64_initrd_file_t initrd_files[] = {
     { .name = "/etc/motd", .data = motd, .size = sizeof(motd) - 1u, .mode = 0644u },
     { .name = "/etc/profile", .data = shell_profile, .size = sizeof(shell_profile) - 1u, .mode = 0644u },
     { .name = "/hello.txt", .data = hello_txt, .size = sizeof(hello_txt) - 1u, .mode = 0644u },
+    /* H.2: ring3 demo ELF。kernel64.c 通过 initrd_find("/bin/hello64")
+     * 拿到 image 后喂给 arch_x86_64_elf64_load_image。 */
+    { .name = "/bin/hello64", .data = hello64_elf, .size = (x86_64_size_t)hello64_elf_size, .mode = 0755u },
 };
 
 static const x86_64_initrd_image_t builtin_initrd = {
