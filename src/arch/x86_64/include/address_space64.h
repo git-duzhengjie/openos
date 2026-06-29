@@ -71,6 +71,16 @@ int arch_x86_64_as_map_user(x86_64_address_space_t *as,
                             x86_64_size_t size,
                             uint64_t flags);
 
+/* Deep-clone an existing AS for fork(): allocate a brand new PML4,
+ * pointer-copy PML4[0,2..511] (shared boot identity + future HHK), then
+ * recursively duplicate the entire PML4[1] subtree (PDPT/PD/PT pages
+ * each get fresh PMM frames, and every present leaf 4 KiB user page is
+ * copied byte-for-byte to a freshly allocated frame). Page flags
+ * (P/RW/US/NX/...) are preserved on every leaf. On any OOM the partial
+ * clone is fully torn down and NULL is returned. Returns NULL if parent
+ * is NULL or has no PML4. */
+x86_64_address_space_t *arch_x86_64_as_clone(const x86_64_address_space_t *parent);
+
 /* Query: physical of currently-active boot PML4 (kernel identity). Used
  * by execve to flip back to the kernel AS before destroying the old. */
 x86_64_phys_addr_t arch_x86_64_as_boot_pml4(void);

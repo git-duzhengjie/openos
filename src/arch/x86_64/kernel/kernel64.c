@@ -19,6 +19,7 @@
 #include "../include/shell64.h"
 #include "../include/syscall64.h"
 #include "../include/syscall_selftest64.h"
+#include "../include/as_selftest64.h"
 #include "../include/sched_selftest64.h"
 #include "../include/net64.h"
 #include "../include/net_selftest64.h"
@@ -201,6 +202,16 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
         int selftest_rv = arch_x86_64_syscall_selftest_run();
         early_console64_write("[x86_64][selftest] result=");
         early_console64_write_hex64((uint64_t)(uint32_t)selftest_rv);
+        early_console64_write("\n");
+    }
+
+    /* H.5b.3.A AS deep-clone selftest — verifies fork() page-table
+     * machinery (PML4[1] subtree dup, leaf 4KiB byte copy, isolation).
+     * Runs entirely on the boot identity, no CR3 flip. */
+    {
+        int as_rv = arch_x86_64_as_selftest_clone_run();
+        early_console64_write("[x86_64][as-selftest] result=");
+        early_console64_write_hex64((uint64_t)(uint32_t)as_rv);
         early_console64_write("\n");
     }
 

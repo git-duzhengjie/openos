@@ -203,6 +203,172 @@ void arch_x86_64_as_activate(x86_64_address_space_t *as) {
     __asm__ __volatile__("mov %0, %%cr3" :: "r"((uint64_t)as->pml4_phys) : "memory");
 }
 
+/*
+ * H.5b.3: deep-clone an entire AS for fork().
+ *
+ * Strategy:
+ *   1. allocate a fresh AS via as_create() -- that already copies
+ *      PML4[0,2..511] from boot (shared boot identity + HHK).
+ *   2. PML4[1] subtree: recursively descend parent. For each non-leaf
+ *      level (PDPT/PD/PT) PMM-alloc a fresh table and copy entries
+ *      after recursion. For each present PT leaf, PMM-alloc a fresh
+ *      4 KiB user data frame, byte-copy the parent frame into it via
+ *      boot 0..4 GiB identity (PMM frames live there), and rewrite the
+ *      leaf entry's phys field while preserving the flag bits exactly.
+ *   3. On any OOM unwind: tear down whatever was built via as_destroy(),
+ *      which already knows to free PML4[1..511] recursively.
+ */
+
+static void as_memcpy_page(uint64_t dst_phys, uint64_t src_phys) {
+    /* Boot identity covers physical [0, 4 GiB). PMM frames live there,
+     * so phys==va. Copy a full 4 KiB page word-by-word. */
+    uint64_t *d = phys_to_va(dst_phys);
+    uint64_t *s = phys_to_va(src_phys);
+    uint64_t i;
+    for (i = 0; i < (AS_PAGE_SIZE / sizeof(uint64_t)); ++i) {
+        d[i] = s[i];
+    }
+}
+
+/* Clone a present PT (leaf table). Returns 0 on success.
+ * Writes the new PT's table phys into *out_phys, *_pages_added is
+ * incremented for each newly-allocated leaf 4 KiB frame. */
+static int clone_pt(const uint64_t *parent_pt,
+                    x86_64_phys_addr_t *out_phys,
+                    uint64_t *pages_added) {
+    x86_64_phys_addr_t new_pt_phys;
+    uint64_t *new_pt;
+    uint64_t i;
+
+    new_pt_phys = alloc_table();
+    if (new_pt_phys == 0) return -1;
+    new_pt = phys_to_va(new_pt_phys);
+
+    for (i = 0; i < AS_ENTRIES_PER_TABLE; ++i) {
+        uint64_t pe = parent_pt[i];
+        x86_64_phys_addr_t new_leaf;
+        if (!(pe & OPENOS_X86_64_AS_FLAG_P)) {
+            new_pt[i] = 0;
+            continue;
+        }
+        new_leaf = arch_x86_64_pmm_alloc_page();
+        if (new_leaf == 0) {
+            /* unwind: free leaves already copied in *this* PT */
+            uint64_t j;
+            for (j = 0; j < i; ++j) {
+                uint64_t ne = new_pt[j];
+                if (ne & OPENOS_X86_64_AS_FLAG_P) {
+                    arch_x86_64_pmm_free_page(entry_phys(ne));
+                }
+            }
+            arch_x86_64_pmm_free_page(new_pt_phys);
+            return -1;
+        }
+        as_memcpy_page((uint64_t)new_leaf, (uint64_t)entry_phys(pe));
+        /* Preserve every flag bit exactly (US/RW/NX/PAT/G/...) -- only
+         * swap the physical frame field. */
+        new_pt[i] = ((uint64_t)new_leaf & 0x000FFFFFFFFFF000ULL) |
+                    (pe & ~0x000FFFFFFFFFF000ULL);
+        (*pages_added)++;
+    }
+    *out_phys = new_pt_phys;
+    return 0;
+}
+
+/* Generic recursive clone of a non-leaf table.
+ * level: 2=PDPT, 1=PD, 0=PT(leaf). */
+static int clone_subtree(const uint64_t *parent_table,
+                         int level,
+                         x86_64_phys_addr_t *out_phys,
+                         uint64_t *pages_added) {
+    x86_64_phys_addr_t new_phys;
+    uint64_t *new_table;
+    uint64_t i;
+
+    if (level == 0) {
+        return clone_pt(parent_table, out_phys, pages_added);
+    }
+
+    new_phys = alloc_table();
+    if (new_phys == 0) return -1;
+    new_table = phys_to_va(new_phys);
+
+    for (i = 0; i < AS_ENTRIES_PER_TABLE; ++i) {
+        uint64_t pe = parent_table[i];
+        x86_64_phys_addr_t child_phys;
+        if (!(pe & OPENOS_X86_64_AS_FLAG_P)) {
+            new_table[i] = 0;
+            continue;
+        }
+        if (clone_subtree(phys_to_va(entry_phys(pe)),
+                          level - 1,
+                          &child_phys,
+                          pages_added) != 0) {
+            /* unwind: free already-cloned children in this table */
+            uint64_t j;
+            for (j = 0; j < i; ++j) {
+                uint64_t ne = new_table[j];
+                if (ne & OPENOS_X86_64_AS_FLAG_P) {
+                    free_subtree(phys_to_va(entry_phys(ne)), level - 1);
+                    arch_x86_64_pmm_free_page(entry_phys(ne));
+                }
+            }
+            arch_x86_64_pmm_free_page(new_phys);
+            return -1;
+        }
+        /* preserve flags on non-leaf entry */
+        new_table[i] = ((uint64_t)child_phys & 0x000FFFFFFFFFF000ULL) |
+                       (pe & ~0x000FFFFFFFFFF000ULL);
+    }
+    *out_phys = new_phys;
+    return 0;
+}
+
+x86_64_address_space_t *arch_x86_64_as_clone(const x86_64_address_space_t *parent) {
+    x86_64_address_space_t *child;
+    uint64_t parent_pml4_1;
+    x86_64_phys_addr_t child_pdpt_phys;
+    uint64_t pages_added = 0;
+
+    if (parent == NULL || parent->pml4_va == NULL) {
+        return NULL;
+    }
+
+    child = arch_x86_64_as_create();
+    if (child == NULL) return NULL;
+
+    parent_pml4_1 = parent->pml4_va[1];
+    if (!(parent_pml4_1 & OPENOS_X86_64_AS_FLAG_P)) {
+        /* parent has no user mappings, child stays bare */
+        early_console64_write("[x86_64][as] clone parent_pml4[1] empty, child=");
+        early_console64_write_hex64((uint64_t)child->pml4_phys);
+        early_console64_write("\n");
+        return child;
+    }
+
+    if (clone_subtree(phys_to_va(entry_phys(parent_pml4_1)),
+                      2, /* PDPT level */
+                      &child_pdpt_phys,
+                      &pages_added) != 0) {
+        arch_x86_64_as_destroy(child);
+        return NULL;
+    }
+
+    /* hook the freshly cloned PDPT into PML4[1] preserving parent flags */
+    child->pml4_va[1] = ((uint64_t)child_pdpt_phys & 0x000FFFFFFFFFF000ULL) |
+                        (parent_pml4_1 & ~0x000FFFFFFFFFF000ULL);
+    child->user_pages = pages_added;
+
+    early_console64_write("[x86_64][as] clone parent_pa=");
+    early_console64_write_hex64((uint64_t)parent->pml4_phys);
+    early_console64_write(" child_pa=");
+    early_console64_write_hex64((uint64_t)child->pml4_phys);
+    early_console64_write(" pages=");
+    early_console64_write_hex64(pages_added);
+    early_console64_write("\n");
+    return child;
+}
+
 int arch_x86_64_as_map_user(x86_64_address_space_t *as,
                             x86_64_virt_addr_t va,
                             x86_64_phys_addr_t pa,
