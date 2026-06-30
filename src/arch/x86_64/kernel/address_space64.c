@@ -196,7 +196,18 @@ void arch_x86_64_as_destroy(x86_64_address_space_t *as) {
 }
 
 void arch_x86_64_as_activate(x86_64_address_space_t *as) {
+    /*
+     * A2.P4.a — defensive: NULL or torn-down AS routes to the boot PML4.
+     *
+     * Rationale: callers (e.g. proc teardown, ENOEXEC rollback) may pass
+     * NULL when they have no replacement AS in hand. Returning silently
+     * leaves CR3 pointing at whatever AS we are about to destroy, and a
+     * subsequent TLB miss would walk freed page tables → triple fault.
+     * Switching to the boot PML4 keeps the kernel half live (it covers
+     * the kernel image + HHK + identity 0..1 GiB) and is always safe.
+     */
     if (as == NULL || as->pml4_phys == 0) {
+        arch_x86_64_as_activate_boot();
         return;
     }
     as->generation++;

@@ -99,7 +99,13 @@ _get_rip:
     rep stosq
 
     /* PML4[0]   = pdpt_lo | P | RW | U   (identity; U so ring3 may walk)
-     * PML4[511] = pdpt_hi | P | RW       (higher-half, kernel only) */
+     * PML4[511] = pdpt_hi | P | RW       (higher-half, kernel only)
+     *
+     * A2.P4.c attempt #1 (reverted): dropping U here closes the ring3 -> kernel
+     * read hole, but `seed_user_stack` currently writes argv/envp char-pointers
+     * pointing at the low identity alias of the stack (PML4[0]). Once U is
+     * gone ring3 cannot deref those pointers -> #PF cr2=0x1DE9xxxx cpl=3.
+     * Tracking as A2.P4.c.1 "migrate all user-visible pointers to USER_VBASE". */
     movq %r14, %rax
     orq  $0x7, %rax
     movq %rax, 0(%r11)
