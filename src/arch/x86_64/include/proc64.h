@@ -105,8 +105,8 @@ typedef struct x86_64_proc {
      *   2. for the SYSCALL path it ALSO snapshots the user %rsp out of
      *      %gs:syscall_user_rsp into fork_user_rsp (the syscall trapframe
      *      doesn't carry user rsp, unlike int80),
-     *   3. sets fork_pending=1,
-     *   4. returns child_pid (placeholder 2) to the parent in %rax.
+     *   3. allocates/stores a minimal child_pid and sets fork_pending=1,
+     *   4. returns that child_pid to the parent in %rax.
      *
      * After arch_x86_64_usermode_run() returns to the main loop, kernel64
      * checks fork_pending and re-enters ring3 from the saved frame with
@@ -116,6 +116,16 @@ typedef struct x86_64_proc {
     bool                      fork_pending;
     uint8_t                   fork_via_syscall;   /* 0=int80, 1=syscall */
     uint64_t                  fork_user_rsp;      /* only valid when fork_via_syscall=1 */
+
+    /* A2.P2: temporary single-child wait/waitpid bookkeeping for the
+     * vfork-style child captured above. child_exited/exit_code are set
+     * when the child side of the fork-resume path exits; wait_in_progress
+     * guards the nested do_wait() to usermode_run() path. */
+    uint32_t                  child_pid;
+    bool                      child_exited;
+    int32_t                   child_exit_code;
+    bool                      wait_in_progress;
+
     x86_64_int80_frame_t      saved_fork_frame_int80;
     x86_64_syscall_frame_t    saved_fork_frame_sysc;
 } x86_64_proc_t;
@@ -142,6 +152,7 @@ uint32_t arch_x86_64_proc_current_tid(void);
 uint32_t arch_x86_64_proc_current_ppid(void);
 uint32_t arch_x86_64_proc_current_uid(void);
 uint32_t arch_x86_64_proc_current_gid(void);
+uint32_t arch_x86_64_proc_alloc_child_pid(x86_64_proc_t *parent);
 
 /* H.5b.2: per-process address-space accessors. as_create() ownership
  * is transferred into the PCB by set_as(); proc_exit() will destroy it

@@ -101,6 +101,13 @@ static uint64_t arch_x86_64_syscall_fork_capture(
         return (uint64_t)-1;
     }
 
+    uint32_t child_pid = arch_x86_64_proc_alloc_child_pid(p);
+    if (child_pid == 0) {
+        early_console64_write(
+            "[x86_64][fork] child pid allocation failed -- refusing.\n");
+        return (uint64_t)-1;
+    }
+
     p->fork_via_syscall = via_syscall;
     if (via_syscall) {
         /* Byte copy (avoid dragging in libc string.h). */
@@ -134,8 +141,7 @@ static uint64_t arch_x86_64_syscall_fork_capture(
         early_console64_write("\n");
     }
 
-    /* Placeholder child PID -- A2.P2 will replace with a real allocator. */
-    return 2u;
+    return child_pid;
 }
 
 /*

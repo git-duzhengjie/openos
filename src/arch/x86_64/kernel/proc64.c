@@ -28,6 +28,7 @@ static uint16_t      current_index;
 static uint64_t      yield_count;
 static uint64_t      spawn_count;
 static uint64_t      exit_count;
+static uint32_t      next_child_pid;
 
 /* ------------------------------------------------------------------- */
 /* helpers                                                              */
@@ -74,6 +75,7 @@ void arch_x86_64_proc_init(void) {
     yield_count = 0;
     spawn_count = 0;
     exit_count = 0;
+    next_child_pid = 2;
 }
 
 uint32_t arch_x86_64_proc_spawn_user(const char *name) {
@@ -99,6 +101,10 @@ uint32_t arch_x86_64_proc_spawn_user(const char *name) {
     p->fork_pending     = 0;
     p->fork_via_syscall = 0;
     p->fork_user_rsp    = 0;
+    p->child_pid        = 0;
+    p->child_exited     = false;
+    p->child_exit_code  = 0;
+    p->wait_in_progress = false;
 
     current_index = slot;
     ++spawn_count;
@@ -132,6 +138,24 @@ void arch_x86_64_proc_exit(int code) {
     ++exit_count;
     /* rotate back to the kernel proc */
     current_index = 0;
+}
+
+uint32_t arch_x86_64_proc_alloc_child_pid(x86_64_proc_t *parent) {
+    if (parent == NULL) return 0;
+    if (parent->child_pid != 0 && !parent->child_exited) {
+        return 0;
+    }
+
+    uint32_t pid = next_child_pid++;
+    if (next_child_pid == 0) {
+        next_child_pid = 2;
+    }
+
+    parent->child_pid = pid;
+    parent->child_exited = false;
+    parent->child_exit_code = 0;
+    parent->wait_in_progress = false;
+    return pid;
 }
 
 /* ------------------------------------------------------------------- */
