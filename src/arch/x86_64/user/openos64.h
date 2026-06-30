@@ -17,6 +17,7 @@
 #define OPENOS64_SYS_CLOSE   226ULL
 #define OPENOS64_SYS_GETPPID 224ULL
 #define OPENOS64_SYS_EXEC    221ULL
+#define OPENOS64_SYS_FORK    220ULL
 
 /* Step E.3: loopback datagram sockets. Numbers mirror the kernel
  * SYS_SOCKET/BIND/SENDTO/RECVFROM in src/kernel/include/syscall.h. */
@@ -152,6 +153,13 @@ static inline long openos64_execve(const char *path, char *const argv[], char *c
                              (uint64_t)(uintptr_t)path,
                              (uint64_t)(uintptr_t)argv,
                              (uint64_t)(uintptr_t)envp);
+}
+
+/* A2.P3-B-beta: minimal fork wrapper. Returns child pid in parent, 0 in
+ * child. -1 on error. Semantics are vfork-ish (child shares parent stack;
+ * caller must not unwind before exec/exit). */
+static inline long openos64_fork(void) {
+    return openos64_syscall0(OPENOS64_SYS_FORK);
 }
 
 /* ------------------ Step E.4 monotonic clock helper ------------------

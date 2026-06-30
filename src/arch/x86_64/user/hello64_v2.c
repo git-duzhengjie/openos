@@ -79,5 +79,18 @@ int openos64_main(int argc, char **argv, char **envp) {
     write_str(OPENOS64_STDOUT_FILENO,
               "[hello64_v2] H.4: exiting with code 42\n");
 
+    /* A2.P3-B-beta: minimal fork smoke test. Keep dead simple: no argv,
+     * no envp, no loops. Just fork() once, print one line, exit. */
+    write_str(OPENOS64_STDOUT_FILENO, "[fork] pre\n");
+    long rv = openos64_fork();
+    if (rv == 0) {
+        write_str(OPENOS64_STDOUT_FILENO, "[fork] child\n");
+        openos64_exit(0);
+    } else if (rv > 0) {
+        write_str(OPENOS64_STDOUT_FILENO, "[fork] parent rv>0\n");
+    } else {
+        write_str(OPENOS64_STDOUT_FILENO, "[fork] err\n");
+    }
+
     return 42;
 }

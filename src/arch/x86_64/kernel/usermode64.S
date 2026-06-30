@@ -7,6 +7,7 @@
 #define PERCPU_OFF_USER_DISPATCH 0x78
 
 .global arch_x86_64_iretq_enter_user
+.global arch_x86_64_iretq_enter_user_full
 .global arch_x86_64_user_thread_trampoline
 .global arch_x86_64_user_thread_sentinel_trampoline
 
@@ -105,6 +106,69 @@ arch_x86_64_iretq_enter_user:
      * irq*, syscall) will swapgs back. Establishing the path here lets G.7c
      * later flip KERNEL_GS_BASE to 0 without touching this stub.
      */
+    swapgs
+    iretq
+
+1:
+    hlt
+    jmp 1b
+
+
+/*
+ * void arch_x86_64_iretq_enter_user_full(const x86_64_user_iretq_frame_t *frame)
+ *
+ * A2.P3-B-β: fork-resume variant. Identical to arch_x86_64_iretq_enter_user
+ * for the iretq portion, but additionally restores callee-saved registers
+ * from the extended frame slots before crossing to ring3. Caller-saved
+ * registers (rax/rcx/rdx/rsi/rdi/r8-r11) are still zeroed so the child
+ * observes rax == 0 (the fork-returns-0-in-child convention).
+ *
+ * Frame layout:
+ *   0x00 rip
+ *   0x08 cs
+ *   0x10 rflags
+ *   0x18 rsp
+ *   0x20 ss
+ *   0x28 rbx
+ *   0x30 rbp
+ *   0x38 r12
+ *   0x40 r13
+ *   0x48 r14
+ *   0x50 r15
+ */
+arch_x86_64_iretq_enter_user_full:
+    test %rdi, %rdi
+    jz 1f
+
+    movq 0x20(%rdi), %rax
+    movw %ax, %ds
+    movw %ax, %es
+
+    pushq 0x20(%rdi)
+    pushq 0x18(%rdi)
+    pushq 0x10(%rdi)
+    pushq 0x08(%rdi)
+    pushq 0x00(%rdi)
+
+    /* Restore callee-saved from the extended frame slots. */
+    movq 0x28(%rdi), %rbx
+    movq 0x30(%rdi), %rbp
+    movq 0x38(%rdi), %r12
+    movq 0x40(%rdi), %r13
+    movq 0x48(%rdi), %r14
+    movq 0x50(%rdi), %r15
+
+    /* Zero caller-saved so child sees fork()==0 and clean scratch regs. */
+    xorq %rax, %rax
+    xorq %rcx, %rcx
+    xorq %rdx, %rdx
+    xorq %rsi, %rsi
+    xorq %rdi, %rdi
+    xorq %r8, %r8
+    xorq %r9, %r9
+    xorq %r10, %r10
+    xorq %r11, %r11
+
     swapgs
     iretq
 

@@ -42,11 +42,16 @@ typedef struct x86_64_int80_frame {
 typedef struct x86_64_syscall_frame {
     /*
      * Step D.3 fix: this struct overlays the syscall_entry kernel stack frame.
-     * The asm pushes in order:  r11, rcx, r10, r9, r8, rdi, rsi, rdx, rax
+     * The asm pushes in order:  r15,r14,r13,r12,rbp,rbx, r11,rcx,r10,r9,r8,
+     *                            rdi,rsi,rdx,rax
      * then does `movq %rsp, %rdi` -- i.e. the pointer aims at the LAST push
-     * (rax). Struct fields are laid out low->high, so rax must come first.
-     * The previous layout listed r11 first, which meant frame->rax read r11
-     * (= user RFLAGS), and dispatch saw bogus syscall numbers like 0x46.
+     * (rax). Struct fields are laid out low->high, so rax must come first,
+     * and callee-saved registers come at the end (they are pushed first).
+     *
+     * A2.P3-B-β fix: callee-saved (rbx/rbp/r12-r15) are now saved here so
+     * that the fork resume_child path can restore them; without this the
+     * child resumed from iretq with rbx/rbp/r12-r15 = 0 and crashed on the
+     * first `call *%rbx`.
      */
     uint64_t rax;
     uint64_t rdx;
@@ -57,6 +62,12 @@ typedef struct x86_64_syscall_frame {
     uint64_t r10;
     uint64_t rcx;
     uint64_t r11;
+    uint64_t rbx;
+    uint64_t rbp;
+    uint64_t r12;
+    uint64_t r13;
+    uint64_t r14;
+    uint64_t r15;
 } x86_64_syscall_frame_t;
 
 void arch_x86_64_syscall_init(void);

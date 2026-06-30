@@ -11,6 +11,20 @@ typedef struct x86_64_user_iretq_frame {
     uint64_t rflags;
     uint64_t rsp;
     uint64_t ss;
+    /*
+     * A2.P3-B-β: optional callee-saved register snapshot.
+     * Loaded by arch_x86_64_iretq_enter_user_full() before iretq.
+     * The default iretq_enter_user stub IGNORES these and zeros all GPRs
+     * (correct for a fresh user thread spawn). The _full variant exists
+     * specifically for fork resume_child so the child observes the same
+     * callee-saved state the parent had right before the SYS_FORK call.
+     */
+    uint64_t rbx;
+    uint64_t rbp;
+    uint64_t r12;
+    uint64_t r13;
+    uint64_t r14;
+    uint64_t r15;
 } x86_64_user_iretq_frame_t;
 
 void arch_x86_64_usermode_init(void);

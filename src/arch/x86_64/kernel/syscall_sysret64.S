@@ -40,6 +40,12 @@ x86_64_syscall_entry:
     movq %rsp, %gs:0x68          /* save user rsp */
     movq %gs:0x60, %rsp          /* load kernel rsp (== TSS.RSP0) */
 
+    pushq %r15
+    pushq %r14
+    pushq %r13
+    pushq %r12
+    pushq %rbp
+    pushq %rbx
     pushq %r11
     pushq %rcx
     pushq %r10
@@ -64,6 +70,12 @@ x86_64_syscall_entry:
     popq %r10
     popq %rcx
     popq %r11
+    popq %rbx
+    popq %rbp
+    popq %r12
+    popq %r13
+    popq %r14
+    popq %r15
 
     /*
      * G.7c: restore user stack pointer that we saved on entry, then

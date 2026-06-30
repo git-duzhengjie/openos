@@ -124,6 +124,15 @@ static uint64_t arch_x86_64_syscall_fork_capture(
     early_console64_write("[fork:capture] pending set via_syscall=");
     early_console64_write_hex64((uint64_t)(uint32_t)via_syscall);
     early_console64_write("\n");
+    if (via_syscall) {
+        early_console64_write("[fork:capture] saved rcx(rip)=");
+        early_console64_write_hex64(p->saved_fork_frame_sysc.rcx);
+        early_console64_write(" r11(rfl)=");
+        early_console64_write_hex64(p->saved_fork_frame_sysc.r11);
+        early_console64_write(" user_rsp=");
+        early_console64_write_hex64(p->fork_user_rsp);
+        early_console64_write("\n");
+    }
 
     /* Placeholder child PID -- A2.P2 will replace with a real allocator. */
     return 2u;

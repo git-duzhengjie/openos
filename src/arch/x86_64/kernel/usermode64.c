@@ -10,6 +10,7 @@
 #include "../include/proc64.h"
 
 extern void arch_x86_64_iretq_enter_user(const x86_64_user_iretq_frame_t *frame);
+extern void arch_x86_64_iretq_enter_user_full(const x86_64_user_iretq_frame_t *frame);
 
 /*
  * Step G.x: ring3-drop sentry state.
@@ -134,6 +135,14 @@ void arch_x86_64_usermode_prepare_iretq(x86_64_user_iretq_frame_t *frame,
     frame->rflags = 0x202ULL;
     frame->rsp = (uint64_t)stack_top;
     frame->ss = (uint64_t)(OPENOS_X86_64_GDT_USER_DATA | 3u);
+    /* A2.P3-B-β: fresh user thread starts with zeroed callee-saved.
+     * iretq_enter_user_full will load these into rbx/rbp/r12-r15. */
+    frame->rbx = 0;
+    frame->rbp = 0;
+    frame->r12 = 0;
+    frame->r13 = 0;
+    frame->r14 = 0;
+    frame->r15 = 0;
 }
 
 uint8_t arch_x86_64_usermode_validate_frame(const x86_64_user_iretq_frame_t *frame) {
@@ -257,15 +266,39 @@ int arch_x86_64_usermode_run(x86_64_entry_t entry) {
             PREPARED_USER_FRAME.rip    = p_fork->saved_fork_frame_sysc.rcx;
             PREPARED_USER_FRAME.rflags = p_fork->saved_fork_frame_sysc.r11;
             PREPARED_USER_FRAME.rsp    = p_fork->fork_user_rsp;
+            /* A2.P3-B-β: restore callee-saved from the syscall save area
+             * so the child resumes with the exact same rbx/rbp/r12-r15
+             * the parent had at the SYS_FORK call site. Without this the
+             * child crashed on the first `call *%rbx` after the branch. */
+            PREPARED_USER_FRAME.rbx = p_fork->saved_fork_frame_sysc.rbx;
+            PREPARED_USER_FRAME.rbp = p_fork->saved_fork_frame_sysc.rbp;
+            PREPARED_USER_FRAME.r12 = p_fork->saved_fork_frame_sysc.r12;
+            PREPARED_USER_FRAME.r13 = p_fork->saved_fork_frame_sysc.r13;
+            PREPARED_USER_FRAME.r14 = p_fork->saved_fork_frame_sysc.r14;
+            PREPARED_USER_FRAME.r15 = p_fork->saved_fork_frame_sysc.r15;
         } else {
             PREPARED_USER_FRAME.rip    = p_fork->saved_fork_frame_int80.rip;
             PREPARED_USER_FRAME.rflags = p_fork->saved_fork_frame_int80.rflags;
             PREPARED_USER_FRAME.rsp    = p_fork->saved_fork_frame_int80.rsp;
+            PREPARED_USER_FRAME.rbx = p_fork->saved_fork_frame_int80.rbx;
+            PREPARED_USER_FRAME.rbp = p_fork->saved_fork_frame_int80.rbp;
+            PREPARED_USER_FRAME.r12 = p_fork->saved_fork_frame_int80.r12;
+            PREPARED_USER_FRAME.r13 = p_fork->saved_fork_frame_int80.r13;
+            PREPARED_USER_FRAME.r14 = p_fork->saved_fork_frame_int80.r14;
+            PREPARED_USER_FRAME.r15 = p_fork->saved_fork_frame_int80.r15;
         }
         /* One-shot: clear pending before the no-return iretq so a future
          * re-entry sees a clean state. */
         p_fork->fork_pending = 0;
-        early_console64_write("[fork:resume] entering child (rax=0)\n");
+        early_console64_write("[fork:resume] entering child rip=");
+        early_console64_write_hex64(PREPARED_USER_FRAME.rip);
+        early_console64_write(" rsp=");
+        early_console64_write_hex64(PREPARED_USER_FRAME.rsp);
+        early_console64_write(" rfl=");
+        early_console64_write_hex64(PREPARED_USER_FRAME.rflags);
+        early_console64_write(" cs=");
+        early_console64_write_hex64(PREPARED_USER_FRAME.cs);
+        early_console64_write("\n");
     }
     if (!arch_x86_64_usermode_validate_frame(&PREPARED_USER_FRAME)) {
         return -2;
@@ -340,7 +373,7 @@ int arch_x86_64_usermode_run(x86_64_entry_t entry) {
         "pushq %%rax\n\t"             /* RIP slot on top -- ret target */
         "movq %%rsp, %0\n\t"          /* publish kernel return rsp */
         "movq %3, %%rdi\n\t"
-        "call arch_x86_64_iretq_enter_user\n\t"
+        "call arch_x86_64_iretq_enter_user_full\n\t"
         /* Should never fall through here -- iretq goes to ring3. */
         "ud2\n\t"
         "1:\n\t"                       /* return target from SYS_EXIT */
