@@ -212,8 +212,23 @@ int arch_x86_64_usermode_run(x86_64_entry_t entry) {
      * none are queued seed_user_stack still lays out the minimal
      * argc=0/argv={NULL} frame to satisfy the ABI.
      */
-    user_rsp = arch_x86_64_usermode_seed_user_stack(
-        (x86_64_virt_addr_t)bootstrap_user_stack_top());
+    /*
+     * H.4 + P4.c.1: seed the user stack with the SysV program-startup
+     * frame. Kernel-side writes still go through the low identity alias
+     * (bootstrap_user_stack_top() is a low VA == phys), but every
+     * pointer value the ring3 _start will dereference (argv[i], envp[i])
+     * and the returned RSP are biased by OPENOS_X86_64_USER_VBASE so
+     * ring3 sees the high-half alias. This is the precondition for
+     * dropping the U bit on PML4[0]: ring3 must never need to dereference
+     * a low-identity VA.
+     *
+     * The high-half alias mapping itself is installed in the block
+     * immediately below; the seed write order is fine because ring3
+     * doesn't run until iretq, by which point the alias is live.
+     */
+    user_rsp = arch_x86_64_usermode_seed_user_stack_ex(
+        (x86_64_virt_addr_t)bootstrap_user_stack_top(),
+        (x86_64_virt_addr_t)OPENOS_X86_64_USER_VBASE);
     if (user_rsp == 0) {
         return -3;
     }
@@ -243,7 +258,8 @@ int arch_x86_64_usermode_run(x86_64_entry_t entry) {
                     OPENOS_X86_64_VMM_PAGE_SIZE,
                     OPENOS_X86_64_AS_FLAG_RW);
             }
-            user_rsp = (x86_64_virt_addr_t)(OPENOS_X86_64_USER_VBASE + user_rsp);
+            /* P4.c.1: user_rsp is already biased by USER_VBASE inside
+             * seed_user_stack_ex(); no further translation needed here. */
         }
     }
 
@@ -644,6 +660,12 @@ void arch_x86_64_usermode_set_envs(int envc, const char *const *envp) {
  * the C ABI's usual rsp % 16 == 8 contract.
  */
 x86_64_virt_addr_t arch_x86_64_usermode_seed_user_stack(x86_64_virt_addr_t stack_top_in) {
+    return arch_x86_64_usermode_seed_user_stack_ex(stack_top_in, 0);
+}
+
+x86_64_virt_addr_t arch_x86_64_usermode_seed_user_stack_ex(
+    x86_64_virt_addr_t stack_top_in,
+    x86_64_virt_addr_t pointer_va_bias) {
     if (stack_top_in == 0) {
         return 0;
     }
@@ -707,7 +729,9 @@ x86_64_virt_addr_t arch_x86_64_usermode_seed_user_stack(x86_64_virt_addr_t stack
     *(uint64_t *)cursor = 0;
     for (int i = envc - 1; i >= 0; --i) {
         cursor -= 8;
-        *(uint64_t *)cursor = (uint64_t)env_va[i];
+        /* P4.c.1: expose env_va[i] to ring3 through pointer_va_bias. The
+         * kernel-side write target (cursor) stays unbiased. */
+        *(uint64_t *)cursor = (uint64_t)(env_va[i] + (uintptr_t)pointer_va_bias);
     }
     uintptr_t envp_base = cursor; /* envp[0] (or terminator when envc==0) */
 
@@ -716,7 +740,8 @@ x86_64_virt_addr_t arch_x86_64_usermode_seed_user_stack(x86_64_virt_addr_t stack
     *(uint64_t *)cursor = 0;
     for (int i = argc - 1; i >= 0; --i) {
         cursor -= 8;
-        *(uint64_t *)cursor = (uint64_t)arg_va[i];
+        /* P4.c.1: expose arg_va[i] to ring3 through pointer_va_bias. */
+        *(uint64_t *)cursor = (uint64_t)(arg_va[i] + (uintptr_t)pointer_va_bias);
     }
     uintptr_t argv_base = cursor; /* argv[0] */
 
@@ -744,6 +769,8 @@ x86_64_virt_addr_t arch_x86_64_usermode_seed_user_stack(x86_64_virt_addr_t stack
     early_console64_write_hex64((uint64_t)(uint32_t)envc);
     early_console64_write(" rsp=");
     early_console64_write_hex64((uint64_t)cursor);
+    early_console64_write(" bias=");
+    early_console64_write_hex64((uint64_t)pointer_va_bias);
     early_console64_write("\n");
 
     /* H.5a: arg+env tables are one-shot per usermode_run/exec round. Clear
@@ -752,5 +779,7 @@ x86_64_virt_addr_t arch_x86_64_usermode_seed_user_stack(x86_64_virt_addr_t stack
     arch_x86_64_usermode_clear_args();
     arch_x86_64_usermode_clear_envs();
 
-    return (x86_64_virt_addr_t)cursor;
+    /* P4.c.1: return the ring3-visible RSP (kernel did all writes via the
+     * unbiased cursor, but ring3 enters with rsp = cursor + bias). */
+    return (x86_64_virt_addr_t)(cursor + (uintptr_t)pointer_va_bias);
 }

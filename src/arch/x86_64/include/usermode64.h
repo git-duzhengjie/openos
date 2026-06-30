@@ -127,6 +127,24 @@ int arch_x86_64_usermode_pending_envc(void);
 x86_64_virt_addr_t arch_x86_64_usermode_seed_user_stack(x86_64_virt_addr_t stack_top_in);
 
 /*
+ * P4.c.1 (PML4[0] U-bit removal prep): same as seed_user_stack, but
+ * every pointer value written into the user stack (argv[i], envp[i])
+ * and the returned RSP are biased by `pointer_va_bias` before being
+ * exposed to ring3. The kernel-side writes still go through the
+ * `stack_top_in` view (which must be kernel-accessible), so the caller
+ * is responsible for ensuring the physical pages backing
+ * `stack_top_in` are also reachable at `stack_top_in + pointer_va_bias`
+ * from ring3 (typically via an aliasing mapping at PML4[1]).
+ *
+ * NULL pointers (argv/envp terminators) are kept as 0 -- they are not
+ * biased. Setting pointer_va_bias == 0 makes this function behave
+ * exactly like the legacy seed_user_stack().
+ */
+x86_64_virt_addr_t arch_x86_64_usermode_seed_user_stack_ex(
+    x86_64_virt_addr_t stack_top_in,
+    x86_64_virt_addr_t pointer_va_bias);
+
+/*
  * A2.P3-B (vfork-flavored fork, alpha cut).
  *
  * arch_x86_64_usermode_resume_child():
