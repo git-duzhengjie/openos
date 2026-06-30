@@ -256,9 +256,21 @@ static uint64_t do_exec(uint64_t path_ptr, uint64_t argv_ptr, uint64_t envp_ptr)
         return (uint64_t)-1;
     }
     {
-        /* Replace PCB.as: take ownership of new_as, destroy the old one. */
+        /*
+         * A2.P3-B-beta fix: CR3 must point at new_as BEFORE we destroy old_as.
+         *
+         * Bug found in P3-C investigation (was misdiagnosed as a high-half PT
+         * gap): old_as's PML4 physical page is freed by as_destroy(). If CR3
+         * still references it, the next PMM allocation can hand that page
+         * back out and a subsequent write will corrupt the in-flight PML4 --
+         * including PML4[511] which maps the kernel image. The next IRQ then
+         * triple-faults trying to fetch the ISR.
+         *
+         * Order: (1) set PCB.as=new_as, (2) load CR3 from new_as, (3) free old.
+         */
         struct x86_64_address_space *old_as = arch_x86_64_proc_current_get_as();
         arch_x86_64_proc_current_set_as(new_as);
+        arch_x86_64_as_activate(new_as);
         if (old_as != ((struct x86_64_address_space *)0)) {
             arch_x86_64_as_destroy(old_as);
         }
