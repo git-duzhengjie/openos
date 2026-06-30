@@ -98,16 +98,18 @@ _get_rip:
     movq $512, %rcx
     rep stosq
 
-    /* PML4[0]   = pdpt_lo | P | RW | U   (identity; U so ring3 may walk)
+    /* PML4[0]   = pdpt_lo | P | RW       (identity; kernel-only after P4.c)
      * PML4[511] = pdpt_hi | P | RW       (higher-half, kernel only)
      *
-     * A2.P4.c attempt #1 (reverted): dropping U here closes the ring3 -> kernel
-     * read hole, but `seed_user_stack` currently writes argv/envp char-pointers
-     * pointing at the low identity alias of the stack (PML4[0]). Once U is
-     * gone ring3 cannot deref those pointers -> #PF cr2=0x1DE9xxxx cpl=3.
-     * Tracking as A2.P4.c.1 "migrate all user-visible pointers to USER_VBASE". */
+     * A2.P4.c (shipped after P4.c.1): seed_user_stack now biases every
+     * user-visible pointer (argv/envp, RSP) through USER_VBASE (PML4[1]),
+     * and fork resume restores RSP from the biased frame, so ring3 no
+     * longer needs the low identity alias to walk its own stack. Drop U
+     * on PML4[0] so a stray ring3 deref of a low-identity VA traps as
+     * #PF instead of silently succeeding. PML4[1] (USER_VBASE) carries
+     * its own U-bit chain. */
     movq %r14, %rax
-    orq  $0x7, %rax
+    orq  $0x3, %rax
     movq %rax, 0(%r11)
     movq %r12, %rax
     orq  $0x3, %rax
