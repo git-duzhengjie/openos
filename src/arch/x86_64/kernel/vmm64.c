@@ -3,7 +3,7 @@
 #include "../include/pmm64.h"
 #include "../include/vmm64.h"
 
-#define VMM64_EARLY_IDENTITY_SIZE (64ULL * 1024ULL * 1024ULL)
+#define VMM64_EARLY_IDENTITY_SIZE (512ULL * 1024ULL * 1024ULL)
 #define VMM64_EARLY_KERNEL_MAP_SIZE (64ULL * 1024ULL * 1024ULL)
 
 /*
@@ -299,6 +299,16 @@ void arch_x86_64_vmm_init(void) {
     arch_x86_64_pmm_reserve_range(vmm64_info.pml4_phys, OPENOS_X86_64_VMM_PAGE_SIZE);
     arch_x86_64_pmm_reserve_range(virt_to_phys_addr((x86_64_virt_addr_t)(uintptr_t)&vmm64_tables[0]), sizeof(vmm64_tables));
     arch_x86_64_pmm_reserve_range(kernel_phys_start, kernel_phys_end - kernel_phys_start);
+
+    /* Activate our own PML4 so subsequent maps (heap, user AS) are visible. */
+    arch_x86_64_vmm_load_cr3(vmm64_info.pml4_phys);
+
+    /* LAPIC / IOAPIC MMIO windows are above the early identity range.
+     * Map one page each so lapic_init / ioapic_init can probe them. */
+    (void)arch_x86_64_vmm_map_range(0xFEE00000ULL, 0xFEE00000ULL, OPENOS_X86_64_VMM_PAGE_SIZE,
+                                    OPENOS_X86_64_VMM_KERNEL_FLAGS);
+    (void)arch_x86_64_vmm_map_range(0xFEC00000ULL, 0xFEC00000ULL, OPENOS_X86_64_VMM_PAGE_SIZE,
+                                    OPENOS_X86_64_VMM_KERNEL_FLAGS);
 }
 
 const x86_64_vmm_info_t *arch_x86_64_vmm_get_info(void) {
