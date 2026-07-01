@@ -9,6 +9,39 @@
 通过 `git log --oneline -10` 校对得到的真实栈顶：
 
 ```
+<pending A2.P5 commit>
+5c368f5 x86_64 A2.P2: wait/waitpid nested run + CR3 restore fix
+a4242df x86_64 A2.P2: wait/waitpid skeleton + child PCB
+145bf94 H.5b P4.c: PML4[0] U-bit removal
+f108feb H.5b P4.b: kernel PT hardening
+e309544 H.5b P4.a: usermode entry guard
+72f01f6 (older)
+6b2c0f7 A2.P3-B-beta: load CR3 from new_as before destroying old_as in do_exec
+```
+
+**真实 HEAD 已推进至 A2.P5**（三级 exec 链 launcher → hello64_v2 → hello_fork + fork/wait 独立 ELF 冒烟）。
+
+### 阶段总结（追加于 2026-07-01）
+
+| 阶段 | 状态 | 关键 commit |
+|---|---|---|
+| H.5b P4.a/b/c | ✅ 全绿 | `e309544` / `f108feb` / `145bf94` |
+| A2.P2 wait/waitpid | ✅ 封板 | `a4242df` + `5c368f5`（CR3 restore fix） |
+| A2.P5 hello_fork 独立 ELF | ✅ 封板 | **本次 commit** |
+
+A2.P5 log 通过标志：
+```
+[launcher] execve /bin/hello64_v2
+[hello64_v2] execve /bin/hello_fork (A2.P5)
+[hello_fork] argc=2 pid=2 ppid=1
+[wait] pre → child exit=7 → parent pid=2 exit=7 → [wait] PASS
+```
+
+下一步候选：A2.P3-B-γ 遗留 child RIP 抓崩点（如仍需），或推进真 fork 语义（COW / 独立地址空间）替换 vfork 短路。
+
+### 历史提交栈（保留原文）
+
+```
 6b2c0f7 A2.P3-B-beta: load CR3 from new_as before destroying old_as in do_exec
 623d440 docs(state_truth): mark A2.P0/P1 done, P3-B-alpha shipped, open P3-C VMM blocker
 7e66784 A2.P3-B-alpha: vfork-style fork skeleton (kernel-side, deferred user validation)

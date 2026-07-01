@@ -395,6 +395,17 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
     nm "$ARCH64_BIN_BUILD/hello64_v2.elf" | grep -q ' openos64_main$'
     python3 _embed_elf.py "$ARCH64_BIN_BUILD/hello64_v2.elf" "$ARCH64_SRC/include/embed_hello64_v2.h" hello64_v2_elf
 
+    echo "[1b'/5] Building x86_64 /bin/hello_fork ELF (A2.P5 standalone fork/wait target)..."
+    gcc $ARCH64_USER_CFLAGS -c "$ARCH64_SRC/user/hello_fork.c" -o "$ARCH64_USER_BUILD/hello_fork.o"
+    ld $ARCH64_USER_LDFLAGS -o "$ARCH64_BIN_BUILD/hello_fork.elf" \
+        "$ARCH64_USER_BUILD/start.o" \
+        "$ARCH64_USER_BUILD/crt0.o" \
+        "$ARCH64_USER_BUILD/hello_fork.o"
+    readelf -h "$ARCH64_BIN_BUILD/hello_fork.elf" | grep -q 'Class:.*ELF64'
+    readelf -h "$ARCH64_BIN_BUILD/hello_fork.elf" | grep -q 'Machine:.*X86-64'
+    nm "$ARCH64_BIN_BUILD/hello_fork.elf" | grep -q ' openos64_main$'
+    python3 _embed_elf.py "$ARCH64_BIN_BUILD/hello_fork.elf" "$ARCH64_SRC/include/embed_hello_fork.h" hello_fork_elf
+
     echo "[1c/5] Building x86_64 /bin/launcher ELF (H.3 execve caller)..."
     gcc $ARCH64_USER_CFLAGS -c "$ARCH64_SRC/user/launcher.c" -o "$ARCH64_USER_BUILD/launcher.o"
     ld $ARCH64_USER_LDFLAGS -o "$ARCH64_BIN_BUILD/launcher.elf" \

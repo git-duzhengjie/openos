@@ -77,33 +77,35 @@ int openos64_main(int argc, char **argv, char **envp) {
     }
 
     write_str(OPENOS64_STDOUT_FILENO,
-              "[hello64_v2] H.4: exiting with code 42\n");
+              "[hello64_v2] H.4: about to execve /bin/hello_fork (A2.P5)\n");
 
-    /* A2.P2: wait()/waitpid() smoke test. Parent blocks in wait while the
-     * pending vfork-style child runs to exit(7), then observes pid/status. */
-    write_str(OPENOS64_STDOUT_FILENO, "[wait] pre\n");
-    long rv = openos64_fork();
-    if (rv == 0) {
-        write_str(OPENOS64_STDOUT_FILENO, "[wait] child exit=7\n");
-        openos64_exit(7);
-    } else if (rv > 0) {
-        int st = -1;
-        long wp = openos64_wait(&st);
-        write_str(OPENOS64_STDOUT_FILENO, "[wait] parent pid=");
-        write_dec(OPENOS64_STDOUT_FILENO, wp);
-        write_str(OPENOS64_STDOUT_FILENO, " status=");
-        write_dec(OPENOS64_STDOUT_FILENO, (long)st);
-        write_str(OPENOS64_STDOUT_FILENO, " exit=");
-        write_dec(OPENOS64_STDOUT_FILENO, (long)((st >> 8) & 0xFF));
-        write_str(OPENOS64_STDOUT_FILENO, "\n");
-        if (wp == rv && ((st >> 8) & 0xFF) == 7) {
-            write_str(OPENOS64_STDOUT_FILENO, "[wait] PASS\n");
-        } else {
-            write_str(OPENOS64_STDOUT_FILENO, "[wait] FAIL\n");
-        }
-    } else {
-        write_str(OPENOS64_STDOUT_FILENO, "[wait] fork err\n");
-    }
+    /* A2.P5: hand fork/wait off to a dedicated ELF so execve and fork/wait
+     * are decoupled regressions. Forward our argv/envp verbatim so the
+     * second execve also exercises SysV startup frame plumbing. */
+    static const char *fork_argv[] = {
+        "hello_fork",
+        "a2.p5",
+        (const char *)0,
+    };
+    static const char *fork_envp[] = {
+        "PATH=/bin",
+        "OPENOS_STAGE=A2.P5",
+        (const char *)0,
+    };
+    long rc = openos64_execve("/bin/hello_fork",
+                              (char *const *)fork_argv,
+                              (char *const *)fork_envp);
 
-    return 42;
+    /* Falling through means execve failed. Print diagnostic + exit 98 so it
+     * is grep-able alongside launcher's 99. */
+    static const char hexd[] = "0123456789abcdef";
+    char errbuf[64];
+    openos64_size_t bi = 0;
+    const char *epfx = "[hello64_v2] ERR: execve returned rc=0x";
+    for (const char *p = epfx; *p; ++p) errbuf[bi++] = *p;
+    uint64_t v = (uint64_t)rc;
+    for (int s = 60; s >= 0; s -= 4) errbuf[bi++] = hexd[(v >> s) & 0xF];
+    errbuf[bi++] = '\n';
+    (void)openos64_write(OPENOS64_STDERR_FILENO, errbuf, bi);
+    return 98;
 }
