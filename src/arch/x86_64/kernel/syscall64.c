@@ -88,60 +88,67 @@ void arch_x86_64_syscall_init(void) {
  */
 static uint64_t arch_x86_64_syscall_fork_capture(
     void *frame, uint8_t via_syscall) {
-    x86_64_proc_t *p = arch_x86_64_proc_current();
-    if (p == NULL) {
+    x86_64_proc_t *parent = arch_x86_64_proc_current();
+    if (parent == NULL) {
         early_console64_write(
             "[x86_64][fork] no current proc -- refusing fork.\n");
         return (uint64_t)-1;
     }
-    if (p->fork_pending) {
-        /* Another fork is already queued; reject (no nested vfork). */
+    if (parent->child_slot != OPENOS_X86_64_PROC_INVALID_INDEX) {
+        /* Another child is already queued/running; γ.2.a serialises. */
         early_console64_write(
             "[x86_64][fork] nested fork attempt -- refusing.\n");
         return (uint64_t)-1;
     }
 
-    uint32_t child_pid = arch_x86_64_proc_alloc_child_pid(p);
-    if (child_pid == 0) {
+    /* γ.2.a: give the child its own PCB slot. AS is still shared with the
+     * parent (as_clone lands in γ.2.b/γ.3). fork_pending / fork_user_rsp /
+     * saved_fork_frame_* now live on the CHILD PCB, so wait() can drive
+     * the child by switching current_index to child->slot. */
+    x86_64_proc_t *child = arch_x86_64_proc_fork_alloc_child(parent);
+    if (child == NULL) {
         early_console64_write(
-            "[x86_64][fork] child pid allocation failed -- refusing.\n");
+            "[x86_64][fork] child slot allocation failed -- refusing.\n");
         return (uint64_t)-1;
     }
 
-    p->fork_via_syscall = via_syscall;
+    child->fork_via_syscall = via_syscall;
     if (via_syscall) {
         /* Byte copy (avoid dragging in libc string.h). */
         const uint8_t *src = (const uint8_t *)frame;
-        uint8_t       *dst = (uint8_t *)&p->saved_fork_frame_sysc;
+        uint8_t       *dst = (uint8_t *)&child->saved_fork_frame_sysc;
         for (x86_64_size_t i = 0; i < sizeof(x86_64_syscall_frame_t); ++i)
             dst[i] = src[i];
-        /* Read user rsp stashed at syscall entry via %gs:syscall_user_rsp.
-         * percpu_t.syscall_user_rsp is the canonical slot (see
-         * percpu64.h:108 and syscall_sysret64.S). */
+        /* Read user rsp stashed at syscall entry via %gs:syscall_user_rsp. */
         arch_x86_64_percpu_t *pc = arch_x86_64_this_cpu_ptr();
-        p->fork_user_rsp = pc->syscall_user_rsp;
+        child->fork_user_rsp = pc->syscall_user_rsp;
     } else {
         const uint8_t *src = (const uint8_t *)frame;
-        uint8_t       *dst = (uint8_t *)&p->saved_fork_frame_int80;
+        uint8_t       *dst = (uint8_t *)&child->saved_fork_frame_int80;
         for (x86_64_size_t i = 0; i < sizeof(x86_64_int80_frame_t); ++i)
             dst[i] = src[i];
-        p->fork_user_rsp = 0; /* int80 frame carries user rsp natively */
+        child->fork_user_rsp = 0; /* int80 frame carries user rsp natively */
     }
-    p->fork_pending = 1;
-    early_console64_write("[fork:capture] pending set via_syscall=");
+    child->fork_pending = 1;
+
+    early_console64_write("[fork:capture] child slot=");
+    early_console64_write_hex64((uint64_t)parent->child_slot);
+    early_console64_write(" pid=");
+    early_console64_write_hex64((uint64_t)child->pid);
+    early_console64_write(" via_syscall=");
     early_console64_write_hex64((uint64_t)(uint32_t)via_syscall);
     early_console64_write("\n");
     if (via_syscall) {
         early_console64_write("[fork:capture] saved rcx(rip)=");
-        early_console64_write_hex64(p->saved_fork_frame_sysc.rcx);
+        early_console64_write_hex64(child->saved_fork_frame_sysc.rcx);
         early_console64_write(" r11(rfl)=");
-        early_console64_write_hex64(p->saved_fork_frame_sysc.r11);
+        early_console64_write_hex64(child->saved_fork_frame_sysc.r11);
         early_console64_write(" user_rsp=");
-        early_console64_write_hex64(p->fork_user_rsp);
+        early_console64_write_hex64(child->fork_user_rsp);
         early_console64_write("\n");
     }
 
-    return child_pid;
+    return child->pid;
 }
 
 /*

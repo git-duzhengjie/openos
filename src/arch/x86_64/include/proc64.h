@@ -41,6 +41,7 @@ struct x86_64_address_space;
 
 #define OPENOS_X86_64_PROC_MAX 8u
 #define OPENOS_X86_64_PROC_NAME_MAX 16u
+#define OPENOS_X86_64_PROC_INVALID_INDEX ((uint16_t)0xFFFFu)
 
 typedef enum x86_64_proc_state {
     OPENOS_X86_64_PROC_FREE = 0,
@@ -126,6 +127,20 @@ typedef struct x86_64_proc {
     int32_t                   child_exit_code;
     bool                      wait_in_progress;
 
+    /* γ.2.a — child now owns an independent PCB slot.
+     *   parent.child_slot -> proc_table index of the queued child PCB
+     *                        (OPENOS_X86_64_PROC_INVALID_INDEX when none).
+     *   child.parent_slot -> proc_table index of the parent PCB. Used by
+     *                        mark_exited() to publish exit status into
+     *                        the parent's child_exited/child_exit_code
+     *                        fields when the parent is blocked in wait().
+     *
+     * Address space is still shared with the parent in this sub-step
+     * (γ.2.b/γ.3 will introduce as_clone + activate). Only the PCB and
+     * the fork trapframe move to the child. */
+    uint16_t                  child_slot;
+    uint16_t                  parent_slot;
+
     x86_64_int80_frame_t      saved_fork_frame_int80;
     x86_64_syscall_frame_t    saved_fork_frame_sysc;
 } x86_64_proc_t;
@@ -153,6 +168,28 @@ uint32_t arch_x86_64_proc_current_ppid(void);
 uint32_t arch_x86_64_proc_current_uid(void);
 uint32_t arch_x86_64_proc_current_gid(void);
 uint32_t arch_x86_64_proc_alloc_child_pid(x86_64_proc_t *parent);
+
+/* γ.2.a — allocate an independent PCB slot for the fork child. Parent is
+ * `parent_pcb` (usually arch_x86_64_proc_current()). Inherits ppid/uid/gid
+ * and links parent.child_slot / child.parent_slot both ways. Does NOT
+ * rotate current_index — the parent keeps running until wait() drives the
+ * child via arch_x86_64_proc_switch_to() below. Returns NULL on failure. */
+x86_64_proc_t *arch_x86_64_proc_fork_alloc_child(x86_64_proc_t *parent_pcb);
+
+/* γ.2.a — current-slot management for the wait-driven child run. Returns
+ * the previous current slot index so the caller can restore it after the
+ * nested run. proc_table[slot] must be RUNNING. */
+uint16_t arch_x86_64_proc_current_slot(void);
+uint16_t arch_x86_64_proc_switch_to(uint16_t slot);
+
+/* γ.2.a — direct PCB accessor by slot (used by wait-path to read the
+ * child's exit status after it has been reaped from mark_exited()). Returns
+ * NULL for FREE slots or out-of-range indices. */
+x86_64_proc_t *arch_x86_64_proc_slot(uint16_t slot);
+
+/* γ.2.a — release the child PCB slot after its status has been consumed by
+ * a wait(). Safe to call on FREE slots (no-op). */
+void arch_x86_64_proc_release_slot(uint16_t slot);
 
 /* H.5b.2: per-process address-space accessors. as_create() ownership
  * is transferred into the PCB by set_as(); proc_exit() will destroy it

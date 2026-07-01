@@ -433,7 +433,11 @@ int arch_x86_64_usermode_run_pending_child_for_wait(void) {
     if (p->wait_in_progress) return -2;
     if (p->child_pid == 0) return -10;
     if (p->child_exited) return p->child_exit_code;
-    if (!p->fork_pending) return -10;
+    if (p->child_slot == OPENOS_X86_64_PROC_INVALID_INDEX) return -10;
+
+    x86_64_proc_t *child = arch_x86_64_proc_slot(p->child_slot);
+    if (child == NULL) return -10;
+    if (!child->fork_pending) return -10;
 
     /* Preserve the parent's outer SYS_EXIT landing zone. The nested child
      * run will publish its own USERMODE_RETURN_RSP, then return here after
@@ -445,6 +449,17 @@ int arch_x86_64_usermode_run_pending_child_for_wait(void) {
     int saved_last_exit_code = usermode_last_exit_code;
 
     p->wait_in_progress = true;
+
+    /* γ.2.a: temporarily promote the child to `current` for the nested
+     * usermode_run(). fork_resume path inside usermode_run reads
+     * `current()->saved_fork_frame_*` + `current()->fork_pending`, and
+     * child SYS_EXIT will hit arch_x86_64_usermode_mark_exited() while
+     * current == child, so publishing exit_code into child's own PCB is
+     * natural. Parent slot is restored right after the nested run. */
+    uint16_t parent_slot = arch_x86_64_proc_current_slot();
+    uint16_t child_slot  = p->child_slot;
+    (void)arch_x86_64_proc_switch_to(child_slot);
+
     arch_x86_64_percpu_t *pc = arch_x86_64_this_cpu_ptr();
     /* A2.P2-fix: keep these reads/writes 8-byte and prevent the compiler
      * from fusing the adjacent kernel_rsp(@0x60) + user_rsp(@0x68) loads
@@ -466,6 +481,9 @@ int arch_x86_64_usermode_run_pending_child_for_wait(void) {
         pc->syscall_kernel_rsp = saved_syscall_kernel_rsp - 0x4000ULL;
     }
     int code = arch_x86_64_usermode_run(0);
+
+    /* Restore parent as current before any parent-facing bookkeeping. */
+    (void)arch_x86_64_proc_switch_to(parent_slot);
     /*
      * A2.P2-fix (CR3-restore): usermode_run() unconditionally ends with
      * arch_x86_64_as_activate_boot(), which loads boot PML4 into CR3. On
@@ -504,7 +522,12 @@ int arch_x86_64_usermode_run_pending_child_for_wait(void) {
     usermode_exited = saved_exited;
     usermode_last_exit_code = saved_last_exit_code;
 
-    if (p->child_exited) return p->child_exit_code;
+    if (p->child_exited) {
+        /* Reap the child slot now that its status has been consumed. */
+        arch_x86_64_proc_release_slot(child_slot);
+        p->child_slot = OPENOS_X86_64_PROC_INVALID_INDEX;
+        return p->child_exit_code;
+    }
     return code;
 }
 
@@ -514,16 +537,29 @@ void arch_x86_64_usermode_mark_exited(int code) {
     usermode_running = 0;
     ++usermode_exit_count;
 
-    /* A2.P2: wait()/waitpid() can synchronously drive the pending
-     * vfork-style child while the parent is blocked inside the wait syscall.
-     * In that mode parent and child still share this PCB, so freeing/rotating
-     * the PCB here would destroy the parent. Record a zombie-like child status
-     * and let the nested usermode_run return to do_wait(). */
+    /* A2.P2 / γ.2.a: wait()/waitpid() can synchronously drive the pending
+     * fork child while the parent is blocked inside the wait syscall. As of
+     * γ.2.a the child owns its own PCB slot, so `current` here is the
+     * CHILD; the parent is reachable via child.parent_slot. Record the
+     * child's exit into the parent's child_exited/child_exit_code fields
+     * and return to the nested usermode_run() — do_wait() will then reap
+     * the child slot after usermode_run_pending_child_for_wait() returns.
+     * Freeing the child slot here would rip out the stack the SYS_EXIT is
+     * still running on. */
     x86_64_proc_t *p = arch_x86_64_proc_current();
-    if (p != NULL && p->wait_in_progress) {
-        p->child_exited = true;
-        p->child_exit_code = code;
-        return;
+    if (p != NULL && p->parent_slot != OPENOS_X86_64_PROC_INVALID_INDEX) {
+        x86_64_proc_t *parent = arch_x86_64_proc_slot(p->parent_slot);
+        if (parent != NULL && parent->wait_in_progress) {
+            /* Publish exit status on BOTH sides:
+             *   - parent.child_exit_code   → what wait() returns
+             *   - child.exit_code / exited → record on the child PCB too
+             *                                (kept for future waitpid()). */
+            parent->child_exited    = true;
+            parent->child_exit_code = code;
+            p->exit_code = code;
+            p->fork_pending = 0;
+            return;
+        }
     }
 
     /* Step E.1: tear down the ring3 PCB so SYS_GETPID after exit reports
