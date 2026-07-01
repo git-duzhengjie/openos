@@ -175,4 +175,7 @@ x86_64_virt_addr_t arch_x86_64_usermode_seed_user_stack_ex(
  */
 void arch_x86_64_usermode_resume_child(void);
 
+/* A2.P2: drive the current pending vfork-style child from wait()/waitpid(). */
+int arch_x86_64_usermode_run_pending_child_for_wait(void);
+
 #endif /* OPENOS_ARCH_X86_64_USERMODE64_H */

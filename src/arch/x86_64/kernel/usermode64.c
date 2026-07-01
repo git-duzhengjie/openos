@@ -7,6 +7,7 @@
 #include "../include/gdt64.h"
 #include "../include/idt64.h"
 #include "../include/pmm64.h"
+#include "../include/percpu64.h"
 #include "../include/proc64.h"
 
 extern void arch_x86_64_iretq_enter_user(const x86_64_user_iretq_frame_t *frame);
@@ -426,11 +427,105 @@ int arch_x86_64_usermode_run(x86_64_entry_t entry) {
     return usermode_exited ? usermode_last_exit_code : -3;
 }
 
+int arch_x86_64_usermode_run_pending_child_for_wait(void) {
+    x86_64_proc_t *p = arch_x86_64_proc_current();
+    if (p == NULL) return -1;
+    if (p->wait_in_progress) return -2;
+    if (p->child_pid == 0) return -10;
+    if (p->child_exited) return p->child_exit_code;
+    if (!p->fork_pending) return -10;
+
+    /* Preserve the parent's outer SYS_EXIT landing zone. The nested child
+     * run will publish its own USERMODE_RETURN_RSP, then return here after
+     * child SYS_EXIT. Parent must keep its original landing zone for its own
+     * later SYS_EXIT after wait has returned to ring3. */
+    uint64_t saved_return_rsp = USERMODE_RETURN_RSP;
+    int saved_running = usermode_running;
+    int saved_exited = usermode_exited;
+    int saved_last_exit_code = usermode_last_exit_code;
+
+    p->wait_in_progress = true;
+    arch_x86_64_percpu_t *pc = arch_x86_64_this_cpu_ptr();
+    /* A2.P2-fix: keep these reads/writes 8-byte and prevent the compiler
+     * from fusing the adjacent kernel_rsp(@0x60) + user_rsp(@0x68) loads
+     * into a 16-byte SSE movdqa/movaps pair -- the per-CPU struct is only
+     * 8-byte aligned, so a fused movaps to/from %rsp triggers #GP. */
+    volatile uint64_t saved_syscall_kernel_rsp = pc ? pc->syscall_kernel_rsp : 0;
+    asm volatile("" ::: "memory");
+    volatile uint64_t saved_syscall_user_rsp   = pc ? pc->syscall_user_rsp   : 0;
+    asm volatile("" ::: "memory");
+    if (pc != NULL) {
+        /* A2.P2: the parent is blocked inside a syscall handler on the
+         * per-CPU syscall stack. A nested usermode_run publishes its return
+         * frame on that same stack; if child SYS_EXIT reused the original
+         * syscall_kernel_rsp, its entry frame would overwrite the nested
+         * return frame. Put the child syscall frame well below the whole
+         * wait() call chain while this synchronous wait-driven run is active,
+         * then restore it below. One page is not enough on debug-ish builds:
+         * the child SYS_EXIT frame can still clobber the inner return slot. */
+        pc->syscall_kernel_rsp = saved_syscall_kernel_rsp - 0x4000ULL;
+    }
+    int code = arch_x86_64_usermode_run(0);
+    /*
+     * A2.P2-fix (CR3-restore): usermode_run() unconditionally ends with
+     * arch_x86_64_as_activate_boot(), which loads boot PML4 into CR3. On
+     * the outer/top-level ring3 round-trip that's fine (kernel keeps
+     * running on boot PML4), but for a *nested* run driven from inside
+     * the parent's wait() syscall handler, dropping to boot PML4 means
+     * that when do_wait_common eventually returns and sysretq's back to
+     * ring3, CR3 no longer has PML4[1]/USER_VBASE mapped -> the parent's
+     * next user instruction #PF's with err=0x14 (user, ifetch, P=0) at
+     * some 0x00000080_00xxxxxx address.
+     *
+     * Since parent and child share the AS in this vfork-style model,
+     * re-activate the parent's AS here to restore CR3 before returning.
+     */
+    {
+        x86_64_address_space_t *as = arch_x86_64_proc_current_get_as();
+        if (as != NULL) {
+            arch_x86_64_as_activate(as);
+        }
+    }
+    if (pc != NULL) {
+        asm volatile("" ::: "memory");
+        pc->syscall_kernel_rsp = saved_syscall_kernel_rsp;
+        asm volatile("" ::: "memory");
+        /* A2.P2-fix: child's SYS_EXIT entry overwrote %gs:syscall_user_rsp
+         * with the child's user RSP. When the parent's wait() syscall
+         * eventually sysretq's, it reloads %rsp from this slot -- so we
+         * MUST restore the parent's user RSP here, otherwise sysret hands
+         * the parent the child's user stack and an immediate #PF follows. */
+        pc->syscall_user_rsp   = saved_syscall_user_rsp;
+    }
+    p->wait_in_progress = false;
+
+    USERMODE_RETURN_RSP = saved_return_rsp;
+    usermode_running = saved_running;
+    usermode_exited = saved_exited;
+    usermode_last_exit_code = saved_last_exit_code;
+
+    if (p->child_exited) return p->child_exit_code;
+    return code;
+}
+
 void arch_x86_64_usermode_mark_exited(int code) {
     usermode_last_exit_code = code;
     usermode_exited = 1;
     usermode_running = 0;
     ++usermode_exit_count;
+
+    /* A2.P2: wait()/waitpid() can synchronously drive the pending
+     * vfork-style child while the parent is blocked inside the wait syscall.
+     * In that mode parent and child still share this PCB, so freeing/rotating
+     * the PCB here would destroy the parent. Record a zombie-like child status
+     * and let the nested usermode_run return to do_wait(). */
+    x86_64_proc_t *p = arch_x86_64_proc_current();
+    if (p != NULL && p->wait_in_progress) {
+        p->child_exited = true;
+        p->child_exit_code = code;
+        return;
+    }
+
     /* Step E.1: tear down the ring3 PCB so SYS_GETPID after exit reports
      * the kernel proc again. Safe even if the user program never spawned
      * (proc_exit is a no-op on the kernel slot). */

@@ -18,6 +18,8 @@
 #define OPENOS64_SYS_GETPPID 224ULL
 #define OPENOS64_SYS_EXEC    221ULL
 #define OPENOS64_SYS_FORK    220ULL
+#define OPENOS64_SYS_WAIT    222ULL
+#define OPENOS64_SYS_WAITPID 223ULL
 
 /* Step E.3: loopback datagram sockets. Numbers mirror the kernel
  * SYS_SOCKET/BIND/SENDTO/RECVFROM in src/kernel/include/syscall.h. */
@@ -160,6 +162,16 @@ static inline long openos64_execve(const char *path, char *const argv[], char *c
  * caller must not unwind before exec/exit). */
 static inline long openos64_fork(void) {
     return openos64_syscall0(OPENOS64_SYS_FORK);
+}
+
+static inline long openos64_wait(int *status) {
+    return openos64_syscall1(OPENOS64_SYS_WAIT, (uint64_t)(uintptr_t)status);
+}
+
+static inline long openos64_waitpid(long pid, int *status) {
+    return openos64_syscall2(OPENOS64_SYS_WAITPID,
+                             (uint64_t)pid,
+                             (uint64_t)(uintptr_t)status);
 }
 
 /* ------------------ Step E.4 monotonic clock helper ------------------

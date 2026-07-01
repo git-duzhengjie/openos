@@ -375,6 +375,37 @@ static uint64_t do_yield(void) {
     return 0;
 }
 
+static uint64_t do_wait_common(uint64_t pid_arg, uint64_t status_ptr, int use_pid) {
+    x86_64_proc_t *p = arch_x86_64_proc_current();
+    if (p == NULL) return (uint64_t)-1;
+    if (p->child_pid == 0) return (uint64_t)-1;
+    if (use_pid && pid_arg != (uint64_t)p->child_pid && pid_arg != (uint64_t)-1) {
+        return (uint64_t)-1;
+    }
+
+    int code = arch_x86_64_usermode_run_pending_child_for_wait();
+    if (!p->child_exited) return (uint64_t)-1;
+
+    if (status_ptr != 0) {
+        /* Minimal wait status encoding: normal exit, code in bits 8..15.
+         * P4.c keeps user-visible stack pointers in USER_VBASE while the
+         * kernel writes the same pages through their low-half identity alias. */
+        uintptr_t status_addr = (uintptr_t)status_ptr;
+        if (status_addr >= OPENOS_X86_64_USER_VBASE) {
+            status_addr -= OPENOS_X86_64_USER_VBASE;
+        }
+        int *status_out = (int *)status_addr;
+        *status_out = (code & 0xFF) << 8;
+    }
+
+    int child_pid = p->child_pid;
+    p->child_pid = 0;
+    p->child_exited = false;
+    p->child_exit_code = 0;
+    p->fork_pending = 0;
+    return (uint64_t)(uint32_t)child_pid;
+}
+
 /* ---------------------------------------------------------------------------
  * Step E.3 — loopback socket backends.
  *
@@ -456,6 +487,8 @@ uint64_t arch_x86_64_syscall_dispatch_common(uint64_t num,
     case SYS_GETUID:      return (uint64_t)arch_x86_64_proc_current_uid();
     case SYS_GETGID:      return (uint64_t)arch_x86_64_proc_current_gid();
     case SYS_YIELD:       return do_yield();
+    case SYS_WAIT:        return do_wait_common(0, a0, 0);
+    case SYS_WAITPID:     return do_wait_common(a0, a1, 1);
 
     /* -------- I/O (read-only initrd + early console) -------- */
     case SYS_WRITE:       return do_write(a0, a1, a2);

@@ -79,17 +79,30 @@ int openos64_main(int argc, char **argv, char **envp) {
     write_str(OPENOS64_STDOUT_FILENO,
               "[hello64_v2] H.4: exiting with code 42\n");
 
-    /* A2.P3-B-beta: minimal fork smoke test. Keep dead simple: no argv,
-     * no envp, no loops. Just fork() once, print one line, exit. */
-    write_str(OPENOS64_STDOUT_FILENO, "[fork] pre\n");
+    /* A2.P2: wait()/waitpid() smoke test. Parent blocks in wait while the
+     * pending vfork-style child runs to exit(7), then observes pid/status. */
+    write_str(OPENOS64_STDOUT_FILENO, "[wait] pre\n");
     long rv = openos64_fork();
     if (rv == 0) {
-        write_str(OPENOS64_STDOUT_FILENO, "[fork] child\n");
-        openos64_exit(0);
+        write_str(OPENOS64_STDOUT_FILENO, "[wait] child exit=7\n");
+        openos64_exit(7);
     } else if (rv > 0) {
-        write_str(OPENOS64_STDOUT_FILENO, "[fork] parent rv>0\n");
+        int st = -1;
+        long wp = openos64_wait(&st);
+        write_str(OPENOS64_STDOUT_FILENO, "[wait] parent pid=");
+        write_dec(OPENOS64_STDOUT_FILENO, wp);
+        write_str(OPENOS64_STDOUT_FILENO, " status=");
+        write_dec(OPENOS64_STDOUT_FILENO, (long)st);
+        write_str(OPENOS64_STDOUT_FILENO, " exit=");
+        write_dec(OPENOS64_STDOUT_FILENO, (long)((st >> 8) & 0xFF));
+        write_str(OPENOS64_STDOUT_FILENO, "\n");
+        if (wp == rv && ((st >> 8) & 0xFF) == 7) {
+            write_str(OPENOS64_STDOUT_FILENO, "[wait] PASS\n");
+        } else {
+            write_str(OPENOS64_STDOUT_FILENO, "[wait] FAIL\n");
+        }
     } else {
-        write_str(OPENOS64_STDOUT_FILENO, "[fork] err\n");
+        write_str(OPENOS64_STDOUT_FILENO, "[wait] fork err\n");
     }
 
     return 42;
