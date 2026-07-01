@@ -18,6 +18,7 @@
 #include "../include/gdt64.h"
 #include "../include/percpu64.h"
 #include "../include/proc64.h"
+#include "../include/sched64.h"        /* gamma.3b-alpha: PARKED child slot */
 #include "../include/syscall_dispatch64.h"
 #include "../include/usermode64.h"
 #include "syscall.h" /* canonical SYS_* numbers (shared with i386) */
@@ -133,6 +134,54 @@ static uint64_t arch_x86_64_syscall_fork_capture(
         child->fork_user_rsp = 0; /* int80 frame carries user rsp natively */
     }
     child->fork_pending = 1;
+
+    /* gamma.3b-alpha: allocate a PARKED USER sched_slot for the child.
+     *
+     * Purpose: prove out the allocation + AS-binding + release lifecycle
+     * so beta can flip PARKED -> READY and enter the preemption path
+     * with zero new code. Alpha itself does NOT dispatch this slot;
+     * the legacy fork_pending / saved_fork_frame handoff still runs.
+     *
+     * Failure here is non-fatal: log and continue with legacy path
+     * (child_sched_slot stays 0 == invalid). */
+    {
+        uint64_t rip_u, rsp_u, rfl_u;
+        if (via_syscall) {
+            /* SYSCALL/SYSRET path: user context lives in saved rcx/r11
+             * and %gs:syscall_user_rsp (already copied to fork_user_rsp). */
+            rip_u = child->saved_fork_frame_sysc.rcx;
+            rfl_u = child->saved_fork_frame_sysc.r11;
+            rsp_u = child->fork_user_rsp;
+        } else {
+            rip_u = (uint64_t)child->saved_fork_frame_int80.rip;
+            rfl_u = child->saved_fork_frame_int80.rflags;
+            rsp_u = (uint64_t)child->saved_fork_frame_int80.rsp;
+        }
+        uint16_t ucs = (uint16_t)(OPENOS_X86_64_GDT_USER_CODE | 3u);
+        uint16_t uss = (uint16_t)(OPENOS_X86_64_GDT_USER_DATA | 3u);
+        uint32_t slot_idx = arch_x86_64_sched_spawn_uthread_parked(
+            rip_u, rsp_u, rfl_u, ucs, uss,
+            OPENOS_X86_64_SCHED_PRIO_DEFAULT, 0u);
+        if (slot_idx == 0xFFFFFFFFu) {
+            early_console64_write(
+                "[fork:capture][alpha] parked slot alloc FAILED"
+                " (continuing on legacy fork_pending path)\n");
+            child->fork_child_sched_slot = 0u;
+        } else {
+            /* Bind the child's cloned AS to the slot. Dispatcher's
+             * as_activate (gamma.3a) will pick it up when beta flips
+             * the slot to READY; alpha never dispatches. */
+            (void)arch_x86_64_sched_slot_set_as(slot_idx, child->as);
+            child->fork_child_sched_slot = slot_idx;
+            early_console64_write("[fork:capture][alpha] parked slot=");
+            early_console64_write_hex64((uint64_t)slot_idx);
+            early_console64_write(" rip=");
+            early_console64_write_hex64(rip_u);
+            early_console64_write(" rsp=");
+            early_console64_write_hex64(rsp_u);
+            early_console64_write("\n");
+        }
+    }
 
     early_console64_write("[fork:capture] child slot=");
     early_console64_write_hex64((uint64_t)parent->child_slot);

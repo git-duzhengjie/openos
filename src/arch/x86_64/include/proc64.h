@@ -141,6 +141,17 @@ typedef struct x86_64_proc {
     uint16_t                  child_slot;
     uint16_t                  parent_slot;
 
+    /* gamma.3b-alpha: index of the PARKED sched_slot allocated at
+     * fork_alloc_child time to hold the child's future USER dispatch
+     * context. In alpha the slot is NEVER flipped to READY and is
+     * released on reap; it exists purely to prove out the allocation
+     * / lifecycle plumbing. Beta will flip PARKED -> READY at
+     * fork(2)-return so the child enters the preemption path.
+     *
+     * 0 == OPENOS_X86_64_SCHED_INVALID_SLOT (idx 0 is reserved for
+     * the bootstrap slot in sched64.c). */
+    uint32_t                  fork_child_sched_slot;
+
     x86_64_int80_frame_t      saved_fork_frame_int80;
     x86_64_syscall_frame_t    saved_fork_frame_sysc;
 } x86_64_proc_t;

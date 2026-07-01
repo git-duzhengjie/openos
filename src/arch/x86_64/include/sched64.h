@@ -282,6 +282,15 @@ uint32_t arch_x86_64_sched_slot_kind(uint32_t slot_idx);
  * equals stack_base + KSTACK_BYTES for every spawned kthread. */
 uintptr_t arch_x86_64_sched_slot_kstack_top(uint32_t slot_idx);
 
+/* γ.3: bind an address space to a slot. The AS will be activated
+ * (CR3 loaded) every time this slot gets dispatched via sched_yield.
+ * Pass NULL to detach (keeps whatever CR3 is loaded on dispatch).
+ * Returns 0 on success, 0xFFFFFFFFu on invalid slot. */
+struct x86_64_address_space;
+uint32_t arch_x86_64_sched_slot_set_as(uint32_t slot_idx,
+                                       struct x86_64_address_space *as);
+struct x86_64_address_space *arch_x86_64_sched_slot_get_as(uint32_t slot_idx);
+
 /* ---- G.6.7a: preemption tail-hook primitives -----------------------
  *
  * Background: historically the only place we ever made a scheduling
@@ -382,5 +391,48 @@ void arch_x86_64_preempt_enable(void);
 /* Observers for selftests (read percpu slot directly, not via %gs). */
 uint32_t arch_x86_64_preempt_depth_for_cpu(uint32_t cpu_idx);
 uint64_t arch_x86_64_preempt_deferred_count_for_cpu(uint32_t cpu_idx);
+
+/* ------------------------------------------------------------------
+ * gamma.3b-alpha: PARKED USER slot preparation for fork(2).
+ *
+ * A slot that has been fully built (kernel stack allocated, iretq
+ * frame written, context_switch trampoline ready, AS bound via
+ * sched_slot_set_as) but is NOT yet on the ready-list is in state
+ * SCHED_SLOT_PARKED. pick_next / has_other_ready must skip it, so
+ * from the dispatcher's point of view a PARKED slot is invisible.
+ *
+ * This is pure scaffolding for gamma.3b-beta: fork_alloc_child will
+ * allocate a PARKED slot to hold the child's future USER dispatch
+ * context, and beta will flip it to READY at fork(2)-return time so
+ * the child actually enters the preemption path.
+ *
+ * gamma.3b-alpha itself does NOT wire fork_alloc_child to use these
+ * APIs -- the point of alpha is *structure only*, zero behaviour
+ * change on the hello_fork happy path. The child is still resumed
+ * via the legacy fork_pending / saved_fork_frame handoff on the BSP
+ * main loop; the PARKED slot is allocated, sanity-checked at
+ * reap time, and freed. If beta is deferred, alpha still passes
+ * every stage 30 selftest.
+ *
+ * spawn_uthread_parked: identical layout to arch_x86_64_sched_spawn_uthread
+ *   but the resulting slot's state is SCHED_SLOT_PARKED, not
+ *   SCHED_SLOT_READY. Caller is expected to bind an address space
+ *   via arch_x86_64_sched_slot_set_as before making it READY.
+ *   Returns the slot index, or 0xFFFFFFFFu on allocation failure.
+ *
+ * slot_release: tear down a PARKED (or EXITED) slot: frees the
+ *   kernel stack, clears the AS binding (but does NOT tear down the
+ *   AS itself -- ownership stays with the caller / proc PCB), and
+ *   returns the slot to SCHED_SLOT_FREE. Rejects (returns non-zero)
+ *   if the slot is RUNNING or READY -- callers must yield/drain first.
+ */
+uint32_t arch_x86_64_sched_spawn_uthread_parked(uint64_t user_rip,
+                                                uint64_t user_rsp,
+                                                uint64_t user_rflags,
+                                                uint16_t user_cs,
+                                                uint16_t user_ss,
+                                                uint32_t priority,
+                                                uint32_t target_cpu);
+uint32_t arch_x86_64_sched_slot_release(uint32_t slot_idx);
 
 #endif /* OPENOS_ARCH_X86_64_SCHED64_H */

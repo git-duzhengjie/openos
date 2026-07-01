@@ -9,6 +9,7 @@
 #include "../include/percpu64.h"
 #include "../include/smp64.h"  /* G.6.5c: OPENOS_X86_64_SMP_MAX_CPUS for spawn_on clamp */
 #include "../include/usermode64.h"
+#include "../include/address_space64.h"  /* γ.3: as_activate on slot dispatch */
 
 /* G.7e: trampoline implemented in usermode64.S. context_switch dispatches
  * a USER slot by loading ctx.rsp (-> iretq frame) and jumping to ctx.rip,
@@ -132,6 +133,11 @@ typedef enum {
     SCHED_SLOT_READY,
     SCHED_SLOT_RUNNING,
     SCHED_SLOT_EXITED,
+    /* gamma.3b-alpha: slot fully built (stack, iretq frame, context, AS
+     * binding) but intentionally NOT on the ready list. Invisible to
+     * pick_next / has_other_ready. Caller flips to READY when the
+     * dispatchable moment arrives (child fork(2) return in beta). */
+    SCHED_SLOT_PARKED,
 } sched_slot_state_t;
 
 typedef struct {
@@ -153,6 +159,9 @@ typedef struct {
      * per-CPU RSP0 baked into TSS at percpu_setup. */
     uint32_t            kind;
     uintptr_t           kernel_stack_top;
+    /* γ.3: address space to activate on dispatch. NULL = keep current CR3
+     * (kernel-only slot rides the boot AS or whatever CR3 is loaded). */
+    struct x86_64_address_space *as;
 } sched_slot_t;
 
 static sched_slot_t  sched_slots[OPENOS_X86_64_SCHED_MAX_KTHREADS];
@@ -185,6 +194,12 @@ static void sched_apply_rsp0_for_next(uint32_t nxt) {
             (void)arch_x86_64_percpu_set_rsp0(cpu, (x86_64_stack_ptr_t)baseline);
         }
     }
+
+    /* γ.3: activate the target slot's address space (CR3 switch).
+     * NULL as = keep current CR3 (kthread selftest slots ride the boot AS). */
+    if (sched_slots[nxt].as != NULL) {
+        arch_x86_64_as_activate(sched_slots[nxt].as);
+    }
 }
 
 static void sched_ensure_bootstrap_slot(void) {
@@ -195,6 +210,7 @@ static void sched_ensure_bootstrap_slot(void) {
     sched_slots[0].id        = 0u;
     sched_slots[0].priority  = OPENOS_X86_64_SCHED_PRIO_DEFAULT;
     sched_slots[0].owner_cpu = 0u;   /* G.6.4: BSP owns slot 0 */
+    sched_slots[0].as        = NULL; /* γ.3: bootstrap rides boot AS */
     /* NOTE: slot 0 is the BSP's bootstrap thread (running selftests,
      * etc.) -- it is *not* a dedicated idle thread. AP cpus each get
      * their own real idle slot via sched_register_ap_idle, where
@@ -231,6 +247,7 @@ static uint32_t sched_alloc_slot(void) {
              * will (re-)set kind + kernel_stack_top with the fresh stack. */
             sched_slots[i].kind             = OPENOS_X86_64_SCHED_KIND_KERNEL;
             sched_slots[i].kernel_stack_top = 0u;
+            sched_slots[i].as               = NULL;  /* γ.3: no AS by default */
             /* owner_cpu set by caller (spawn pins to spawning CPU). */
             return i;
         }
@@ -445,6 +462,127 @@ uint32_t arch_x86_64_sched_spawn_uthread(uintptr_t user_entry,
     sched_slots[idx].kind             = OPENOS_X86_64_SCHED_KIND_USER;
     sched_slots[idx].kernel_stack_top = kstack_top;
     return idx;
+}
+
+/* gamma.3b-alpha: parked USER slot for fork(2) child preparation.
+ *
+ * Identical layout to arch_x86_64_sched_spawn_uthread but:
+ *   - accepts full iretq state (rip/rsp/rflags/cs/ss) so the child can
+ *     resume with parent-saved r11/rcx/user_rsp and ring3 selectors;
+ *   - final state is SCHED_SLOT_PARKED, not READY, so pick_next skips
+ *     it until the caller flips it to READY;
+ *   - the slot's AS binding is NOT touched here -- caller is expected
+ *     to invoke arch_x86_64_sched_slot_set_as() before READY-flip so
+ *     dispatcher's as_activate lands on the child's cloned tree.
+ *
+ * On failure returns 0xFFFFFFFFu (all slot indices are <= 0xFFFF).
+ *
+ * Rationale: fork_alloc_child needs to hand the child a real iretq
+ * frame carrying (a) rax=0 return code, (b) parent's SYSCALL-time
+ * user CS/SS/RSP/RFLAGS, (c) the syscall-return RIP. Beta will wire
+ * those in; alpha allocates the slot in PARKED state, sanity-checks
+ * bookkeeping, then releases it on reap. Zero behaviour change. */
+uint32_t arch_x86_64_sched_spawn_uthread_parked(uint64_t user_rip,
+                                                uint64_t user_rsp,
+                                                uint64_t user_rflags,
+                                                uint16_t user_cs,
+                                                uint16_t user_ss,
+                                                uint32_t priority,
+                                                uint32_t target_cpu) {
+    if (user_rip == 0u || user_rsp == 0u) {
+        return 0xFFFFFFFFu;
+    }
+    if (priority > OPENOS_X86_64_SCHED_PRIO_MAX) {
+        priority = OPENOS_X86_64_SCHED_PRIO_DEFAULT;
+    }
+    if (target_cpu >= OPENOS_X86_64_SMP_MAX_CPUS) {
+        target_cpu = arch_x86_64_this_cpu_ptr()->cpu_idx;
+    }
+    /* IF must be set on iretq (child must resume interruptible). Force
+     * it in defensively even if caller passed a raw r11 that had it. */
+    user_rflags |= 0x200ULL;
+
+    uint32_t idx = sched_alloc_slot();
+    if (idx == 0u) {
+        return 0xFFFFFFFFu;
+    }
+
+    void *stack = arch_x86_64_kmalloc(OPENOS_X86_64_SCHED_KSTACK_BYTES);
+    if (stack == NULL) {
+        sched_slots[idx].state = SCHED_SLOT_FREE;
+        return 0xFFFFFFFFu;
+    }
+    sched_slots[idx].stack_base = stack;
+
+    uintptr_t kstack_top = (uintptr_t)stack + OPENOS_X86_64_SCHED_KSTACK_BYTES;
+    uintptr_t frame_base = kstack_top - (5u * sizeof(uint64_t));
+    frame_base &= ~((uintptr_t)0xFu);
+    uint64_t *frame = (uint64_t *)frame_base;
+    frame[0] = user_rip;
+    frame[1] = (uint64_t)user_cs;
+    frame[2] = user_rflags;
+    frame[3] = user_rsp;
+    frame[4] = (uint64_t)user_ss;
+
+    x86_64_context_t ctx;
+    ctx.rsp    = (x86_64_stack_ptr_t)frame_base;
+    ctx.rip    = (x86_64_entry_t)&arch_x86_64_user_thread_trampoline;
+    ctx.rflags = 0u;
+    ctx.rbx    = 0u;
+    ctx.rbp    = 0u;
+    ctx.r12    = 0u;
+    ctx.r13    = 0u;
+    ctx.r14    = 0u;
+    ctx.r15    = 0u;
+    ctx.r8     = 0u;
+    ctx.r9     = 0u;
+    ctx.r10    = 0u;
+    ctx.r11    = 0u;
+
+    sched_slots[idx].ctx              = ctx;
+    sched_slots[idx].state            = SCHED_SLOT_PARKED;
+    sched_slots[idx].id               = idx;
+    sched_slots[idx].priority         = priority;
+    sched_slots[idx].owner_cpu        = target_cpu;
+    sched_slots[idx].is_idle          = 0u;
+    sched_slots[idx].kind             = OPENOS_X86_64_SCHED_KIND_USER;
+    sched_slots[idx].kernel_stack_top = kstack_top;
+    sched_slots[idx].as               = NULL;
+    return idx;
+}
+
+/* gamma.3b-alpha: release a PARKED or EXITED slot allocated via
+ * spawn_uthread_parked. Frees the kernel stack, clears AS binding
+ * (does NOT free the AS -- ownership stays with proc PCB), and
+ * flips the slot to SCHED_SLOT_FREE. Returns 0 on success, non-zero
+ * on refusal (bad idx / RUNNING / READY -- caller must drain first).
+ *
+ * Alpha never enters READY, so the RUNNING/READY guard is defense
+ * in depth for beta callers that mis-order state transitions. */
+uint32_t arch_x86_64_sched_slot_release(uint32_t slot_idx) {
+    if (slot_idx == 0u || slot_idx >= OPENOS_X86_64_SCHED_MAX_KTHREADS) {
+        return 1u;
+    }
+    sched_slot_t *s = &sched_slots[slot_idx];
+    if (s->state == SCHED_SLOT_FREE) {
+        return 2u; /* double free */
+    }
+    if (s->state == SCHED_SLOT_RUNNING || s->state == SCHED_SLOT_READY) {
+        return 3u; /* still dispatchable, refuse */
+    }
+    /* PARKED or EXITED -- safe to reclaim. */
+    if (s->stack_base != NULL) {
+        arch_x86_64_kfree(s->stack_base);
+        s->stack_base = NULL;
+    }
+    s->kernel_stack_top = 0u;
+    s->as               = NULL;
+    s->kind             = OPENOS_X86_64_SCHED_KIND_KERNEL;
+    s->owner_cpu        = 0u;
+    s->priority         = OPENOS_X86_64_SCHED_PRIO_DEFAULT;
+    s->is_idle          = 0u;
+    s->state            = SCHED_SLOT_FREE;
+    return 0u;
 }
 
 uint32_t arch_x86_64_sched_spawn_uthread_sentinel(uint32_t priority,
@@ -843,6 +981,21 @@ uintptr_t arch_x86_64_sched_slot_kstack_top(uint32_t slot_idx) {
     sched_slot_t *s = &sched_slots[slot_idx];
     if (s->state == SCHED_SLOT_FREE) return 0u;
     return s->kernel_stack_top;
+}
+
+/* γ.3: bind an address space to a slot. Activated on every dispatch. */
+uint32_t arch_x86_64_sched_slot_set_as(uint32_t slot_idx,
+                                       struct x86_64_address_space *as) {
+    if (slot_idx >= OPENOS_X86_64_SCHED_MAX_KTHREADS) return 0xFFFFFFFFu;
+    sched_slot_t *s = &sched_slots[slot_idx];
+    if (s->state == SCHED_SLOT_FREE) return 0xFFFFFFFFu;
+    s->as = as;
+    return 0u;
+}
+
+struct x86_64_address_space *arch_x86_64_sched_slot_get_as(uint32_t slot_idx) {
+    if (slot_idx >= OPENOS_X86_64_SCHED_MAX_KTHREADS) return NULL;
+    return sched_slots[slot_idx].as;
 }
 
 /* G.6.6b: migrate a READY slot to target_cpu and poke the target with a

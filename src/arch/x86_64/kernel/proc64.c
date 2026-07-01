@@ -72,6 +72,7 @@ void arch_x86_64_proc_init(void) {
     proc_copy_name(proc_table[0].name, "kernel");
     proc_table[0].child_slot  = OPENOS_X86_64_PROC_INVALID_INDEX;
     proc_table[0].parent_slot = OPENOS_X86_64_PROC_INVALID_INDEX;
+    proc_table[0].fork_child_sched_slot = 0u; /* gamma.3b-alpha: invalid */
     current_index = 0;
     yield_count = 0;
     spawn_count = 0;
@@ -108,6 +109,7 @@ uint32_t arch_x86_64_proc_spawn_user(const char *name) {
     p->wait_in_progress = false;
     p->child_slot       = OPENOS_X86_64_PROC_INVALID_INDEX;
     p->parent_slot      = OPENOS_X86_64_PROC_INVALID_INDEX;
+    p->fork_child_sched_slot = 0u; /* gamma.3b-alpha: PARKED slot idx */
 
     current_index = slot;
     ++spawn_count;
@@ -296,6 +298,7 @@ x86_64_proc_t *arch_x86_64_proc_fork_alloc_child(x86_64_proc_t *parent_pcb) {
     c->wait_in_progress = false;
     c->child_slot       = OPENOS_X86_64_PROC_INVALID_INDEX;
     c->parent_slot      = parent_slot;
+    c->fork_child_sched_slot = 0u; /* gamma.3b-alpha: filled by fork_capture */
 
     /* Wire parent -> child. Also mirror the child pid into the legacy
      * parent.child_pid so existing wait()/mark_exited() consumers keep
@@ -347,6 +350,28 @@ void arch_x86_64_proc_release_slot(uint16_t slot) {
     p->fork_pending = 0;
     p->parent_slot = OPENOS_X86_64_PROC_INVALID_INDEX;
     p->child_slot  = OPENOS_X86_64_PROC_INVALID_INDEX;
+
+    /* gamma.3b-alpha: release the PARKED sched_slot allocated at
+     * fork_capture time (if any). Alpha never flips it to READY, so
+     * it is always still in PARKED state here -- slot_release accepts
+     * PARKED. Log any refusal (should never fire in alpha). */
+    if (p->fork_child_sched_slot != 0u) {
+        uint32_t rc = arch_x86_64_sched_slot_release(p->fork_child_sched_slot);
+        if (rc != 0u) {
+            early_console64_write(
+                "[proc:release][alpha] sched_slot_release REFUSED idx=");
+            early_console64_write_hex64((uint64_t)p->fork_child_sched_slot);
+            early_console64_write(" rc=");
+            early_console64_write_hex64((uint64_t)rc);
+            early_console64_write("\n");
+        } else {
+            early_console64_write(
+                "[proc:release][alpha] freed parked slot=");
+            early_console64_write_hex64((uint64_t)p->fork_child_sched_slot);
+            early_console64_write("\n");
+        }
+        p->fork_child_sched_slot = 0u;
+    }
 }
 
 void arch_x86_64_proc_print_status(void) {
