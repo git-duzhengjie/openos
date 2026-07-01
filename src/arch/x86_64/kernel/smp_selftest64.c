@@ -2132,8 +2132,17 @@ void arch_x86_64_smp_selftest_run(void)
         /* Step 2: write the ring3 busy loop into the user code page.
          *   EB FE  =  jmp $-0   (infinite jmp to itself)
          * This keeps the user thread in a deterministic, tight loop at a
-         * single RIP that the timer can preempt from. */
-        volatile uint8_t *user_code = (volatile uint8_t *)(uintptr_t)user_code_va;
+         * single RIP that the timer can preempt from.
+         *
+         * NOTE (gamma.3b-S1 fix): we deliberately write through the
+         * kernel identity window (phys_to_va(code_pa) == code_pa on
+         * 0..4GiB) instead of through user_code_va. The user VA is
+         * mapped without PTE_RW so that ring3 sees an R+X page; with
+         * CR0.WP=1 a kernel-mode write through the U-only-mapped VA
+         * would fault (#PF err=3, P|W). Under `-smp 1` stage 30 was
+         * previously gated off (ap_n<3) so this latent bug never
+         * surfaced. Direct-map write avoids the fault entirely. */
+        volatile uint8_t *user_code = (volatile uint8_t *)(uintptr_t)code_pa;
         user_code[0] = 0xEB;
         user_code[1] = 0xFE;
 
@@ -2229,6 +2238,139 @@ void arch_x86_64_smp_selftest_run(void)
         }
         if (tcnt_after <= tcnt_at_dispatch) {
             early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 30 LAPIC timer did not advance after ring3 dispatch\n");
+            return;
+        }
+        early_console64_write(" PASS");
+
+        /* ------------------------------------------------------------
+         * gamma.3b-S1: stage 31 -- PARKED slot wakeup drives ring3 dispatch.
+         *
+         * Purpose: prove that a slot spawned via spawn_uthread_parked()
+         *   is invisible to pick_next while PARKED, and becomes eligible
+         *   after slot_wakeup() flips it to READY. This is the minimal
+         *   dispatcher entry-point that fork(2)'s child slot will use
+         *   in S2 (child spawn-parked -> as_clone bind -> wakeup ->
+         *   child runs on a live CPU).
+         *
+         * Reuses stage 30's user_code / user_stack fixtures (EB FE busy
+         * loop @ 0x500000 + user stack @ 0x501000+4KiB) which are still
+         * mapped and identity-owned. Picks the same target_cpu = ap_n-1.
+         *
+         * Sequence:
+         *   1) spawn_uthread_parked() with parent-style iretq state
+         *      (user_cs=USER_CODE|3, user_ss=USER_DATA|3, IF=1).
+         *   2) Assert slot_state == PARKED.
+         *   3) Snapshot user_dispatch_count/LAPIC-timer on target_cpu.
+         *   4) Poll for ~50ms while slot is PARKED -- dispatch count
+         *      MUST NOT advance (proves PARKED is invisible). Timer
+         *      may still tick; that only means the AP is alive.
+         *   5) slot_wakeup() -> assert state == READY.
+         *   6) Poll for up to ~5s for dispatch + post-dispatch tick,
+         *      identical to stage 30's success criteria. IPI-kick
+         *      every 50ms.
+         *
+         * On success: log PASS. slot_release() is deliberately NOT
+         * called -- the ring3 thread is still spinning in EB FE and
+         * releasing under it would corrupt the runqueue. It stays
+         * running for the rest of the boot (identical to stage 30).
+         */
+        early_console64_write("\n[x86_64][smp-selftest] stage 31 (gamma.3b-S1): PARKED slot wakeup drives ring3 dispatch ...");
+
+        uint64_t udisp_s31_before = arch_x86_64_percpu_user_dispatch_count(target_cpu);
+        uint64_t tcnt_s31_before  = arch_x86_64_percpu_lapic_timer_count(target_cpu);
+        log_kv(" target_cpu=", (uint64_t)target_cpu);
+        log_kv(" disp_before=", udisp_s31_before);
+        log_kv(" timer_before=", tcnt_s31_before);
+
+        /* Spawn PARKED. Reuse the same user_entry/user_rsp fixture as
+         * stage 30. Stage 30's slot is still running on target_cpu, and
+         * spinning at the same RIP is fine (both threads execute EB FE
+         * independently on their own kernel stacks; time-slice will
+         * naturally alternate). */
+        uint32_t s31_slot = arch_x86_64_sched_spawn_uthread_parked(
+            (uint64_t)user_entry,
+            (uint64_t)user_rsp,
+            0x202ULL,                                        /* RFLAGS: IF=1 */
+            (uint16_t)(OPENOS_X86_64_GDT_USER_CODE | 3u),
+            (uint16_t)(OPENOS_X86_64_GDT_USER_DATA | 3u),
+            128u,
+            target_cpu);
+        if (s31_slot == 0u || s31_slot == 0xFFFFFFFFu) {
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 31 spawn_uthread_parked returned invalid\n");
+            return;
+        }
+        log_kv(" parked_slot=", (uint64_t)s31_slot);
+
+        /* Assert PARKED. slot_state is a snapshot read; safe here since
+         * nothing else is racing to change it. */
+        uint32_t st0 = arch_x86_64_sched_slot_state(s31_slot);
+        log_kv(" state_after_park=", (uint64_t)st0);
+        if (st0 != SCHED_SLOT_PARKED) {
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 31 slot not PARKED after spawn\n");
+            return;
+        }
+
+        /* Negative assertion: for ~50ms while PARKED, dispatch count
+         * on target_cpu MUST NOT advance. We deliberately do NOT send
+         * a resched IPI here -- if pick_next were buggy (e.g. treated
+         * PARKED as READY), the natural PIT/LAPIC tick on target_cpu
+         * within this window would still expose it. */
+        uint64_t udisp_while_parked = udisp_s31_before;
+        for (uint32_t i = 0; i < 50u; ++i) {
+            udisp_while_parked = arch_x86_64_percpu_user_dispatch_count(target_cpu);
+            if (udisp_while_parked != udisp_s31_before) break;
+            arch_x86_64_delay_us(1000u);
+        }
+        log_kv(" disp_while_parked=", udisp_while_parked);
+        if (udisp_while_parked != udisp_s31_before) {
+            /* NOTE: user_dispatch_count is a per-CPU counter and stage
+             * 30's slot is *already* running on target_cpu -- its own
+             * ticks do NOT bump this counter (it is bumped on the
+             * READY->RUNNING transition, not every tick). So an
+             * increment here really would indicate our PARKED slot got
+             * picked up. */
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 31 PARKED slot was dispatched (pick_next bug)\n");
+            return;
+        }
+
+        /* Flip PARKED -> READY via the new wakeup API. Return 0 = OK. */
+        uint32_t wake_rc = arch_x86_64_sched_slot_wakeup(s31_slot);
+        log_kv(" wakeup_rc=", (uint64_t)wake_rc);
+        if (wake_rc != 0u) {
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 31 slot_wakeup returned non-zero\n");
+            return;
+        }
+
+        /* Poll for dispatch + post-dispatch tick, mirroring stage 30. */
+        uint64_t udisp_s31_after = udisp_s31_before;
+        uint64_t tcnt_s31_after  = tcnt_s31_before;
+        uint64_t tcnt_s31_at_dispatch = 0;
+        bool s31_seen_dispatch = false;
+        for (uint32_t i = 0; i < 5000u; ++i) {
+            udisp_s31_after = arch_x86_64_percpu_user_dispatch_count(target_cpu);
+            tcnt_s31_after  = arch_x86_64_percpu_lapic_timer_count(target_cpu);
+            if (!s31_seen_dispatch && udisp_s31_after > udisp_s31_before) {
+                s31_seen_dispatch = true;
+                tcnt_s31_at_dispatch = tcnt_s31_after;
+            }
+            if (s31_seen_dispatch && tcnt_s31_after > tcnt_s31_at_dispatch) {
+                break;
+            }
+            if ((i % 50u) == 49u) {
+                arch_x86_64_smp_send_resched_ipi(target_cpu);
+            }
+            arch_x86_64_delay_us(1000u);
+        }
+        log_kv(" disp_after=", udisp_s31_after);
+        log_kv(" timer_at_dispatch=", tcnt_s31_at_dispatch);
+        log_kv(" timer_after=", tcnt_s31_after);
+
+        if (!s31_seen_dispatch) {
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 31 woken slot never dispatched\n");
+            return;
+        }
+        if (tcnt_s31_after <= tcnt_s31_at_dispatch) {
+            early_console64_write("\n[x86_64][smp-selftest] FAIL: stage 31 LAPIC timer did not advance after wakeup dispatch\n");
             return;
         }
         early_console64_write(" PASS");

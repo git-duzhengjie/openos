@@ -112,7 +112,7 @@ goto run_gui
 
 :run_gui
 echo [build+run] GUI mode; serial mirrored to %SERLOG%
-"%QEMU%" -machine q35 -cpu qemu64 -m 256M ^
+"%QEMU%" -machine q35 -cpu qemu64 -smp 4 -m 256M ^
   -drive if=pflash,format=raw,unit=0,file="%OVMF_CODE%",readonly=on ^
   -drive if=pflash,format=raw,unit=1,file="%OVMF_VARS%" ^
   -drive file="%IMAGE%",format=raw,media=disk,if=ide,index=0 ^
@@ -130,7 +130,7 @@ if exist "%SERLOG%" del /Q "%SERLOG%" >nul 2>&1
 set "QEMU_STDERR=%LOGDIR%\qemu.stderr"
 if exist "%QEMU_STDERR%" del /Q "%QEMU_STDERR%" >nul 2>&1
 rem  Launch QEMU detached; wait up to N seconds; force-kill remaining processes.
-start "" /B "%QEMU%" -machine q35 -cpu qemu64 -m 256M ^
+start "" /B "%QEMU%" -machine q35 -cpu qemu64 -smp 4 -m 256M ^
   -drive "if=pflash,format=raw,unit=0,file=%OVMF_CODE%,readonly=on" ^
   -drive "if=pflash,format=raw,unit=1,file=%OVMF_VARS%" ^
   -drive "file=%IMAGE%,format=raw,media=disk,if=ide,index=0" ^

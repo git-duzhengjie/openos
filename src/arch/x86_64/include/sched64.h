@@ -435,4 +435,47 @@ uint32_t arch_x86_64_sched_spawn_uthread_parked(uint64_t user_rip,
                                                 uint32_t target_cpu);
 uint32_t arch_x86_64_sched_slot_release(uint32_t slot_idx);
 
+/* ------------------------------------------------------------------
+ * gamma.3b-S1: slot state enum exposed to selftests.
+ *
+ * Kept in sync with the internal typedef in sched64.c. slot_state()
+ * returns these values as uint32_t. Do NOT reorder or renumber -- the
+ * dispatcher checks state == SCHED_SLOT_READY directly.
+ */
+typedef enum {
+    SCHED_SLOT_FREE    = 0,
+    SCHED_SLOT_READY   = 1,
+    SCHED_SLOT_RUNNING = 2,
+    SCHED_SLOT_EXITED  = 3,
+    SCHED_SLOT_PARKED  = 4,
+} sched_slot_state_t;
+
+/* ------------------------------------------------------------------
+ * gamma.3b-S1: PARKED -> READY lifecycle.
+ *
+ * slot_wakeup: flips a PARKED slot to READY so pick_next / has_other_ready
+ *   can pick it up. Also sends a reschedule IPI to the slot's owner_cpu
+ *   so the target actually preempts and dispatches promptly (without the
+ *   IPI, dispatch would be deferred until the next natural tick on the
+ *   owner CPU, which on TCG is ~1.3s -- unacceptable for fork(2)-return
+ *   latency).
+ *
+ *   Returns 0 on success, non-zero on refusal:
+ *     1 = bad slot_idx
+ *     2 = slot is FREE (never allocated / already released)
+ *     3 = slot is not PARKED (already READY/RUNNING/EXITED)
+ *
+ *   Precondition: caller must have bound the slot's AS via
+ *   arch_x86_64_sched_slot_set_as() *before* wakeup, otherwise the
+ *   dispatcher will activate a NULL AS on first dispatch. Alpha's
+ *   fork_alloc_child hook already does this.
+ *
+ * slot_state: read-only observer of the slot's SCHED_SLOT_* state. Used
+ *   by selftests to prove PARKED slots are invisible to the dispatcher
+ *   until wakeup, and to detect EXITED transitions after ring3 exit.
+ *   Returns SCHED_SLOT_FREE for out-of-range idx.
+ */
+uint32_t arch_x86_64_sched_slot_wakeup(uint32_t slot_idx);
+uint32_t arch_x86_64_sched_slot_state(uint32_t slot_idx);
+
 #endif /* OPENOS_ARCH_X86_64_SCHED64_H */

@@ -128,17 +128,9 @@ void arch_x86_64_sched_note_switch(x86_64_context_t *next) {
  * Slots 1..N-1 are dynamically-spawned kthreads. Round-robin pick.
  * ================================================================= */
 
-typedef enum {
-    SCHED_SLOT_FREE = 0,
-    SCHED_SLOT_READY,
-    SCHED_SLOT_RUNNING,
-    SCHED_SLOT_EXITED,
-    /* gamma.3b-alpha: slot fully built (stack, iretq frame, context, AS
-     * binding) but intentionally NOT on the ready list. Invisible to
-     * pick_next / has_other_ready. Caller flips to READY when the
-     * dispatchable moment arrives (child fork(2) return in beta). */
-    SCHED_SLOT_PARKED,
-} sched_slot_state_t;
+/* NOTE: sched_slot_state_t moved to sched64.h so external selftests
+ * (and future proc-layer integration in gamma.3b-S2+) can inspect
+ * slot_state() return values by name. */
 
 typedef struct {
     sched_slot_state_t  state;
@@ -583,6 +575,70 @@ uint32_t arch_x86_64_sched_slot_release(uint32_t slot_idx) {
     s->is_idle          = 0u;
     s->state            = SCHED_SLOT_FREE;
     return 0u;
+}
+
+/* ------------------------------------------------------------------
+ * gamma.3b-S1: slot_wakeup / slot_state
+ *
+ * These two functions form the minimum-viable dispatcher entry-point
+ * for parked slots.
+ *
+ * slot_wakeup(idx):
+ *   - Validates idx and current state (must be PARKED).
+ *   - Flips state to READY under the same guards the migrate path
+ *     uses (is_idle / RUNNING / EXITED refused).
+ *   - Sends a resched IPI to owner_cpu if it is an AP; BSP will
+ *     naturally re-enter check_and_dispatch on its next PIT tick, so
+ *     no IPI is needed there. (BSP self-kick would also just re-arm
+ *     what a PIT tick already does.)
+ *
+ *   Ordering with set_as: the caller MUST have called set_as() before
+ *   wakeup(), because as soon as READY is visible the target CPU can
+ *   race in and pick this slot up on its next tick. We do not enforce
+ *   that here (set_as is idempotent and a NULL AS is caught at
+ *   dispatch time by as_activate), but the alpha lifecycle in
+ *   fork_alloc_child already sequences it correctly.
+ *
+ * slot_state(idx):
+ *   - Pure read of s->state, no locking. Callers that need snapshot
+ *     consistency across multiple observations should sample twice.
+ *   - Out-of-range idx returns SCHED_SLOT_FREE (safe default: caller
+ *     treats "nothing to see" == "free").
+ */
+uint32_t arch_x86_64_sched_slot_wakeup(uint32_t slot_idx) {
+    if (slot_idx == 0u || slot_idx >= OPENOS_X86_64_SCHED_MAX_KTHREADS) {
+        return 1u;
+    }
+    sched_slot_t *s = &sched_slots[slot_idx];
+    if (s->state == SCHED_SLOT_FREE) {
+        return 2u;
+    }
+    if (s->state != SCHED_SLOT_PARKED) {
+        return 3u; /* already READY / RUNNING / EXITED */
+    }
+
+    /* Flip PARKED -> READY. Once this store is visible on the target
+     * CPU, pick_next / has_other_ready will start considering this
+     * slot. On x86_64, aligned u32 stores are observed in program
+     * order by other CPUs, so no explicit barrier is needed before
+     * the IPI. */
+    s->state = SCHED_SLOT_READY;
+
+    /* Kick the owner CPU. BSP polls sched itself on every PIT tick so
+     * we skip the IPI. APs might be idle-halted or running an
+     * arbitrarily long user thread; the IPI forces re-entry into
+     * check_and_dispatch which will see the new READY slot. */
+    if (s->owner_cpu != 0u) {
+        (void)arch_x86_64_smp_send_resched_ipi(s->owner_cpu);
+    }
+    return 0u;
+}
+
+uint32_t arch_x86_64_sched_slot_state(uint32_t slot_idx) {
+    if (slot_idx >= OPENOS_X86_64_SCHED_MAX_KTHREADS) {
+        return SCHED_SLOT_FREE;
+    }
+    return (uint32_t)sched_slots[slot_idx].state;
 }
 
 uint32_t arch_x86_64_sched_spawn_uthread_sentinel(uint32_t priority,
