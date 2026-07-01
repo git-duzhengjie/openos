@@ -21,9 +21,24 @@
 
 #include "../include/early_console64.h"
 #include "../include/sched64.h"
+#include "../include/percpu64.h"
 
 static x86_64_proc_t proc_table[OPENOS_X86_64_PROC_MAX];
-static uint16_t      current_index;
+
+/* gamma.3b-S2a Seg-1: `current_index` migrated to per-CPU storage.
+ *
+ * Before Seg-1 this was a single module-static uint16_t, which was
+ * correct only while every user thread ran on the BSP. Seg-1 stages
+ * the plumbing for AP-dispatched user procs: each CPU reads / writes
+ * its own `current_proc_slot` via %gs:0x80 (see percpu64.h). Behavior
+ * is unchanged this seg because dispatcher writes and non-BSP reads
+ * only start firing in Seg-2 / Seg-3. */
+static inline uint16_t current_index_get(void) {
+    return (uint16_t)arch_x86_64_this_cpu_ptr()->current_proc_slot;
+}
+static inline void current_index_set(uint16_t slot) {
+    arch_x86_64_this_cpu_ptr()->current_proc_slot = (uint32_t)slot;
+}
 static uint64_t      yield_count;
 static uint64_t      spawn_count;
 static uint64_t      exit_count;
@@ -73,7 +88,9 @@ void arch_x86_64_proc_init(void) {
     proc_table[0].child_slot  = OPENOS_X86_64_PROC_INVALID_INDEX;
     proc_table[0].parent_slot = OPENOS_X86_64_PROC_INVALID_INDEX;
     proc_table[0].fork_child_sched_slot = 0u; /* gamma.3b-alpha: invalid */
-    current_index = 0;
+    /* BSS zero-init already leaves every percpu.current_proc_slot at 0,
+     * so this store is redundant but explicit for BSP clarity. */
+    current_index_set(0);
     yield_count = 0;
     spawn_count = 0;
     exit_count = 0;
@@ -88,7 +105,7 @@ uint32_t arch_x86_64_proc_spawn_user(const char *name) {
     p->pid = (uint32_t)slot + 1;
     p->tid = p->pid; /* one thread per proc for now */
     /* parent is whoever is current at spawn time */
-    p->ppid = proc_table[current_index].pid;
+    p->ppid = proc_table[current_index_get()].pid;
     p->uid = 0;
     p->gid = 0;
     p->exit_code = 0;
@@ -111,14 +128,15 @@ uint32_t arch_x86_64_proc_spawn_user(const char *name) {
     p->parent_slot      = OPENOS_X86_64_PROC_INVALID_INDEX;
     p->fork_child_sched_slot = 0u; /* gamma.3b-alpha: PARKED slot idx */
 
-    current_index = slot;
+    current_index_set(slot);
     ++spawn_count;
     return p->pid;
 }
 
 void arch_x86_64_proc_exit(int code) {
-    x86_64_proc_t *p = &proc_table[current_index];
-    if (current_index == 0) {
+    uint16_t cur = current_index_get();
+    x86_64_proc_t *p = &proc_table[cur];
+    if (cur == 0) {
         /* Kernel proc never really exits; record the code for diagnostics. */
         p->exit_code = code;
         return;
@@ -131,7 +149,7 @@ void arch_x86_64_proc_exit(int code) {
      * path zeros it) and complete the teardown. */
     if (p->fork_pending) {
         p->exit_code = code;
-        /* leave state / current_index / as untouched */
+        /* leave state / current_proc_slot / as untouched */
         ++exit_count;
         return;
     }
@@ -142,7 +160,7 @@ void arch_x86_64_proc_exit(int code) {
     p->as = (struct x86_64_address_space *)0;
     ++exit_count;
     /* rotate back to the kernel proc */
-    current_index = 0;
+    current_index_set(0);
 }
 
 uint32_t arch_x86_64_proc_alloc_child_pid(x86_64_proc_t *parent) {
@@ -168,22 +186,21 @@ uint32_t arch_x86_64_proc_alloc_child_pid(x86_64_proc_t *parent) {
 /* ------------------------------------------------------------------- */
 
 x86_64_proc_t *arch_x86_64_proc_current(void) {
-    /* current_index is initialised to 0 in arch_x86_64_proc_init() and
-     * proc_table[0] is the long-lived kernel PCB, so this is always a
-     * valid pointer after kernel init. Returning the address lets
-     * usermode64.c stash per-thread longjmp state without leaking the
-     * proc_table symbol. */
-    return &proc_table[current_index];
+    /* per-CPU: each CPU has its own `current_proc_slot` in %gs:0x80,
+     * BSS-zeroed to point at slot 0 (the long-lived kernel PCB). Safe
+     * to call from any CPU once arch_x86_64_percpu_install_gs() has
+     * run for that CPU (BSP: kernel64.c:71; APs: smp64.c). */
+    return &proc_table[current_index_get()];
 }
 
-uint32_t arch_x86_64_proc_current_pid(void)  { return proc_table[current_index].pid; }
-uint32_t arch_x86_64_proc_current_tid(void)  { return proc_table[current_index].tid; }
-uint32_t arch_x86_64_proc_current_ppid(void) { return proc_table[current_index].ppid; }
-uint32_t arch_x86_64_proc_current_uid(void)  { return proc_table[current_index].uid; }
-uint32_t arch_x86_64_proc_current_gid(void)  { return proc_table[current_index].gid; }
+uint32_t arch_x86_64_proc_current_pid(void)  { return proc_table[current_index_get()].pid; }
+uint32_t arch_x86_64_proc_current_tid(void)  { return proc_table[current_index_get()].tid; }
+uint32_t arch_x86_64_proc_current_ppid(void) { return proc_table[current_index_get()].ppid; }
+uint32_t arch_x86_64_proc_current_uid(void)  { return proc_table[current_index_get()].uid; }
+uint32_t arch_x86_64_proc_current_gid(void)  { return proc_table[current_index_get()].gid; }
 
 struct x86_64_address_space *arch_x86_64_proc_current_get_as(void) {
-    return proc_table[current_index].as;
+    return proc_table[current_index_get()].as;
 }
 
 void arch_x86_64_proc_current_set_as(struct x86_64_address_space *as) {
@@ -192,7 +209,7 @@ void arch_x86_64_proc_current_set_as(struct x86_64_address_space *as) {
      * do NOT activate CR3 here — step A keeps the boot identity path
      * live so ring3 still runs unchanged. Step B will follow with an
      * arch_x86_64_as_activate(as) in usermode_run() right before iretq. */
-    proc_table[current_index].as = as;
+    proc_table[current_index_get()].as = as;
 }
 
 int arch_x86_64_proc_yield(void) {
@@ -310,20 +327,21 @@ x86_64_proc_t *arch_x86_64_proc_fork_alloc_child(x86_64_proc_t *parent_pcb) {
     parent_pcb->wait_in_progress = false;
 
     ++spawn_count;
-    /* NOTE: intentionally do NOT touch current_index — the parent must
-     * keep running until wait() drives the child via switch_to(). */
+    /* NOTE: intentionally do NOT touch current_proc_slot — the parent
+     * must keep running until wait() drives the child via switch_to(). */
     return c;
 }
 
 uint16_t arch_x86_64_proc_current_slot(void) {
-    return current_index;
+    return current_index_get();
 }
 
 uint16_t arch_x86_64_proc_switch_to(uint16_t slot) {
-    if (slot >= OPENOS_X86_64_PROC_MAX) return current_index;
-    if (proc_table[slot].state == OPENOS_X86_64_PROC_FREE) return current_index;
-    uint16_t prev = current_index;
-    current_index = slot;
+    uint16_t cur = current_index_get();
+    if (slot >= OPENOS_X86_64_PROC_MAX) return cur;
+    if (proc_table[slot].state == OPENOS_X86_64_PROC_FREE) return cur;
+    uint16_t prev = cur;
+    current_index_set(slot);
     return prev;
 }
 

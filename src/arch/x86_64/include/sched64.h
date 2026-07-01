@@ -72,7 +72,7 @@ void arch_x86_64_sched_print_status(void);
  *        remaining slots are the dynamic kthread pool, owned by CPU 0 until
  *        G.6.5 introduces migration. */
 #define OPENOS_X86_64_SMP_MAX_CPUS_HINT  8u
-#define OPENOS_X86_64_SCHED_MAX_KTHREADS 16u
+#define OPENOS_X86_64_SCHED_MAX_KTHREADS 32u
 #define OPENOS_X86_64_SCHED_KSTACK_BYTES 8192u
 
 uint32_t arch_x86_64_sched_spawn_kthread(x86_64_thread_entry_t entry, void *arg);
