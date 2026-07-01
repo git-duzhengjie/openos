@@ -15,6 +15,7 @@
  */
 
 #include "../include/proc64.h"
+#include "../include/address_space64.h"
 
 #include <stddef.h>
 
@@ -244,8 +245,45 @@ x86_64_proc_t *arch_x86_64_proc_fork_alloc_child(x86_64_proc_t *parent_pcb) {
     c->state = OPENOS_X86_64_PROC_RUNNING;
     proc_copy_name(c->name, parent_pcb->name);
 
-    /* γ.2.a shares AS with the parent — as_clone lands in γ.2.b/γ.3. */
-    c->as = parent_pcb->as;
+    /* γ.2.b: deep-clone the parent AS so the child has its own PML4[1]
+     * subtree (user pages eagerly copied). Kernel-half PML4[0] stays
+     * shared via as_create()'s boot PML4 copy, so kernel stacks / PCBs
+     * / heap remain reachable under CR3=child.
+     *
+     * On OOM, roll the freshly-allocated slot back and bubble NULL. */
+    early_console64_write("[fork:as_clone] before parent_as=");
+    early_console64_write_hex64((uint64_t)(uintptr_t)parent_pcb->as);
+    early_console64_write(" parent_pml4_pa=");
+    early_console64_write_hex64((uint64_t)parent_pcb->as->pml4_phys);
+    early_console64_write(" parent_pml4[1]=");
+    early_console64_write_hex64(parent_pcb->as->pml4_va[1]);
+    early_console64_write("\n");
+    /*
+     * γ.2.b: SYSCALL entry does not swap CR3, so we are still walking
+     * the parent's user AS. as_create() copies PML4 entries via the
+     * identity map (phys_to_va(phys)==phys, valid via PML4[0]), but
+     * the destination pool[] itself lives in the kernel high half
+     * (PML4[511]) -- and every user AS created by exec has PML4[511]
+     * pointer-copied from the boot PML4, so writes hit the same page
+     * tables. That IS safe. The hazard is _stale TLB_: right after
+     * this fork returns, sysretq restores parent's user code page,
+     * which needs the parent's PML4[1]. Switch CR3 to boot PML4 for
+     * the duration of the clone so alloc_table()/phys_to_va are
+     * unambiguous, then re-activate the parent AS before returning.
+     */
+    arch_x86_64_as_activate_boot();
+    x86_64_address_space_t *child_as = arch_x86_64_as_clone(parent_pcb->as);
+    /* Restore parent's CR3: SYSCALL rip / user stack live in parent.as. */
+    arch_x86_64_as_activate(parent_pcb->as);
+    early_console64_write("[fork:as_clone] after child_as=");
+    early_console64_write_hex64((uint64_t)(uintptr_t)child_as);
+    early_console64_write("\n");
+    if (child_as == NULL) {
+        c->state = OPENOS_X86_64_PROC_FREE;
+        c->as = (struct x86_64_address_space *)0;
+        return NULL;
+    }
+    c->as = child_as;
 
     /* Clean fork state on the child; caller (fork_capture) will populate
      * fork_pending / saved_fork_frame_* and fork_user_rsp on this PCB. */
@@ -296,8 +334,16 @@ void arch_x86_64_proc_release_slot(uint16_t slot) {
     if (slot == 0 || slot >= OPENOS_X86_64_PROC_MAX) return;
     x86_64_proc_t *p = &proc_table[slot];
     if (p->state == OPENOS_X86_64_PROC_FREE) return;
+    /* γ.2.b: if this slot owns a private AS (child of a fork), tear it
+     * down before the pointer is cleared. Note: the caller must have
+     * already switched CR3 off of `p->as` (usermode_run_pending_child_
+     * for_wait re-activates parent.as right before calling release_slot),
+     * otherwise we would free page tables that CR3 still walks. */
+    if (p->as != (struct x86_64_address_space *)0) {
+        arch_x86_64_as_destroy(p->as);
+        p->as = (struct x86_64_address_space *)0;
+    }
     p->state = OPENOS_X86_64_PROC_FREE;
-    p->as = (struct x86_64_address_space *)0;
     p->fork_pending = 0;
     p->parent_slot = OPENOS_X86_64_PROC_INVALID_INDEX;
     p->child_slot  = OPENOS_X86_64_PROC_INVALID_INDEX;
@@ -318,3 +364,4 @@ void arch_x86_64_proc_print_status(void) {
     early_console64_write_hex64(yield_count);
     early_console64_write("\n");
 }
+

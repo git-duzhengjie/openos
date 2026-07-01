@@ -135,8 +135,6 @@ static elf64_loader_status_t map_segment(const uint8_t *image,
                                          struct x86_64_address_space *target_as) {
     x86_64_virt_addr_t seg_start;
     x86_64_virt_addr_t seg_end;
-    x86_64_virt_addr_t va;
-    uint64_t flags;
 
     if (phdr->p_memsz == 0) {
         return ELF64_LOADER_OK;
@@ -155,47 +153,72 @@ static elf64_loader_status_t map_segment(const uint8_t *image,
     }
 
     /*
-     * H.5b.2 step B: the user link script now places PT_LOADs at
-     * USER_VBASE+0x400000 (high-half, PML4[1]). The kernel boot PML4 has
-     * nothing mapped there yet, so we cannot write the ELF bytes through
-     * p_vaddr anymore. Instead we keep the same *physical* footprint as
-     * before -- phys := p_vaddr - USER_VBASE, still inside the boot 0..4 GiB
-     * identity window -- and write the image bytes through that low-half
-     * identity alias. The per-PCB AS then maps the high-half user VA to
-     * exactly those phys pages, so ring3 sees the segment once CR3 flips.
+     * H.5b.2 step B / γ.exec-fix: PT_LOADs sit at USER_VBASE+0x400000
+     * (high-half, PML4[1]). Historically we mapped user VA to the fixed
+     * phys = va - USER_VBASE, which caused *every* user ELF (launcher,
+     * hello64_v2, hello_fork...) to share the same physical footprint
+     * around 0x400000+. As soon as two AS destroy in sequence (execve or
+     * process exit) we hit pmm double-free on those pages.
+     *
+     * Fix (plan A): each load_segment page allocates a *fresh* phys via
+     * pmm_alloc_page(), stages the image bytes through the boot 0..4GiB
+     * identity window (phys_to_va(phys) == phys), then binds the user VA
+     * to that private phys in target_as. free_subtree() on as_destroy now
+     * frees each ELF's own pages exactly once -- no cross-AS aliasing.
      */
     if (phdr->p_vaddr < OPENOS_X86_64_USER_VBASE) {
         return ELF64_LOADER_ERR_BAD_SEGMENT;
     }
+    if (target_as == NULL) {
+        /* Loading an ELF without a target AS would still trigger the
+         * legacy aliasing bug. All live call sites pass a non-NULL AS
+         * (kernel64 boot path + execve). Refuse instead of silently
+         * corrupting the PMM. */
+        return ELF64_LOADER_ERR_BAD_ARGUMENT;
+    }
 
     seg_start = align_down_addr(phdr->p_vaddr);
     seg_end = align_up_addr(phdr->p_vaddr + phdr->p_memsz);
-    flags = flags_from_phdr(phdr);
+    (void)flags_from_phdr;  /* boot-vmm mirror retired in step B */
 
-    for (va = seg_start; va < seg_end; va += OPENOS_X86_64_VMM_PAGE_SIZE) {
-        x86_64_phys_addr_t phys =
-            (x86_64_phys_addr_t)(va - OPENOS_X86_64_USER_VBASE);
-        arch_x86_64_pmm_reserve_range(phys, OPENOS_X86_64_VMM_PAGE_SIZE);
-        ++elf64_loader_info.mapped_pages;
+    /*
+     * Walk pages in one pass: allocate a fresh phys, zero+copy the slice of
+     * file bytes belonging to this page through the identity window, then
+     * map user VA -> phys in target_as.
+     */
+    {
+        x86_64_virt_addr_t page_va;
+        const uint8_t *file_src = image + phdr->p_offset;
+        x86_64_virt_addr_t file_lo = phdr->p_vaddr;
+        x86_64_virt_addr_t file_hi = phdr->p_vaddr + phdr->p_filesz;
 
-        if (target_as != NULL) {
-            (void)arch_x86_64_as_map_user(target_as, va, phys,
+        for (page_va = seg_start; page_va < seg_end; page_va += OPENOS_X86_64_VMM_PAGE_SIZE) {
+            x86_64_phys_addr_t phys = arch_x86_64_pmm_alloc_page();
+            if (phys == 0) {
+                return ELF64_LOADER_ERR_BAD_SEGMENT;
+            }
+            ++elf64_loader_info.mapped_pages;
+
+            /* Zero the whole page (fresh from PMM has undefined contents). */
+            mem_zero((void *)(uintptr_t)phys, OPENOS_X86_64_VMM_PAGE_SIZE);
+
+            /* Compute intersection [page_va, page_va+PAGE) ∩ [file_lo, file_hi)
+             * and copy that slice from the ELF image into phys+off. */
+            x86_64_virt_addr_t page_end = page_va + OPENOS_X86_64_VMM_PAGE_SIZE;
+            x86_64_virt_addr_t copy_lo = page_va > file_lo ? page_va : file_lo;
+            x86_64_virt_addr_t copy_hi = page_end < file_hi ? page_end : file_hi;
+            if (copy_lo < copy_hi) {
+                uint64_t page_off = copy_lo - page_va;
+                uint64_t src_off = copy_lo - file_lo;
+                mem_copy((void *)(uintptr_t)(phys + page_off),
+                         file_src + src_off,
+                         (x86_64_size_t)(copy_hi - copy_lo));
+            }
+
+            (void)arch_x86_64_as_map_user(target_as, page_va, phys,
                                      OPENOS_X86_64_VMM_PAGE_SIZE,
                                      as_flags_from_phdr(phdr));
         }
-        (void)flags;  /* boot-vmm mirror retired in step B */
-    }
-
-    /*
-     * Zero+copy the image bytes through the low-half boot identity alias
-     * (phys < 4 GiB by construction of the reserve above).
-     */
-    {
-        uintptr_t low = (uintptr_t)(phdr->p_vaddr - OPENOS_X86_64_USER_VBASE);
-        mem_zero((void *)low, (x86_64_size_t)phdr->p_memsz);
-        mem_copy((void *)low,
-                 image + phdr->p_offset,
-                 (x86_64_size_t)phdr->p_filesz);
     }
 
     if (result->load_segments == 0 || seg_start < result->low_addr) {

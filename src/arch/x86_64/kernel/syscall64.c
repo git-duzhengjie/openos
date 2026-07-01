@@ -88,6 +88,9 @@ void arch_x86_64_syscall_init(void) {
  */
 static uint64_t arch_x86_64_syscall_fork_capture(
     void *frame, uint8_t via_syscall) {
+    early_console64_write("[fork:capture] enter via_syscall=");
+    early_console64_write_hex64((uint64_t)via_syscall);
+    early_console64_write("\n");
     x86_64_proc_t *parent = arch_x86_64_proc_current();
     if (parent == NULL) {
         early_console64_write(

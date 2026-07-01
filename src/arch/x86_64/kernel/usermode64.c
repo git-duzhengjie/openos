@@ -257,7 +257,8 @@ int arch_x86_64_usermode_run(x86_64_entry_t entry) {
                     (x86_64_phys_addr_t)(stk_base_phys + off);
                 (void)arch_x86_64_as_map_user(as, hi, ph,
                     OPENOS_X86_64_VMM_PAGE_SIZE,
-                    OPENOS_X86_64_AS_FLAG_RW);
+                    OPENOS_X86_64_AS_FLAG_RW |
+                    OPENOS_X86_64_AS_FLAG_BORROWED);
             }
             /* P4.c.1: user_rsp is already biased by USER_VBASE inside
              * seed_user_stack_ex(); no further translation needed here. */
@@ -495,8 +496,12 @@ int arch_x86_64_usermode_run_pending_child_for_wait(void) {
      * next user instruction #PF's with err=0x14 (user, ifetch, P=0) at
      * some 0x00000080_00xxxxxx address.
      *
-     * Since parent and child share the AS in this vfork-style model,
-     * re-activate the parent's AS here to restore CR3 before returning.
+     * Since γ.2.b, parent and child each own an independent AS (child
+     * = as_clone(parent.as)). usermode_run() ends with activate_boot(),
+     * so CR3 == boot PML4 here. Re-activate the parent's AS so that when
+     * do_wait_common sysretq's back to ring3, CR3 has parent's PML4[1]
+     * remapped. release_slot() will then as_destroy() the child AS
+     * safely (CR3 is parent.as, not child.as).
      */
     {
         x86_64_address_space_t *as = arch_x86_64_proc_current_get_as();

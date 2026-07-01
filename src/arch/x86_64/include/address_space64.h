@@ -43,6 +43,14 @@
 #define OPENOS_X86_64_AS_FLAG_US (1ULL << 2)
 #define OPENOS_X86_64_AS_FLAG_NX (1ULL << 63)
 
+/*
+ * BORROWED (AVL bit 9): leaf page is *not* owned by this AS. free_subtree
+ * must NOT return the physical page to PMM when tearing down. Used for
+ * pages that are shared across address spaces (e.g. the bootstrap user
+ * stack in usermode64.c). Ignored by the CPU (AVL).
+ */
+#define OPENOS_X86_64_AS_FLAG_BORROWED (1ULL << 9)
+
 typedef struct x86_64_address_space {
     x86_64_phys_addr_t pml4_phys;   /* physical address of the PML4 page */
     uint64_t *pml4_va;              /* identity-mapped virtual pointer    */

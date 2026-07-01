@@ -82,12 +82,20 @@ static void free_subtree(uint64_t *table, int level) {
         return;
     }
     if (level == 0) {
-        /* PT: entries point to user data pages — free them. */
+        /* PT: entries point to user data pages — free them, except BORROWED. */
         for (i = 0; i < AS_ENTRIES_PER_TABLE; ++i) {
             uint64_t e = table[i];
-            if (e & OPENOS_X86_64_AS_FLAG_P) {
-                arch_x86_64_pmm_free_page(entry_phys(e));
+            if (!(e & OPENOS_X86_64_AS_FLAG_P)) {
+                continue;
             }
+            if (e & OPENOS_X86_64_AS_FLAG_BORROWED) {
+                /* Shared page (e.g. bootstrap user stack) — do NOT free. */
+                early_console64_write("[free_subtree] skip borrowed pa=");
+                early_console64_write_hex64(entry_phys(e));
+                early_console64_write("\n");
+                continue;
+            }
+            arch_x86_64_pmm_free_page(entry_phys(e));
         }
         return;
     }
@@ -96,6 +104,13 @@ static void free_subtree(uint64_t *table, int level) {
         if (!(e & OPENOS_X86_64_AS_FLAG_P)) {
             continue;
         }
+        early_console64_write("[free_subtree] lvl=");
+        early_console64_write_hex64((uint64_t)level);
+        early_console64_write(" idx=");
+        early_console64_write_hex64(i);
+        early_console64_write(" child_pa=");
+        early_console64_write_hex64(entry_phys(e));
+        early_console64_write("\n");
         free_subtree(phys_to_va(entry_phys(e)), level - 1);
         arch_x86_64_pmm_free_page(entry_phys(e));
     }
@@ -118,16 +133,22 @@ void arch_x86_64_as_activate_boot(void) {
 x86_64_address_space_t *arch_x86_64_as_create(void) {
     static x86_64_address_space_t pool[16];
     static uint64_t pool_used = 0;
-    x86_64_address_space_t *as;
+    x86_64_address_space_t *as = NULL;
     x86_64_phys_addr_t pml4_phys;
     uint64_t *pml4_va;
     uint64_t *boot_va;
     uint64_t i;
 
-    if (pool_used >= (sizeof(pool) / sizeof(pool[0]))) {
-        return NULL;
+    /* γ.2.b: recycle a freed slot (pml4_va == NULL) before growing. */
+    for (uint64_t s = 0; s < pool_used; ++s) {
+        if (pool[s].pml4_va == NULL) { as = &pool[s]; break; }
     }
-    as = &pool[pool_used];
+    if (as == NULL) {
+        if (pool_used >= (sizeof(pool) / sizeof(pool[0]))) {
+            return NULL;
+        }
+        as = &pool[pool_used];
+    }
 
     pml4_phys = alloc_table();
     if (pml4_phys == 0) {
@@ -174,21 +195,33 @@ x86_64_address_space_t *arch_x86_64_as_create(void) {
 }
 
 void arch_x86_64_as_destroy(x86_64_address_space_t *as) {
+    early_console64_write("[x86_64][as] destroy as=");
+    early_console64_write_hex64((uint64_t)(uintptr_t)as);
+    early_console64_write(" pml4_pa=");
+    early_console64_write_hex64(as ? (uint64_t)as->pml4_phys : 0);
+    early_console64_write("\n");
     uint64_t i;
     uint64_t *pml4_va;
     if (as == NULL || as->pml4_va == NULL) {
         return;
     }
     pml4_va = as->pml4_va;
-    /* Walk only PML4[1..511]; PML4[0] is shared (boot identity) — never free it. */
-    for (i = 1; i < AS_ENTRIES_PER_TABLE; ++i) {
-        uint64_t e = pml4_va[i];
-        if (!(e & OPENOS_X86_64_AS_FLAG_P)) {
-            continue;
+    /*
+     * H.5b.3 fix: as_create pointer-copies PML4[0], PML4[2..511] from the
+     * boot PML4 (kernel low identity + kernel high half). Those PDPTs are
+     * SHARED — walking them here and calling pmm_free_page would double-free
+     * kernel page tables and later hand the same physical page out as a new
+     * user PML4, corrupting a live parent AS. Only PML4[1] is owned by this
+     * AS (user high half, zero-init on create) and must be freed on destroy.
+     */
+    (void)i;
+    {
+        uint64_t e = pml4_va[1];
+        if (e & OPENOS_X86_64_AS_FLAG_P) {
+            free_subtree(phys_to_va(entry_phys(e)), 2); /* child is PDPT */
+            arch_x86_64_pmm_free_page(entry_phys(e));
+            pml4_va[1] = 0;
         }
-        free_subtree(phys_to_va(entry_phys(e)), 2); /* child is PDPT */
-        arch_x86_64_pmm_free_page(entry_phys(e));
-        pml4_va[i] = 0;
     }
     arch_x86_64_pmm_free_page(as->pml4_phys);
     as->pml4_va = NULL;
@@ -277,9 +310,12 @@ static int clone_pt(const uint64_t *parent_pt,
         }
         as_memcpy_page((uint64_t)new_leaf, (uint64_t)entry_phys(pe));
         /* Preserve every flag bit exactly (US/RW/NX/PAT/G/...) -- only
-         * swap the physical frame field. */
+         * swap the physical frame field. The new leaf is *independently*
+         * allocated for the child, so it is owned (not borrowed): strip
+         * the BORROWED marker from the copied flag set. */
         new_pt[i] = ((uint64_t)new_leaf & 0x000FFFFFFFFFF000ULL) |
-                    (pe & ~0x000FFFFFFFFFF000ULL);
+                    (pe & ~0x000FFFFFFFFFF000ULL &
+                     ~OPENOS_X86_64_AS_FLAG_BORROWED);
         (*pages_added)++;
     }
     *out_phys = new_pt_phys;

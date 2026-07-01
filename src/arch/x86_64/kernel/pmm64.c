@@ -186,7 +186,11 @@ void arch_x86_64_pmm_init(x86_64_phys_addr_t kernel_phys_start, x86_64_phys_addr
 }
 
 x86_64_phys_addr_t arch_x86_64_pmm_alloc_page(void) {
-    return arch_x86_64_pmm_alloc_pages(1);
+    x86_64_phys_addr_t p = arch_x86_64_pmm_alloc_pages(1);
+    if (p == 0x0DD49000ULL) {
+        early_console64_write("[pmm-trace] ALLOC 0xDD49000\n");
+    }
+    return p;
 }
 
 x86_64_phys_addr_t arch_x86_64_pmm_alloc_pages(uint64_t count) {
@@ -207,6 +211,12 @@ x86_64_phys_addr_t arch_x86_64_pmm_alloc_pages(uint64_t count) {
             if (run == count) {
                 uint64_t i;
                 for (i = 0; i < count; ++i) {
+                    if (!page_is_free(run_start + i)) {
+                        early_console64_write("[pmm-panic] ALLOC on USED pa=");
+                        early_console64_write_hex64(page_addr(run_start + i));
+                        early_console64_write("\n");
+                        for (;;) { __asm__ __volatile__("cli; hlt"); }
+                    }
                     set_page_state(run_start + i, 0);
                 }
                 return page_addr(run_start);
@@ -223,7 +233,17 @@ void arch_x86_64_pmm_free_page(x86_64_phys_addr_t phys_addr) {
     if ((phys_addr & (OPENOS_X86_64_PMM_PAGE_SIZE - 1ULL)) != 0) {
         return;
     }
-    set_page_state(page_index(phys_addr), 1);
+    uint64_t idx = page_index(phys_addr);
+    if (page_is_free(idx)) {
+        early_console64_write("[pmm-PANIC] DOUBLE-FREE pa=");
+        early_console64_write_hex64(phys_addr);
+        early_console64_write("\n");
+        for (;;) { __asm__ __volatile__("cli; hlt"); }
+    }
+    if (phys_addr == 0x0DD49000ULL) {
+        early_console64_write("[pmm-trace] FREE  0xDD49000\n");
+    }
+    set_page_state(idx, 1);
 }
 
 uint64_t arch_x86_64_pmm_get_free_pages(void) {
