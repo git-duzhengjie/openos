@@ -93,13 +93,16 @@ ap_pm32_entry:
     orb     $0x20, %al
     movl    %eax, %cr4
 
-    /* Set LME bit in EFER MSR.
-     * EFER is read into EDX:EAX. LME = bit 8, i.e. EAX bit 8.
+    /* Set LME (bit 8) and NXE (bit 11) in EFER MSR.
+     * EFER is read into EDX:EAX. LME|NXE = 0x100|0x800 = 0x900.
      * NOTE: `orb $0x100,%ah` would silently truncate to 0 — use a
-     * word-sized OR on AX so the bit actually lands at EAX bit 8. */
+     * word-sized OR on AX so the bits actually land at EAX bit 8/11.
+     * NXE MUST be set here to match BSP (UEFI enabled NXE by default);
+     * otherwise any PTE with bit63=1 triggers reserved-bit #PF on APs
+     * — this bit us hard in gamma.3b-S2a child dispatch. */
     movl    $0xC0000080, %ecx
     rdmsr
-    orw     $0x0100, %ax
+    orw     $0x0900, %ax
     wrmsr
 
     /* Enable paging (this activates long mode) */
