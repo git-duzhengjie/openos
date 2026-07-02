@@ -19,6 +19,7 @@
 #include "../include/percpu64.h"
 #include "../include/proc64.h"
 #include "../include/sched64.h"        /* gamma.3b-alpha: PARKED child slot */
+#include "../include/smp64.h"          /* gamma.3b-S2a Seg-5: cpu_count for target CPU */
 #include "../include/syscall_dispatch64.h"
 #include "../include/usermode64.h"
 #include "syscall.h" /* canonical SYS_* numbers (shared with i386) */
@@ -135,51 +136,102 @@ static uint64_t arch_x86_64_syscall_fork_capture(
     }
     child->fork_pending = 1;
 
-    /* gamma.3b-alpha: allocate a PARKED USER sched_slot for the child.
+    /* gamma.3b-S2a Seg-5: allocate a PARKED USER sched_slot for the child
+     * with the parent's callee-saved GPRs plumbed into the child's
+     * initial iretq frame.
      *
-     * Purpose: prove out the allocation + AS-binding + release lifecycle
-     * so beta can flip PARKED -> READY and enter the preemption path
-     * with zero new code. Alpha itself does NOT dispatch this slot;
-     * the legacy fork_pending / saved_fork_frame handoff still runs.
+     * Change vs alpha (γ.3b-alpha):
+     *   - We call the _full variant so the child's dispatch trampoline
+     *     restores rbx/rbp/r12-r15 to the parent's syscall-entry values
+     *     before iretq. This is what makes the child, on its first user
+     *     instruction, see "the state right after fork() returned 0".
+     *   - We bind the slot's owner_proc back-pointer so proc_current()
+     *     works on the AP that ends up dispatching it.
+     *   - We pin the slot to CPU 1 when SMP is up (target_cpu=1); on UP
+     *     we fall back to CPU 0 (== BSP) and the legacy fork_pending
+     *     path picks it up as before.
      *
-     * Failure here is non-fatal: log and continue with legacy path
-     * (child_sched_slot stays 0 == invalid). */
+     * Alpha's failure-is-non-fatal contract still holds: on spawn error
+     * child_sched_slot stays 0 and the legacy resume path runs. */
     {
         uint64_t rip_u, rsp_u, rfl_u;
+        uint64_t init_rbx, init_rbp, init_r12, init_r13, init_r14, init_r15;
         if (via_syscall) {
-            /* SYSCALL/SYSRET path: user context lives in saved rcx/r11
-             * and %gs:syscall_user_rsp (already copied to fork_user_rsp). */
             rip_u = child->saved_fork_frame_sysc.rcx;
             rfl_u = child->saved_fork_frame_sysc.r11;
             rsp_u = child->fork_user_rsp;
+            init_rbx = child->saved_fork_frame_sysc.rbx;
+            init_rbp = child->saved_fork_frame_sysc.rbp;
+            init_r12 = child->saved_fork_frame_sysc.r12;
+            init_r13 = child->saved_fork_frame_sysc.r13;
+            init_r14 = child->saved_fork_frame_sysc.r14;
+            init_r15 = child->saved_fork_frame_sysc.r15;
         } else {
             rip_u = (uint64_t)child->saved_fork_frame_int80.rip;
             rfl_u = child->saved_fork_frame_int80.rflags;
             rsp_u = (uint64_t)child->saved_fork_frame_int80.rsp;
+            init_rbx = child->saved_fork_frame_int80.rbx;
+            init_rbp = child->saved_fork_frame_int80.rbp;
+            init_r12 = child->saved_fork_frame_int80.r12;
+            init_r13 = child->saved_fork_frame_int80.r13;
+            init_r14 = child->saved_fork_frame_int80.r14;
+            init_r15 = child->saved_fork_frame_int80.r15;
         }
         uint16_t ucs = (uint16_t)(OPENOS_X86_64_GDT_USER_CODE | 3u);
         uint16_t uss = (uint16_t)(OPENOS_X86_64_GDT_USER_DATA | 3u);
-        uint32_t slot_idx = arch_x86_64_sched_spawn_uthread_parked(
+        /* Target CPU = 1 when SMP has >= 2 CPUs, else 0. arch_x86_64_smp_
+         * cpu_count() is the canonical count; falling back to 0 keeps
+         * the legacy fork_pending path working on UP builds and QEMU
+         * -smp 1 runs. */
+        /* S2a-dbg2: stage 21 selftest leaves a sentinel task on CPU=cpu_count-1
+         * with `cli;hlt` (IF=0) which permanently blocks IPIs on that CPU.
+         * Route fork child to CPU=cpu_count-2 (typically CPU=2 on -smp 4)
+         * which is left idle after stage 30/31. Falls back gracefully:
+         *   cpu_count >= 3 -> cpu_count - 2
+         *   cpu_count == 2 -> 1
+         *   cpu_count <  2 -> 0 (BSP, UP mode) */
+        uint32_t _cpu_cnt = arch_x86_64_smp_cpu_count();
+        uint32_t target_cpu =
+            (_cpu_cnt >= 3u) ? (_cpu_cnt - 2u)
+                             : ((_cpu_cnt >= 2u) ? 1u : 0u);
+        uint32_t slot_idx = arch_x86_64_sched_spawn_uthread_parked_full(
             rip_u, rsp_u, rfl_u, ucs, uss,
-            OPENOS_X86_64_SCHED_PRIO_DEFAULT, 0u);
+            OPENOS_X86_64_SCHED_PRIO_DEFAULT, target_cpu,
+            init_rbx, init_rbp, init_r12, init_r13, init_r14, init_r15);
         if (slot_idx == 0xFFFFFFFFu) {
             early_console64_write(
-                "[fork:capture][alpha] parked slot alloc FAILED"
+                "[fork:capture][S2a] parked slot alloc FAILED"
                 " (continuing on legacy fork_pending path)\n");
             child->fork_child_sched_slot = 0u;
         } else {
-            /* Bind the child's cloned AS to the slot. Dispatcher's
-             * as_activate (gamma.3a) will pick it up when beta flips
-             * the slot to READY; alpha never dispatches. */
             (void)arch_x86_64_sched_slot_set_as(slot_idx, child->as);
+            (void)arch_x86_64_sched_slot_set_owner_proc(slot_idx, child);
             child->fork_child_sched_slot = slot_idx;
-            early_console64_write("[fork:capture][alpha] parked slot=");
+            early_console64_write("[fork:capture][S2a] parked slot=");
             early_console64_write_hex64((uint64_t)slot_idx);
             early_console64_write(" rip=");
             early_console64_write_hex64(rip_u);
             early_console64_write(" rsp=");
             early_console64_write_hex64(rsp_u);
+            early_console64_write(" target_cpu=");
+            early_console64_write_hex64((uint64_t)target_cpu);
             early_console64_write("\n");
+
+            /* Wakeup only when we truly have SMP + AP available.
+             * On UP fall back to legacy fork_pending path (kmain will
+             * see child->fork_pending and hand-dispatch it). */
+            if (target_cpu != 0u) {
+                uint32_t wk = arch_x86_64_sched_slot_wakeup(slot_idx);
+                early_console64_write("[fork:capture][S2a] wakeup rc=");
+                early_console64_write_hex64((uint64_t)wk);
+                early_console64_write("\n");
+                /* Once the child is READY on the AP, we do NOT need the
+                 * legacy fork_pending path for this child. Clear the
+                 * flag so kmain's main loop skips the hand-dispatch
+                 * fallback. do_wait / do_exit will handle synchronization
+                 * (S2a step 6/7). */
+                child->fork_pending = 0u;
+            }
         }
     }
 
