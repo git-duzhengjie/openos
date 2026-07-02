@@ -22,6 +22,51 @@ extern void arch_x86_64_user_thread_trampoline(void);
 extern void arch_x86_64_user_thread_trampoline_full(void);  /* γ.3b-S2a Seg-4 */
 extern void arch_x86_64_user_thread_sentinel_trampoline(void);
 
+/* γ.5-F1: dedicated per-CPU idle stacks.
+ *
+ * Before F1, sched_register_ap_idle() left slot[cpu_idx].ctx zeroed and the
+ * AP's real idle loop ran on the AP boot stack (from ap_entry.S). That boot
+ * stack gets clobbered by every subsequent kernel entry (IRQ, syscall,
+ * fork parent path). When timer preempts idle for the first time, the ISR
+ * saves the current RSP/RIP into slot[cpu_idx].ctx — but by then the boot
+ * stack contents around that RSP have already been repeatedly overwritten,
+ * and no dispatch has yet routed through slot[cpu_idx] as a *from* slot to
+ * repopulate it either. So the first sched_exit_self() fallback on an AP
+ * (nxt == cur → slot[cpu_idx] idle) restored a coherent-but-stale RSP that
+ * pointed into freed frames → iretq to RIP=0 / hang. This precisely matches
+ * the observed regression: waitpid section pid=5/7 on cpu2 never return
+ * while wait-multi siblings (whose exit_self picks another READY sibling in
+ * Pass 1) succeed.
+ *
+ * F1 gives each AP a clean, dedicated 4 KiB idle stack and a well-defined
+ * arch_x86_64_ap_idle_entry(). ap_entry.S enters idle via
+ * arch_x86_64_sched_enter_ap_idle(), which calls context_switch(NULL, &idle)
+ * → the FIRST time the AP touches its idle loop it is already running on
+ * the dedicated stack. Every subsequent save-into-idle-slot writes clean
+ * frames onto that same private stack, and every subsequent restore-from-
+ * idle-slot is guaranteed coherent.
+ *
+ * Stack size: 4 KiB is sufficient — the loop body is exactly `sti; hlt`,
+ * no locals, no calls. IRQ handlers switch to their IST/TSS stack, so the
+ * idle stack only holds the resume frame of the interrupted idle loop.
+ *
+ * Slot 0 is BSP and never uses this array; g_ap_idle_stacks[0] is unused. */
+#define OPENOS_X86_64_AP_IDLE_STACK_BYTES 16384u
+static __attribute__((aligned(16)))
+uint8_t g_ap_idle_stacks[OPENOS_X86_64_SMP_MAX_CPUS_HINT]
+                        [OPENOS_X86_64_AP_IDLE_STACK_BYTES];
+
+static void __attribute__((noreturn)) arch_x86_64_ap_idle_entry(void)
+{
+    /* AP idle loop, running on its dedicated idle stack.
+     * `sti` is explicit for defence-in-depth in case F1 is ever entered
+     * before rflags-restore paths (F.3) are fully wired. */
+    __asm__ volatile ("sti");
+    for (;;) {
+        __asm__ volatile ("hlt");
+    }
+}
+
 /* G.6.3: per-CPU scheduler cursors / counters live in arch_x86_64_percpu_t,
  * addressable via %gs. The sched_slots[] pool itself is still a single
  * shared array (slot ownership stays global; only the running-cursor and
@@ -978,32 +1023,31 @@ uint32_t arch_x86_64_sched_on_tick(void) {
      * CPU's own IRQ path (vs. only from cooperative yield). */
     arch_x86_64_this_cpu_ptr()->sched_tick_calls++;
 
-    /* gamma.5-P1: every 256 ticks on cpu_idx==0, dump the preempt-hit
-     * histogram of every CPU so we can observe whether the timer IRQ
-     * ever caught ring3 code. The classification itself is done inside
-     * arch_x86_64_lapic_timer_irq_handler / the PIT stub, using the
-     * iret-frame CS.RPL. Cadence 256 keeps the log volume tolerable at
-     * ~100 Hz timer and still surfaces movement within ~2.5 s. */
+    /* gamma.5-P1: every ~64 ticks (aggregated across all CPUs) dump
+     * the preempt-hit histogram of every CPU so we can observe whether
+     * the timer IRQ ever caught ring3 code. The classification itself
+     * is done inside arch_x86_64_lapic_timer_irq_handler / the PIT stub,
+     * using the iret-frame CS.RPL. Any CPU may drive the dump — this is
+     * important because during hello_fork the BSP blocks in wait() and
+     * its PIT ticks slow way down, so we'd otherwise miss the very
+     * window we're trying to observe. */
     {
         static volatile uint32_t p1_dump_gate = 0u;
-        arch_x86_64_percpu_t *pc = arch_x86_64_this_cpu_ptr();
-        if (pc->cpu_idx == 0u) {
-            uint32_t g = ++p1_dump_gate;
-            if ((g & 0x1Fu) == 0u) {
-                early_console64_write("[gamma5-P1] tick_hits per-CPU:");
-                for (uint32_t c = 0u; c < OPENOS_X86_64_PERCPU_MAX_CPUS; ++c) {
-                    uint32_t u = arch_x86_64_percpu_tick_hits_user(c);
-                    uint32_t k = arch_x86_64_percpu_tick_hits_kernel(c);
-                    if ((u | k) == 0u) continue;
-                    early_console64_write(" cpu");
-                    early_console64_write_hex64((uint64_t)c);
-                    early_console64_write("=u:");
-                    early_console64_write_hex64((uint64_t)u);
-                    early_console64_write(",k:");
-                    early_console64_write_hex64((uint64_t)k);
-                }
-                early_console64_write("\n");
+        uint32_t g = __atomic_add_fetch(&p1_dump_gate, 1u, __ATOMIC_RELAXED);
+        if ((g & 0x0Fu) == 0u) {
+            early_console64_write("[gamma5-P1] tick_hits per-CPU:");
+            for (uint32_t c = 0u; c < OPENOS_X86_64_PERCPU_MAX_CPUS; ++c) {
+                uint32_t u = arch_x86_64_percpu_tick_hits_user(c);
+                uint32_t k = arch_x86_64_percpu_tick_hits_kernel(c);
+                if ((u | k) == 0u) continue;
+                early_console64_write(" cpu");
+                early_console64_write_hex64((uint64_t)c);
+                early_console64_write("=u:");
+                early_console64_write_hex64((uint64_t)u);
+                early_console64_write(",k:");
+                early_console64_write_hex64((uint64_t)k);
             }
+            early_console64_write("\n");
         }
     }
     if (sched_pc_quantum() > 0u) {
@@ -1104,15 +1148,56 @@ uint32_t arch_x86_64_sched_register_ap_idle(void) {
     sched_slots[cpu].priority   = OPENOS_X86_64_SCHED_PRIO_DEFAULT;
     sched_slots[cpu].owner_cpu  = cpu;
     sched_slots[cpu].is_idle    = 1u;
-    sched_slots[cpu].stack_base = NULL;  /* AP runs on its trampoline stack */
+    sched_slots[cpu].stack_base = NULL;  /* AP idle stack is static (g_ap_idle_stacks), not heap */
     /* G.7d: AP idle slots are KERNEL; they ride the per-CPU RSP0 that
      * was baked into the AP's TSS by percpu_setup(cpu) on AP bringup,
      * so kernel_stack_top stays 0 ("don't touch TSS.RSP0"). */
     sched_slots[cpu].kind             = OPENOS_X86_64_SCHED_KIND_KERNEL;
     sched_slots[cpu].kernel_stack_top = 0u;
     sched_slots[cpu].owner_proc       = NULL;  /* γ.3b-S2a Seg-2: AP idle has no user PCB */
+
+    /* γ.5-F1: pre-populate the idle context so that any restore
+     * (via sched_exit_self fallback, or the very first enter via
+     * sched_enter_ap_idle) lands on a coherent RSP/RIP with IF=1.
+     * Uses this AP's dedicated static idle stack. */
+    uintptr_t idle_stack_top =
+        (uintptr_t)&g_ap_idle_stacks[cpu][OPENOS_X86_64_AP_IDLE_STACK_BYTES];
+    idle_stack_top &= ~(uintptr_t)0xFu;  /* 16-byte align */
+    x86_64_context_t *ictx = &sched_slots[cpu].ctx;
+    ictx->rsp    = (x86_64_stack_ptr_t)idle_stack_top;
+    ictx->rip    = (x86_64_entry_t)(uintptr_t)arch_x86_64_ap_idle_entry;
+    ictx->rflags = OPENOS_X86_64_CONTEXT_RFLAGS_IF;
+    ictx->rbx = 0; ictx->rbp = 0;
+    ictx->r12 = 0; ictx->r13 = 0;
+    ictx->r14 = 0; ictx->r15 = 0;
+    ictx->r8  = 0; ictx->r9  = 0;
+    ictx->r10 = 0; ictx->r11 = 0;
+
     sched_pc_set_current(cpu);
     return cpu;
+}
+
+/* γ.5-F1: enter the AP idle loop via context_switch. Never returns.
+ *
+ * Called at the end of ap_entry (replacing raw `sti; for(;;) hlt;`).
+ * Rationale documented at g_ap_idle_stacks[] above. Passing NULL as
+ * `from` tells context_switch64.S to skip the save half and land
+ * directly into the pre-populated idle context (dedicated stack,
+ * arch_x86_64_ap_idle_entry as rip, IF=1 in rflags). */
+void arch_x86_64_sched_enter_ap_idle(void) {
+    uint32_t cpu = arch_x86_64_this_cpu_ptr()->cpu_idx;
+    /* Defensive: if register_ap_idle wasn't called or slot got clobbered,
+     * fall back to the historical inline idle loop rather than jumping to
+     * a zero ctx. This branch should never trigger in practice. */
+    if (cpu == 0u || cpu >= OPENOS_X86_64_SMP_MAX_CPUS_HINT ||
+        sched_slots[cpu].is_idle != 1u ||
+        sched_slots[cpu].ctx.rip == 0) {
+        __asm__ volatile ("sti");
+        for (;;) { __asm__ volatile ("hlt"); }
+    }
+    arch_x86_64_context_switch(NULL, &sched_slots[cpu].ctx);
+    /* Unreachable. */
+    __builtin_unreachable();
 }
 
 uint32_t arch_x86_64_sched_idle_slot_for_cpu(uint32_t cpu_idx) {

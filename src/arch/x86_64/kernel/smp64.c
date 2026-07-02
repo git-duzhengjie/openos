@@ -589,12 +589,23 @@ void arch_x86_64_ap_entry(uint64_t apic_id) {
         for (;;) { __asm__ volatile ("cli; hlt"); }
     }
 
-    /* AP idle loop with interrupts ENABLED. The LAPIC timer ISR bumps
-     * this CPU's percpu.lapic_timer_count; smp_selftest observes the
-     * counters to confirm per-CPU heartbeats. G.6.5b will wire
-     * sched_on_tick() into the same ISR. */
-    __asm__ volatile ("sti");
-    for (;;) {
-        __asm__ volatile ("hlt");
-    }
+    /* γ.5-F1: switch into this AP's dedicated idle context via
+     * arch_x86_64_sched_enter_ap_idle() instead of running the raw
+     * `sti; hlt` loop directly on the AP boot stack.
+     *
+     * Before F1 the AP's real idle loop lived on this trampoline stack,
+     * which is aliased into the boot pool and repeatedly clobbered by
+     * every subsequent kernel entry (IRQ, syscall, fork parent). When
+     * sched_exit_self on an AP fell back to slot[cpu_idx] (the idle
+     * slot) the restored RSP pointed into garbage → iretq to RIP=0 /
+     * hang. This precisely explains the observed regression where
+     * cpu2 waitpid-section children (pid=5, pid=7) never returned
+     * after wait-multi children ran busy loops.
+     *
+     * enter_ap_idle() never returns; it context_switches into the idle
+     * slot pre-populated by register_ap_idle() above, running on the
+     * dedicated static g_ap_idle_stacks[cpu] page. */
+    arch_x86_64_sched_enter_ap_idle();
+    /* Unreachable. */
+    for (;;) { __asm__ volatile ("cli; hlt"); }
 }

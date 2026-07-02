@@ -113,6 +113,14 @@ uint32_t arch_x86_64_sched_register_ap_idle(void);
 uint32_t arch_x86_64_sched_idle_slot_for_cpu(uint32_t cpu_idx);
 uint32_t arch_x86_64_sched_idle_selftest(uint32_t online_cpus);
 
+/* γ.5-F1: enter this CPU's idle loop via context_switch. Never returns.
+ * Called by smp64 AP bring-up at the end of ap_entry, replacing the raw
+ * `sti; for(;;) hlt;` tail. Ensures the AP idle thread runs on a
+ * dedicated per-CPU idle stack, so that when sched_exit_self falls back
+ * to slot[cpu_idx], the saved idle rsp is guaranteed valid and not
+ * overwritten by any prior IRQ/syscall on the AP's boot stack. */
+void     arch_x86_64_sched_enter_ap_idle(void) __attribute__((noreturn));
+
 /* -----------------------------------------------------------------
  * Step F.3: preemptive tick hook.
  *

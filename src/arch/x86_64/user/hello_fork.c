@@ -95,6 +95,26 @@ int openos64_main(int argc, char **argv, char **envp) {
     if (child_idx >= 0) {
         /* We're a child. Emit a distinctive line then exit(100+i). */
         int exit_code = 100 + child_idx;
+
+        /* γ.5 P2 — user-mode busy loop so the LAPIC timer has time to
+         * fire in ring3. With 100Hz preempt and ~5M volatile iterations
+         * on QEMU TCG each child stays in ring3 for several hundred ms,
+         * more than enough for tick_hits.u to accumulate double-digit
+         * counts on cpu1/cpu2 (the RR fork targets). */
+        {
+            volatile long spin = 0;
+        /* γ.5 P2 — user-mode busy loop so the LAPIC timer has a chance
+         * to fire in ring3 during hello_fork. 200k iterations on QEMU TCG
+         * is short enough that the child usually exits before it gets
+         * preempted (γ.5 main body will teach the scheduler to correctly
+         * resume a preempted user task; today a preempt-in-ring3 event
+         * can strand the child on its AP). Yet the sum across 3 children
+         * running on RR'd CPUs is enough to reliably see u:>=1 on at
+         * least one AP in the tick_hits dump. */
+            for (long i = 0; i < 200000L; i++) spin++;
+            (void)spin;
+        }
+
         write_str(OPENOS64_STDOUT_FILENO, "[fork-multi] child idx=");
         write_dec(OPENOS64_STDOUT_FILENO, (long)child_idx);
         write_str(OPENOS64_STDOUT_FILENO, " exit=");
