@@ -355,17 +355,13 @@ static uint64_t do_exit(uint64_t status) {
         if (owner != NULL && owner == me && !on_bsp_usermode_run &&
             sslot != 0u) {
             me->child_exit_code = (int)status;
-            me->child_exited    = true;  /* parent's do_wait polls this */
-            /* NOTE: me is the CHILD PCB. The parent PCB is me->parent (if
-             * we grow that link). Seg-7 wait() runs on the parent and
-             * checks parent->child_exited, which fork_capture set to
-             * point at the child; the flag ownership is *the parent's*
-             * child_exited, not me->child_exited. Fix: mirror onto the
-             * parent. */
-            /* Locate parent PCB. proc64 uses slot == pid (1-based; slot 0
-             * is the reserved kernel PCB), so parent PCB = proc_slot(ppid). */
+            me->child_exited    = true;  /* legacy self-flag; harmless */
+            /* γ.4: notify the *parent* PCB so its do_wait Mode-A poll
+             * on parent->child_exited actually observes the exit. me is
+             * the CHILD PCB; the parent PCB was linked via me->parent_slot
+             * in fork_capture (see proc64.c fork_alloc_child). */
             x86_64_proc_t *parent =
-                arch_x86_64_proc_slot((uint16_t)me->ppid);
+                arch_x86_64_proc_slot(me->parent_slot);
             if (parent != NULL) {
                 parent->child_exit_code = (int)status;
                 parent->child_exited    = true;
@@ -461,10 +457,17 @@ static uint64_t do_wait_common(uint64_t pid_arg, uint64_t status_ptr, int use_pi
      *   an AP, so kmain/usermode_run has to hand-dispatch it under the
      *   parent's kernel stack. This is the pre-S2a path; unchanged. */
     if (p->fork_pending == 0u) {
-        /* Mode A: busy-poll until AP child sets child_exited. */
+        /* Mode A: busy-poll until AP child sets parent->child_exited via
+         * cross-CPU write in do_exit. Interrupts were masked on syscall
+         * entry by FMASK; re-enable IF for the wait so the LAPIC can keep
+         * time-slicing this CPU (not strictly required for correctness —
+         * the AP-side write is cache-coherent — but keeps the CPU
+         * responsive to other work). */
+        __asm__ volatile ("sti" ::: "memory");
         while (!p->child_exited) {
             __asm__ volatile ("pause" ::: "memory");
         }
+        __asm__ volatile ("cli" ::: "memory");
         code = p->child_exit_code;
     } else {
         /* Mode B: legacy hand-dispatch. */
