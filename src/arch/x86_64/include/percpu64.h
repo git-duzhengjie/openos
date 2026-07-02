@@ -130,20 +130,19 @@ typedef struct openos_x86_64_percpu {
      * Stage 21 to verify that a USER sched slot actually got
      * dispatched on its owning CPU. */
     uint64_t user_dispatch_count;    /* offset 0x78 */
-    /* gamma.3b-S2a Seg-1: per-CPU "current process" slot index.
+    /* gamma.3b-S2a Seg-2 (岔路5方案B): current_proc_slot has been
+     * REMOVED. The Seg-1 field lived here at 0x80/0x84 as the per-CPU
+     * "who am I?" answer for proc_current*(). Seg-2 collapses this back
+     * into sched: each sched_slot_t carries an owner_proc back-pointer,
+     * and proc_current() reads sched_current_slot()->owner_proc. That
+     * gives us a single source of truth for the running PCB per-CPU
+     * without a percpu mirror to keep in sync.
      *
-     * Previously proc64.c held a single module-static `current_index`
-     * as the "who am I?" answer for proc_current*(). That worked while
-     * every user thread ran on the BSP under kernel64.c's usermode_run
-     * loop. gamma.3b-S2a starts dispatching child procs on APs; each
-     * CPU must be able to answer proc_current() independently.
-     *
-     * The dispatcher writes this field whenever it schedules a USER
-     * slot on the local CPU, and proc_current*() reads it via %gs:0.
-     * BSS zero-init leaves every CPU pointing at slot 0 (the reserved
-     * kernel proc) on boot, matching pre-Seg-1 behavior. */
-    uint32_t current_proc_slot;      /* offset 0x80 */
-    uint32_t _resv_after_cur_proc;   /* offset 0x84 */
+     * We keep the 8-byte hole here so all higher OFF_* offsets stay
+     * fixed (asm and selftest bake several of them in). Do NOT reuse
+     * without renaming the OFF_CURRENT_PROC macro below. */
+    uint32_t _resv_slot_0x80;        /* offset 0x80 (was current_proc_slot) */
+    uint32_t _resv_slot_0x84;        /* offset 0x84 */
 } __attribute__((aligned(64))) arch_x86_64_percpu_t;
 
 /* Per-field offsets (compile-time, for asm or sanity checks). */
@@ -165,7 +164,10 @@ typedef struct openos_x86_64_percpu {
 #define OPENOS_X86_64_PERCPU_OFF_SYSCALL_URSP     0x68
 #define OPENOS_X86_64_PERCPU_OFF_BASELINE_RSP0    0x70
 #define OPENOS_X86_64_PERCPU_OFF_USER_DISPATCH    0x78
-#define OPENOS_X86_64_PERCPU_OFF_CURRENT_PROC     0x80
+/* 0x80 was OPENOS_X86_64_PERCPU_OFF_CURRENT_PROC. Removed in gamma.3b-S2a
+ * Seg-2 (岔路5方案B). See percpu64.h struct comment: sched_slot.owner_proc
+ * is now the sole per-CPU running-PCB source. Slot 0x80/0x84 kept as
+ * reserved hole to preserve future offsets. */
 
 /* IA32_GS_BASE MSR */
 #define OPENOS_X86_64_MSR_GS_BASE        0xC0000101u

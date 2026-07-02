@@ -25,19 +25,55 @@
 
 static x86_64_proc_t proc_table[OPENOS_X86_64_PROC_MAX];
 
-/* gamma.3b-S2a Seg-1: `current_index` migrated to per-CPU storage.
+/* gamma.3b-S2a Seg-2 (岔路5方案B): current_index migrated from
+ * percpu.current_proc_slot to a sched_slot reverse lookup.
  *
- * Before Seg-1 this was a single module-static uint16_t, which was
- * correct only while every user thread ran on the BSP. Seg-1 stages
- * the plumbing for AP-dispatched user procs: each CPU reads / writes
- * its own `current_proc_slot` via %gs:0x80 (see percpu64.h). Behavior
- * is unchanged this seg because dispatcher writes and non-BSP reads
- * only start firing in Seg-2 / Seg-3. */
+ * Seg-1 moved the field into %gs:0x80 so AP-side syscalls could see
+ * their own PCB, but that left proc/sched with two parallel truths
+ * (percpu.current_proc_slot vs sched_current_slot()->owner_proc) that
+ * we would have to keep in sync forever. Seg-2 collapses this: sched
+ * owns the running-slot cursor per-CPU (sched_pc_current()), and each
+ * slot carries an owner_proc back-pointer set by fork_alloc_child.
+ * proc_current() therefore reads sched_current_slot() -> owner_proc
+ * -> proc_table[]. When the current slot is the kernel/idle slot
+ * (owner_proc==NULL), we fall back to slot 0 (the kernel PCB).
+ *
+ * Concurrency: sched_current_slot() reads a percpu word, so it is
+ * inherently per-CPU. owner_proc is set once before slot_wakeup and
+ * cleared once at reap, so no cross-CPU race on this field either. */
 static inline uint16_t current_index_get(void) {
-    return (uint16_t)arch_x86_64_this_cpu_ptr()->current_proc_slot;
+    uint32_t sslot = arch_x86_64_sched_current_slot();
+    struct x86_64_proc *owner =
+        arch_x86_64_sched_slot_get_owner_proc(sslot);
+    if (owner == NULL) {
+        /* kernel / idle / bootstrap slot -> report kernel PCB (slot 0).
+         * All kernel-context callers (syscall dispatcher on BSP before
+         * first user dispatch, timer tick logging, sched selftest) hit
+         * this path. */
+        return 0u;
+    }
+    /* Recover slot index via pointer arithmetic against proc_table[]. */
+    ptrdiff_t idx = (x86_64_proc_t *)owner - &proc_table[0];
+    if (idx < 0 || idx >= (ptrdiff_t)OPENOS_X86_64_PROC_MAX) return 0u;
+    return (uint16_t)idx;
 }
 static inline void current_index_set(uint16_t slot) {
-    arch_x86_64_this_cpu_ptr()->current_proc_slot = (uint32_t)slot;
+    /* 方案B: proc侧不再直接写 running-slot cursor. sched 是唯一真相源:
+     *   - AP侧的 user proc 靠 fork_alloc_child 绑 owner_proc 后 slot_wakeup,
+     *     dispatcher 消费 PARKED slot 时自然把 sched_pc_current() 指到它.
+     *   - BSP 法人 (kernel proc slot 0 / spawn_user 后的旧式路径) 目前
+     *     都新欣写 slot 0 or spawned pid; 为了不破旧接口语义, 在这里
+     *     把目标 slot 绑 sched 当前 slot 的 owner_proc, 以后反查就能拿到.
+     *   - slot==0 (内核 PCB) 则把 owner_proc 置 NULL 回归默认.
+     */
+    uint32_t sslot = arch_x86_64_sched_current_slot();
+    if (slot >= OPENOS_X86_64_PROC_MAX) return;
+    if (slot == 0u) {
+        (void)arch_x86_64_sched_slot_set_owner_proc(sslot, NULL);
+    } else {
+        (void)arch_x86_64_sched_slot_set_owner_proc(
+            sslot, &proc_table[slot]);
+    }
 }
 static uint64_t      yield_count;
 static uint64_t      spawn_count;

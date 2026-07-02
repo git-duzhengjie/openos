@@ -11,10 +11,15 @@
 #include "../include/usermode64.h"
 #include "../include/address_space64.h"  /* γ.3: as_activate on slot dispatch */
 
+/* γ.3b-S2a岔路5(方案B): forward decl for owner_proc back-pointer in sched_slot_t.
+ * Full proc PCB layout is proc64.h; sched64 only stores an opaque pointer. */
+struct x86_64_proc;
+
 /* G.7e: trampoline implemented in usermode64.S. context_switch dispatches
  * a USER slot by loading ctx.rsp (-> iretq frame) and jumping to ctx.rip,
  * which is this label. */
 extern void arch_x86_64_user_thread_trampoline(void);
+extern void arch_x86_64_user_thread_trampoline_full(void);  /* γ.3b-S2a Seg-4 */
 extern void arch_x86_64_user_thread_sentinel_trampoline(void);
 
 /* G.6.3: per-CPU scheduler cursors / counters live in arch_x86_64_percpu_t,
@@ -154,6 +159,13 @@ typedef struct {
     /* γ.3: address space to activate on dispatch. NULL = keep current CR3
      * (kernel-only slot rides the boot AS or whatever CR3 is loaded). */
     struct x86_64_address_space *as;
+    /* γ.3b-S2a岔路5(方案B): owner PCB back-pointer. Non-NULL for USER
+     * slots owned by a proc; NULL for KERNEL / idle / bootstrap slots.
+     * proc_current() reads this via sched_current_slot() to derive the
+     * running PCB per-CPU without a separate percpu.current_proc_slot
+     * field. Set by fork_alloc_child right before slot_wakeup; cleared
+     * on slot_release / EXITED reap. */
+    struct x86_64_proc          *owner_proc;
 } sched_slot_t;
 
 static sched_slot_t  sched_slots[OPENOS_X86_64_SCHED_MAX_KTHREADS];
@@ -192,6 +204,8 @@ static void sched_apply_rsp0_for_next(uint32_t nxt) {
     if (sched_slots[nxt].as != NULL) {
         arch_x86_64_as_activate(sched_slots[nxt].as);
     }
+
+    /* gamma.3b-S2a Patch B removed: disp_dbg debug telemetry stripped. */
 }
 
 static void sched_ensure_bootstrap_slot(void) {
@@ -216,6 +230,7 @@ static void sched_ensure_bootstrap_slot(void) {
      * kernel_stack_top=0 to signal "do not touch TSS.RSP0 for this slot". */
     sched_slots[0].kind             = OPENOS_X86_64_SCHED_KIND_KERNEL;
     sched_slots[0].kernel_stack_top = 0u;
+    sched_slots[0].owner_proc       = NULL;  /* γ.3b-S2a Seg-2: bootstrap has no user PCB */
     sched_pc_set_current(0u);
 }
 
@@ -240,6 +255,7 @@ static uint32_t sched_alloc_slot(void) {
             sched_slots[i].kind             = OPENOS_X86_64_SCHED_KIND_KERNEL;
             sched_slots[i].kernel_stack_top = 0u;
             sched_slots[i].as               = NULL;  /* γ.3: no AS by default */
+            sched_slots[i].owner_proc       = NULL;  /* γ.3b-S2a Seg-2: no owner PCB */
             /* owner_cpu set by caller (spawn pins to spawning CPU). */
             return i;
         }
@@ -543,6 +559,119 @@ uint32_t arch_x86_64_sched_spawn_uthread_parked(uint64_t user_rip,
     return idx;
 }
 
+/* gamma.3b-S2a Seg-4: fork-resume variant.
+ *
+ * See spawn_uthread_parked above for the baseline. The only differences:
+ *   1. Frame is 11 qwords instead of 5. The extra 6 qwords sit BELOW
+ *      the iretq frame and hold callee-saved GPRs at the offsets that
+ *      arch_x86_64_user_thread_trampoline_full expects to pop from:
+ *          frame[0] = rbx        (popped first)
+ *          frame[1] = rbp
+ *          frame[2] = r12
+ *          frame[3] = r13
+ *          frame[4] = r14
+ *          frame[5] = r15
+ *          frame[6] = rip        (iretq base)
+ *          frame[7] = cs
+ *          frame[8] = rflags
+ *          frame[9] = user_rsp
+ *          frame[10]= ss
+ *   2. Dispatch RIP goes to arch_x86_64_user_thread_trampoline_full
+ *      rather than the vanilla trampoline.
+ *
+ * Caller-saved GPRs are NOT plumbed through: the SYSCALL ABI already
+ * treats them as clobbered on kernel entry, so the child observing
+ * rax==0 / rcx=r11=0 / rdx=rsi=rdi=r8..r11=0 is spec-conformant.
+ * (rax==0 is the fork()==0 contract; rest fall out of the trampoline's
+ * xorq sequence.)
+ *
+ * Alignment: SysV ABI requires 16-byte alignment at function entry,
+ * which for iretq means the user_rsp we deliver must itself be 16-aligned.
+ * We do not touch user_rsp here; the caller (fork_alloc_child) inherits
+ * parent's syscall-saved rsp, which the parent set up correctly for its
+ * own syscall return. The 11-qword kernel frame is 8-byte aligned by
+ * construction; we mask frame_base down to 16 for defence in depth just
+ * like the 5-qword variant. */
+uint32_t arch_x86_64_sched_spawn_uthread_parked_full(uint64_t user_rip,
+                                                     uint64_t user_rsp,
+                                                     uint64_t user_rflags,
+                                                     uint16_t user_cs,
+                                                     uint16_t user_ss,
+                                                     uint32_t priority,
+                                                     uint32_t target_cpu,
+                                                     uint64_t init_rbx,
+                                                     uint64_t init_rbp,
+                                                     uint64_t init_r12,
+                                                     uint64_t init_r13,
+                                                     uint64_t init_r14,
+                                                     uint64_t init_r15) {
+    if (user_rip == 0u || user_rsp == 0u) {
+        return 0xFFFFFFFFu;
+    }
+    if (priority > OPENOS_X86_64_SCHED_PRIO_MAX) {
+        priority = OPENOS_X86_64_SCHED_PRIO_DEFAULT;
+    }
+    if (target_cpu >= OPENOS_X86_64_SMP_MAX_CPUS) {
+        target_cpu = arch_x86_64_this_cpu_ptr()->cpu_idx;
+    }
+    user_rflags |= 0x200ULL;  /* enforce IF=1 in child on iretq */
+
+    uint32_t idx = sched_alloc_slot();
+    if (idx == 0u) {
+        return 0xFFFFFFFFu;
+    }
+
+    void *stack = arch_x86_64_kmalloc(OPENOS_X86_64_SCHED_KSTACK_BYTES);
+    if (stack == NULL) {
+        sched_slots[idx].state = SCHED_SLOT_FREE;
+        return 0xFFFFFFFFu;
+    }
+    sched_slots[idx].stack_base = stack;
+
+    uintptr_t kstack_top = (uintptr_t)stack + OPENOS_X86_64_SCHED_KSTACK_BYTES;
+    uintptr_t frame_base = kstack_top - (11u * sizeof(uint64_t));
+    frame_base &= ~((uintptr_t)0xFu);
+    uint64_t *frame = (uint64_t *)frame_base;
+    frame[0]  = init_rbx;
+    frame[1]  = init_rbp;
+    frame[2]  = init_r12;
+    frame[3]  = init_r13;
+    frame[4]  = init_r14;
+    frame[5]  = init_r15;
+    frame[6]  = user_rip;
+    frame[7]  = (uint64_t)user_cs;
+    frame[8]  = user_rflags;
+    frame[9]  = user_rsp;
+    frame[10] = (uint64_t)user_ss;
+
+    x86_64_context_t ctx;
+    ctx.rsp    = (x86_64_stack_ptr_t)frame_base;
+    ctx.rip    = (x86_64_entry_t)&arch_x86_64_user_thread_trampoline_full;
+    ctx.rflags = 0u;
+    ctx.rbx    = 0u;
+    ctx.rbp    = 0u;
+    ctx.r12    = 0u;
+    ctx.r13    = 0u;
+    ctx.r14    = 0u;
+    ctx.r15    = 0u;
+    ctx.r8     = 0u;
+    ctx.r9     = 0u;
+    ctx.r10    = 0u;
+    ctx.r11    = 0u;
+
+    sched_slots[idx].ctx              = ctx;
+    sched_slots[idx].state            = SCHED_SLOT_PARKED;
+    sched_slots[idx].id               = idx;
+    sched_slots[idx].priority         = priority;
+    sched_slots[idx].owner_cpu        = target_cpu;
+    sched_slots[idx].is_idle          = 0u;
+    sched_slots[idx].kind             = OPENOS_X86_64_SCHED_KIND_USER;
+    sched_slots[idx].kernel_stack_top = kstack_top;
+    sched_slots[idx].as               = NULL;  /* caller does slot_set_as before wakeup */
+    sched_slots[idx].owner_proc       = NULL;  /* caller does slot_set_owner_proc before wakeup */
+    return idx;
+}
+
 /* gamma.3b-alpha: release a PARKED or EXITED slot allocated via
  * spawn_uthread_parked. Frees the kernel stack, clears AS binding
  * (does NOT free the AS -- ownership stays with proc PCB), and
@@ -569,6 +698,7 @@ uint32_t arch_x86_64_sched_slot_release(uint32_t slot_idx) {
     }
     s->kernel_stack_top = 0u;
     s->as               = NULL;
+    s->owner_proc       = NULL;  /* gamma.3b-S2a Seg-2: drop owner PCB back-ptr on reap */
     s->kind             = OPENOS_X86_64_SCHED_KIND_KERNEL;
     s->owner_cpu        = 0u;
     s->priority         = OPENOS_X86_64_SCHED_PRIO_DEFAULT;
@@ -951,6 +1081,7 @@ uint32_t arch_x86_64_sched_register_ap_idle(void) {
      * so kernel_stack_top stays 0 ("don't touch TSS.RSP0"). */
     sched_slots[cpu].kind             = OPENOS_X86_64_SCHED_KIND_KERNEL;
     sched_slots[cpu].kernel_stack_top = 0u;
+    sched_slots[cpu].owner_proc       = NULL;  /* γ.3b-S2a Seg-2: AP idle has no user PCB */
     sched_pc_set_current(cpu);
     return cpu;
 }
@@ -1052,6 +1183,30 @@ uint32_t arch_x86_64_sched_slot_set_as(uint32_t slot_idx,
 struct x86_64_address_space *arch_x86_64_sched_slot_get_as(uint32_t slot_idx) {
     if (slot_idx >= OPENOS_X86_64_SCHED_MAX_KTHREADS) return NULL;
     return sched_slots[slot_idx].as;
+}
+
+/* γ.3b-S2a岔路5(方案B): owner PCB back-pointer setter/getter.
+ *
+ * Set by fork_alloc_child before slot_wakeup so a USER slot dispatched on
+ * any CPU can be reverse-mapped to its PCB via sched_current_slot(). This
+ * is the sole source of truth for "which proc is running here" -- there
+ * is no separate percpu.current_proc_slot mirror anymore. Clear (NULL)
+ * for kernel / idle / bootstrap slots. Fully collected on slot reap.
+ *
+ * Returns 0 on success, 0xFFFFFFFF on OOB / FREE slot. Getter returns
+ * NULL on OOB or when the slot has no owning PCB. */
+uint32_t arch_x86_64_sched_slot_set_owner_proc(uint32_t slot_idx,
+                                                struct x86_64_proc *owner) {
+    if (slot_idx >= OPENOS_X86_64_SCHED_MAX_KTHREADS) return 0xFFFFFFFFu;
+    sched_slot_t *s = &sched_slots[slot_idx];
+    if (s->state == SCHED_SLOT_FREE) return 0xFFFFFFFFu;
+    s->owner_proc = owner;
+    return 0u;
+}
+
+struct x86_64_proc *arch_x86_64_sched_slot_get_owner_proc(uint32_t slot_idx) {
+    if (slot_idx >= OPENOS_X86_64_SCHED_MAX_KTHREADS) return NULL;
+    return sched_slots[slot_idx].owner_proc;
 }
 
 /* G.6.6b: migrate a READY slot to target_cpu and poke the target with a
@@ -1282,3 +1437,4 @@ uint64_t arch_x86_64_preempt_deferred_count_for_cpu(uint32_t cpu_idx) {
     if (!p) return 0ull;
     return p->preempt_deferred_count;
 }
+

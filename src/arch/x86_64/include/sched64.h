@@ -291,6 +291,24 @@ uint32_t arch_x86_64_sched_slot_set_as(uint32_t slot_idx,
                                        struct x86_64_address_space *as);
 struct x86_64_address_space *arch_x86_64_sched_slot_get_as(uint32_t slot_idx);
 
+/* γ.3b-S2a岔路5(方案B): bind a PCB back-pointer to a slot so that
+ * proc_current() can reverse-map the running CPU's sched_current_slot()
+ * to its owning proc without a separate percpu.current_proc_slot mirror.
+ * Set NULL to detach (kernel / idle / bootstrap slots).
+ *
+ * Contract:
+ *   - Must be called by fork_alloc_child *after* sched_slot_alloc and
+ *     *before* sched_slot_wakeup, otherwise the target CPU may dispatch
+ *     the slot and see a stale/NULL owner on its first syscall.
+ *   - Cleared to NULL by do_exit's sched-USER branch before the slot is
+ *     reaped, so a subsequent alloc of the same idx starts clean.
+ *
+ * Returns 0 on success, 0xFFFFFFFFu on OOB / FREE slot. */
+struct x86_64_proc;
+uint32_t arch_x86_64_sched_slot_set_owner_proc(uint32_t slot_idx,
+                                                struct x86_64_proc *owner);
+struct x86_64_proc *arch_x86_64_sched_slot_get_owner_proc(uint32_t slot_idx);
+
 /* ---- G.6.7a: preemption tail-hook primitives -----------------------
  *
  * Background: historically the only place we ever made a scheduling
@@ -434,6 +452,43 @@ uint32_t arch_x86_64_sched_spawn_uthread_parked(uint64_t user_rip,
                                                 uint32_t priority,
                                                 uint32_t target_cpu);
 uint32_t arch_x86_64_sched_slot_release(uint32_t slot_idx);
+
+/* ------------------------------------------------------------------
+ * gamma.3b-S2a Seg-4: spawn_uthread_parked_full
+ *
+ * Fork-resume variant of spawn_uthread_parked. Same allocation and
+ * bookkeeping, but the child's first dispatch materializes an 11-qword
+ * frame carrying the parent's six callee-saved GPRs (rbx/rbp/r12-r15)
+ * on top of the usual iretq frame. Dispatch entry is
+ * arch_x86_64_user_thread_trampoline_full, which pops the six
+ * callee-saved slots into their registers, zeros all caller-saved
+ * (so rax==0 == fork()==0), then iretq's into user mode.
+ *
+ * The five caller-saved GPRs the parent had at the SYSCALL boundary
+ * (rcx, rdx, rsi, rdi, r8/r9/r10/r11) are intentionally discarded --
+ * the SYSCALL ABI already treats them as clobbered, so the child
+ * observing them zero is spec-conformant and matches Linux behavior.
+ * r11 in particular is rflags on SYSCALL entry; the fork_alloc_child
+ * caller has already stashed it into user_rflags for us.
+ *
+ * All alpha lifecycle invariants of spawn_uthread_parked hold:
+ *   - Returns SCHED_SLOT_PARKED (must set_as + wakeup to run).
+ *   - Returns 0xFFFFFFFFu on slot / kstack allocation failure.
+ *   - The 11-qword frame lives at the top of the kernel stack;
+ *     context_switch loads ctx.rsp = frame_base = &rbx_slot. */
+uint32_t arch_x86_64_sched_spawn_uthread_parked_full(uint64_t user_rip,
+                                                     uint64_t user_rsp,
+                                                     uint64_t user_rflags,
+                                                     uint16_t user_cs,
+                                                     uint16_t user_ss,
+                                                     uint32_t priority,
+                                                     uint32_t target_cpu,
+                                                     uint64_t init_rbx,
+                                                     uint64_t init_rbp,
+                                                     uint64_t init_r12,
+                                                     uint64_t init_r13,
+                                                     uint64_t init_r14,
+                                                     uint64_t init_r15);
 
 /* ------------------------------------------------------------------
  * gamma.3b-S1: slot state enum exposed to selftests.

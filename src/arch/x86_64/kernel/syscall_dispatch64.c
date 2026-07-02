@@ -33,6 +33,7 @@
 #include "../include/tsc64.h"
 #include "../include/usermode64.h"
 #include "../include/vfs64.h"
+#include "../include/percpu64.h"
 #include "syscall.h" /* canonical SYS_* numbers (shared with i386) */
 
 static uint64_t dispatch_total_count;
@@ -312,14 +313,77 @@ static uint64_t do_exec(uint64_t path_ptr, uint64_t argv_ptr, uint64_t envp_ptr)
  * syscall64.c trips a loud assert if that ever happens.
  */
 static uint64_t do_exit(uint64_t status) {
-    early_console64_write("[do_exit] enter status=");
-    early_console64_write_hex64(status);
+    /* gamma.3b-S2a Seg-6: sched-dispatched USER slot exit path.
+     *
+     * If we got here because a child user thread that had been dispatched
+     * onto an AP via a PARKED sched_slot called exit(), we are running on
+     * that AP inside the syscall wrapper. There is no usermode_run() frame
+     * on our kernel stack to longjmp back to -- the AP entered ring3 from
+     * sched_run's dispatch, not from usermode_run.
+     *
+     * Detect this condition by asking sched: is my current slot USER-typed
+     * AND does its owner_proc == me AND am I not on the BSP kmain path
+     * (usermode_running flag is only ever set on the BSP that owns
+     * usermode_run)? If yes:
+     *   1. Record the exit code + child_exited flag on the PCB so the
+     *      parent's do_wait busy-loop (Seg-7) can observe it.
+     *   2. Mark the sched_slot EXITED so the dispatcher will reap it on
+     *      its next tick and pick another READY slot (or fall back to
+     *      the AP's idle slot).
+     *   3. NULL out slot.owner_proc so any subsequent proc_current() on
+     *      this CPU (before reap) sees the kernel PCB, not our stale
+     *      pointer.
+     *   4. Call sched_run() -- it will pick another slot and
+     *      context_switch away, never returning here. The dying kernel
+     *      stack is safe to free asynchronously (Seg-6 punts this: the
+     *      slot's stack lives until beta reap; we do not free it inline).
+     *
+     * The legacy longjmp branch below is untouched for BSP-hosted user
+     * procs (kmain / usermode_run() loop). */
     {
-        x86_64_proc_t *pdbg = arch_x86_64_proc_current();
-        early_console64_write(" fork_pending=");
-        early_console64_write_hex64(pdbg ? (uint64_t)pdbg->fork_pending : 0xFFFFu);
-        early_console64_write("\n");
+        uint32_t sslot = arch_x86_64_sched_current_slot();
+        struct x86_64_proc *owner =
+            arch_x86_64_sched_slot_get_owner_proc(sslot);
+        x86_64_proc_t *me = arch_x86_64_proc_current();
+        /* usermode_is_running is a global set by BSP's usermode_run() -- it does
+     * NOT tell us whether the CURRENT cpu is a BSP-usermode caller. On APs
+     * child do_exit must go through the sched-USER path even while BSP is
+     * still spinning inside usermode_run. Gate by CPU id. */
+    int on_bsp_usermode_run =
+            (arch_x86_64_this_cpu_idx() == 0u) &&
+            (int)arch_x86_64_usermode_is_running();
+        if (owner != NULL && owner == me && !on_bsp_usermode_run &&
+            sslot != 0u) {
+            me->child_exit_code = (int)status;
+            me->child_exited    = true;  /* parent's do_wait polls this */
+            /* NOTE: me is the CHILD PCB. The parent PCB is me->parent (if
+             * we grow that link). Seg-7 wait() runs on the parent and
+             * checks parent->child_exited, which fork_capture set to
+             * point at the child; the flag ownership is *the parent's*
+             * child_exited, not me->child_exited. Fix: mirror onto the
+             * parent. */
+            /* Locate parent PCB. proc64 uses slot == pid (1-based; slot 0
+             * is the reserved kernel PCB), so parent PCB = proc_slot(ppid). */
+            x86_64_proc_t *parent =
+                arch_x86_64_proc_slot((uint16_t)me->ppid);
+            if (parent != NULL) {
+                parent->child_exit_code = (int)status;
+                parent->child_exited    = true;
+            }
+
+            (void)arch_x86_64_sched_slot_set_owner_proc(sslot, NULL);
+
+            /* Hand control back to the scheduler. sched_exit_self marks
+             * the current slot EXITED, picks the next runnable, and
+             * context_switches away. Never returns. */
+            arch_x86_64_sched_exit_self();
+
+            /* Safety net: if sched_exit_self ever returned we would sysret
+             * into a dying ring3 context. Halt loudly. */
+            for (;;) __asm__ volatile ("cli; hlt");
+        }
     }
+
     arch_x86_64_usermode_mark_exited((int)status);
     /*
      * Step D.3 fix: do NOT return -- otherwise dispatch_common returns,
@@ -383,8 +447,30 @@ static uint64_t do_wait_common(uint64_t pid_arg, uint64_t status_ptr, int use_pi
         return (uint64_t)-1;
     }
 
-    int code = arch_x86_64_usermode_run_pending_child_for_wait();
-    if (!p->child_exited) return (uint64_t)-1;
+    int code;
+    /* gamma.3b-S2a Seg-7: two-mode wait.
+     *
+     * Mode A (S2a new): child is running as a real sched_slot on an AP.
+     *   fork_pending was cleared by fork_capture after slot_wakeup, so we
+     *   detect Mode A by (fork_pending == 0 && child_pid != 0). In this
+     *   mode we simply spin on p->child_exited, which the AP-side do_exit
+     *   Seg-6 branch will set via arch_x86_64_proc_slot(ppid). Busy-loop
+     *   with a pause hint; hlt / IPI wakeup is S2b territory.
+     *
+     * Mode B (legacy): fork_pending is still set -> child never went to
+     *   an AP, so kmain/usermode_run has to hand-dispatch it under the
+     *   parent's kernel stack. This is the pre-S2a path; unchanged. */
+    if (p->fork_pending == 0u) {
+        /* Mode A: busy-poll until AP child sets child_exited. */
+        while (!p->child_exited) {
+            __asm__ volatile ("pause" ::: "memory");
+        }
+        code = p->child_exit_code;
+    } else {
+        /* Mode B: legacy hand-dispatch. */
+        code = arch_x86_64_usermode_run_pending_child_for_wait();
+        if (!p->child_exited) return (uint64_t)-1;
+    }
 
     if (status_ptr != 0) {
         /* Minimal wait status encoding: normal exit, code in bits 8..15.

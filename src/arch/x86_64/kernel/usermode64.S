@@ -9,6 +9,7 @@
 .global arch_x86_64_iretq_enter_user
 .global arch_x86_64_iretq_enter_user_full
 .global arch_x86_64_user_thread_trampoline
+.global arch_x86_64_user_thread_trampoline_full
 .global arch_x86_64_user_thread_sentinel_trampoline
 
 /*
@@ -56,6 +57,58 @@ arch_x86_64_user_thread_sentinel_trampoline:
     cli
     hlt
     jmp 1b
+
+
+/*
+ * gamma.3b-S2a Seg-4: arch_x86_64_user_thread_trampoline_full
+ *
+ * Fork-resume dispatch entry. Same contract as arch_x86_64_user_thread_
+ * trampoline (context_switch lands here with %gs=kernel_gs, IF=0,
+ * ctx.rsp already pointing at a caller-built frame), but the frame is
+ * 11 qwords instead of 5:
+ *
+ *   [ ctx.rsp ] ->  0x00 rbx    (callee-saved to restore)
+ *                   0x08 rbp
+ *                   0x10 r12
+ *                   0x18 r13
+ *                   0x20 r14
+ *                   0x28 r15
+ *                   0x30 rip    (iretq consumes from here down)
+ *                   0x38 cs
+ *                   0x40 rflags
+ *                   0x48 user_rsp
+ *                   0x50 ss
+ *
+ * We pop the six callee-saved slots off into their registers, which
+ * naturally advances rsp to the 5-qword iretq frame, then zero the
+ * caller-saved GPRs so the child observes rax==0 (fork-returns-0),
+ * bump the per-CPU dispatch counter, swapgs, iretq. Identical exit
+ * sequence to iretq_enter_user_full -- this is just its
+ * context_switch-callable twin. */
+arch_x86_64_user_thread_trampoline_full:
+    popq %rbx
+    popq %rbp
+    popq %r12
+    popq %r13
+    popq %r14
+    popq %r15
+
+    /* Zero caller-saved so child sees fork()==0 and clean scratch regs.
+     * We match the ordering / set used by iretq_enter_user_full above
+     * so any future audit sees one canonical child-entry state. */
+    xorq %rax, %rax
+    xorq %rcx, %rcx
+    xorq %rdx, %rdx
+    xorq %rsi, %rsi
+    xorq %rdi, %rdi
+    xorq %r8,  %r8
+    xorq %r9,  %r9
+    xorq %r10, %r10
+    xorq %r11, %r11
+
+    incq %gs:PERCPU_OFF_USER_DISPATCH
+    swapgs
+    iretq
 
 
 /*
