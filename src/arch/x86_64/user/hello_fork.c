@@ -139,6 +139,93 @@ int openos64_main(int argc, char **argv, char **envp) {
         write_str(OPENOS64_STDOUT_FILENO, " mismatch=");
         write_dec(OPENOS64_STDOUT_FILENO, (long)mismatch);
         write_str(OPENOS64_STDOUT_FILENO, "\n");
+        return 1;
+    }
+
+    /* γ.4 S2c — waitpid(specific_pid) test. Same fan-out shape as
+     * wait-multi above, but this time the parent reaps in an explicit
+     * order that is *not* LIFO, exercising the interior-splice path in
+     * try_reap_zombie_by_pid. Children exit with 200..200+N-1 so log
+     * lines don't collide with the wait-multi block above. */
+#define OPENOS64_WAITPID_N 3
+    long wp_pids[OPENOS64_WAITPID_N];
+    int  wp_child_idx = -1;
+
+    write_str(OPENOS64_STDOUT_FILENO, "[waitpid] pre\n");
+
+    for (int i = 0; i < OPENOS64_WAITPID_N; i++) {
+        long rv = openos64_fork();
+        if (rv == 0) {
+            wp_child_idx = i;
+            break;
+        } else if (rv > 0) {
+            wp_pids[i] = rv;
+            write_str(OPENOS64_STDOUT_FILENO, "[waitpid] spawned child ");
+            write_dec(OPENOS64_STDOUT_FILENO, (long)i);
+            write_str(OPENOS64_STDOUT_FILENO, " pid=");
+            write_dec(OPENOS64_STDOUT_FILENO, rv);
+            write_str(OPENOS64_STDOUT_FILENO, "\n");
+        } else {
+            write_str(OPENOS64_STDOUT_FILENO, "[waitpid] fork err at i=");
+            write_dec(OPENOS64_STDOUT_FILENO, (long)i);
+            write_str(OPENOS64_STDOUT_FILENO, "\n");
+            return 1;
+        }
+    }
+
+    if (wp_child_idx >= 0) {
+        int exit_code = 200 + wp_child_idx;
+        write_str(OPENOS64_STDOUT_FILENO, "[waitpid] child idx=");
+        write_dec(OPENOS64_STDOUT_FILENO, (long)wp_child_idx);
+        write_str(OPENOS64_STDOUT_FILENO, " exit=");
+        write_dec(OPENOS64_STDOUT_FILENO, (long)exit_code);
+        write_str(OPENOS64_STDOUT_FILENO, "\n");
+        openos64_exit(exit_code);
+    }
+
+    /* Parent — reap in a deliberately-scrambled order: middle, first,
+     * last. Each waitpid must return exactly the requested pid, and
+     * status byte must equal 200+idx. */
+    static const int reap_order[OPENOS64_WAITPID_N] = { 1, 0, 2 };
+    int wp_mismatch = 0;
+    int wp_reaped   = 0;
+    for (int k = 0; k < OPENOS64_WAITPID_N; k++) {
+        int  idx  = reap_order[k];
+        long want = wp_pids[idx];
+        int  st   = -1;
+        long got  = openos64_waitpid(want, &st);
+        int  code = (int)((st >> 8) & 0xFF);
+        write_str(OPENOS64_STDOUT_FILENO, "[waitpid] want=");
+        write_dec(OPENOS64_STDOUT_FILENO, want);
+        write_str(OPENOS64_STDOUT_FILENO, " got=");
+        write_dec(OPENOS64_STDOUT_FILENO, got);
+        write_str(OPENOS64_STDOUT_FILENO, " exit=");
+        write_dec(OPENOS64_STDOUT_FILENO, (long)code);
+        write_str(OPENOS64_STDOUT_FILENO, "\n");
+        if (got != want)          wp_mismatch = 1;
+        if (code != 200 + idx)    wp_mismatch = 1;
+        if (got == want)          wp_reaped++;
+    }
+
+    /* Negative case: waitpid on a bogus pid should return -1 (ECHILD)
+     * because zombie_head is drained and no live child has that pid. */
+    {
+        int  st  = -1;
+        long got = openos64_waitpid(999999, &st);
+        write_str(OPENOS64_STDOUT_FILENO, "[waitpid] bogus want=999999 got=");
+        write_dec(OPENOS64_STDOUT_FILENO, got);
+        write_str(OPENOS64_STDOUT_FILENO, "\n");
+        if (got != -1) wp_mismatch = 1;
+    }
+
+    if (wp_reaped == OPENOS64_WAITPID_N && !wp_mismatch) {
+        write_str(OPENOS64_STDOUT_FILENO, "[waitpid] PASS\n");
+    } else {
+        write_str(OPENOS64_STDOUT_FILENO, "[waitpid] FAIL reaped=");
+        write_dec(OPENOS64_STDOUT_FILENO, (long)wp_reaped);
+        write_str(OPENOS64_STDOUT_FILENO, " mismatch=");
+        write_dec(OPENOS64_STDOUT_FILENO, (long)wp_mismatch);
+        write_str(OPENOS64_STDOUT_FILENO, "\n");
     }
 
     return 0;

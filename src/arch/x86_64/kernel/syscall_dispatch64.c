@@ -476,9 +476,100 @@ static uint64_t do_yield(void) {
     return 0;
 }
 
+/* γ.4 S2c — helper: unlink a zombie child from parent->zombie_head by pid.
+ * Returns the zombie PCB pointer with zombie_next cleared, or NULL if no
+ * zombie in the chain has that pid. Walks the singly-linked list with a
+ * `prev` cursor so we can splice out interior nodes. */
+static x86_64_proc_t *try_reap_zombie_by_pid(x86_64_proc_t *parent, uint32_t pid) {
+    uint16_t prev = OPENOS_X86_64_PROC_INVALID_INDEX;
+    uint16_t cur  = parent->zombie_head;
+    while (cur != OPENOS_X86_64_PROC_INVALID_INDEX) {
+        x86_64_proc_t *z = arch_x86_64_proc_slot(cur);
+        if (z == NULL) break;
+        if (z->pid == pid) {
+            uint16_t nxt = z->zombie_next;
+            if (prev == OPENOS_X86_64_PROC_INVALID_INDEX) {
+                parent->zombie_head = nxt;
+            } else {
+                x86_64_proc_t *pp = arch_x86_64_proc_slot(prev);
+                if (pp != NULL) pp->zombie_next = nxt;
+            }
+            z->zombie_next = OPENOS_X86_64_PROC_INVALID_INDEX;
+            return z;
+        }
+        prev = cur;
+        cur  = z->zombie_next;
+    }
+    return NULL;
+}
+
+/* γ.4 S2c — helper: is `pid` currently in parent's live children list?
+ * Used by waitpid(specific_pid) to decide between "block until this one
+ * exits" and "ECHILD, we've never heard of it". */
+static bool is_live_child_pid(x86_64_proc_t *parent, uint32_t pid) {
+    uint16_t cur = parent->children_head;
+    while (cur != OPENOS_X86_64_PROC_INVALID_INDEX) {
+        x86_64_proc_t *c = arch_x86_64_proc_slot(cur);
+        if (c == NULL) break;
+        if (c->pid == pid) return true;
+        cur = c->sibling_next;
+    }
+    return false;
+}
+
+/* γ.4 S2c — write the classic wait status word (exit code in bits 8..15)
+ * to user memory, tolerating USER_VBASE mapping. Shared between the
+ * wait-any and waitpid(pid) return paths. */
+static void wait_write_status(uint64_t status_ptr, int code) {
+    if (status_ptr == 0) return;
+    uintptr_t status_addr = (uintptr_t)status_ptr;
+    if (status_addr >= OPENOS_X86_64_USER_VBASE) {
+        status_addr -= OPENOS_X86_64_USER_VBASE;
+    }
+    int *status_out = (int *)status_addr;
+    *status_out = (code & 0xFF) << 8;
+}
+
 static uint64_t do_wait_common(uint64_t pid_arg, uint64_t status_ptr, int use_pid) {
     x86_64_proc_t *p = arch_x86_64_proc_current();
     if (p == NULL) return (uint64_t)-1;
+
+    /* γ.4 S2c — waitpid(specific_pid) fast path. Separate from wait-any
+     * because the semantics differ: we don't pop the zombie_head LIFO,
+     * we pluck the matching pid out of the chain (possibly interior).
+     * If the pid is a live child we busy-poll until do_exit moves it
+     * onto zombie_head, then splice-out.  A pid that is neither live
+     * nor zombie is ECHILD. */
+    if (use_pid && pid_arg != (uint64_t)-1 && pid_arg != 0) {
+        uint32_t target_pid = (uint32_t)pid_arg;
+        /* Already dead? */
+        x86_64_proc_t *z = try_reap_zombie_by_pid(p, target_pid);
+        if (z == NULL) {
+            /* Not dead. Live child? If not, ECHILD. */
+            if (!is_live_child_pid(p, target_pid)) {
+                return (uint64_t)-1;
+            }
+            /* Live child — spin until do_exit lifts it onto zombie_head,
+             * then splice out. Same STI/CLI dance as the wait-any path so
+             * the LAPIC keeps ticking. */
+            __asm__ volatile ("sti" ::: "memory");
+            while ((z = try_reap_zombie_by_pid(p, target_pid)) == NULL) {
+                __asm__ volatile ("pause" ::: "memory");
+            }
+            __asm__ volatile ("cli" ::: "memory");
+        }
+        /* Got the zombie. Drain flag mirrors zombie_head emptiness. */
+        int code      = z->child_exit_code;
+        int child_pid = (int)z->pid;
+        if (p->zombie_head == OPENOS_X86_64_PROC_INVALID_INDEX) {
+            p->child_exited    = false;
+            p->child_pid       = 0;
+            p->child_exit_code = 0;
+        }
+        wait_write_status(status_ptr, code);
+        p->fork_pending = 0;
+        return (uint64_t)(uint32_t)child_pid;
+    }
 
     /* γ.4 S2b — no live children AND no zombies => nothing to wait for.
      * children_head is the live-child list; zombie_head is the
@@ -491,13 +582,9 @@ static uint64_t do_wait_common(uint64_t pid_arg, uint64_t status_ptr, int use_pi
         p->child_pid == 0) {
         return (uint64_t)-1;
     }
-    /* waitpid(specific_pid) is not yet supported for the multi-child
-     * path; S3 will add that. For now we only allow "wait for any" or
-     * waitpid(-1). Reject specific pids that don't match the *legacy*
-     * mirrored singleton to keep the pre-S2b hello_fork test passing. */
-    if (use_pid && pid_arg != (uint64_t)-1 && pid_arg != (uint64_t)p->child_pid) {
-        return (uint64_t)-1;
-    }
+    /* waitpid(-1) falls through to the wait-any path below; specific-pid
+     * cases were handled by the S2c fast path above. */
+    (void)use_pid;
 
     int code;
     int child_pid;
@@ -566,17 +653,10 @@ static uint64_t do_wait_common(uint64_t pid_arg, uint64_t status_ptr, int use_pi
         p->child_exit_code = 0;
     }
 
-    if (status_ptr != 0) {
-        /* Minimal wait status encoding: normal exit, code in bits 8..15.
-         * P4.c keeps user-visible stack pointers in USER_VBASE while the
-         * kernel writes the same pages through their low-half identity alias. */
-        uintptr_t status_addr = (uintptr_t)status_ptr;
-        if (status_addr >= OPENOS_X86_64_USER_VBASE) {
-            status_addr -= OPENOS_X86_64_USER_VBASE;
-        }
-        int *status_out = (int *)status_addr;
-        *status_out = (code & 0xFF) << 8;
-    }
+    /* Minimal wait status encoding: normal exit, code in bits 8..15.
+     * P4.c keeps user-visible stack pointers in USER_VBASE while the
+     * kernel writes the same pages through their low-half identity alias. */
+    wait_write_status(status_ptr, code);
 
     /* Legacy singleton mirrors: only clear when *no* zombies remain queued;
      * otherwise subsequent wait() calls would treat the parent as having no
