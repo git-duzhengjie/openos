@@ -107,10 +107,11 @@ static uint64_t arch_x86_64_syscall_fork_capture(
         return (uint64_t)-1;
     }
     if (parent->child_slot != OPENOS_X86_64_PROC_INVALID_INDEX) {
-        /* Another child is already queued/running; γ.2.a serialises. */
-        early_console64_write(
-            "[x86_64][fork] nested fork attempt -- refusing.\n");
-        return (uint64_t)-1;
+        /* γ.4 S2b — legacy child_slot is the *most-recent* child mirror.
+         * Its presence no longer implies exclusivity; multi-child is
+         * tracked via parent->children_head / zombie_head. We keep
+         * child_slot mirrored for backward compatibility with any code
+         * that still peeks at it, but we do NOT refuse the fork here. */
     }
 
     /* γ.2.a: give the child its own PCB slot. AS is still shared with the
@@ -190,17 +191,35 @@ static uint64_t arch_x86_64_syscall_fork_capture(
          * cpu_count() is the canonical count; falling back to 0 keeps
          * the legacy fork_pending path working on UP builds and QEMU
          * -smp 1 runs. */
-        /* S2a-dbg2: stage 21 selftest leaves a sentinel task on CPU=cpu_count-1
-         * with `cli;hlt` (IF=0) which permanently blocks IPIs on that CPU.
-         * Route fork child to CPU=cpu_count-2 (typically CPU=2 on -smp 4)
-         * which is left idle after stage 30/31. Falls back gracefully:
-         *   cpu_count >= 3 -> cpu_count - 2
-         *   cpu_count == 2 -> 1
-         *   cpu_count <  2 -> 0 (BSP, UP mode) */
+        /* γ.4 S2b — round-robin child placement across usable APs.
+         *
+         * stage-21 selftest leaves a `cli;hlt` sentinel on the *last*
+         * CPU (id = cpu_count-1) that permanently blocks IPIs on it, so
+         * that slot is off-limits. BSP (id=0) is also excluded because
+         * the parent typically runs there and we want the child on a
+         * different core so its exit can wake the parent's busy-poll.
+         *
+         *   cpu_count >= 3 -> rotate over [1 .. cpu_count-2]
+         *   cpu_count == 2 -> always 1 (only one AP)
+         *   cpu_count <  2 -> 0 (UP fallback, will use fork_pending path)
+         *
+         * The counter is a plain static: fork() dispatch is currently
+         * single-CPU-serialized (parent enters syscall from BSP or a
+         * single AP; there is no concurrent fork issuer yet), so no
+         * atomics required. If we ever allow concurrent forks this needs
+         * to become an atomic fetch-add. */
         uint32_t _cpu_cnt = arch_x86_64_smp_cpu_count();
-        uint32_t target_cpu =
-            (_cpu_cnt >= 3u) ? (_cpu_cnt - 2u)
-                             : ((_cpu_cnt >= 2u) ? 1u : 0u);
+        static uint32_t s_fork_rr_counter = 0u;
+        uint32_t target_cpu;
+        if (_cpu_cnt >= 3u) {
+            uint32_t range = _cpu_cnt - 2u; /* [1..cpu_cnt-2] inclusive */
+            target_cpu = 1u + (s_fork_rr_counter % range);
+            s_fork_rr_counter++;
+        } else if (_cpu_cnt >= 2u) {
+            target_cpu = 1u;
+        } else {
+            target_cpu = 0u;
+        }
         uint32_t slot_idx = arch_x86_64_sched_spawn_uthread_parked_full(
             rip_u, rsp_u, rfl_u, ucs, uss,
             OPENOS_X86_64_SCHED_PRIO_DEFAULT, target_cpu,

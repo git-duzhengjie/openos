@@ -60,28 +60,85 @@ int openos64_main(int argc, char **argv, char **envp) {
     write_str(OPENOS64_STDOUT_FILENO, "\n");
 
     write_str(OPENOS64_STDOUT_FILENO, "[wait] pre\n");
-    long rv = openos64_fork();
-    if (rv == 0) {
-        write_str(OPENOS64_STDOUT_FILENO, "[wait] child exit=7\n");
-        openos64_exit(7);
-    } else if (rv > 0) {
+
+    /* γ.4 S2b — fan-out fork test. Parent forks N children, each exits
+     * with a distinct code (100..100+N-1). Parent then wait()s N times
+     * and validates the *set* of returned (pid,exit) pairs matches the
+     * set of pids/codes fork() handed us. Order is intentionally not
+     * asserted: the kernel currently drains zombies LIFO but any
+     * ordering must be tolerated. */
+#define OPENOS64_FORK_N 3
+    long child_pids[OPENOS64_FORK_N];
+    int  child_idx = -1;
+
+    for (int i = 0; i < OPENOS64_FORK_N; i++) {
+        long rv = openos64_fork();
+        if (rv == 0) {
+            /* Child i: distinct exit code so parent can identify us. */
+            child_idx = i;
+            break;
+        } else if (rv > 0) {
+            child_pids[i] = rv;
+            write_str(OPENOS64_STDOUT_FILENO, "[fork-multi] spawned child ");
+            write_dec(OPENOS64_STDOUT_FILENO, (long)i);
+            write_str(OPENOS64_STDOUT_FILENO, " pid=");
+            write_dec(OPENOS64_STDOUT_FILENO, rv);
+            write_str(OPENOS64_STDOUT_FILENO, "\n");
+        } else {
+            write_str(OPENOS64_STDOUT_FILENO, "[fork-multi] fork err at i=");
+            write_dec(OPENOS64_STDOUT_FILENO, (long)i);
+            write_str(OPENOS64_STDOUT_FILENO, "\n");
+            return 1;
+        }
+    }
+
+    if (child_idx >= 0) {
+        /* We're a child. Emit a distinctive line then exit(100+i). */
+        int exit_code = 100 + child_idx;
+        write_str(OPENOS64_STDOUT_FILENO, "[fork-multi] child idx=");
+        write_dec(OPENOS64_STDOUT_FILENO, (long)child_idx);
+        write_str(OPENOS64_STDOUT_FILENO, " exit=");
+        write_dec(OPENOS64_STDOUT_FILENO, (long)exit_code);
+        write_str(OPENOS64_STDOUT_FILENO, "\n");
+        openos64_exit(exit_code);
+    }
+
+    /* Parent: reap N children. Track which pids/codes we've seen. */
+    int seen_pid[OPENOS64_FORK_N] = {0};
+    int seen_code[OPENOS64_FORK_N] = {0};
+    int reaped = 0;
+    int mismatch = 0;
+    for (int w = 0; w < OPENOS64_FORK_N; w++) {
         int st = -1;
         long wp = openos64_wait(&st);
-        write_str(OPENOS64_STDOUT_FILENO, "[wait] parent pid=");
+        int code = (int)((st >> 8) & 0xFF);
+        write_str(OPENOS64_STDOUT_FILENO, "[wait-multi] got pid=");
         write_dec(OPENOS64_STDOUT_FILENO, wp);
-        write_str(OPENOS64_STDOUT_FILENO, " status=");
-        write_dec(OPENOS64_STDOUT_FILENO, (long)st);
         write_str(OPENOS64_STDOUT_FILENO, " exit=");
-        write_dec(OPENOS64_STDOUT_FILENO, (long)((st >> 8) & 0xFF));
+        write_dec(OPENOS64_STDOUT_FILENO, (long)code);
         write_str(OPENOS64_STDOUT_FILENO, "\n");
-        if (wp == rv && ((st >> 8) & 0xFF) == 7) {
-            write_str(OPENOS64_STDOUT_FILENO, "[wait] PASS\n");
-        } else {
-            write_str(OPENOS64_STDOUT_FILENO, "[wait] FAIL\n");
+        if (wp <= 0) { mismatch = 1; continue; }
+
+        /* Find matching child by pid, cross-check exit code == 100+idx. */
+        int found = -1;
+        for (int j = 0; j < OPENOS64_FORK_N; j++) {
+            if (child_pids[j] == wp && !seen_pid[j]) { found = j; break; }
         }
+        if (found < 0) { mismatch = 1; continue; }
+        seen_pid[found]  = 1;
+        seen_code[found] = 1;
+        if (code != 100 + found) mismatch = 1;
+        reaped++;
+    }
+
+    if (reaped == OPENOS64_FORK_N && !mismatch) {
+        write_str(OPENOS64_STDOUT_FILENO, "[wait-multi] PASS\n");
     } else {
-        write_str(OPENOS64_STDOUT_FILENO, "[wait] fork err\n");
-        return 1;
+        write_str(OPENOS64_STDOUT_FILENO, "[wait-multi] FAIL reaped=");
+        write_dec(OPENOS64_STDOUT_FILENO, (long)reaped);
+        write_str(OPENOS64_STDOUT_FILENO, " mismatch=");
+        write_dec(OPENOS64_STDOUT_FILENO, (long)mismatch);
+        write_str(OPENOS64_STDOUT_FILENO, "\n");
     }
 
     return 0;

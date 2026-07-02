@@ -141,6 +141,29 @@ typedef struct x86_64_proc {
     uint16_t                  child_slot;
     uint16_t                  parent_slot;
 
+    /* γ.4 S2b — multi-child fork/wait support.
+     *
+     * children_head  : head of the parent's list of *live* (not yet reaped)
+     *                  children, linked via child.sibling_next. When a
+     *                  child exits it is removed from this list and pushed
+     *                  onto zombie_head so wait() can drain it.
+     * zombie_head    : head of the parent's list of *exited but not reaped*
+     *                  children, linked via child.zombie_next. Populated by
+     *                  do_exit() (on the child) and drained by do_wait()
+     *                  (on the parent). While non-empty, child_exited=true.
+     * sibling_next   : per-child pointer used by children_head list.
+     * zombie_next    : per-child pointer used by zombie_head list.
+     *
+     * All fields carry OPENOS_X86_64_PROC_INVALID_INDEX for "NULL".
+     * Legacy single-child fields child_slot/child_pid/child_exited/
+     * child_exit_code stay in place: they now mirror the *most recent*
+     * child event so any code path that hasn't been migrated yet keeps
+     * seeing consistent (if stale) data. */
+    uint16_t                  children_head;
+    uint16_t                  zombie_head;
+    uint16_t                  sibling_next;
+    uint16_t                  zombie_next;
+
     /* gamma.3b-alpha: index of the PARKED sched_slot allocated at
      * fork_alloc_child time to hold the child's future USER dispatch
      * context. In alpha the slot is NEVER flipped to READY and is
@@ -197,6 +220,14 @@ uint16_t arch_x86_64_proc_switch_to(uint16_t slot);
  * child's exit status after it has been reaped from mark_exited()). Returns
  * NULL for FREE slots or out-of-range indices. */
 x86_64_proc_t *arch_x86_64_proc_slot(uint16_t slot);
+
+/* γ.4 S2b — reverse lookup: given a PCB pointer previously returned by
+ * arch_x86_64_proc_slot()/arch_x86_64_proc_current()/fork_alloc_child(),
+ * return its slot index. Returns OPENOS_X86_64_PROC_INVALID_INDEX if the
+ * pointer is NULL or does not point into proc_table[]. Used by the
+ * multi-child fork/wait path to identify "self" so children can unlink
+ * themselves from parent->children_head. */
+uint16_t arch_x86_64_proc_slot_of(const x86_64_proc_t *p);
 
 /* γ.2.a — release the child PCB slot after its status has been consumed by
  * a wait(). Safe to call on FREE slots (no-op). */

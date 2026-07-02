@@ -363,6 +363,47 @@ static uint64_t do_exit(uint64_t status) {
             x86_64_proc_t *parent =
                 arch_x86_64_proc_slot(me->parent_slot);
             if (parent != NULL) {
+                /* γ.4 S2b — thread this child onto the parent's zombie
+                 * list.
+                 *
+                 * 1. Remove me from parent->children_head (singly-linked
+                 *    via child.sibling_next). O(N) but N is tiny.
+                 * 2. Prepend me to parent->zombie_head.
+                 * 3. Mirror my exit_code/pid into the parent's legacy
+                 *    singleton fields so old wait() code paths keep
+                 *    seeing SOMETHING (the most recent zombie). do_wait
+                 *    below now consumes zombie_head, not the singleton.
+                 * 4. Raise parent->child_exited so any Mode-A poller
+                 *    still spinning wakes up.
+                 *
+                 * NB: no locking here. Every fork/wait syscall is
+                 * serviced under a single-CPU dispatcher (Mode A spins,
+                 * Mode B is BSP-only) and the parent isn't concurrently
+                 * mutating its own children/zombie list — parent is
+                 * either running (won't be here) or spinning on
+                 * child_exited (won't touch the lists). do_wait's list
+                 * mutation happens *after* it observes child_exited,
+                 * i.e. strictly after this store. */
+                uint16_t my_slot = arch_x86_64_proc_slot_of(me);
+                if (parent->children_head == my_slot) {
+                    parent->children_head = me->sibling_next;
+                } else {
+                    uint16_t cur = parent->children_head;
+                    while (cur != OPENOS_X86_64_PROC_INVALID_INDEX) {
+                        x86_64_proc_t *cp = arch_x86_64_proc_slot(cur);
+                        if (cp == NULL) break;
+                        if (cp->sibling_next == my_slot) {
+                            cp->sibling_next = me->sibling_next;
+                            break;
+                        }
+                        cur = cp->sibling_next;
+                    }
+                }
+                me->sibling_next = OPENOS_X86_64_PROC_INVALID_INDEX;
+
+                me->zombie_next    = parent->zombie_head;
+                parent->zombie_head = my_slot;
+
                 parent->child_exit_code = (int)status;
                 parent->child_exited    = true;
             }
@@ -438,12 +479,28 @@ static uint64_t do_yield(void) {
 static uint64_t do_wait_common(uint64_t pid_arg, uint64_t status_ptr, int use_pid) {
     x86_64_proc_t *p = arch_x86_64_proc_current();
     if (p == NULL) return (uint64_t)-1;
-    if (p->child_pid == 0) return (uint64_t)-1;
-    if (use_pid && pid_arg != (uint64_t)p->child_pid && pid_arg != (uint64_t)-1) {
+
+    /* γ.4 S2b — no live children AND no zombies => nothing to wait for.
+     * children_head is the live-child list; zombie_head is the
+     * exited-but-not-reaped list. Either being non-empty means there is
+     * (or will be) something to reap. Legacy: if a caller hand-set
+     * child_pid without going through fork() we still honor it via the
+     * old singleton fallback below. */
+    if (p->children_head == OPENOS_X86_64_PROC_INVALID_INDEX &&
+        p->zombie_head   == OPENOS_X86_64_PROC_INVALID_INDEX &&
+        p->child_pid == 0) {
+        return (uint64_t)-1;
+    }
+    /* waitpid(specific_pid) is not yet supported for the multi-child
+     * path; S3 will add that. For now we only allow "wait for any" or
+     * waitpid(-1). Reject specific pids that don't match the *legacy*
+     * mirrored singleton to keep the pre-S2b hello_fork test passing. */
+    if (use_pid && pid_arg != (uint64_t)-1 && pid_arg != (uint64_t)p->child_pid) {
         return (uint64_t)-1;
     }
 
     int code;
+    int child_pid;
     /* gamma.3b-S2a Seg-7: two-mode wait.
      *
      * Mode A (S2a new): child is running as a real sched_slot on an AP.
@@ -464,15 +521,49 @@ static uint64_t do_wait_common(uint64_t pid_arg, uint64_t status_ptr, int use_pi
          * the AP-side write is cache-coherent — but keeps the CPU
          * responsive to other work). */
         __asm__ volatile ("sti" ::: "memory");
-        while (!p->child_exited) {
+        while (p->zombie_head == OPENOS_X86_64_PROC_INVALID_INDEX &&
+               !p->child_exited) {
             __asm__ volatile ("pause" ::: "memory");
         }
         __asm__ volatile ("cli" ::: "memory");
-        code = p->child_exit_code;
+
+        /* γ.4 S2b — pop one zombie off the head. Order is LIFO (newest
+         * exit first) which is fine because user-space is expected to
+         * treat wait() results as an unordered set. If zombie_head is
+         * empty here it means the legacy singleton path fired (fork
+         * without list linkage, or Mode B fallback); fall through. */
+        if (p->zombie_head != OPENOS_X86_64_PROC_INVALID_INDEX) {
+            uint16_t zslot = p->zombie_head;
+            x86_64_proc_t *z = arch_x86_64_proc_slot(zslot);
+            if (z != NULL) {
+                p->zombie_head = z->zombie_next;
+                z->zombie_next = OPENOS_X86_64_PROC_INVALID_INDEX;
+                code      = z->child_exit_code;
+                child_pid = (int)z->pid; /* child's own pid */
+
+                /* Once drained, clear the legacy "has zombie" flag so a
+                 * subsequent wait() call blocks correctly. If there are
+                 * more zombies still queued, keep it set. */
+                if (p->zombie_head == OPENOS_X86_64_PROC_INVALID_INDEX) {
+                    p->child_exited = false;
+                }
+            } else {
+                code      = p->child_exit_code;
+                child_pid = p->child_pid;
+                p->child_exited = false;
+            }
+        } else {
+            code      = p->child_exit_code;
+            child_pid = p->child_pid;
+            p->child_exited = false;
+        }
     } else {
         /* Mode B: legacy hand-dispatch. */
         code = arch_x86_64_usermode_run_pending_child_for_wait();
         if (!p->child_exited) return (uint64_t)-1;
+        child_pid = p->child_pid;
+        p->child_exited    = false;
+        p->child_exit_code = 0;
     }
 
     if (status_ptr != 0) {
@@ -487,10 +578,13 @@ static uint64_t do_wait_common(uint64_t pid_arg, uint64_t status_ptr, int use_pi
         *status_out = (code & 0xFF) << 8;
     }
 
-    int child_pid = p->child_pid;
-    p->child_pid = 0;
-    p->child_exited = false;
-    p->child_exit_code = 0;
+    /* Legacy singleton mirrors: only clear when *no* zombies remain queued;
+     * otherwise subsequent wait() calls would treat the parent as having no
+     * children left. */
+    if (p->zombie_head == OPENOS_X86_64_PROC_INVALID_INDEX) {
+        p->child_pid       = 0;
+        p->child_exit_code = 0;
+    }
     p->fork_pending = 0;
     return (uint64_t)(uint32_t)child_pid;
 }

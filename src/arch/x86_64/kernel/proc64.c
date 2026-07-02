@@ -123,6 +123,10 @@ void arch_x86_64_proc_init(void) {
     proc_copy_name(proc_table[0].name, "kernel");
     proc_table[0].child_slot  = OPENOS_X86_64_PROC_INVALID_INDEX;
     proc_table[0].parent_slot = OPENOS_X86_64_PROC_INVALID_INDEX;
+    proc_table[0].children_head = OPENOS_X86_64_PROC_INVALID_INDEX;
+    proc_table[0].zombie_head   = OPENOS_X86_64_PROC_INVALID_INDEX;
+    proc_table[0].sibling_next  = OPENOS_X86_64_PROC_INVALID_INDEX;
+    proc_table[0].zombie_next   = OPENOS_X86_64_PROC_INVALID_INDEX;
     proc_table[0].fork_child_sched_slot = 0u; /* gamma.3b-alpha: invalid */
     /* BSS zero-init already leaves every percpu.current_proc_slot at 0,
      * so this store is redundant but explicit for BSP clarity. */
@@ -162,6 +166,10 @@ uint32_t arch_x86_64_proc_spawn_user(const char *name) {
     p->wait_in_progress = false;
     p->child_slot       = OPENOS_X86_64_PROC_INVALID_INDEX;
     p->parent_slot      = OPENOS_X86_64_PROC_INVALID_INDEX;
+    p->children_head    = OPENOS_X86_64_PROC_INVALID_INDEX;
+    p->zombie_head      = OPENOS_X86_64_PROC_INVALID_INDEX;
+    p->sibling_next     = OPENOS_X86_64_PROC_INVALID_INDEX;
+    p->zombie_next      = OPENOS_X86_64_PROC_INVALID_INDEX;
     p->fork_child_sched_slot = 0u; /* gamma.3b-alpha: PARKED slot idx */
 
     current_index_set(slot);
@@ -351,11 +359,21 @@ x86_64_proc_t *arch_x86_64_proc_fork_alloc_child(x86_64_proc_t *parent_pcb) {
     c->wait_in_progress = false;
     c->child_slot       = OPENOS_X86_64_PROC_INVALID_INDEX;
     c->parent_slot      = parent_slot;
+    c->children_head    = OPENOS_X86_64_PROC_INVALID_INDEX;
+    c->zombie_head      = OPENOS_X86_64_PROC_INVALID_INDEX;
+    c->zombie_next      = OPENOS_X86_64_PROC_INVALID_INDEX;
     c->fork_child_sched_slot = 0u; /* gamma.3b-alpha: filled by fork_capture */
+
+    /* γ.4 S2b — push the new child onto parent->children_head. This is the
+     * *live children* list (drained on exit into zombie_head, further drained
+     * by wait()). Prepending keeps the O(1) cost regardless of fan-out. */
+    c->sibling_next            = parent_pcb->children_head;
+    parent_pcb->children_head  = slot;
 
     /* Wire parent -> child. Also mirror the child pid into the legacy
      * parent.child_pid so existing wait()/mark_exited() consumers keep
-     * working during the γ.2.a transition. */
+     * working during the γ.2.a transition. Legacy singletons now reflect
+     * the *most recent* child so single-child callers stay compatible. */
     parent_pcb->child_slot       = slot;
     parent_pcb->child_pid        = cpid;
     parent_pcb->child_exited     = false;
@@ -385,6 +403,18 @@ x86_64_proc_t *arch_x86_64_proc_slot(uint16_t slot) {
     if (slot >= OPENOS_X86_64_PROC_MAX) return NULL;
     if (proc_table[slot].state == OPENOS_X86_64_PROC_FREE) return NULL;
     return &proc_table[slot];
+}
+
+/* γ.4 S2b — reverse lookup used by do_exit/do_wait to identify "self"
+ * so children can unlink themselves from parent->children_head. Kept in
+ * this TU because proc_table is file-scoped static. Deliberately does
+ * not skip FREE slots: callers hold a PCB pointer they just wrote to,
+ * even if the state slot is being torn down. */
+uint16_t arch_x86_64_proc_slot_of(const x86_64_proc_t *p) {
+    if (p == NULL) return OPENOS_X86_64_PROC_INVALID_INDEX;
+    if (p < &proc_table[0] || p >= &proc_table[OPENOS_X86_64_PROC_MAX])
+        return OPENOS_X86_64_PROC_INVALID_INDEX;
+    return (uint16_t)(p - &proc_table[0]);
 }
 
 void arch_x86_64_proc_release_slot(uint16_t slot) {
