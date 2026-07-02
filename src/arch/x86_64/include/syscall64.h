@@ -71,6 +71,7 @@ typedef struct x86_64_syscall_frame {
 } x86_64_syscall_frame_t;
 
 void arch_x86_64_syscall_init(void);
+void arch_x86_64_syscall_init_ap(void); /* γ.3b-S2a: per-CPU MSR init (STAR/LSTAR/FMASK/EFER.SCE) */
 uint64_t arch_x86_64_int80_dispatch(x86_64_int80_frame_t *frame);
 uint64_t arch_x86_64_syscall_dispatch(x86_64_syscall_frame_t *frame);
 uint32_t arch_x86_64_syscall_current_abi(void);

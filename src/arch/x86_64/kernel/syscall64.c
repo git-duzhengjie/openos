@@ -58,6 +58,13 @@ static void configure_syscall_sysret(void) {
     syscall_sysret_enabled = 1u;
 }
 
+/* γ.3b-S2a: AP-side syscall init. Only wires per-CPU MSRs
+ * (STAR/LSTAR/FMASK/EFER.SCE) so that `syscall` doesn't #UD on APs.
+ * Does NOT touch global counters/ABI state (those belong to the BSP). */
+void arch_x86_64_syscall_init_ap(void) {
+    configure_syscall_sysret();
+}
+
 void arch_x86_64_syscall_init(void) {
     syscall64_current_abi = OPENOS_X86_64_SYSCALL_ABI_INT80_COMPAT;
     int80_dispatch_count = 0;

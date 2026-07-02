@@ -7,6 +7,7 @@
 #include "../include/percpu64.h"
 #include "../include/idt64.h"
 #include "../include/sched64.h"
+#include "../include/syscall64.h"
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -553,6 +554,10 @@ void arch_x86_64_ap_entry(uint64_t apic_id) {
      * reserved for per-CPU idle threads). sched_init_ap seeds our
      * quantum so a future timer tick will not divide-by-zero. */
     arch_x86_64_sched_init_ap();
+    /* γ.3b-S2a: per-CPU MSR init so `syscall` doesn't #UD on this AP.
+     * Wires STAR/LSTAR/FMASK and sets EFER.SCE. Must run before this AP
+     * ever dispatches a user thread. */
+    arch_x86_64_syscall_init_ap();
     uint32_t my_idle_slot = arch_x86_64_sched_register_ap_idle();
     if (my_idle_slot == 0xFFFFFFFFu) {
         for (;;) { __asm__ volatile ("cli; hlt"); }
