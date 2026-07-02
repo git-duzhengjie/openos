@@ -25,6 +25,6 @@ uint32_t arch_x86_64_pit_get_hz(void);
 
 /* Called from the IRQ0 assembly stub — public only so isr64.S can wire
  * the C entry point. Do not call from regular code. */
-void arch_x86_64_pit_irq0_handler(void);
+void arch_x86_64_pit_irq0_handler(uint64_t iret_cs);
 
 #endif /* OPENOS_ARCH_X86_64_PIT64_H */

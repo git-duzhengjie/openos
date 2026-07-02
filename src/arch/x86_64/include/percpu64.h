@@ -141,8 +141,22 @@ typedef struct openos_x86_64_percpu {
      * We keep the 8-byte hole here so all higher OFF_* offsets stay
      * fixed (asm and selftest bake several of them in). Do NOT reuse
      * without renaming the OFF_CURRENT_PROC macro below. */
-    uint32_t _resv_slot_0x80;        /* offset 0x80 (was current_proc_slot) */
-    uint32_t _resv_slot_0x84;        /* offset 0x84 */
+    /* gamma.5-P1: LAPIC-timer preempt probe.
+     *
+     * 0x80/0x84 was previously current_proc_slot (removed in
+     * gamma.3b-S2a Seg-2, see the block comment right above). Reused
+     * here to hold two independent counters that tally where the timer
+     * IRQ struck on this CPU:
+     *   tick_hits_user   -- CS.RPL == 3 (ring3, i.e. user code)
+     *   tick_hits_kernel -- CS.RPL == 0 (ring0, i.e. kernel code)
+     * Their sum equals sched_tick_calls (which counts every entry to
+     * sched_on_tick regardless of who was interrupted).
+     *
+     * Populated by arch_x86_64_lapic_timer_irq_handler(iret_cs) using
+     * the CS field from the iret frame that the isr64.S stub forwards.
+     * See src/arch/x86_64/kernel/isr64.S :: x86_64_irq_lapic_timer. */
+    uint32_t tick_hits_user;         /* offset 0x80 */
+    uint32_t tick_hits_kernel;       /* offset 0x84 */
 } __attribute__((aligned(64))) arch_x86_64_percpu_t;
 
 /* Per-field offsets (compile-time, for asm or sanity checks). */
@@ -259,6 +273,14 @@ uint64_t arch_x86_64_percpu_user_dispatch_count(uint32_t cpu_idx);
  * LAPIC timer ISR, in lapic64.c). Used by stage 30 to prove that the
  * timer IRQ actually preempts a ring3 busy loop on the target CPU. */
 uint64_t arch_x86_64_percpu_lapic_timer_count(uint32_t cpu_idx);
+
+/* gamma.5-P1: read cpu_idx's timer-hit histogram. tick_hits_user +
+ * tick_hits_kernel == sched_tick_calls if the accounting is correct.
+ * Non-zero tick_hits_user on any CPU proves the timer IRQ actually
+ * preempts ring3 code (i.e. the missing piece before gamma.5-P2
+ * cooperative -> preemptive scheduling of two ring3 tasks). */
+uint32_t arch_x86_64_percpu_tick_hits_user(uint32_t cpu_idx);
+uint32_t arch_x86_64_percpu_tick_hits_kernel(uint32_t cpu_idx);
 
 /* G.7a: read a 1-based IST entry (1..OPENOS_X86_64_PERCPU_IST_COUNT)
  * from cpu_idx's TSS. Returns 0 for out-of-range cpu or ist index. */

@@ -438,10 +438,28 @@ bool arch_x86_64_lapic_timer_init_periodic(uint8_t vector,
  */
 extern uint32_t arch_x86_64_sched_on_tick(void);
 
-void arch_x86_64_lapic_timer_irq_handler(void) {
+void arch_x86_64_lapic_timer_irq_handler(uint64_t iret_cs) {
     arch_x86_64_percpu_t *p = arch_x86_64_this_cpu_ptr();
     if (p != 0) {
         p->lapic_timer_count++;
+
+        /* gamma.5-P1: split preempt hits by which ring we interrupted.
+         * CS.RPL==3 means the CPU was executing ring3 user code when
+         * the timer fired; RPL==0 means we caught the kernel. This is
+         * the raw evidence gamma.5 needs before wiring user tasks into
+         * the run queue: if tick_hits_user stays at 0 forever while a
+         * ring3 busy loop runs, then the timer LVT is masked in that
+         * context (or IF is off) and no amount of scheduler work will
+         * preempt it.
+         *
+         * Note: iret_cs is the 16-bit CS in the low bits of a 64-bit
+         * word (upper bits are architecturally undefined per iret
+         * layout). Masking to 0x3 is sufficient for RPL. */
+        if ((iret_cs & 0x3u) == 0x3u) {
+            p->tick_hits_user++;
+        } else {
+            p->tick_hits_kernel++;
+        }
     }
 
     /* G.6.5b: drive per-CPU quantum / preemption. Safe to call here

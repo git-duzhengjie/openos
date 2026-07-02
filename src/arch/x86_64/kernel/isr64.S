@@ -120,7 +120,12 @@ x86_64_irq0:
     popq %rax
 
     /* Now save the SysV caller-saved set and dispatch to C. The C handler is
-     * responsible for bumping g_pit_ticks and sending the PIC EOI. */
+     * responsible for bumping g_pit_ticks and sending the PIC EOI.
+     *
+     * gamma.5-P1: forward the interrupted CS to arch_x86_64_pit_irq0_handler
+     * so BSP can also record ring3-vs-ring0 preempt hits (same story as the
+     * LAPIC timer stub above). CS lives at (%rsp + 9*8 + 8) = 80(%rsp)
+     * after the 9 caller-saved pushes below. */
     pushq %rax
     pushq %rcx
     pushq %rdx
@@ -131,6 +136,7 @@ x86_64_irq0:
     pushq %r10
     pushq %r11
     cld
+    movq 80(%rsp), %rdi
     call arch_x86_64_pit_irq0_handler
     popq %r11
     popq %r10
@@ -157,7 +163,13 @@ irq0_iret_dump:
  * Per-CPU periodic timer driving the AP scheduler heartbeat. The hardware
  * does not push an error code (external interrupt). We save the SysV
  * caller-saved set, call the C handler, restore, and iretq. The C handler
- * is responsible for sending the LAPIC EOI. */
+ * is responsible for sending the LAPIC EOI.
+ *
+ * gamma.5-P1: forward the interrupted CS to the C handler in %rdi so it
+ * can classify user (CS.RPL==3) vs kernel (CS.RPL==0) preempts and bump
+ * the per-CPU tick_hits_user / tick_hits_kernel histogram. After the
+ * SWAPGS + 9-reg caller-saved push, the iret frame's CS sits at
+ * (%rsp + 9*8 + 8) = 80(%rsp). RIP is at 72(%rsp) but we don't need it. */
 .global x86_64_irq_lapic_timer
 x86_64_irq_lapic_timer:
     /* G.7b: see x86_64_irq0 for rationale. */
@@ -172,6 +184,8 @@ x86_64_irq_lapic_timer:
     pushq %r10
     pushq %r11
     cld
+    /* gamma.5-P1: 1st arg = interrupted CS. */
+    movq 80(%rsp), %rdi
     call arch_x86_64_lapic_timer_irq_handler
     popq %r11
     popq %r10

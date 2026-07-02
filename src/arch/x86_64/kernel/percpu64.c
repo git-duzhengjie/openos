@@ -251,6 +251,24 @@ uint64_t arch_x86_64_percpu_lapic_timer_count(uint32_t cpu_idx) {
     return *(volatile uint64_t *)&g_percpu[cpu_idx].lapic_timer_count;
 }
 
+/* gamma.5-P1: per-CPU histogram of timer preempt hits (see the block
+ * comment on tick_hits_user / tick_hits_kernel in include/percpu64.h).
+ * The two counters are written by arch_x86_64_lapic_timer_irq_handler
+ * using the CS from the iret frame forwarded by isr64.S. */
+uint32_t arch_x86_64_percpu_tick_hits_user(uint32_t cpu_idx) {
+    if (cpu_idx >= OPENOS_X86_64_PERCPU_MAX_CPUS) {
+        return 0;
+    }
+    return *(volatile uint32_t *)&g_percpu[cpu_idx].tick_hits_user;
+}
+
+uint32_t arch_x86_64_percpu_tick_hits_kernel(uint32_t cpu_idx) {
+    if (cpu_idx >= OPENOS_X86_64_PERCPU_MAX_CPUS) {
+        return 0;
+    }
+    return *(volatile uint32_t *)&g_percpu[cpu_idx].tick_hits_kernel;
+}
+
 x86_64_stack_ptr_t arch_x86_64_percpu_ist(uint32_t cpu_idx, uint32_t ist_index) {
     if (cpu_idx >= OPENOS_X86_64_PERCPU_MAX_CPUS) {
         return 0;
@@ -299,6 +317,11 @@ void arch_x86_64_percpu_install_gs(uint32_t cpu_idx) {
     p->sched_preempt_count  = 0;
     p->lapic_timer_count    = 0;
     p->sched_tick_calls     = 0;
+    /* gamma.5-P1: histogram of preempted rings. See tick_hits_user /
+     * tick_hits_kernel in include/percpu64.h. Reset per CPU here for
+     * the same reason as the counters above. */
+    p->tick_hits_user       = 0;
+    p->tick_hits_kernel     = 0;
     /* G.6.6a/G.6.7a: clear reschedule-IPI counters and need_resched flag.
      * Note: install_gs() runs once per CPU during its bring-up, so this
      * is the right place to zero them. BSP=0 contract for need_resched

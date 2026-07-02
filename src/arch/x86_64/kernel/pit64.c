@@ -2,6 +2,7 @@
 #include "../include/pic64.h"
 #include "../include/lapic64.h"
 #include "../include/sched64.h"
+#include "../include/percpu64.h"
 
 #include <stdint.h>
 
@@ -62,7 +63,7 @@ uint32_t arch_x86_64_pit_get_hz(void) {
     return g_pit_hz;
 }
 
-void arch_x86_64_pit_irq0_handler(void) {
+void arch_x86_64_pit_irq0_handler(uint64_t iret_cs) {
     /* IRQ0 hot path. Order matters:
      *   1. bump the visible tick counter (selftests poll this)
      *   2. EOI the PIC so a re-entrant IRQ0 can fire after we sti below
@@ -79,6 +80,21 @@ void arch_x86_64_pit_irq0_handler(void) {
      * existing irq-selftest behavior (delta ∈ [18,22] over 200ms) is
      * preserved bit-for-bit. */
     g_pit_ticks++;
+
+    /* gamma.5-P1: same histogram as the LAPIC-timer handler (see
+     * lapic64.c). On the BSP the PIT is the only preempt source, so
+     * without this hook tick_hits_user on cpu 0 would stay at 0 even
+     * if IRQ0 fired every 10ms in ring3. iret_cs's low 2 bits are RPL. */
+    {
+        arch_x86_64_percpu_t *pc = arch_x86_64_this_cpu_ptr();
+        if (pc != 0) {
+            if ((iret_cs & 0x3u) == 0x3u) {
+                pc->tick_hits_user++;
+            } else {
+                pc->tick_hits_kernel++;
+            }
+        }
+    }
     /* Route EOI to whichever controller is currently driving us. Once
      * Step G.1 wires the IOAPIC, IRQ0 is delivered via the LAPIC and
      * the PIC EOI is a stale write that would actually un-mask master
