@@ -350,7 +350,7 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
     ARCH64_USER_BUILD="$ARCH64_BUILD/user"
     ARCH64_BOOT_BUILD="$ARCH64_BUILD/boot"
     ARCH64_BIN_BUILD="$ARCH64_BUILD/bin"
-    ARCH64_CFLAGS="-m64 -mcmodel=kernel -mno-red-zone -ffreestanding -nostdlib -Wall -Wextra -O2 -fno-pic -fno-pie -fno-PIE -fno-stack-protector -fno-builtin -I$ARCH64_SRC/include -Isrc/kernel/include"
+    ARCH64_CFLAGS="-m64 -mcmodel=kernel -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-80387 -mno-avx -ffreestanding -nostdlib -Wall -Wextra -O2 -fno-pic -fno-pie -fno-PIE -fno-stack-protector -fno-builtin -DGUI_EARLY_VERIFY -I$ARCH64_SRC/include -Isrc/kernel/include"
     ARCH64_ASFLAGS="-m64 -mcmodel=kernel -mno-red-zone -fno-pic -fno-pie -fno-PIE -I$ARCH64_SRC/include -Isrc/kernel/include"
     ARCH64_USER_CFLAGS="-m64 -mcmodel=large -ffreestanding -nostdlib -Wall -Wextra -O2 -fno-pic -fno-pie -fno-PIE -fno-stack-protector -fno-builtin -I$ARCH64_SRC/user"
     ARCH64_USER_ASFLAGS="-m64 -mcmodel=large -fno-pic -fno-pie -fno-PIE -I$ARCH64_SRC/user"
@@ -436,6 +436,8 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         kernel/tsc_selftest64.c \
         kernel/pic64.c \
         kernel/pit64.c \
+        kernel/mouse64.c \
+        kernel/keyboard64.c \
         kernel/irq_selftest64.c \
         kernel/sched_preempt_selftest64.c \
         kernel/sched_prio_selftest64.c \
@@ -476,6 +478,27 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         src/kernel/platform/pc_uefi_platform_ops.c; do
         obj="$ARCH64_BUILD/$(basename "${cfile%.c}").o"
         gcc $ARCH64_CFLAGS -c "$cfile" -o "$obj"
+    done
+
+    echo "[2b/5] Compiling x86_64 GUI subsystem (ported from i386)..."
+    # GUI 移植：i386 版 gui.c/gui_user.c/i18n.c/font.c/window_manager.c/framebuffer.c
+    # 直接以 x86_64 目标编译（types.h 已按 __x86_64__ 分支适配）。
+    # 需额外 -Isrc/kernel 以解析 gui.c 的 "core/fs/vfs.h"、"net/net.h" 等相对包含。
+    # 外部依赖（net/dns/tls/vfs/mouse）由 gui64_stubs.c 提供安全桩，
+    # framebuffer 后端由 framebuffer64.c(UEFI GOP) + gui64_shims.c 提供。
+    GUI64_CFLAGS="$ARCH64_CFLAGS -Isrc/kernel"
+    for cfile in \
+        src/kernel/gui.c \
+        src/kernel/gui_user.c \
+        src/kernel/i18n.c \
+        src/kernel/font.c \
+        src/kernel/window_manager.c \
+        src/kernel/generated/cjk_font.c \
+        src/arch/x86_64/gui64/framebuffer64.c \
+        src/arch/x86_64/gui64/gui64_shims.c \
+        src/arch/x86_64/gui64/gui64_stubs.c; do
+        obj="$ARCH64_BUILD/$(basename "${cfile%.c}").o"
+        gcc $GUI64_CFLAGS -c "$cfile" -o "$obj"
     done
 
     echo "[3/5] Assembling x86_64 entry files..."
@@ -520,6 +543,8 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         "$ARCH64_BUILD/tsc_selftest64.o" \
         "$ARCH64_BUILD/pic64.o" \
         "$ARCH64_BUILD/pit64.o" \
+        "$ARCH64_BUILD/mouse64.o" \
+        "$ARCH64_BUILD/keyboard64.o" \
         "$ARCH64_BUILD/irq_selftest64.o" \
         "$ARCH64_BUILD/sched_preempt_selftest64.o" \
         "$ARCH64_BUILD/sched_prio_selftest64.o" \
@@ -557,7 +582,16 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         "$ARCH64_BUILD/driver.o" \
         "$ARCH64_BUILD/basic_devices.o" \
         "$ARCH64_BUILD/x86_64_arch_ops.o" \
-        "$ARCH64_BUILD/pc_uefi_platform_ops.o"
+        "$ARCH64_BUILD/pc_uefi_platform_ops.o" \
+        "$ARCH64_BUILD/gui.o" \
+        "$ARCH64_BUILD/gui_user.o" \
+        "$ARCH64_BUILD/i18n.o" \
+        "$ARCH64_BUILD/font.o" \
+        "$ARCH64_BUILD/window_manager.o" \
+        "$ARCH64_BUILD/cjk_font.o" \
+        "$ARCH64_BUILD/framebuffer64.o" \
+        "$ARCH64_BUILD/gui64_shims.o" \
+        "$ARCH64_BUILD/gui64_stubs.o"
 
     echo "[5/5] x86_64 kernel and hello64 user ELF linked."
 
@@ -639,6 +673,21 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
 fi
 
 echo "===== Building openos Phase 2 (i386) ====="
+
+# ---------------------------------------------------------------------------
+# [DEPRECATED] i386 (32-bit) branch has been ARCHIVED (2026-07).
+# 150 i386-only source files were removed after dependency-diff analysis
+# confirmed the x86_64 mainline does not reference them.
+# Shared GUI/font sources (gui.c, font.c, i18n.c, window_manager.c,
+# cjk_font.c, etc.) remain and are still compiled by the x86_64 segment.
+# A backup tarball lives in legacy_backup/i386_files_*.tar.gz.
+# Building i386 will now fail with missing-file errors; abort early with a
+# clear message instead. To resurrect it, restore from the backup tarball.
+# ---------------------------------------------------------------------------
+echo "[DEPRECATED] The i386 32-bit branch has been archived and its sources removed." >&2
+echo "             x86_64 is the only supported target. Run: ARCH=x86_64 bash build.sh" >&2
+echo "             To restore i386, extract legacy_backup/i386_files_*.tar.gz" >&2
+exit 1
 
 mkdir -p $BUILD
 rm -f $BUILD/*.elf
