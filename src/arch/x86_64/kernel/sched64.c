@@ -1023,33 +1023,6 @@ uint32_t arch_x86_64_sched_on_tick(void) {
      * CPU's own IRQ path (vs. only from cooperative yield). */
     arch_x86_64_this_cpu_ptr()->sched_tick_calls++;
 
-    /* gamma.5-P1: every ~64 ticks (aggregated across all CPUs) dump
-     * the preempt-hit histogram of every CPU so we can observe whether
-     * the timer IRQ ever caught ring3 code. The classification itself
-     * is done inside arch_x86_64_lapic_timer_irq_handler / the PIT stub,
-     * using the iret-frame CS.RPL. Any CPU may drive the dump — this is
-     * important because during hello_fork the BSP blocks in wait() and
-     * its PIT ticks slow way down, so we'd otherwise miss the very
-     * window we're trying to observe. */
-    {
-        static volatile uint32_t p1_dump_gate = 0u;
-        uint32_t g = __atomic_add_fetch(&p1_dump_gate, 1u, __ATOMIC_RELAXED);
-        if ((g & 0x0Fu) == 0u) {
-            early_console64_write("[gamma5-P1] tick_hits per-CPU:");
-            for (uint32_t c = 0u; c < OPENOS_X86_64_PERCPU_MAX_CPUS; ++c) {
-                uint32_t u = arch_x86_64_percpu_tick_hits_user(c);
-                uint32_t k = arch_x86_64_percpu_tick_hits_kernel(c);
-                if ((u | k) == 0u) continue;
-                early_console64_write(" cpu");
-                early_console64_write_hex64((uint64_t)c);
-                early_console64_write("=u:");
-                early_console64_write_hex64((uint64_t)u);
-                early_console64_write(",k:");
-                early_console64_write_hex64((uint64_t)k);
-            }
-            early_console64_write("\n");
-        }
-    }
     if (sched_pc_quantum() > 0u) {
         sched_pc_dec_quantum();
     }

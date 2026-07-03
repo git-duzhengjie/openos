@@ -38,6 +38,17 @@
 extern void x86_64_irq0(void);
 extern void x86_64_irq_lapic_timer(void);  /* G.6.5a: AP per-CPU LAPIC timer */
 extern void x86_64_irq_lapic_resched(void); /* G.6.6a: cross-CPU reschedule IPI */
+
+/* GUI 移植 (范围 B): i386 图形桌面已链入 x86_64 内核。
+ * window_manager_start_desktop() 初始化 GUI 子系统并绘制桌面，
+ * window_manager_poll() 处理一帧（鼠标/重绘）。这些符号来自
+ * src/kernel/window_manager.c，声明在 include/window_manager.h。 */
+extern int  window_manager_start_desktop(void);
+extern void window_manager_poll(void);
+extern void framebuffer_init(void);  /* UEFI GOP 后端初始化 (framebuffer64.c) */
+extern int  arch_x86_64_mouse_install(void);  /* PS/2 鼠标接入 (mouse64.c) */
+extern int  arch_x86_64_keyboard_install(void);  /* PS/2 键盘接入 (keyboard64.c) */
+extern void gui_invalidate_all(void);  /* 标记整屏为脏，下一帧全屏重绘 */
 #include "../include/tss64.h"
 #include "../include/usermode64.h"
 #include "../include/vfs64.h"
@@ -293,6 +304,74 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
      * keeps inheriting "IRQs-off" precondition. */
     (void)arch_x86_64_sched_prio_selftest_run();
 
+    /* ============================================================
+     * GUI 桌面启动 —— 早期验证路径 (GUI_EARLY_VERIFY)
+     *
+     * 用户态 fork-multi 自检当前 wait 回收极慢（分钟级），会挡住
+     * 主线到达文件末尾的 GUI 启动点。为先行验证"桌面能否显示"，
+     * 这里在 ring3 测试之前拉起 GUI 桌面。验证通过后再决定最终
+     * 落点（或修复 fork wait 后移回文件末尾）。
+     * ============================================================ */
+#ifdef GUI_EARLY_VERIFY
+    early_console64_write("[x86_64][gui] (early) starting desktop before ring3 test...\n");
+    {
+        framebuffer_init();
+        int gui_rc = window_manager_start_desktop();
+        early_console64_write("[x86_64][gui] window_manager_start_desktop rc=");
+        early_console64_write_hex64((uint64_t)(uint32_t)gui_rc);
+        early_console64_write("\n");
+        if (gui_rc == 0) {
+            /* 桌面已接管 framebuffer：先关闭 fbcon 屏幕输出，避免后续内核
+             * 日志继续叠印在桌面底部（串口日志仍照常输出）。关闭后再打印的
+             * 日志只走串口，不会画到屏幕上。 */
+            early_console64_set_fbcon(0);
+            early_console64_write("[x86_64][gui] desktop up, entering poll loop\n");
+            /* 标记整屏为脏并立即重绘一帧，把关闭 fbcon 之前残留在屏幕
+             * 最底部（桌面重绘范围之外）的内核日志文字彻底覆盖掉。 */
+            gui_invalidate_all();
+            window_manager_poll();
+            /* 桂载 PS/2 鼠标：注册 IRQ12 网关 + IOAPIC 路由 + 设备使能。
+             * desktop 已起来，gui_poll() 通过 mouse_snapshot_and_clear_delta()
+             * 消费光标位置；这里把真实驱动接进中断系统。 */
+            if (arch_x86_64_mouse_install() != 0) {
+                early_console64_write("[x86_64][gui] WARN mouse install failed; desktop runs without pointer\n");
+            }
+            /* 挂载 PS/2 键盘：注册 IRQ1 网关 + IOAPIC 路由 + 控制器使能。
+             * gui_post_key_code_with_modifiers() 把按键喂给桌面/窗口。 */
+            if (arch_x86_64_keyboard_install() != 0) {
+                early_console64_write("[x86_64][gui] WARN keyboard install failed; desktop runs without keys\n");
+            }
+            __asm__ __volatile__("sti");  /* 开中断，让 IRQ12 能进来 */
+            /* 端到端键盘验证：创建一个带文本框的测试窗口并让其获得输入焦点。
+             * 焦点文本框会让 gui_should_capture_key_code_with_modifiers() 对
+             * 普通字母键返回 cap=1，键入的字符经 gui_process_events() 路由到
+             * textbox_on_key() 显示出来，形成可见的端到端输入效果。 */
+            {
+                extern void *gui_create_window(int x, int y, int w, int h, const char *title);
+                extern void *gui_add_label(void *window, int x, int y, int w, int h, const char *text);
+                extern void *gui_add_textbox(void *window, int x, int y, int w, int h, const char *text);
+                extern void gui_widget_focus(void *widget);
+                void *tw = gui_create_window(360, 260, 420, 180, "Keyboard Test");
+                if (tw) {
+                    gui_add_label(tw, 20, 20, 320, 20, "Type here (PS/2 keyboard -> GUI):");
+                    void *tb = gui_add_textbox(tw, 20, 50, 360, 32, "");
+                    if (tb) gui_widget_focus(tb);
+                    gui_invalidate_all();
+                    window_manager_poll();
+                    early_console64_write("[x86_64][gui] keyboard test window created + textbox focused\n");
+                } else {
+                    early_console64_write("[x86_64][gui] WARN failed to create keyboard test window\n");
+                }
+            }
+            for (;;) {
+                window_manager_poll();
+                __asm__ __volatile__("hlt");
+            }
+        }
+        early_console64_write("[x86_64][gui] (early) desktop start FAILED, continue to ring3 test\n");
+    }
+#endif
+
     /* Step C: initrd & fdtable 就绪后再跳 ring3 hello64，否则 open(/hello.txt) 会看不到文件。
      * H.2: image 不再直连 embed_hello64 数组，改走 initrd 通路。kernel64.c
      * 不再 #include embed_hello64.h；image 真正的 single source of truth
@@ -501,6 +580,38 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
     arch_x86_64_vfs_print_status();
     early_console64_write(x86_64_compat32_log);
     arch_x86_64_compat32_print_status();
+
+    /* ============================================================
+     * GUI 桌面启动 (范围 B: i386 图形桌面移植)
+     *
+     * 至此 x86_64 主线已完成 selftest / usermode / shell 自检。
+     * 以前这里是 for(;;) hlt —— 因此只有满屏文字、无桌面。
+     * 现在拉起 GUI 桌面：
+     *   1. window_manager_start_desktop() 初始化图形子系统(fb/font/wm)
+     *      并绘制桌面背景 + 任务栏。
+     *   2. 主循环反复调用 window_manager_poll() 处理鼠标/重绘，
+     *      hlt 等中断、降低空转。
+     * ============================================================ */
+    early_console64_write("[x86_64][gui] starting desktop...\n");
+    {
+        /* 初始化 UEFI GOP framebuffer 后端（framebuffer64.c），
+         * 从 early_framebuffer64_get_info() 取真实 GOP 分辨率/地址。
+         * gui 层后续通过 framebuffer_* API 绘制。 */
+        framebuffer_init();
+        int gui_rc = window_manager_start_desktop();
+        early_console64_write("[x86_64][gui] window_manager_start_desktop rc=");
+        early_console64_write_hex64((uint64_t)(uint32_t)gui_rc);
+        early_console64_write("\n");
+        if (gui_rc == 0) {
+            early_console64_write("[x86_64][gui] desktop up, entering poll loop\n");
+            for (;;) {
+                window_manager_poll();
+                __asm__ __volatile__("hlt");
+            }
+        }
+        /* 桌面启动失败：回退到原来的 hlt 循环（保证不崩）*/
+        early_console64_write("[x86_64][gui] desktop start FAILED, fallback to hlt loop\n");
+    }
     for (;;) {
         __asm__ __volatile__("hlt");
     }

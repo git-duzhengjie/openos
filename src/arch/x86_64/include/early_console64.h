@@ -18,6 +18,7 @@ typedef struct early_framebuffer64_info {
 } early_framebuffer64_info_t;
 
 void early_console64_init(void);
+void early_console64_set_fbcon(int on);
 void early_console64_putc(char c);
 void early_console64_write(const char *text);
 void early_console64_write_hex64(uint64_t value);

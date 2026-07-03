@@ -40,3 +40,9 @@ src/kernel/include/version.h
 # 外部依赖缓存，包含 Chromium checkout 等大体积源码
 .openos-deps/
 .commit_msg.tmp
+
+# 调试临时产物：QMP 截图/串口抓帧/验证脚本等
+logs/
+*.bak
+*_new.c
+*.ppm

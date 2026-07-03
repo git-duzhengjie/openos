@@ -201,6 +201,66 @@ x86_64_irq_lapic_resched:
     SWAPGS_IF_FROM_USER 8
     iretq
 
+/* PS/2 mouse IRQ12 stub (routed to vector OPENOS_X86_64_MOUSE_VECTOR=0x2C).
+ * External interrupt: no error code pushed. Same caller-saved + EOI-in-C
+ * contract as x86_64_irq0. The C handler reassembles PS/2 packets and the
+ * EOI is sent by the trampoline below (arch_x86_64_mouse_irq12_trampoline). */
+.global x86_64_irq_mouse
+x86_64_irq_mouse:
+    SWAPGS_IF_FROM_USER 8
+    pushq %rax
+    pushq %rcx
+    pushq %rdx
+    pushq %rsi
+    pushq %rdi
+    pushq %r8
+    pushq %r9
+    pushq %r10
+    pushq %r11
+    cld
+    call arch_x86_64_mouse_irq12_trampoline
+    popq %r11
+    popq %r10
+    popq %r9
+    popq %r8
+    popq %rdi
+    popq %rsi
+    popq %rdx
+    popq %rcx
+    popq %rax
+    SWAPGS_IF_FROM_USER 8
+    iretq
+
+/* PS/2 keyboard IRQ1 stub (routed to vector OPENOS_X86_64_KBD_VECTOR=0x21).
+ * External interrupt: no error code pushed. Same caller-saved + EOI-in-C
+ * contract as x86_64_irq_mouse. The C handler decodes the scancode and the
+ * EOI is sent by the trampoline (arch_x86_64_kbd_irq1_trampoline). */
+.global x86_64_irq_keyboard
+x86_64_irq_keyboard:
+    SWAPGS_IF_FROM_USER 8
+    pushq %rax
+    pushq %rcx
+    pushq %rdx
+    pushq %rsi
+    pushq %rdi
+    pushq %r8
+    pushq %r9
+    pushq %r10
+    pushq %r11
+    cld
+    call arch_x86_64_kbd_irq1_trampoline
+    popq %r11
+    popq %r10
+    popq %r9
+    popq %r8
+    popq %rdi
+    popq %rsi
+    popq %rdx
+    popq %rcx
+    popq %rax
+    SWAPGS_IF_FROM_USER 8
+    iretq
+
 .global x86_64_isr_common
 x86_64_isr_common:
     /* G.7b: at this point the stack has err_code(0)/vector(8)/RIP(16)/CS(24).

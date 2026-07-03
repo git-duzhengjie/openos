@@ -6845,7 +6845,11 @@ static void gui_poll_mouse(void) {
         } else {
             g_gui.mouse_x = ms.x;
             g_gui.mouse_y = ms.y;
-            gui_cursor_present_fast();
+            /* invalidate old & new cursor rects so the unified renderer
+             * repaints the background under the cursor and redraws it,
+             * avoiding the dual-path (present_fast vs gui_render) smear. */
+            gui_invalidate_rect(g_gui.mouse_x - 2, g_gui.mouse_y - 2, 22, 22);
+            gui_invalidate_rect(ms.x - 2, ms.y - 2, 22, 22);
         }
     }
 
@@ -6940,6 +6944,17 @@ int gui_start(uint32_t width, uint32_t height) {
     }
     g_gui.double_buffered = g_gui.backbuffer ? 1 : 0;
     g_gui.compositor_enabled = g_gui.double_buffered;
+    serial_write("[gui] backbuffer alloc: ptr=");
+    serial_write_hex((uint32_t)((uint64_t)(uintptr_t)g_gui.backbuffer >> 32));
+    serial_write(":");
+    serial_write_hex((uint32_t)((uint64_t)(uintptr_t)g_gui.backbuffer & 0xFFFFFFFFu));
+    serial_write(" w=");
+    serial_write_hex(g_gui.width);
+    serial_write(" h=");
+    serial_write_hex(g_gui.height);
+    serial_write(" pixels=");
+    serial_write_hex(pixels);
+    serial_write("\n");
 
     gui_terminal_init();
     gui_desktop_init();

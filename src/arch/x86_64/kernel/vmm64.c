@@ -309,6 +309,21 @@ void arch_x86_64_vmm_init(void) {
                                     OPENOS_X86_64_VMM_KERNEL_FLAGS);
     (void)arch_x86_64_vmm_map_range(0xFEC00000ULL, 0xFEC00000ULL, OPENOS_X86_64_VMM_PAGE_SIZE,
                                     OPENOS_X86_64_VMM_KERNEL_FLAGS);
+
+    /* GOP framebuffer usually lives above the early identity range (e.g. 0x80000000).
+     * Identity-map it so the early framebuffer console keeps working after CR3 switch. */
+    {
+        const early_framebuffer64_info_t *fb = early_framebuffer64_get_info();
+        if (fb != 0 && fb->available != 0 && fb->base != 0) {
+            uint64_t fb_base = (uint64_t)fb->base;
+            uint64_t fb_size = (uint64_t)fb->pitch * (uint64_t)fb->height;
+            uint64_t fb_start = fb_base & ~(OPENOS_X86_64_VMM_PAGE_SIZE - 1ULL);
+            uint64_t fb_end = (fb_base + fb_size + OPENOS_X86_64_VMM_PAGE_SIZE - 1ULL) &
+                              ~(OPENOS_X86_64_VMM_PAGE_SIZE - 1ULL);
+            (void)arch_x86_64_vmm_map_range(fb_start, fb_start, fb_end - fb_start,
+                                            OPENOS_X86_64_VMM_KERNEL_FLAGS);
+        }
+    }
 }
 
 const x86_64_vmm_info_t *arch_x86_64_vmm_get_info(void) {

@@ -95,8 +95,8 @@ if not exist "%OVMF_CODE%" (
   exit /b 22
 )
 if not exist "%OVMF_VARS%" (
-  echo [build+run] WARN: OVMF_VARS not found, copying template from OVMF_CODE dir
-  copy /Y "C:\Program Files\qemu\share\edk2-x86_64-code.fd" "%OVMF_VARS%" >nul 2>&1
+  echo [build+run] WARN: OVMF_VARS not found, copying VARS template edk2-i386-vars.fd
+  copy /Y "C:\Program Files\qemu\share\edk2-i386-vars.fd" "%OVMF_VARS%" >nul 2>&1
 )
 
 if "%MODE_RUN%"=="0" (

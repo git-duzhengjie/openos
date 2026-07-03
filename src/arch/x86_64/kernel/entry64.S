@@ -26,6 +26,8 @@
 
 .section .bss
 .align 4096
+.global __boot64_pagetables_start
+__boot64_pagetables_start:
 boot64_pml4:    .skip 4096
 boot64_pdpt_hi: .skip 4096
 boot64_pd_hi:   .skip 4096
@@ -34,6 +36,8 @@ boot64_pd_lo0:  .skip 4096          /* identity 0..1 GiB */
 boot64_pd_lo1:  .skip 4096          /* identity 1..2 GiB */
 boot64_pd_lo2:  .skip 4096          /* identity 2..3 GiB */
 boot64_pd_lo3:  .skip 4096          /* identity 3..4 GiB */
+.global __boot64_pagetables_end
+__boot64_pagetables_end:
 
 .section .text.entry,"ax"
 _start64:
@@ -215,6 +219,46 @@ _get_rip:
      * the C entry point with the handoff pointer we stashed in %r15. */
     leaq kernel64_stack_top(%rip), %rsp
     andq $-16, %rsp
+
+    /* Preserve globals that were initialised *before* the .bss wipe below.
+     * kernel64_phys_base was stored by the boot trampoline (see above) and
+     * lives in .bss, so the upcoming clear would zero it and break every
+     * virt<->phys translation in vmm64.c.  Stash it in a callee-saved reg
+     * and write it back after the wipe. */
+    movq kernel64_phys_base(%rip), %r12
+
+    /* Zero the entire .bss region now that we execute in the higher-half
+     * mapping.  The linker places .bss in its own PT_LOAD with p_filesz=0,
+     * so the UEFI ELF loader never physically initialised it — C globals
+     * such as g_gui (760 KiB) would otherwise contain stale firmware
+     * memory, making early sanity checks (e.g. gui backbuffer != NULL)
+     * read garbage.
+     *
+     * CAUTION: the boot page tables (boot64_pml4 .. __boot64_pagetables_end)
+     * also live in .bss and are the CR3 we are *currently* running on.
+     * Clearing them would instantly fault, so we zero .bss in two chunks
+     * that straddle the page-table block, and we stop before the stack we
+     * just switched to (kernel64_stack_bottom). */
+
+    /* chunk 1: [__bss64_start, __boot64_pagetables_start) */
+    leaq __bss64_start(%rip), %rdi
+    leaq __boot64_pagetables_start(%rip), %rcx
+    subq %rdi, %rcx
+    shrq $3, %rcx
+    xorq %rax, %rax
+    rep stosq
+
+    /* chunk 2: [__boot64_pagetables_end, kernel64_stack_bottom) */
+    leaq __boot64_pagetables_end(%rip), %rdi
+    leaq kernel64_stack_bottom(%rip), %rcx
+    subq %rdi, %rcx
+    shrq $3, %rcx
+    xorq %rax, %rax
+    rep stosq
+
+    /* Restore the boot-time globals clobbered by the wipe. */
+    movq %r12, kernel64_phys_base(%rip)
+
     movq %r15, %rdi
     xorq %rbp, %rbp
     call kernel_main64_with_handoff
