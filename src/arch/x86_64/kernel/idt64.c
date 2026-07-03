@@ -584,6 +584,26 @@ void arch_x86_64_exception_dispatch(struct x86_64_exception_frame *frame) {
         early_console64_write(" SS=");
         early_console64_write_hex64(irq0_iret_dump[4]);
     }
+    /* γ.5-P3-α1: dump the *pre-iretq* frame captured by the timer stub
+     * (just before iretq executed). This is the frame the CPU actually
+     * consumed; comparing it against irq0_iret_dump (entry snapshot)
+     * reveals whether the frame was corrupted between handler entry
+     * and iretq (i.e. by context_switch / scheduler). */
+    {
+        extern uint64_t lapic_pre_iret_dump[6];
+        early_console64_write("\n[x86_64][exception] pre_iret RIP=");
+        early_console64_write_hex64(lapic_pre_iret_dump[0]);
+        early_console64_write(" CS=");
+        early_console64_write_hex64(lapic_pre_iret_dump[1]);
+        early_console64_write(" RFLAGS=");
+        early_console64_write_hex64(lapic_pre_iret_dump[2]);
+        early_console64_write(" RSP=");
+        early_console64_write_hex64(lapic_pre_iret_dump[3]);
+        early_console64_write(" SS=");
+        early_console64_write_hex64(lapic_pre_iret_dump[4]);
+        early_console64_write(" cnt=");
+        early_console64_write_hex64(lapic_pre_iret_dump[5]);
+    }
     /* D1-E: dump current CPU's GDT[6]/[7] (TSS descriptor) and live TSS
      * contents to see if TSS descriptor / TSS.rsp0 / TSS.ist[] were
      * corrupted, which is the top suspect when #GP(err=0x30) fires on

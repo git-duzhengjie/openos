@@ -47,8 +47,19 @@ static void configure_syscall_sysret(void) {
     uint64_t star;
     uint64_t efer;
 
+    /* γ.5-P3-α ROOT-CAUSE FIX:
+     * SYSRET hardware computes CS = STAR[63:48] + 16, SS = STAR[63:48] + 8
+     * (both OR'd with RPL=3). The base must therefore point 16 bytes BELOW
+     * USER_CODE. With GDT layout NULL/KCODE/KDATA/UDATA/UCODE/... the value
+     * that yields CS=USER_CODE(0x20) and SS=USER_DATA(0x18) is:
+     *     base = USER_CODE - 16 = KERNEL_DATA = 0x10
+     * The previous value (USER_CODE|3 = 0x23) made SYSRET load
+     * CS=0x33 (TSS descriptor!) / SS=0x2B, so any timer preempt after a
+     * sysret returned into ring3 with a poisoned CS -> #GP(err=0x30) on the
+     * subsequent iretq. Setting the base to 0x10 (RPL forced to 3 by HW)
+     * fixes the sporadic ring3-preempt #GP entirely. */
     star = ((uint64_t)arch_x86_64_gdt_kernel_code_selector() << 32) |
-           ((uint64_t)(OPENOS_X86_64_GDT_USER_CODE | 3u) << 48);
+           ((uint64_t)(OPENOS_X86_64_GDT_KERNEL_DATA | 3u) << 48);
     wrmsr64(OPENOS_X86_64_MSR_STAR, star);
     wrmsr64(OPENOS_X86_64_MSR_LSTAR, (x86_64_entry_t)(uintptr_t)x86_64_syscall_entry);
     wrmsr64(OPENOS_X86_64_MSR_FMASK, OPENOS_X86_64_SYSCALL_FMASK);

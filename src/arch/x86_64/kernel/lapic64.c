@@ -473,6 +473,8 @@ typedef struct {
     uint64_t  iret_cs;
     uint64_t  iret_rip;
     uint64_t  iret_rsp;
+    uint64_t  iret_ss;
+    uint64_t  iret_rflags;
 } lapic_j_entry_t;
 
 static lapic_j_entry_t g_j_ring[OPENOS_LAPIC_J_RING_LEN];
@@ -481,7 +483,9 @@ static uint64_t        g_j_tick;
 
 static void j_probe_record(uint64_t iret_cs,
                            uint64_t iret_rip,
-                           uint64_t iret_rsp) {
+                           uint64_t iret_rsp,
+                           uint64_t iret_ss,
+                           uint64_t iret_rflags) {
     uint32_t idx = __atomic_fetch_add(&g_j_head, 1u, __ATOMIC_RELAXED)
                    % OPENOS_LAPIC_J_RING_LEN;
     uint64_t tno = __atomic_add_fetch(&g_j_tick, 1u, __ATOMIC_RELAXED);
@@ -498,6 +502,8 @@ static void j_probe_record(uint64_t iret_cs,
     e->iret_cs         = iret_cs;
     e->iret_rip        = iret_rip;
     e->iret_rsp        = iret_rsp;
+    e->iret_ss         = iret_ss;
+    e->iret_rflags     = iret_rflags;
 }
 
 void arch_x86_64_lapic_j_probe_dump(void) {
@@ -523,12 +529,16 @@ void arch_x86_64_lapic_j_probe_dump(void) {
         early_console64_write_hex64(e->iret_rip);
         early_console64_write(" rsp=");
         early_console64_write_hex64(e->iret_rsp);
+        early_console64_write(" ss=");
+        early_console64_write_hex64(e->iret_ss);
+        early_console64_write(" rfl=");
+        early_console64_write_hex64(e->iret_rflags);
         early_console64_write("\n");
     }
 }
 
-void arch_x86_64_lapic_timer_irq_handler(uint64_t iret_cs, uint64_t iret_rip, uint64_t iret_rsp) {
-    j_probe_record(iret_cs, iret_rip, iret_rsp);
+void arch_x86_64_lapic_timer_irq_handler(uint64_t iret_cs, uint64_t iret_rip, uint64_t iret_rsp, uint64_t iret_ss, uint64_t iret_rflags) {
+    j_probe_record(iret_cs, iret_rip, iret_rsp, iret_ss, iret_rflags);
     d1b_af_trap(iret_rip, iret_cs);
     arch_x86_64_percpu_t *p = arch_x86_64_this_cpu_ptr();
     if (p != 0) {
