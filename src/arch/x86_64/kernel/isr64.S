@@ -94,31 +94,6 @@ x86_64_irq0:
      * any push so a later C handler that uses %gs:0 sees the percpu pointer.
      * Hardware iret frame is intact: CS sits at (%rsp+8). */
     SWAPGS_IF_FROM_USER 8
-    /* Diagnostic: snapshot the hardware iret frame to a fixed memory region
-     * so we can examine it post-mortem if anything goes wrong. The stack
-     * shape on entry is (top-down):
-     *  [%rsp+0]   hw-pushed RIP
-     *  [%rsp+8]   hw-pushed CS
-     *  [%rsp+16]  hw-pushed RFLAGS
-     *  [%rsp+24]  hw-pushed RSP
-     *  [%rsp+32]  hw-pushed SS
-     */
-    pushq %rax
-    pushq %rbx
-    leaq irq0_iret_dump(%rip), %rbx
-    movq 16(%rsp), %rax
-    movq %rax, 0(%rbx)    /* RIP    */
-    movq 24(%rsp), %rax
-    movq %rax, 8(%rbx)    /* CS     */
-    movq 32(%rsp), %rax
-    movq %rax, 16(%rbx)   /* RFLAGS */
-    movq 40(%rsp), %rax
-    movq %rax, 24(%rbx)   /* RSP    */
-    movq 48(%rsp), %rax
-    movq %rax, 32(%rbx)   /* SS     */
-    popq %rbx
-    popq %rax
-
     /* Now save the SysV caller-saved set and dispatch to C. The C handler is
      * responsible for bumping g_pit_ticks and sending the PIC EOI.
      *
@@ -152,11 +127,6 @@ x86_64_irq0:
     SWAPGS_IF_FROM_USER 8
     iretq
 
-.section .bss,"aw",@nobits
-.global irq0_iret_dump
-.balign 16
-irq0_iret_dump:
-    .skip 64
 .section .text,"ax"
 
 /* G.6.5a — LAPIC timer IRQ stub (vector OPENOS_X86_64_LAPIC_TIMER_VECTOR=0x40).
@@ -186,14 +156,6 @@ x86_64_irq_lapic_timer:
     cld
     /* gamma.5-P1: 1st arg = interrupted CS. */
     movq 80(%rsp), %rdi
-    /* D1-B: 2nd arg = saved RIP for AF-pattern trap. */
-    movq 72(%rsp), %rsi
-    /* γ.5-D1-J: 3rd arg = interrupted RSP (iret frame @+96). */
-    movq 96(%rsp), %rdx
-    /* γ.5-P3-α0: 4th arg = interrupted SS (iret frame @+104). */
-    movq 104(%rsp), %rcx
-    /* γ.5-P3-α0: 5th arg = interrupted RFLAGS (iret frame @+88). */
-    movq 88(%rsp), %r8
     call arch_x86_64_lapic_timer_irq_handler
     popq %r11
     popq %r10
@@ -204,36 +166,8 @@ x86_64_irq_lapic_timer:
     popq %rdx
     popq %rcx
     popq %rax
-    /* γ.5-P3-α1: dump the iret frame the CPU is about to consume, so a
-     * GP triggered inside iretq can be diagnosed against the *actual*
-     * (post-handler, post-context-switch) frame instead of the entry-time
-     * snapshot. Layout after saving %rax/%rbx: iret frame lives at
-     * 16..48(%rsp) — RIP(16) CS(24) RFLAGS(32) RSP(40) SS(48). */
-    pushq %rax
-    pushq %rbx
-    leaq lapic_pre_iret_dump(%rip), %rbx
-    movq 16(%rsp), %rax    /* RIP    */
-    movq %rax, 0(%rbx)
-    movq 24(%rsp), %rax    /* CS     */
-    movq %rax, 8(%rbx)
-    movq 32(%rsp), %rax    /* RFLAGS */
-    movq %rax, 16(%rbx)
-    movq 40(%rsp), %rax    /* RSP    */
-    movq %rax, 24(%rbx)
-    movq 48(%rsp), %rax    /* SS     */
-    movq %rax, 32(%rbx)
-    incq 40(%rbx)          /* count  */
-    popq %rbx
-    popq %rax
     SWAPGS_IF_FROM_USER 8
     iretq
-
-.section .bss,"aw",@nobits
-.global lapic_pre_iret_dump
-.balign 16
-lapic_pre_iret_dump:
-    .skip 64
-.section .text,"ax"
 
 /* G.6.6a — LAPIC reschedule-IPI stub (vector 0x41).
  * Cross-CPU "poke" signal sent via fixed-delivery IPI. Same caller-saved
