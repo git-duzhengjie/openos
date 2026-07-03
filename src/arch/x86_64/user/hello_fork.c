@@ -111,7 +111,12 @@ int openos64_main(int argc, char **argv, char **envp) {
          * can strand the child on its AP). Yet the sum across 3 children
          * running on RR'd CPUs is enough to reliably see u:>=1 on at
          * least one AP in the tick_hits dump. */
-            for (long i = 0; i < 200000L; i++) spin++;
+            /* γ.5 P2/F1 clean baseline:无 user spin。
+             * 尝试引入 spin 以捕获 tick_hits.u 时发现 timer 抢占
+             * ring3 回 iret 一律 #GP（err=0x30, rip 在 irq0_iret）→
+             * 证明 user-preempt return 路径未实现。此为γ.5 P3
+             * 工作，本基线不开启。child 直接 exit。 */
+            (void)spin;
             (void)spin;
         }
 

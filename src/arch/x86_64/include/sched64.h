@@ -73,7 +73,9 @@ void arch_x86_64_sched_print_status(void);
  *        G.6.5 introduces migration. */
 #define OPENOS_X86_64_SMP_MAX_CPUS_HINT  8u
 #define OPENOS_X86_64_SCHED_MAX_KTHREADS 32u
-#define OPENOS_X86_64_SCHED_KSTACK_BYTES 8192u
+/* D1-H1: bumped 8K -> 16K to A/B-test kthread stack overflow hypothesis
+ * (stage-16 sporadic #GP with rsp landing in 0xFFFFFFFF9000_xxxx heap range) */
+#define OPENOS_X86_64_SCHED_KSTACK_BYTES 16384u
 
 uint32_t arch_x86_64_sched_spawn_kthread(x86_64_thread_entry_t entry, void *arg);
 uint32_t arch_x86_64_sched_yield(void);
@@ -120,6 +122,23 @@ uint32_t arch_x86_64_sched_idle_selftest(uint32_t online_cpus);
  * to slot[cpu_idx], the saved idle rsp is guaranteed valid and not
  * overwritten by any prior IRQ/syscall on the AP's boot stack. */
 void     arch_x86_64_sched_enter_ap_idle(void) __attribute__((noreturn));
+
+/* ============================================================
+ * D1 canary probes: detect stack overrun / stray writes on the
+ * three main kernel-stack regions:
+ *   1) BSP main kernel64 stack (linker-allocated in .bss)
+ *   2) AP idle stacks (per-CPU g_ap_idle_stacks)
+ *   3) kthread stacks (kmalloc'd, one per sched slot)
+ *
+ * arm_all()   : write canary pattern near the BOTTOM of each stack.
+ * check_all() : verify canaries; print [d1-canary] on first mismatch.
+ *               Returns 0 if all good, non-zero bitmask on failure.
+ * ============================================================ */
+#define OPENOS_X86_64_D1_CANARY_PATTERN 0xC1C1C1C1C1C1C1C1ULL
+#define OPENOS_X86_64_D1_CANARY_QWORDS  16u  /* 128 bytes = 16 qwords */
+
+void     arch_x86_64_sched_canary_arm_all(void);
+uint32_t arch_x86_64_sched_canary_check_all(void);
 
 /* -----------------------------------------------------------------
  * Step F.3: preemptive tick hook.

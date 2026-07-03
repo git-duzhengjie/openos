@@ -186,6 +186,10 @@ x86_64_irq_lapic_timer:
     cld
     /* gamma.5-P1: 1st arg = interrupted CS. */
     movq 80(%rsp), %rdi
+    /* D1-B: 2nd arg = saved RIP for AF-pattern trap. */
+    movq 72(%rsp), %rsi
+    /* γ.5-D1-J: 3rd arg = interrupted RSP (iret frame @+96). */
+    movq 96(%rsp), %rdx
     call arch_x86_64_lapic_timer_irq_handler
     popq %r11
     popq %r10

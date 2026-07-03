@@ -584,7 +584,55 @@ void arch_x86_64_exception_dispatch(struct x86_64_exception_frame *frame) {
         early_console64_write(" SS=");
         early_console64_write_hex64(irq0_iret_dump[4]);
     }
+    /* D1-E: dump current CPU's GDT[6]/[7] (TSS descriptor) and live TSS
+     * contents to see if TSS descriptor / TSS.rsp0 / TSS.ist[] were
+     * corrupted, which is the top suspect when #GP(err=0x30) fires on
+     * iretq (selector 0x30 == GDT slot 6 == TSS in our layout). */
+    {
+        struct { uint16_t limit; uint64_t base; } __attribute__((packed)) gdtr;
+        uint16_t tr = 0;
+        __asm__ __volatile__("sgdt %0" : "=m"(gdtr));
+        __asm__ __volatile__("str  %0" : "=r"(tr));
+        early_console64_write("\n[x86_64][exception] GDTR.base=");
+        early_console64_write_hex64(gdtr.base);
+        early_console64_write(" GDTR.lim=");
+        early_console64_write_hex64((uint64_t)gdtr.limit);
+        early_console64_write(" TR=");
+        early_console64_write_hex64((uint64_t)tr);
+        const uint64_t *gdt = (const uint64_t *)(uintptr_t)gdtr.base;
+        early_console64_write("\n[x86_64][exception] GDT[6]=");
+        early_console64_write_hex64(gdt[6]);
+        early_console64_write(" GDT[7]=");
+        early_console64_write_hex64(gdt[7]);
+        /* Decode TSS base from GDT[6]/[7] (system-segment 16-byte desc). */
+        uint64_t d0 = gdt[6];
+        uint64_t d1 = gdt[7];
+        uint64_t tss_base = ((d0 >> 16) & 0xFFFFFFu) |
+                            (((d0 >> 56) & 0xFFu) << 24) |
+                            ((d1 & 0xFFFFFFFFu) << 32);
+        early_console64_write(" TSS.base=");
+        early_console64_write_hex64(tss_base);
+        if (tss_base != 0u) {
+            const uint32_t *tss = (const uint32_t *)(uintptr_t)tss_base;
+            uint64_t rsp0 = (uint64_t)tss[1] | ((uint64_t)tss[2] << 32);
+            early_console64_write(" TSS.rsp0=");
+            early_console64_write_hex64(rsp0);
+            for (unsigned i = 1u; i <= 7u; ++i) {
+                uint64_t off = 28u + (i - 1u) * 8u; /* IST1 at off 0x24 */
+                uint32_t lo  = tss[off / 4u];
+                uint32_t hi  = tss[off / 4u + 1u];
+                uint64_t ist = (uint64_t)lo | ((uint64_t)hi << 32);
+                early_console64_write(" IST");
+                early_console64_write_hex64((uint64_t)i);
+                early_console64_write("=");
+                early_console64_write_hex64(ist);
+            }
+        }
+    }
     early_console64_write("\n");
+    /* γ.5-D1-J: dump per-tick probe ring to catch stale ctx / bad iret_rsp. */
+    extern void arch_x86_64_lapic_j_probe_dump(void);
+    arch_x86_64_lapic_j_probe_dump();
     for (;;) {
         __asm__ __volatile__("cli; hlt");
     }

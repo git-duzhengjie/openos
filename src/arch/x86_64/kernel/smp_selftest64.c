@@ -856,6 +856,9 @@ void arch_x86_64_smp_selftest_run(void)
         early_console64_write(" PASS");
     }
 
+    /* D1 canary: arm before stage 16 tick-bomb, check after. */
+    arch_x86_64_sched_canary_arm_all();
+
     /* Stage 16 (G.6.7c): timer-tick path goes through the preempt gate.
      *
      * Before G.6.7c the timer ISR yielded inline when quantum expired,
@@ -975,6 +978,9 @@ void arch_x86_64_smp_selftest_run(void)
 
         early_console64_write(" PASS");
     }
+
+    /* D1 canary: post-stage-16 check. Prints [d1-canary] mask=... on hit. */
+    (void)arch_x86_64_sched_canary_check_all();
 
     /* Stage 17 (G.7a): per-CPU TSS distinctness.
      *

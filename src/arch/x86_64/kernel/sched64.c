@@ -1552,3 +1552,95 @@ uint64_t arch_x86_64_preempt_deferred_count_for_cpu(uint32_t cpu_idx) {
     return p->preempt_deferred_count;
 }
 
+/* ============================================================
+ * D1 canary probes — see sched64.h for docs.
+ *
+ * The bottom OPENOS_X86_64_D1_CANARY_QWORDS qwords of each kernel
+ * stack are filled with OPENOS_X86_64_D1_CANARY_PATTERN. Since kernel
+ * stacks grow downward from their `top` symbol, the "bottom" region
+ * is what a stack-overrun writes first. If any of these bytes change
+ * between arm and check, we have proof that the corresponding stack
+ * was overrun (or written by a stray pointer).
+ *
+ * arm_all() is called once after sched_init but before stage-16 begins.
+ * check_all() is called from smp_selftest64 after stage-16 completes.
+ * ============================================================ */
+extern uint8_t kernel64_stack_bottom[];   /* linker symbol, .bss */
+extern uint8_t kernel64_stack_top[];
+
+void arch_x86_64_sched_canary_arm_all(void) {
+    const uint64_t pat = OPENOS_X86_64_D1_CANARY_PATTERN;
+
+    /* (1) BSP main stack: fill low 128B */
+    uint64_t *bsp = (uint64_t *)kernel64_stack_bottom;
+    for (uint32_t i = 0; i < OPENOS_X86_64_D1_CANARY_QWORDS; ++i) bsp[i] = pat;
+
+    /* (2) AP idle stacks: bottom of each per-CPU idle stack */
+    for (uint32_t c = 0; c < OPENOS_X86_64_SMP_MAX_CPUS_HINT; ++c) {
+        uint64_t *p = (uint64_t *)&g_ap_idle_stacks[c][0];
+        for (uint32_t i = 0; i < OPENOS_X86_64_D1_CANARY_QWORDS; ++i) p[i] = pat;
+    }
+
+    /* (3) kthread stacks: any slot with a non-NULL stack_base */
+    for (uint32_t i = 0; i < OPENOS_X86_64_SCHED_MAX_KTHREADS; ++i) {
+        if (sched_slots[i].stack_base == NULL) continue;
+        uint64_t *p = (uint64_t *)sched_slots[i].stack_base;
+        for (uint32_t j = 0; j < OPENOS_X86_64_D1_CANARY_QWORDS; ++j) p[j] = pat;
+    }
+
+    early_console64_write("[d1-canary] armed: bsp=");
+    early_console64_write_hex64((uint64_t)(uintptr_t)kernel64_stack_bottom);
+    early_console64_write(" ap_idle[0..N]=");
+    early_console64_write_hex64((uint64_t)(uintptr_t)&g_ap_idle_stacks[0][0]);
+    early_console64_write("\n");
+}
+
+static uint32_t d1_canary_check_region(const char *tag, uint32_t idx,
+                                       uint64_t *base) {
+    const uint64_t pat = OPENOS_X86_64_D1_CANARY_PATTERN;
+    for (uint32_t i = 0; i < OPENOS_X86_64_D1_CANARY_QWORDS; ++i) {
+        if (base[i] != pat) {
+            early_console64_write("[d1-canary] MISMATCH ");
+            early_console64_write(tag);
+            early_console64_write(" idx=");
+            early_console64_write_hex64((uint64_t)idx);
+            early_console64_write(" off=");
+            early_console64_write_hex64((uint64_t)(i * 8u));
+            early_console64_write(" val=");
+            early_console64_write_hex64(base[i]);
+            early_console64_write(" base=");
+            early_console64_write_hex64((uint64_t)(uintptr_t)base);
+            early_console64_write("\n");
+            return 1u;
+        }
+    }
+    return 0u;
+}
+
+uint32_t arch_x86_64_sched_canary_check_all(void) {
+    uint32_t mask = 0u;
+
+    if (d1_canary_check_region("bsp", 0u, (uint64_t *)kernel64_stack_bottom))
+        mask |= 1u;
+
+    for (uint32_t c = 0; c < OPENOS_X86_64_SMP_MAX_CPUS_HINT; ++c) {
+        if (d1_canary_check_region("ap_idle", c, (uint64_t *)&g_ap_idle_stacks[c][0]))
+            mask |= 2u;
+    }
+
+    for (uint32_t i = 0; i < OPENOS_X86_64_SCHED_MAX_KTHREADS; ++i) {
+        if (sched_slots[i].stack_base == NULL) continue;
+        if (d1_canary_check_region("kthread", i, (uint64_t *)sched_slots[i].stack_base))
+            mask |= 4u;
+    }
+
+    if (mask == 0u) {
+        early_console64_write("[d1-canary] all clean\n");
+    } else {
+        early_console64_write("[d1-canary] mask=");
+        early_console64_write_hex64((uint64_t)mask);
+        early_console64_write("\n");
+    }
+    return mask;
+}
+
