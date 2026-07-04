@@ -382,6 +382,10 @@ typedef struct gui_terminal {
     int dirty;
     int cursor_visible;
     uint32_t cursor_blink_ticks;
+    char cmd_buf[128];
+    int cmd_len;
+    int prompt_shown;
+    char cwd[128];
 } gui_terminal_t;
 
 typedef struct gui_settings_row {
@@ -532,7 +536,15 @@ typedef struct gui_system {
     int desktop_note_dragging;
     int desktop_note_drag_offset_x;
     int desktop_note_drag_offset_y;
+    int desktop_note_press_x;
+    int desktop_note_press_y;
+    int desktop_note_moved;
     gui_rect_t desktop_note_stack_rect;
+    /* 每张便签独立坐标（支持单独拖拽） */
+    int desktop_note_pos_x[8];
+    int desktop_note_pos_y[8];
+    int desktop_note_pos_valid[8];
+    int desktop_note_drag_index;
     gui_rect_t desktop_taskbar_rect;
     gui_rect_t desktop_start_button_rect;
     gui_rect_t desktop_start_menu_rect;
@@ -775,5 +787,12 @@ void gui_terminal_clear_selection(void);
 
 void gui_draw_text(int x, int y, const char *text, uint32_t color);
 void gui_draw_char(int x, int y, char ch, uint32_t color);
+
+/* 锁屏专用全屏绘制原语（不走窗口系统） */
+int  gui_screen_width(void);
+int  gui_screen_height(void);
+void gui_screen_fill_rect(int x, int y, int w, int h, uint32_t color);
+void gui_screen_draw_border(int x, int y, int w, int h, int thickness, uint32_t color);
+void gui_screen_present(void);
 
 #endif /* OPENOS_GUI_H */

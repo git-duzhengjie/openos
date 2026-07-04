@@ -11,6 +11,7 @@
 #include "../include/idt64.h"
 #include "../include/idt_selftest64.h"
 #include "../include/initrd64.h"
+#include "../include/ramfs64.h"
 #include "../include/pic64.h"
 #include "../include/pit64.h"
 #include "../include/pmm64.h"
@@ -193,6 +194,11 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
     arch_x86_64_initrd_print_status();
     arch_x86_64_vfs_print_status();
 
+    /* 阶段一：初始化 RAMFS 内存树文件系统（将 initrd 导入为可读写树）。
+     * 必须在 initrd 就绪之后调用；GUI 终端/文件浏览器的 vfs_* 均走此树。 */
+    ramfs_init();
+    early_console64_write("[x86_64][ramfs] tree ready\n");
+
     /* Step F.1 IDT registration selftest — runs as the very first selftest
      * because every later subsystem (syscall, sched, net, tsc, ring3 drop)
      * needs the IDT to route #PF/#GP/#UD/etc. to our C handlers. A
@@ -342,26 +348,13 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
                 early_console64_write("[x86_64][gui] WARN keyboard install failed; desktop runs without keys\n");
             }
             __asm__ __volatile__("sti");  /* 开中断，让 IRQ12 能进来 */
-            /* 端到端键盘验证：创建一个带文本框的测试窗口并让其获得输入焦点。
-             * 焦点文本框会让 gui_should_capture_key_code_with_modifiers() 对
-             * 普通字母键返回 cap=1，键入的字符经 gui_process_events() 路由到
-             * textbox_on_key() 显示出来，形成可见的端到端输入效果。 */
+
+            /* 开机锁屏门闸：桌面已就绪、键鼠已 install、中断已开，
+             * 此处阻塞等待用户输入正确密码（默认 openos）才放行进桌面。
+             * lockscreen_run() 内部自建全屏密码窗口并驱动 window_manager_poll()。*/
             {
-                extern void *gui_create_window(int x, int y, int w, int h, const char *title);
-                extern void *gui_add_label(void *window, int x, int y, int w, int h, const char *text);
-                extern void *gui_add_textbox(void *window, int x, int y, int w, int h, const char *text);
-                extern void gui_widget_focus(void *widget);
-                void *tw = gui_create_window(360, 260, 420, 180, "Keyboard Test");
-                if (tw) {
-                    gui_add_label(tw, 20, 20, 320, 20, "Type here (PS/2 keyboard -> GUI):");
-                    void *tb = gui_add_textbox(tw, 20, 50, 360, 32, "");
-                    if (tb) gui_widget_focus(tb);
-                    gui_invalidate_all();
-                    window_manager_poll();
-                    early_console64_write("[x86_64][gui] keyboard test window created + textbox focused\n");
-                } else {
-                    early_console64_write("[x86_64][gui] WARN failed to create keyboard test window\n");
-                }
+                extern void lockscreen_run(void);
+                lockscreen_run();
             }
             for (;;) {
                 window_manager_poll();

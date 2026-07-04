@@ -14,6 +14,7 @@
 
 #include "types.h"
 #include "core/fs/vfs.h"
+#include "../include/initrd64.h"
 #include "net/net.h"
 #include "net/dns.h"
 #include "net/dhcp.h"
@@ -59,18 +60,10 @@ const char* tls_handshake_type_name(uint8_t type) { (void)type; return ""; }
 const char* tls_record_type_name(uint8_t type) { (void)type; return ""; }
 
 /* ============================================================
- * 2. VFS（文件管理器）—— 暂时空桩（后续接 vfs64）
+ * 2. VFS（文件管理器）—— 已迁移到 ramfs64.c（RAMFS 内存树）
+ *    vfs_open/close/read/write/seek/truncate/stat/mkdir/rmdir/
+ *    unlink/rename/readdir 全部由 ramfs64.c 提供真实实现。
  * ============================================================ */
-int vfs_open(const char *path, int flags, int mode) { (void)path; (void)flags; (void)mode; return -1; }
-int vfs_close(int fd) { (void)fd; return -1; }
-int vfs_read(int fd, void *buf, uint32_t count) { (void)fd; (void)buf; (void)count; return -1; }
-int vfs_write(int fd, const void *buf, uint32_t count) { (void)fd; (void)buf; (void)count; return -1; }
-int vfs_stat(const char *path, inode_t *st) { (void)path; (void)st; return -1; }
-int vfs_mkdir(const char *path, int mode) { (void)path; (void)mode; return -1; }
-int vfs_rmdir(const char *path) { (void)path; return -1; }
-int vfs_unlink(const char *path) { (void)path; return -1; }
-int vfs_rename(const char *oldpath, const char *newpath) { (void)oldpath; (void)newpath; return -1; }
-dentry_t *vfs_readdir(const char *path, int index) { (void)path; (void)index; return 0; }
 
 /* ============================================================
  * 3. 鼠标 / 输入 / USB tablet —— PS/2 鼠标驱动见 mouse64.c

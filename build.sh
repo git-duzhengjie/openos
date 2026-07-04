@@ -350,7 +350,7 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
     ARCH64_USER_BUILD="$ARCH64_BUILD/user"
     ARCH64_BOOT_BUILD="$ARCH64_BUILD/boot"
     ARCH64_BIN_BUILD="$ARCH64_BUILD/bin"
-    ARCH64_CFLAGS="-m64 -mcmodel=kernel -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-80387 -mno-avx -ffreestanding -nostdlib -Wall -Wextra -O2 -fno-pic -fno-pie -fno-PIE -fno-stack-protector -fno-builtin -DGUI_EARLY_VERIFY -I$ARCH64_SRC/include -Isrc/kernel/include"
+    ARCH64_CFLAGS="-m64 -mcmodel=kernel -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-80387 -mno-avx -ffreestanding -nostdlib -Wall -Wextra -O2 -fno-pic -fno-pie -fno-PIE -fno-stack-protector -fno-builtin -DGUI_EARLY_VERIFY -I$ARCH64_SRC/include -Isrc/kernel/include -Isrc/kernel"
     ARCH64_ASFLAGS="-m64 -mcmodel=kernel -mno-red-zone -fno-pic -fno-pie -fno-PIE -I$ARCH64_SRC/include -Isrc/kernel/include"
     ARCH64_USER_CFLAGS="-m64 -mcmodel=large -ffreestanding -nostdlib -Wall -Wextra -O2 -fno-pic -fno-pie -fno-PIE -fno-stack-protector -fno-builtin -I$ARCH64_SRC/user"
     ARCH64_USER_ASFLAGS="-m64 -mcmodel=large -fno-pic -fno-pie -fno-PIE -I$ARCH64_SRC/user"
@@ -494,9 +494,12 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         src/kernel/font.c \
         src/kernel/window_manager.c \
         src/kernel/generated/cjk_font.c \
+        src/kernel/crypto/sha256.c \
+        src/kernel/lockscreen.c \
         src/arch/x86_64/gui64/framebuffer64.c \
         src/arch/x86_64/gui64/gui64_shims.c \
-        src/arch/x86_64/gui64/gui64_stubs.c; do
+        src/arch/x86_64/gui64/gui64_stubs.c \
+        src/arch/x86_64/gui64/ramfs64.c; do
         obj="$ARCH64_BUILD/$(basename "${cfile%.c}").o"
         gcc $GUI64_CFLAGS -c "$cfile" -o "$obj"
     done
@@ -589,9 +592,12 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         "$ARCH64_BUILD/font.o" \
         "$ARCH64_BUILD/window_manager.o" \
         "$ARCH64_BUILD/cjk_font.o" \
+        "$ARCH64_BUILD/sha256.o" \
+        "$ARCH64_BUILD/lockscreen.o" \
         "$ARCH64_BUILD/framebuffer64.o" \
         "$ARCH64_BUILD/gui64_shims.o" \
-        "$ARCH64_BUILD/gui64_stubs.o"
+        "$ARCH64_BUILD/gui64_stubs.o" \
+        "$ARCH64_BUILD/ramfs64.o"
 
     echo "[5/5] x86_64 kernel and hello64 user ELF linked."
 

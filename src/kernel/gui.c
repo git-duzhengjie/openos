@@ -94,6 +94,7 @@ static void gui_ctxmenu_close(void);
 static int  gui_ctxmenu_handle_click(int x, int y);
 static void gui_ctxmenu_draw(void);
 static int  gui_ctxmenu_is_open(void);
+static void gui_ctxmenu_invalidate_hover_changes(int old_x, int old_y, int new_x, int new_y);
 static void gui_file_preview_open(void);
 static void gui_file_preview_render_list(void);
 static void gui_file_preview_render_view(void);
@@ -101,6 +102,7 @@ static void gui_file_preview_render_edit(void);
 static void gui_file_preview_rebuild(void);
 static void gui_about_open(void);
 static void gui_recycle_open(void);
+static void gui_stickynote_open(void);
 static void gui_settings_open(void);
 static void gui_network_open(void);
 static void gui_wifi_open(void);
@@ -5430,6 +5432,12 @@ static void gui_draw_window(gui_window_t *w) {
     }
 }
 
+/* 锁屏捕获门闸：锁屏运行期间置 1，强制 gui_should_capture_key_code_*
+ * 捕获所有按键（锁屏是自绘全屏遮罩，没有焦点 widget，否则按键会被丢弃）。 */
+static volatile int g_lockscreen_capture = 0;
+void gui_set_lockscreen_capture(int on) { g_lockscreen_capture = on ? 1 : 0; }
+int  gui_get_lockscreen_capture(void)   { return g_lockscreen_capture; }
+
 void gui_event_push(gui_event_t event) {
     if (event.type == GUI_EVENT_MOUSE_MOVE && g_gui.event_count > 0) {
         uint32_t last = (g_gui.event_tail + GUI_EVENT_QUEUE_SIZE - 1) % GUI_EVENT_QUEUE_SIZE;
@@ -6503,8 +6511,13 @@ static void gui_handle_mouse_up(int x, int y) {
         gui_invalidate_all();
     }
     if (g_gui.desktop_note_dragging) {
+        int was_click = !g_gui.desktop_note_moved;
         g_gui.desktop_note_dragging = 0;
         gui_invalidate_all();
+        if (was_click) {
+            /* 未发生拖动，视为点击便签：打开内核态便签窗口 */
+            gui_stickynote_open();
+        }
     }
     if (g_gui.splitview_widget) {
         g_gui.splitview_widget->pressed = 0;
@@ -6646,7 +6659,9 @@ void gui_process_events(void) {
                 gui_alt_tab_cycle();
             } else if (ev.key == GUI_KEY_SUPER) {
                 gui_toggle_start_menu();
-            } else if (ev.key == GUI_KEY_TAB) {
+            } else if (ev.key == GUI_KEY_TAB &&
+                       !(g_gui.terminal.enabled && g_gui.terminal.input_focused &&
+                         g_gui.active_window == g_gui.terminal.window)) {
                 if (ev.modifiers & GUI_USER_KEYMOD_SHIFT) gui_focus_prev_widget();
                 else gui_focus_next_widget();
             } else if (g_gui.focused_widget && g_gui.focused_widget->focused &&
@@ -6655,6 +6670,21 @@ void gui_process_events(void) {
                 gui_textbox_on_key(g_gui.focused_widget, ev.key);
             } else if (browser_handle_address_enter(ev.key)) {
                 /* Browser address bar consumed Enter. */
+            } else if (g_gui.terminal.enabled && g_gui.terminal.input_focused &&
+                       g_gui.active_window == g_gui.terminal.window) {
+                /* Terminal window is active: route keystrokes into the command line
+                 * BEFORE the generic focused-widget fallthrough swallows them. */
+                char tch = 0;
+                if (ev.key == GUI_KEY_ENTER || ev.key == '\n' || ev.key == '\r') {
+                    tch = '\n';
+                } else if (ev.key == GUI_KEY_BACKSPACE || ev.key == 8 || ev.key == 127) {
+                    tch = '\b';
+                } else if (ev.key == GUI_KEY_TAB || ev.key == '\t') {
+                    tch = '\t';
+                } else if (ev.key >= 32 && ev.key < 127) {
+                    tch = (char)ev.key;
+                }
+                if (tch) gui_terminal_on_input(tch);
             } else if (g_gui.focused_widget && g_gui.focused_widget->focused &&
                        (g_gui.focused_widget->type == GUI_WIDGET_SELECT ||
                         g_gui.focused_widget->type == GUI_WIDGET_COMBOBOX) &&
@@ -6703,7 +6733,7 @@ void gui_process_events(void) {
             } else if (g_gui.focused_widget && g_gui.focused_widget->focused) {
                 /* Focused widgets consume keys that they do not handle. */
             } else {
-                /* Terminal input must flow through shell_run(), not GUI key events. */
+                /* No focused widget or terminal; key is dropped. */
             }
         } else if (ev.type == GUI_EVENT_MOUSE_DOWN) {
             if (ev.button & 1u) gui_handle_mouse_down(ev.x, ev.y);
@@ -6826,6 +6856,7 @@ static void gui_poll_mouse(void) {
         int complex_move;
         gui_taskbar_invalidate_hover_changes(g_gui.mouse_x, g_gui.mouse_y, ms.x, ms.y);
         gui_desktop_invalidate_hover_changes(g_gui.mouse_x, g_gui.mouse_y, ms.x, ms.y);
+        gui_ctxmenu_invalidate_hover_changes(g_gui.mouse_x, g_gui.mouse_y, ms.x, ms.y);
         complex_move = (g_gui.drag_window != 0) || g_gui.terminal.view.selecting ||
                        ((ms.buttons & 1u) != 0) || ((g_gui.last_mouse_buttons & 1u) != 0);
         if (complex_move) {
@@ -7727,7 +7758,7 @@ static void gui_desktop_draw_start_menu(void) {
     }
 }
 
-#define GUI_DESKTOP_NOTE_FILE "/home/stickynotes.txt"
+#define GUI_DESKTOP_NOTE_FILE "/stickynotes.txt"
 #define GUI_DESKTOP_NOTE_LEGACY_FILE "/home/stickynote.txt"
 #define GUI_DESKTOP_NOTE_MAX_COUNT 5
 #define GUI_DESKTOP_NOTE_MAX_TEXT 96
@@ -7799,17 +7830,17 @@ static void gui_desktop_notes_load_from_file(gui_desktop_note_store_t *store, co
     }
 }
 
+static int sticky_export_to_desktop_store(gui_desktop_note_store_t *store); /* fwd: load from in-memory sticky notes */
+
 static void gui_desktop_notes_load(gui_desktop_note_store_t *store) {
     if (!store) return;
     store->count = 0;
-    gui_desktop_notes_load_from_file(store, GUI_DESKTOP_NOTE_FILE);
-    if (store->count <= 0) {
-        gui_desktop_notes_load_from_file(store, GUI_DESKTOP_NOTE_LEGACY_FILE);
-    }
-    if (store->count <= 0) {
-        gui_desktop_note_add(store, "欢迎使用桌面便签，点击任务栏便签图标添加便签。",
-                             sizeof("欢迎使用桌面便签，点击任务栏便签图标添加便签。") - 1);
-    }
+    /* x86_64 VFS is read-only initrd: sticky notes live in memory only.
+     * The in-memory sticky store is the single source of truth. When it is
+     * empty (e.g. right after boot with no notes added), the desktop must
+     * show nothing -- do NOT fall back to disk or a default welcome note,
+     * otherwise the desktop would show data that the list view does not. */
+    sticky_export_to_desktop_store(store);
 }
 
 static void gui_desktop_draw_note_wrapped_text(const char *text, int x, int y, int w, int h, uint32_t color) {
@@ -7880,56 +7911,95 @@ static void gui_desktop_draw_note_card(const char *text, int x, int y, int w, in
     gui_desktop_draw_note_wrapped_text(text, text_x, text_y, text_w, text_h, gui_rgb(72, 58, 26));
 }
 
-static void gui_desktop_note_default_position(int *out_x, int *out_y) {
+/* 按索引计算第 index 张便签的默认“瀑布式”坐标（未手动摆放时使用） */
+static void gui_desktop_note_default_position(int index, int *out_x, int *out_y) {
     int x = (int)g_gui.width - GUI_DESKTOP_NOTE_CARD_W - 24;
-    int y = 72;
+    int y = 72 + index * (GUI_DESKTOP_NOTE_CARD_H + GUI_DESKTOP_NOTE_GAP);
     if (x < 24) x = 24;
     if (y < 16) y = 16;
     if (out_x) *out_x = x;
     if (out_y) *out_y = y;
 }
 
-static void gui_desktop_note_clamp_position(void) {
+/* 确保第 index 张便签的坐标已初始化（未摆放则用默认瀑布位） */
+static void gui_desktop_note_ensure_pos(int index) {
+    if (index < 0 || index >= 8) return;
+    if (!g_gui.desktop_note_pos_valid[index]) {
+        gui_desktop_note_default_position(index,
+            &g_gui.desktop_note_pos_x[index],
+            &g_gui.desktop_note_pos_y[index]);
+        g_gui.desktop_note_pos_valid[index] = 1;
+    }
+}
+
+/* 对指定 index 便签的坐标做边界夹取 */
+static void gui_desktop_note_clamp_index(int index) {
     int max_x = (int)g_gui.width - GUI_DESKTOP_NOTE_CARD_W;
     int max_y = (int)g_gui.height - GUI_TASKBAR_HEIGHT - GUI_DESKTOP_NOTE_CARD_H;
-    if (!g_gui.desktop_note_position_initialized) {
-        gui_desktop_note_default_position(&g_gui.desktop_note_x, &g_gui.desktop_note_y);
-        g_gui.desktop_note_position_initialized = 1;
-    }
+    if (index < 0 || index >= 8) return;
+    gui_desktop_note_ensure_pos(index);
     if (max_x < 0) max_x = 0;
     if (max_y < 0) max_y = 0;
-    if (g_gui.desktop_note_x < 0) g_gui.desktop_note_x = 0;
-    if (g_gui.desktop_note_y < 0) g_gui.desktop_note_y = 0;
-    if (g_gui.desktop_note_x > max_x) g_gui.desktop_note_x = max_x;
-    if (g_gui.desktop_note_y > max_y) g_gui.desktop_note_y = max_y;
+    if (g_gui.desktop_note_pos_x[index] < 0) g_gui.desktop_note_pos_x[index] = 0;
+    if (g_gui.desktop_note_pos_y[index] < 0) g_gui.desktop_note_pos_y[index] = 0;
+    if (g_gui.desktop_note_pos_x[index] > max_x) g_gui.desktop_note_pos_x[index] = max_x;
+    if (g_gui.desktop_note_pos_y[index] > max_y) g_gui.desktop_note_pos_y[index] = max_y;
 }
 
 static int gui_desktop_note_begin_drag(int x, int y) {
+    gui_desktop_note_store_t store;
+    int i;
     if (!g_gui.desktop_enabled) return 0;
-    if (g_gui.desktop_note_stack_rect.w <= 0 || g_gui.desktop_note_stack_rect.h <= 0) return 0;
-    if (!gui_rect_contains(&g_gui.desktop_note_stack_rect, x, y)) return 0;
-    g_gui.desktop_note_dragging = 1;
-    g_gui.desktop_note_drag_offset_x = x - g_gui.desktop_note_x;
-    g_gui.desktop_note_drag_offset_y = y - g_gui.desktop_note_y;
-    gui_set_focused_widget(0);
-    gui_invalidate_all();
-    return 1;
+    gui_desktop_notes_load(&store);
+    if (store.count <= 0) return 0;
+    /* 从最上层（后画的）往下找命中的那张便签 */
+    for (i = store.count - 1; i >= 0; i--) {
+        gui_rect_t r;
+        if (i >= 8) continue;
+        gui_desktop_note_clamp_index(i);
+        r.x = g_gui.desktop_note_pos_x[i];
+        r.y = g_gui.desktop_note_pos_y[i];
+        r.w = GUI_DESKTOP_NOTE_CARD_W;
+        r.h = GUI_DESKTOP_NOTE_CARD_H;
+        if (gui_rect_contains(&r, x, y)) {
+            g_gui.desktop_note_dragging = 1;
+            g_gui.desktop_note_drag_index = i;
+            g_gui.desktop_note_drag_offset_x = x - g_gui.desktop_note_pos_x[i];
+            g_gui.desktop_note_drag_offset_y = y - g_gui.desktop_note_pos_y[i];
+            g_gui.desktop_note_press_x = x;
+            g_gui.desktop_note_press_y = y;
+            g_gui.desktop_note_moved = 0;
+            gui_set_focused_widget(0);
+            gui_invalidate_all();
+            return 1;
+        }
+    }
+    return 0;
 }
 
 static void gui_desktop_note_drag_to(int x, int y) {
+    int dx;
+    int dy;
+    int idx;
     if (!g_gui.desktop_note_dragging) return;
-    g_gui.desktop_note_x = x - g_gui.desktop_note_drag_offset_x;
-    g_gui.desktop_note_y = y - g_gui.desktop_note_drag_offset_y;
-    gui_desktop_note_clamp_position();
+    idx = g_gui.desktop_note_drag_index;
+    if (idx < 0 || idx >= 8) return;
+    dx = x - g_gui.desktop_note_press_x;
+    dy = y - g_gui.desktop_note_press_y;
+    if (dx < 0) dx = -dx;
+    if (dy < 0) dy = -dy;
+    /* 超过阈值才认定为拖拽，避免手抖把点击误判成拖动 */
+    if (dx > 4 || dy > 4) g_gui.desktop_note_moved = 1;
+    if (!g_gui.desktop_note_moved) return;
+    g_gui.desktop_note_pos_x[idx] = x - g_gui.desktop_note_drag_offset_x;
+    g_gui.desktop_note_pos_y[idx] = y - g_gui.desktop_note_drag_offset_y;
+    gui_desktop_note_clamp_index(idx);
     gui_invalidate_all();
 }
 
 static void gui_desktop_draw_notes(void) {
     gui_desktop_note_store_t store;
     int i;
-    int x;
-    int y;
-    int drawn = 0;
     if (!g_gui.desktop_enabled) return;
     gui_desktop_notes_load(&store);
     if (store.count <= 0) {
@@ -7939,26 +8009,19 @@ static void gui_desktop_draw_notes(void) {
         g_gui.desktop_note_stack_rect.h = 0;
         return;
     }
-    gui_desktop_note_clamp_position();
-    x = g_gui.desktop_note_x;
-    y = g_gui.desktop_note_y;
-    for (i = 0; i < store.count; i++) {
-        if (y + GUI_DESKTOP_NOTE_CARD_H > (int)g_gui.height - GUI_TASKBAR_HEIGHT - 12) break;
-        gui_desktop_draw_note_card(store.items[i], x, y, GUI_DESKTOP_NOTE_CARD_W, GUI_DESKTOP_NOTE_CARD_H, i);
-        y += GUI_DESKTOP_NOTE_CARD_H + GUI_DESKTOP_NOTE_GAP;
-        drawn++;
+    /* 每张便签用各自独立的坐标绘制 */
+    for (i = 0; i < store.count && i < 8; i++) {
+        gui_desktop_note_clamp_index(i);
+        gui_desktop_draw_note_card(store.items[i],
+            g_gui.desktop_note_pos_x[i],
+            g_gui.desktop_note_pos_y[i],
+            GUI_DESKTOP_NOTE_CARD_W, GUI_DESKTOP_NOTE_CARD_H, i);
     }
-    if (drawn > 0) {
-        g_gui.desktop_note_stack_rect.x = x;
-        g_gui.desktop_note_stack_rect.y = g_gui.desktop_note_y;
-        g_gui.desktop_note_stack_rect.w = GUI_DESKTOP_NOTE_CARD_W;
-        g_gui.desktop_note_stack_rect.h = drawn * GUI_DESKTOP_NOTE_CARD_H + (drawn - 1) * GUI_DESKTOP_NOTE_GAP;
-    } else {
-        g_gui.desktop_note_stack_rect.x = 0;
-        g_gui.desktop_note_stack_rect.y = 0;
-        g_gui.desktop_note_stack_rect.w = 0;
-        g_gui.desktop_note_stack_rect.h = 0;
-    }
+    /* stack_rect 保留为第 0 张的位置（兼容旧引用） */
+    g_gui.desktop_note_stack_rect.x = g_gui.desktop_note_pos_x[0];
+    g_gui.desktop_note_stack_rect.y = g_gui.desktop_note_pos_y[0];
+    g_gui.desktop_note_stack_rect.w = GUI_DESKTOP_NOTE_CARD_W;
+    g_gui.desktop_note_stack_rect.h = GUI_DESKTOP_NOTE_CARD_H;
 }
 
 static void gui_desktop_draw(void) {
@@ -8314,13 +8377,7 @@ static void gui_desktop_run_action(uint32_t action) {
         return;
     }
     if (action == GUI_DESKTOP_ACTION_STICKY) {
-        char *argv[] = { "/bin/stickynote", 0 };
-        int pid = spawn_user_process("/bin/stickynote", argv);
-        if (pid < 0) {
-            serial_write("[GUI] /bin/stickynote unavailable\n");
-        } else {
-            serial_write("[GUI] launched /bin/stickynote\n");
-        }
+        gui_stickynote_open();
         return;
     }
     if (action == GUI_DESKTOP_ACTION_SETTINGS) {
@@ -8690,6 +8747,20 @@ static void gui_ctxmenu_draw(void) {
     gui_menu_draw(&g_ctxmenu);
 }
 
+/* When the hovered item changes during a plain mouse move, invalidate the
+ * whole menu rect (incl. shadow) so the unified renderer repaints it and the
+ * old highlight is erased -- otherwise the hover fill smears across items. */
+static void gui_ctxmenu_invalidate_hover_changes(int old_x, int old_y, int new_x, int new_y) {
+    int old_i, new_i, menu_h;
+    if (!g_ctxmenu.open) return;
+    old_i = gui_menu_item_at(&g_ctxmenu, old_x, old_y);
+    new_i = gui_menu_item_at(&g_ctxmenu, new_x, new_y);
+    if (old_i == new_i) return;
+    menu_h = gui_menu_height(&g_ctxmenu);
+    /* +3 covers the drop shadow drawn at (x+3, y+3) */
+    gui_invalidate_rect(g_ctxmenu.x, g_ctxmenu.y, g_ctxmenu.w + 3, menu_h + 3);
+}
+
 /* Handlers for taskbar window right-click menu */
 static void gui_ctxmenu_taskbar_window_action(int id, void *user) {
     gui_window_t *w = (gui_window_t *)user;
@@ -8844,6 +8915,9 @@ int gui_should_capture_key_code_with_modifiers(int key, uint32_t modifiers) {
     (void)modifiers;
     if (!g_gui.initialized) return 0;
 
+    /* 锁屏门闸：锁屏运行期间吸走所有按键，使其能进入事件队列供 lockscreen_run() 消费。 */
+    if (g_lockscreen_capture) return 1;
+
     /* Global hotkeys: always capture regardless of focus. */
     if (key == GUI_KEY_ALT_TAB || key == GUI_KEY_SUPER) return 1;
 
@@ -8869,6 +8943,24 @@ int gui_should_capture_key_code_with_modifiers(int key, uint32_t modifiers) {
             key == GUI_KEY_LEFT || key == GUI_KEY_RIGHT ||
             key == GUI_KEY_HOME || key == GUI_KEY_END ||
             gui_is_enter_key(key) || key == GUI_KEY_TAB) return 1;
+    }
+
+    /* GUI Terminal command line: when the terminal window is active and has
+     * input focus, capture printable keys plus Enter/Backspace so the built-in
+     * command line (gui_terminal_on_input) can receive them. Without this the
+     * capture gate below returns 0 for printable keys and they never reach the
+     * event queue. */
+    if (g_gui.terminal.enabled && g_gui.terminal.input_focused &&
+        g_gui.active_window == g_gui.terminal.window) {
+        serial_write("[TERMGATE] hit key\n");
+        if (gui_is_enter_key(key) || key == GUI_KEY_BACKSPACE || key == GUI_KEY_TAB) return 1;
+        if (key >= 32 && key < 127) return 1;
+    } else if (g_gui.terminal.enabled) {
+        serial_write("[TERMGATE] miss: focus=");
+        serial_write(g_gui.terminal.input_focused ? "1" : "0");
+        serial_write(" activematch=");
+        serial_write(g_gui.active_window == g_gui.terminal.window ? "1" : "0");
+        serial_write("\n");
     }
 
     /* GUI Terminal is the Shell's graphical output window. Do not capture
@@ -10005,7 +10097,7 @@ void gui_widget_set_text(gui_widget_t *widget, const char *text) {
 }
 
 void gui_widget_set_placeholder(gui_widget_t *widget, const char *placeholder) {
-    if (!widget || (widget->type != GUI_WIDGET_TEXTBOX && widget->type != GUI_WIDGET_TEXTAREA)) return;
+    if (!widget || (widget->type != GUI_WIDGET_TEXTBOX && widget->type != GUI_WIDGET_TEXTAREA && widget->type != GUI_WIDGET_LISTVIEW)) return;
     gui_copy_text(widget->placeholder, placeholder ? placeholder : "", sizeof(widget->placeholder));
     gui_widget_invalidate(widget);
 }
@@ -10202,6 +10294,8 @@ void gui_terminal_init(void) {
     g_gui.terminal.input_focused = 1;
     g_gui.terminal.cursor_visible = 1;
     g_gui.terminal.cursor_blink_ticks = 0;
+    g_gui.terminal.cwd[0] = '/';
+    g_gui.terminal.cwd[1] = 0;
     gui_terminal_clear();
     gui_terminal_write("TERMINAL ready. Keyboard input is routed here.\n> ");
 }
@@ -10246,6 +10340,8 @@ static void gui_terminal_view_handle_backspace(gui_terminal_view_t *view) {
         view->cursor_y--;
         view->cursor_x = view->cols - 1;
     }
+    /* 清除光标当前所在 cell，使退格在视觉上真正删除字符 */
+    view->cells[view->cursor_y][view->cursor_x] = ' ';
 }
 
 int gui_terminal_view_putc(gui_terminal_view_t *view, char ch, int *body_dirty) {
@@ -10257,6 +10353,7 @@ int gui_terminal_view_putc(gui_terminal_view_t *view, char ch, int *body_dirty) 
         gui_terminal_view_handle_carriage_return(view);
     } else if (ch == '\b') {
         gui_terminal_view_handle_backspace(view);
+        dirty = 1;
     } else {
         if (view->cursor_x >= view->cols) {
             gui_terminal_view_handle_line_feed(view, &dirty);
@@ -10287,8 +10384,8 @@ void gui_terminal_putc(char ch) {
     gui_terminal_view_t *view = &g_gui.terminal.view;
     uint32_t old_x, old_y;
     int body_dirty = 0;
-    if (!g_gui.initialized || !g_gui.terminal.enabled) return;
-    if (view->cols == 0 || view->rows == 0) return;
+    if (!g_gui.initialized || !g_gui.terminal.enabled) { serial_write("[TPUTC] reject init/enabled\n"); return; }
+    if (view->cols == 0 || view->rows == 0) { serial_write("[TPUTC] reject cols/rows==0\n"); return; }
     if (view->has_selection && ch != 0x03 && ch != 0x16) gui_terminal_clear_selection();
 
     old_x = view->cursor_x;
@@ -10375,9 +10472,499 @@ void gui_terminal_minimize(void) {
     g_gui.terminal.cursor_blink_ticks = 0;
 }
 
+static int gui_str_eq(const char *a, const char *b) {
+    while (*a && *b) { if (*a != *b) return 0; a++; b++; }
+    return *a == *b;
+}
+
+static void gui_terminal_show_prompt(void) {
+    gui_terminal_write("openos> ");
+    g_gui.terminal.prompt_shown = 1;
+}
+
+/* ---- terminal path helpers ---- */
+static uint32_t gui_term_slen(const char *s) {
+    uint32_t n = 0;
+    if (!s) return 0;
+    while (s[n]) n++;
+    return n;
+}
+static void gui_term_scpy(char *dst, const char *src, uint32_t cap) {
+    uint32_t i = 0;
+    if (!dst || cap == 0) return;
+    if (src) { while (src[i] && i < cap - 1) { dst[i] = src[i]; i++; } }
+    dst[i] = 0;
+}
+/* resolve arg (may be relative/absolute) against cwd -> out (abs, normalized) */
+static void gui_term_resolve(const char *arg_in, char *out, uint32_t cap) {
+    char tmp[128];
+    uint32_t ti = 0;
+    const char *cwd = g_gui.terminal.cwd;
+    /* trim leading/trailing whitespace from arg (Tab completion may append a space) */
+    char argbuf[128];
+    const char *arg = argbuf;
+    if (arg_in) {
+        const char *p = arg_in;
+        while (*p == ' ' || *p == '\t') p++;
+        uint32_t k = 0;
+        while (*p && k < sizeof(argbuf) - 1) argbuf[k++] = *p++;
+        while (k > 0 && (argbuf[k - 1] == ' ' || argbuf[k - 1] == '\t')) k--;
+        argbuf[k] = 0;
+    } else {
+        argbuf[0] = 0;
+    }
+    if (arg[0] == 0) {
+        gui_term_scpy(out, cwd, cap);
+        return;
+    }
+    if (arg[0] == '/') {
+        /* absolute */
+        while (arg[ti] && ti < sizeof(tmp) - 1) { tmp[ti] = arg[ti]; ti++; }
+        tmp[ti] = 0;
+    } else {
+        /* cwd + '/' + arg */
+        uint32_t ci = 0;
+        while (cwd[ci] && ti < sizeof(tmp) - 1) { tmp[ti++] = cwd[ci++]; }
+        if (ti == 0 || tmp[ti - 1] != '/') { if (ti < sizeof(tmp) - 1) tmp[ti++] = '/'; }
+        uint32_t ai = 0;
+        while (arg[ai] && ti < sizeof(tmp) - 1) { tmp[ti++] = arg[ai++]; }
+        tmp[ti] = 0;
+    }
+    /* normalize: collapse '//', handle trailing '/', '.', '..' segment-wise */
+    char norm[128];
+    uint32_t ni = 0;
+    norm[ni++] = '/';
+    uint32_t i = 0;
+    while (tmp[i]) {
+        while (tmp[i] == '/') i++;
+        if (!tmp[i]) break;
+        /* read segment */
+        char seg[64];
+        uint32_t si = 0;
+        while (tmp[i] && tmp[i] != '/' && si < sizeof(seg) - 1) seg[si++] = tmp[i++];
+        seg[si] = 0;
+        if (seg[0] == '.' && seg[1] == 0) {
+            continue;
+        } else if (seg[0] == '.' && seg[1] == '.' && seg[2] == 0) {
+            /* pop last segment in norm */
+            if (ni > 1) {
+                ni--; /* drop trailing char if any */
+                while (ni > 1 && norm[ni - 1] != '/') ni--;
+                if (ni > 1 && norm[ni - 1] == '/') ni--; /* remove the slash too, re-add below */
+                if (ni == 0) ni = 1;
+            }
+        } else {
+            if (ni > 1 && norm[ni - 1] != '/') { if (ni < sizeof(norm) - 1) norm[ni++] = '/'; }
+            else if (ni == 1) { /* root slash already there */ }
+            uint32_t k = 0;
+            while (seg[k] && ni < sizeof(norm) - 1) norm[ni++] = seg[k++];
+        }
+    }
+    norm[ni] = 0;
+    if (ni == 0) { norm[0] = '/'; norm[1] = 0; }
+    gui_term_scpy(out, norm, cap);
+}
+
+/* ---- Tab 补全 ---- */
+#define GUI_TERM_CMD_COUNT 12
+static const char *g_gui_term_commands[GUI_TERM_CMD_COUNT] = {
+    "help", "clear", "echo", "ver", "ls", "cat",
+    "cd", "mkdir", "touch", "rm", "rmdir", "pwd"
+};
+
+/* s 是否以 pre 为前缀 */
+static int gui_term_starts(const char *s, const char *pre) {
+    uint32_t i = 0;
+    if (!s || !pre) return 0;
+    while (pre[i]) { if (s[i] != pre[i]) return 0; i++; }
+    return 1;
+}
+/* 把追加内容 tail 逐字符送入命令行缓冲并显示 */
+static void gui_term_append_input(const char *tail) {
+    if (!tail) return;
+    while (*tail) {
+        if (g_gui.terminal.cmd_len < (int)sizeof(g_gui.terminal.cmd_buf) - 1) {
+            g_gui.terminal.cmd_buf[g_gui.terminal.cmd_len++] = *tail;
+            gui_terminal_putc(*tail);
+        }
+        tail++;
+    }
+}
+
+/* 处理 Tab 键：命令名补全 / 路径补全 */
+static void gui_terminal_complete(void) {
+    int len = g_gui.terminal.cmd_len;
+    char *buf = g_gui.terminal.cmd_buf;
+    buf[len] = 0;
+    /* 找最后一个 token 的起点（最后一个空格之后） */
+    int tok_start = len;
+    while (tok_start > 0 && buf[tok_start - 1] != ' ') tok_start--;
+    /* 判断当前 token 是否是命令名（前面没有非空格内容） */
+    int has_prev = 0;
+    { int k = 0; while (k < tok_start) { if (buf[k] != ' ') { has_prev = 1; break; } k++; } }
+    const char *token = buf + tok_start;
+
+    if (!has_prev) {
+        /* ---- 命令名补全 ---- */
+        const char *matches[GUI_TERM_CMD_COUNT];
+        int nmatch = 0;
+        for (int i = 0; i < GUI_TERM_CMD_COUNT; i++) {
+            if (gui_term_starts(g_gui_term_commands[i], token)) {
+                matches[nmatch++] = g_gui_term_commands[i];
+            }
+        }
+        if (nmatch == 0) return;
+        if (nmatch == 1) {
+            gui_term_append_input(matches[0] + gui_term_slen(token));
+            gui_term_append_input(" ");
+            return;
+        }
+        /* 多匹配：求公共前缀 */
+        char common[32];
+        gui_term_scpy(common, matches[0], sizeof(common));
+        for (int i = 1; i < nmatch; i++) {
+            uint32_t j = 0;
+            while (common[j] && matches[i][j] && common[j] == matches[i][j]) j++;
+            common[j] = 0;
+        }
+        uint32_t tlen = gui_term_slen(token);
+        if (gui_term_slen(common) > tlen) {
+            gui_term_append_input(common + tlen);
+        } else {
+            /* 打印候选列表 */
+            gui_terminal_putc('\n');
+            for (int i = 0; i < nmatch; i++) {
+                gui_terminal_write(matches[i]);
+                gui_terminal_putc(' ');
+            }
+            gui_terminal_putc('\n');
+            gui_terminal_show_prompt();
+            gui_terminal_write(buf);
+        }
+        return;
+    }
+
+    /* ---- 路径补全 ---- */
+    /* 把 token 拆成 dir 部分和前缀部分（最后一个 '/' 之后） */
+    int slash = -1;
+    for (int i = 0; token[i]; i++) if (token[i] == '/') slash = i;
+    char dirarg[128];
+    char prefix[64];
+    if (slash < 0) {
+        /* 没有斜杠：目录为 cwd，前缀为整个 token */
+        dirarg[0] = 0;
+        gui_term_scpy(prefix, token, sizeof(prefix));
+    } else {
+        int di = 0;
+        for (int i = 0; i <= slash && di < (int)sizeof(dirarg) - 1; i++) dirarg[di++] = token[i];
+        dirarg[di] = 0;
+        gui_term_scpy(prefix, token + slash + 1, sizeof(prefix));
+    }
+    /* 解析目录绝对路径 */
+    char absdir[128];
+    gui_term_resolve(dirarg[0] ? dirarg : ".", absdir, sizeof(absdir));
+    /* 遍历目录匹配前缀 */
+    char match_name[64];
+    int nmatch = 0;
+    int match_is_dir = 0;
+    char common[64];
+    int have_common = 0;
+    dentry_t *e;
+    /* 第一遍：统计、记录唯一匹配、求公共前缀 */
+    for (int idx = 0; (e = vfs_readdir(absdir, idx)) != 0; idx++) {
+        if (e->name[0] == '.' && e->name[1] == 0) continue;
+        if (e->name[0] == '.' && e->name[1] == '.' && e->name[2] == 0) continue;
+        if (!gui_term_starts(e->name, prefix)) continue;
+        nmatch++;
+        if (nmatch == 1) {
+            gui_term_scpy(match_name, e->name, sizeof(match_name));
+            gui_term_scpy(common, e->name, sizeof(common));
+            have_common = 1;
+        } else {
+            uint32_t j = 0;
+            while (common[j] && e->name[j] && common[j] == e->name[j]) j++;
+            common[j] = 0;
+        }
+    }
+    if (nmatch == 0) return;
+    uint32_t plen = gui_term_slen(prefix);
+    if (nmatch == 1) {
+        /* 判断唯一匹配是否目录 */
+        char full[128];
+        gui_term_scpy(full, absdir, sizeof(full));
+        uint32_t fl = gui_term_slen(full);
+        if (fl == 0 || full[fl - 1] != '/') { if (fl < sizeof(full) - 1) { full[fl++] = '/'; full[fl] = 0; } }
+        gui_term_scpy(full + fl, match_name, sizeof(full) - fl);
+        inode_t st;
+        if (vfs_stat(full, &st) == 0 && (st.mode & FS_DIR)) match_is_dir = 1;
+        gui_term_append_input(match_name + plen);
+        gui_term_append_input(match_is_dir ? "/" : " ");
+        return;
+    }
+    /* 多匹配 */
+    if (have_common && gui_term_slen(common) > plen) {
+        gui_term_append_input(common + plen);
+        return;
+    }
+    /* 打印候选 */
+    gui_terminal_putc('\n');
+    for (int idx = 0; (e = vfs_readdir(absdir, idx)) != 0; idx++) {
+        if (e->name[0] == '.' && e->name[1] == 0) continue;
+        if (e->name[0] == '.' && e->name[1] == '.' && e->name[2] == 0) continue;
+        if (!gui_term_starts(e->name, prefix)) continue;
+        gui_terminal_write(e->name);
+        if (e->inode && (e->inode->mode & FS_DIR)) gui_terminal_putc('/');
+        gui_terminal_putc(' ');
+    }
+    gui_terminal_putc('\n');
+    gui_terminal_show_prompt();
+    gui_terminal_write(buf);
+}
+
+static void gui_terminal_run_command(const char *cmd) {
+    /* skip leading spaces */
+    while (*cmd == ' ') cmd++;
+    if (*cmd == '\0') {
+        return;
+    }
+    if (gui_str_eq(cmd, "help")) {
+        gui_terminal_write("commands: help clear echo ver time\n");
+        gui_terminal_write("          ls cat pwd cd mkdir rmdir rm touch\n");
+        gui_terminal_write("          echo TEXT > FILE  (write to file)\n");
+    } else if (gui_str_eq(cmd, "clear") || gui_str_eq(cmd, "cls")) {
+        gui_terminal_clear();
+    } else if (gui_str_eq(cmd, "ver") || gui_str_eq(cmd, "version")) {
+        gui_terminal_write("openos x86_64 (UEFI GUI)\n");
+    } else if (gui_str_eq(cmd, "pwd")) {
+        gui_terminal_write(g_gui.terminal.cwd);
+        gui_terminal_write("\n");
+    } else if (cmd[0] == 'l' && cmd[1] == 's' && (cmd[2] == ' ' || cmd[2] == '\0')) {
+        const char *arg = cmd + 2;
+        while (*arg == ' ') arg++;
+        char path[128];
+        gui_term_resolve(arg, path, sizeof(path));
+        int count = 0;
+        for (int i = 0; i < 128; i++) {
+            dentry_t *e = vfs_readdir(path, i);
+            if (!e) break;
+            gui_terminal_write(e->name);
+            gui_terminal_write("  ");
+            count++;
+        }
+        if (count == 0) {
+            gui_terminal_write("(empty or not found)");
+        }
+        gui_terminal_write("\n");
+    } else if (cmd[0] == 'c' && cmd[1] == 'd' && (cmd[2] == ' ' || cmd[2] == '\0')) {
+        const char *arg = cmd + 2;
+        while (*arg == ' ') arg++;
+        char path[128];
+        gui_term_resolve(arg, path, sizeof(path));
+        /* verify it is a directory: readdir must yield at least one entry, or path=="/" */
+        int ok = 0;
+        if (path[0] == '/' && path[1] == 0) {
+            ok = 1;
+        } else {
+            dentry_t *e = vfs_readdir(path, 0);
+            if (e) ok = 1;
+        }
+        if (ok) {
+            gui_term_scpy(g_gui.terminal.cwd, path, sizeof(g_gui.terminal.cwd));
+        } else {
+            gui_terminal_write("cd: no such directory: ");
+            gui_terminal_write(path);
+            gui_terminal_write("\n");
+        }
+    } else if (cmd[0] == 'c' && cmd[1] == 'a' && cmd[2] == 't' && (cmd[3] == ' ' || cmd[3] == '\0')) {
+        const char *arg = cmd + 3;
+        while (*arg == ' ') arg++;
+        if (*arg == 0) {
+            gui_terminal_write("cat: missing file operand\n");
+        } else {
+            char path[128];
+            gui_term_resolve(arg, path, sizeof(path));
+            int fd = vfs_open(path, 0, 0);
+            if (fd < 0) {
+                gui_terminal_write("cat: cannot open: ");
+                gui_terminal_write(path);
+                gui_terminal_write("\n");
+            } else {
+                char buf[129];
+                int n;
+                while ((n = vfs_read(fd, buf, 128)) > 0) {
+                    buf[n] = 0;
+                    gui_terminal_write(buf);
+                }
+                vfs_close(fd);
+                gui_terminal_write("\n");
+            }
+        }
+    } else if (cmd[0] == 'm' && cmd[1] == 'k' && cmd[2] == 'd' && cmd[3] == 'i' && cmd[4] == 'r' &&
+               (cmd[5] == ' ' || cmd[5] == '\0')) {
+        const char *arg = cmd + 5;
+        while (*arg == ' ') arg++;
+        if (*arg == 0) {
+            gui_terminal_write("mkdir: missing operand\n");
+        } else {
+            char path[128];
+            gui_term_resolve(arg, path, sizeof(path));
+            if (vfs_mkdir(path, 0755) == 0) {
+                /* ok, silent */
+            } else {
+                gui_terminal_write("mkdir: cannot create directory: ");
+                gui_terminal_write(path);
+                gui_terminal_write("\n");
+            }
+        }
+    } else if (cmd[0] == 't' && cmd[1] == 'o' && cmd[2] == 'u' && cmd[3] == 'c' && cmd[4] == 'h' &&
+               (cmd[5] == ' ' || cmd[5] == '\0')) {
+        const char *arg = cmd + 5;
+        while (*arg == ' ') arg++;
+        if (*arg == 0) {
+            gui_terminal_write("touch: missing file operand\n");
+        } else {
+            char path[128];
+            gui_term_resolve(arg, path, sizeof(path));
+            int fd = vfs_open(path, O_CREAT, 0644);
+            if (fd < 0) {
+                gui_terminal_write("touch: cannot create: ");
+                gui_terminal_write(path);
+                gui_terminal_write("\n");
+            } else {
+                vfs_close(fd);
+            }
+        }
+    } else if (cmd[0] == 'r' && cmd[1] == 'm' && cmd[2] == 'd' && cmd[3] == 'i' && cmd[4] == 'r' &&
+               (cmd[5] == ' ' || cmd[5] == '\0')) {
+        const char *arg = cmd + 5;
+        while (*arg == ' ') arg++;
+        if (*arg == 0) {
+            gui_terminal_write("rmdir: missing operand\n");
+        } else {
+            char path[128];
+            gui_term_resolve(arg, path, sizeof(path));
+            if (vfs_rmdir(path) != 0) {
+                gui_terminal_write("rmdir: failed (not empty or not a dir): ");
+                gui_terminal_write(path);
+                gui_terminal_write("\n");
+            }
+        }
+    } else if (cmd[0] == 'r' && cmd[1] == 'm' && (cmd[2] == ' ' || cmd[2] == '\0')) {
+        const char *arg = cmd + 2;
+        while (*arg == ' ') arg++;
+        if (*arg == 0) {
+            gui_terminal_write("rm: missing operand\n");
+        } else {
+            char path[128];
+            gui_term_resolve(arg, path, sizeof(path));
+            if (vfs_unlink(path) != 0) {
+                /* 可能是目录，试着当空目录删 */
+                if (vfs_rmdir(path) != 0) {
+                    gui_terminal_write("rm: cannot remove: ");
+                    gui_terminal_write(path);
+                    gui_terminal_write("\n");
+                }
+            }
+        }
+    } else if (cmd[0] == 'e' && cmd[1] == 'c' && cmd[2] == 'h' && cmd[3] == 'o' &&
+               (cmd[4] == ' ' || cmd[4] == '\0')) {
+        const char *arg = cmd + 4;
+        while (*arg == ' ') arg++;
+        /* 检查是否有重定向 '>'：echo TEXT > FILE */
+        const char *redir = arg;
+        const char *gt = 0;
+        while (*redir) { if (*redir == '>') { gt = redir; break; } redir++; }
+        if (gt) {
+            /* 提取文本（去掉尾部空格）与文件名 */
+            char text[128];
+            int tl = 0;
+            const char *tp = arg;
+            while (tp < gt && tl < (int)sizeof(text) - 1) text[tl++] = *tp++;
+            while (tl > 0 && text[tl - 1] == ' ') tl--;
+            text[tl] = 0;
+            const char *fp = gt + 1;
+            while (*fp == ' ') fp++;
+            if (*fp == 0) {
+                gui_terminal_write("echo: missing file after >\n");
+            } else {
+                char path[128];
+                gui_term_resolve(fp, path, sizeof(path));
+                int fd = vfs_open(path, O_CREAT | O_TRUNC | O_WRONLY, 0644);
+                if (fd < 0) {
+                    gui_terminal_write("echo: cannot write: ");
+                    gui_terminal_write(path);
+                    gui_terminal_write("\n");
+                } else {
+                    if (tl > 0) vfs_write(fd, text, (uint32_t)tl);
+                    vfs_write(fd, "\n", 1);
+                    vfs_close(fd);
+                }
+            }
+        } else {
+            gui_terminal_write(arg);
+            gui_terminal_write("\n");
+        }
+    } else {
+        gui_terminal_write("unknown command: ");
+        gui_terminal_write(cmd);
+        gui_terminal_write("\n");
+    }
+}
+
 void gui_terminal_on_input(char ch) {
-    if (!g_gui.initialized || !g_gui.terminal.enabled || !g_gui.terminal.input_focused) return;
-    gui_terminal_putc(ch);
+    serial_write("[TERMIN] on_input called\n");
+    if (!g_gui.initialized || !g_gui.terminal.enabled || !g_gui.terminal.input_focused) {
+        serial_write("[TERMIN] guard REJECT (init/enabled/focus)\n");
+        return;
+    }
+    serial_write("[TERMIN] guard PASS\n");
+
+    if (!g_gui.terminal.prompt_shown) {
+        gui_terminal_show_prompt();
+    }
+
+    if (ch == '\r' || ch == '\n') {
+        /* commit command line */
+        gui_terminal_putc('\n');
+        g_gui.terminal.cmd_buf[g_gui.terminal.cmd_len] = '\0';
+        /* trim 首尾空白（空格/制表符/回车），防止参数带尾随空格导致路径匹配失败 */
+        {
+            char *cb = g_gui.terminal.cmd_buf;
+            int cl = g_gui.terminal.cmd_len;
+            while (cl > 0 && (cb[cl-1]==' '||cb[cl-1]=='\t'||cb[cl-1]=='\r'||cb[cl-1]=='\n')) cb[--cl]=0;
+            int st = 0;
+            while (cb[st]==' '||cb[st]=='\t') st++;
+            if (st > 0) { int d=0; while (cb[st]) cb[d++]=cb[st++]; cb[d]=0; cl=d; }
+            g_gui.terminal.cmd_len = cl;
+        }
+        gui_terminal_run_command(g_gui.terminal.cmd_buf);
+        g_gui.terminal.cmd_len = 0;
+        gui_terminal_show_prompt();
+        return;
+    }
+
+    if (ch == '\b' || ch == 127) {
+        /* backspace */
+        if (g_gui.terminal.cmd_len > 0) {
+            g_gui.terminal.cmd_len--;
+            gui_terminal_putc('\b');
+        }
+        return;
+    }
+
+    if (ch == '\t') {
+        /* Tab 补全：命令名 / 路径 */
+        gui_terminal_complete();
+        return;
+    }
+
+    /* printable ASCII only */
+    if ((unsigned char)ch >= 32 && (unsigned char)ch < 127) {
+        if (g_gui.terminal.cmd_len < (int)sizeof(g_gui.terminal.cmd_buf) - 1) {
+            g_gui.terminal.cmd_buf[g_gui.terminal.cmd_len++] = ch;
+            gui_terminal_putc(ch);
+        }
+    }
 }
 
 void gui_terminal_write(const char *text) {
@@ -11366,6 +11953,7 @@ static int gui_demo_app_entry(gui_app_t *app, void *user_data) {
 static gui_window_t *g_about_win = 0;
 static gui_window_t *g_recycle_win = 0;
 static gui_window_t *g_notif_win = 0;
+static gui_window_t *g_stickynote_win = 0;
 
 #define GUI_NOTIF_MAX        16
 #define GUI_NOTIF_TEXT_LEN   80
@@ -11448,6 +12036,269 @@ static void gui_recycle_open(void) {
     g_recycle_win = gui_create_window(140, 120, win_w, win_h, i18n_t(I18N_KEY_WIN_RECYCLE_BIN));
     if (!g_recycle_win) return;
     gui_window_set_on_close(g_recycle_win, recycle_on_close, 0);
+    gui_render();
+}
+
+/* === Sticky Note manager (kernel-side GUI) === */
+
+#define STICKY_MAX_NOTES 16
+#define STICKY_NOTE_LEN  256
+#define STICKY_FILE_PATH "/stickynotes.txt"
+
+static char g_sticky_notes[STICKY_MAX_NOTES][STICKY_NOTE_LEN];
+static int  g_sticky_count = 0;
+static int  g_sticky_view = 0;      /* 0 = list, 1 = edit */
+static int  g_sticky_edit_idx = -1; /* -1 = new note, >=0 = editing existing */
+static gui_widget_t *g_sticky_listview = 0;
+static gui_widget_t *g_sticky_editbox = 0;
+
+/* Export in-memory sticky notes into a desktop note store (read-only VFS workaround). */
+static int sticky_export_to_desktop_store(gui_desktop_note_store_t *store) {
+    int i;
+    int len;
+    if (!store) return 0;
+    store->count = 0;
+    for (i = 0; i < g_sticky_count && i < STICKY_MAX_NOTES; i++) {
+        const char *s = g_sticky_notes[i];
+        len = 0;
+        while (s[len]) len++;
+        if (len > 0) gui_desktop_note_add(store, s, len);
+    }
+    return store->count;
+}
+
+static void sticky_trim_newline(char *s) {
+    int n = 0;
+    if (!s) return;
+    while (s[n]) n++;
+    while (n > 0 && (s[n - 1] == '\n' || s[n - 1] == '\r')) { s[--n] = '\0'; }
+}
+
+/* Load notes from disk into memory store.
+ * NOTE: x86_64 VFS is a read-only initrd (no write/create). Notes therefore
+ * live in memory only. We must load from disk AT MOST ONCE, otherwise every
+ * re-open of the sticky window would wipe the in-memory notes with the empty
+ * (unwritable) file. */
+static int g_sticky_loaded = 0;
+static void sticky_load(void) {
+    int fd;
+    static char buf[STICKY_MAX_NOTES * STICKY_NOTE_LEN];
+    int total = 0;
+    int i;
+    int line_len;
+    const char *p;
+
+    if (g_sticky_loaded) return;   /* already initialised: keep memory store */
+    g_sticky_loaded = 1;
+
+    g_sticky_count = 0;
+    for (i = 0; i < STICKY_MAX_NOTES; i++) g_sticky_notes[i][0] = '\0';
+
+    fd = vfs_open(STICKY_FILE_PATH, O_RDONLY, 0);
+    if (fd < 0) return;
+    total = vfs_read(fd, buf, sizeof(buf) - 1);
+    vfs_close(fd);
+    if (total <= 0) return;
+    buf[total] = '\0';
+
+    p = buf;
+    while (*p && g_sticky_count < STICKY_MAX_NOTES) {
+        line_len = 0;
+        while (p[line_len] && p[line_len] != '\n') line_len++;
+        if (line_len > 0) {
+            int cp = line_len;
+            if (cp > STICKY_NOTE_LEN - 1) cp = STICKY_NOTE_LEN - 1;
+            for (i = 0; i < cp; i++) g_sticky_notes[g_sticky_count][i] = p[i];
+            g_sticky_notes[g_sticky_count][cp] = '\0';
+            sticky_trim_newline(g_sticky_notes[g_sticky_count]);
+            if (g_sticky_notes[g_sticky_count][0]) g_sticky_count++;
+        }
+        p += line_len;
+        if (*p == '\n') p++;
+    }
+}
+
+/* Persist memory store to disk */
+static void sticky_save(void) {
+    int fd;
+    int i, j;
+    static char buf[STICKY_MAX_NOTES * STICKY_NOTE_LEN];
+    int total = 0;
+
+    for (i = 0; i < g_sticky_count; i++) {
+        for (j = 0; g_sticky_notes[i][j] && total < (int)sizeof(buf) - 2; j++)
+            buf[total++] = g_sticky_notes[i][j];
+        if (total < (int)sizeof(buf) - 1) buf[total++] = '\n';
+    }
+
+    {
+        char dbg[64]; int n=0; const char *pf="[STICKY] save count=";
+        while(pf[n]){dbg[n]=pf[n];n++;} dbg[n++]='0'+(g_sticky_count%10);
+        dbg[n++]=' ';dbg[n++]='b';dbg[n++]='=';dbg[n++]='0'+((total/100)%10);
+        dbg[n++]='0'+((total/10)%10);dbg[n++]='0'+(total%10);dbg[n++]='\n';dbg[n]='\0';
+        serial_write(dbg);
+    }
+    fd = vfs_open(STICKY_FILE_PATH, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0) { serial_write("[STICKY] save OPEN FAIL\n"); return; }
+    if (total > 0) vfs_write(fd, buf, total);
+    vfs_close(fd);
+    serial_write("[STICKY] save OK\n");
+}
+
+/* Build the pipe-free list string for the listview ('\n' separated) */
+static void sticky_build_list_items(char *out, int cap) {
+    int i, o = 0;
+    int j;
+    out[0] = '\0';
+    for (i = 0; i < g_sticky_count && o < cap - 2; i++) {
+        for (j = 0; g_sticky_notes[i][j] && o < cap - 2; j++) {
+            char c = g_sticky_notes[i][j];
+            if (c == '\n' || c == '\r') c = ' ';
+            out[o++] = c;
+        }
+        if (i < g_sticky_count - 1 && o < cap - 1) out[o++] = '\n';
+    }
+    out[o] = '\0';
+    serial_write("[STICKY] listitems='");
+    serial_write(out);
+    serial_write("'\n");
+}
+
+static void gui_stickynote_open(void);
+
+/* ---- list view callbacks ---- */
+static void sticky_cb_add(gui_widget_t *w, void *ud) {
+    (void)w; (void)ud;
+    g_sticky_view = 1;
+    g_sticky_edit_idx = -1;
+    gui_stickynote_open();
+}
+
+static void sticky_cb_edit(gui_widget_t *w, void *ud) {
+    int sel = -1;
+    (void)ud; (void)w;
+    if (!g_sticky_listview) return;
+    gui_listview_get_selected(g_sticky_listview, &sel);
+    if (sel < 0 || sel >= g_sticky_count) { gui_notify("Select a note first"); return; }
+    g_sticky_view = 1;
+    g_sticky_edit_idx = sel;
+    gui_stickynote_open();
+}
+
+static void sticky_cb_delete(gui_widget_t *w, void *ud) {
+    int sel = -1, i;
+    (void)w; (void)ud;
+    if (!g_sticky_listview) return;
+    gui_listview_get_selected(g_sticky_listview, &sel);
+    if (sel < 0 || sel >= g_sticky_count) { gui_notify("Select a note first"); return; }
+    for (i = sel; i < g_sticky_count - 1; i++) {
+        int k;
+        for (k = 0; k < STICKY_NOTE_LEN; k++) g_sticky_notes[i][k] = g_sticky_notes[i + 1][k];
+    }
+    g_sticky_count--;
+    g_sticky_notes[g_sticky_count][0] = '\0';
+    sticky_save();
+    g_sticky_view = 0;
+    gui_stickynote_open();
+}
+
+/* ---- edit view callbacks ---- */
+static void sticky_cb_save(gui_widget_t *w, void *ud) {
+    const char *txt;
+    int i;
+    (void)w; (void)ud;
+    if (!g_sticky_editbox) return;
+    txt = gui_widget_get_text(g_sticky_editbox);
+    serial_write("[STICKY] save txt='");
+    serial_write(txt ? txt : "(null)");
+    serial_write("'\n");
+    if (!txt || !txt[0]) { gui_notify("Note is empty"); return; }
+
+    if (g_sticky_edit_idx >= 0 && g_sticky_edit_idx < g_sticky_count) {
+        for (i = 0; i < STICKY_NOTE_LEN - 1 && txt[i]; i++)
+            g_sticky_notes[g_sticky_edit_idx][i] = txt[i];
+        g_sticky_notes[g_sticky_edit_idx][i] = '\0';
+    } else if (g_sticky_count < STICKY_MAX_NOTES) {
+        for (i = 0; i < STICKY_NOTE_LEN - 1 && txt[i]; i++)
+            g_sticky_notes[g_sticky_count][i] = txt[i];
+        g_sticky_notes[g_sticky_count][i] = '\0';
+        g_sticky_count++;
+    } else {
+        gui_notify("Note list is full");
+        return;
+    }
+    sticky_save();
+    g_sticky_view = 0;
+    g_sticky_edit_idx = -1;
+    gui_stickynote_open();
+}
+
+static void sticky_cb_cancel(gui_widget_t *w, void *ud) {
+    (void)w; (void)ud;
+    g_sticky_view = 0;
+    g_sticky_edit_idx = -1;
+    gui_stickynote_open();
+}
+
+static void stickynote_on_close(gui_window_t *win, void *ud) {
+    (void)win; (void)ud;
+    g_stickynote_win = 0;
+    g_sticky_listview = 0;
+    g_sticky_editbox = 0;
+}
+
+static void gui_stickynote_open(void) {
+    int win_w = 340;
+    int win_h = 300;
+    static int loaded = 0;
+
+    if (!loaded) { sticky_load(); loaded = 1; }
+
+    if (g_stickynote_win) {
+        gui_window_set_on_close(g_stickynote_win, 0, 0);
+        gui_destroy_window(g_stickynote_win);
+        g_stickynote_win = 0;
+    }
+    g_sticky_listview = 0;
+    g_sticky_editbox = 0;
+
+    if (g_sticky_view == 0) {
+        /* ---------- List view ---------- */
+        static char items[STICKY_MAX_NOTES * STICKY_NOTE_LEN];
+        g_stickynote_win = gui_create_window(200, 130, win_w, win_h, "Sticky Notes");
+        if (!g_stickynote_win) return;
+
+        gui_add_label(g_stickynote_win, 10, 8, 120, 20, "My Notes");
+        gui_add_button(g_stickynote_win, win_w - 70, 6, 60, 24, "+ New", sticky_cb_add, 0);
+
+        sticky_build_list_items(items, sizeof(items));
+        g_sticky_listview = gui_add_listview(g_stickynote_win, 10, 38, win_w - 20, win_h - 90, items, -1, 0, 0, 0);
+
+        gui_add_button(g_stickynote_win, 10, win_h - 42, 90, 28, "Edit", sticky_cb_edit, 0);
+        gui_add_button(g_stickynote_win, 110, win_h - 42, 90, 28, "Delete", sticky_cb_delete, 0);
+    } else {
+        /* ---------- Edit view ---------- */
+        const char *init = "";
+        g_stickynote_win = gui_create_window(200, 130, win_w, win_h, "Edit Note");
+        if (!g_stickynote_win) return;
+
+        if (g_sticky_edit_idx >= 0 && g_sticky_edit_idx < g_sticky_count)
+            init = g_sticky_notes[g_sticky_edit_idx];
+
+        gui_add_label(g_stickynote_win, 10, 8, 200, 20, (g_sticky_edit_idx < 0) ? "New Note" : "Edit Note");
+        g_sticky_editbox = gui_add_textarea(g_stickynote_win, 10, 32, win_w - 20, win_h - 90, init);
+        if (g_sticky_editbox) {
+            gui_widget_set_textbox_flags(g_sticky_editbox,
+                GUI_TEXTBOX_FLAG_MULTILINE | GUI_TEXTBOX_FLAG_WRAP);
+            gui_widget_set_placeholder(g_sticky_editbox, "Type your note here...");
+            gui_set_focused_widget(g_sticky_editbox);
+        }
+
+        gui_add_button(g_stickynote_win, 10, win_h - 42, 90, 28, "Save", sticky_cb_save, 0);
+        gui_add_button(g_stickynote_win, 110, win_h - 42, 90, 28, "Cancel", sticky_cb_cancel, 0);
+    }
+
+    gui_window_set_on_close(g_stickynote_win, stickynote_on_close, 0);
     gui_render();
 }
 
@@ -14914,4 +15765,49 @@ void gui_demo(void) {
     app = gui_register_app("demo", "OpenOS Demo", gui_demo_app_entry, 0);
     if (app) gui_start_app(app);
     gui_render();
+}
+
+/* ============================================================
+ * 锁屏专用底层原语（供 lockscreen.c 全屏自绘使用）
+ *
+ * 锁屏是桌面启动前的全屏门闸，不走窗口系统，因此需要直接
+ * 访问 backbuffer 填充与 present。这里把内部静态原语以受控
+ * 方式导出。
+ * ============================================================ */
+
+/* 返回当前屏幕宽高（像素） */
+int gui_screen_width(void) {
+    return (int)g_gui.width;
+}
+
+int gui_screen_height(void) {
+    return (int)g_gui.height;
+}
+
+/* 全屏/矩形填充（写入 backbuffer，随后需调用 gui_screen_present） */
+void gui_screen_fill_rect(int x, int y, int w, int h, uint32_t color) {
+    gui_raw_fill_rect(x, y, w, h, color);
+}
+
+/* 画矩形边框（1px 线宽 * thickness） */
+void gui_screen_draw_border(int x, int y, int w, int h, int thickness, uint32_t color) {
+    int t;
+    if (thickness < 1) thickness = 1;
+    for (t = 0; t < thickness; t++) {
+        gui_raw_fill_rect(x + t, y + t, w - 2 * t, 1, color);            /* top */
+        gui_raw_fill_rect(x + t, y + h - 1 - t, w - 2 * t, 1, color);    /* bottom */
+        gui_raw_fill_rect(x + t, y + t, 1, h - 2 * t, color);            /* left */
+        gui_raw_fill_rect(x + w - 1 - t, y + t, 1, h - 2 * t, color);    /* right */
+    }
+}
+
+/* 将 backbuffer 整屏刷到 framebuffer（present） */
+void gui_screen_present(void) {
+    gui_rect_t all;
+    if (!gui_compositor_active()) return;
+    all.x = 0;
+    all.y = 0;
+    all.w = (int)g_gui.width;
+    all.h = (int)g_gui.height;
+    gui_flush_rect(&all);
 }
