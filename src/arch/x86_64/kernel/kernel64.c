@@ -211,6 +211,10 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
         /* part_lba 传 0：自动探测 MBR 分区，无分区则整盘 FAT32 */
         if (fat32_mount(ata_slave_read_sectors, 0) == 0) {
             early_console64_write("[x86_64][fat32] mounted at /mnt/fat\n");
+            /* 阶段 4-3：使能写入（注入 slave 写扇区回调） */
+            fat32_set_write_fn(ata_slave_write_sectors);
+            if (fat32_writable())
+                early_console64_write("[x86_64][fat32] write enabled (RW)\n");
             fat32_selftest();
         } else {
             early_console64_write("[x86_64][fat32] mount failed\n");

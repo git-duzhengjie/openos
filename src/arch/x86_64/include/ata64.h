@@ -45,5 +45,7 @@ int ata_slave_init(void);
 int ata_slave_present(void);
 /* 从 slave 读取 count 个扇区到 buf。返回 0 成功，负数失败 */
 int ata_slave_read_sectors(uint32_t lba, uint32_t count, void *buf);
+/* 向 slave 写入 count 个扇区。返回 0 成功，负数失败 */
+int ata_slave_write_sectors(uint32_t lba, uint32_t count, const void *buf);
 
 #endif /* ATA64_H */

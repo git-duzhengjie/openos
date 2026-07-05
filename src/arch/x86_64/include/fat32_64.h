@@ -18,6 +18,10 @@
 /* 扇区读回调：从 lba 读 count 个 512 字节扇区到 buf。返回 0 成功，负数失败 */
 typedef int (*fat32_read_fn)(uint32_t lba, uint32_t count, void *buf);
 
+/* 扇区写回调：把 buf 中 count 个 512 字节扇区写到 lba。返回 0 成功，负数失败。
+ * （阶段 4-3 写入支持；不设置则文件系统为只读） */
+typedef int (*fat32_write_fn)(uint32_t lba, uint32_t count, const void *buf);
+
 /* 目录项（对外统一视图） */
 typedef struct {
     char     name[256];        /* 文件名（LFN 或 8.3） */
@@ -45,6 +49,23 @@ int fat32_list(const char *path,
 
 /* 读文件内容到 buf（最多 max 字节）。返回实际读取字节数，负数错误。*/
 int fat32_read_file(const char *path, void *buf, uint32_t max);
+
+/* ---- 阶段 4-3：写入支持（仅 8.3 短文件名） ---- */
+
+/* 注册扇区写回调。挂载后调用一次即可开启写能力。*/
+void fat32_set_write_fn(fat32_write_fn write_fn);
+
+/* 是否可写（已挂载且已注册写回调） */
+int fat32_writable(void);
+
+/* 写文件（覆盖已有内容 / 不存在则新建）。
+ *   path : 完整路径，末段必须是合法 8.3 短名（如 /TEST.TXT、/DIR/A.BIN），
+ *          不支持长文件名写入。
+ *   buf  : 数据；size : 字节数（可为 0，表示清空文件）。
+ * 返回实际写入字节数，负数错误：
+ *   -1 未挂载/不可写  -2 路径非法  -3 父目录不存在
+ *   -4 目标是目录     -5 簇分配失败 -6 目录项写入失败  -7 内存不足 */
+int fat32_write_file(const char *path, const void *buf, uint32_t size);
 
 /* 查询单个路径的元信息。返回 0 成功并填充 out，负数错误。*/
 int fat32_stat(const char *path, fat32_dirent_t *out);

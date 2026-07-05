@@ -293,3 +293,32 @@ int ata_slave_read_sectors(uint32_t lba, uint32_t count, void *buf) {
     }
     return 0;
 }
+
+int ata_slave_write_sectors(uint32_t lba, uint32_t count, const void *buf) {
+    if (!g_slave_present) return -1;
+    if (count == 0) return 0;
+    const uint16_t *ptr = (const uint16_t *)buf;
+
+    for (uint32_t s = 0; s < count; s++) {
+        uint32_t cur = lba + s;
+        if (ata_wait_not_busy() < 0) return -2;
+
+        /* slave + LBA28 高 4 位：0xF0 */
+        outb(ATA_REG_DRIVE, 0xF0 | ((cur >> 24) & 0x0F));
+        outb(ATA_REG_FEATURES, 0);
+        outb(ATA_REG_SECCOUNT, 1);
+        outb(ATA_REG_LBA_LO,  (uint8_t)(cur & 0xFF));
+        outb(ATA_REG_LBA_MID, (uint8_t)((cur >> 8) & 0xFF));
+        outb(ATA_REG_LBA_HI,  (uint8_t)((cur >> 16) & 0xFF));
+        outb(ATA_REG_COMMAND, ATA_CMD_WRITE_PIO);
+
+        if (ata_wait_drq() < 0) return -3;
+
+        for (int i = 0; i < 256; i++) outw(ATA_REG_DATA, *ptr++);
+        ata_io_delay();
+
+        outb(ATA_REG_COMMAND, ATA_CMD_FLUSH);
+        if (ata_wait_not_busy() < 0) return -4;
+    }
+    return 0;
+}
