@@ -23,6 +23,10 @@
 #include "net/net_config.h"
 #include "tls_parser.h"
 #include "process.h"
+
+/* 阶段二：RAMFS 磁盘快照持久化接口（实现于 x86_64 gui64/ramfs64.c） */
+extern int ramfs_snapshot_save(void);
+extern int ramfs_snapshot_load(void);
 extern int spawn_user_process(const char *path, char *const argv[]);
 extern uint32_t sched_time_ms(void);
 
@@ -10566,10 +10570,10 @@ static void gui_term_resolve(const char *arg_in, char *out, uint32_t cap) {
 }
 
 /* ---- Tab 补全 ---- */
-#define GUI_TERM_CMD_COUNT 12
+#define GUI_TERM_CMD_COUNT 13
 static const char *g_gui_term_commands[GUI_TERM_CMD_COUNT] = {
     "help", "clear", "echo", "ver", "ls", "cat",
-    "cd", "mkdir", "touch", "rm", "rmdir", "pwd"
+    "cd", "mkdir", "touch", "rm", "rmdir", "pwd", "sync"
 };
 
 /* s 是否以 pre 为前缀 */
@@ -10731,10 +10735,16 @@ static void gui_terminal_run_command(const char *cmd) {
         gui_terminal_write("commands: help clear echo ver time\n");
         gui_terminal_write("          ls cat pwd cd mkdir rmdir rm touch\n");
         gui_terminal_write("          echo TEXT > FILE  (write to file)\n");
+        gui_terminal_write("          sync  (save filesystem to disk)\n");
     } else if (gui_str_eq(cmd, "clear") || gui_str_eq(cmd, "cls")) {
         gui_terminal_clear();
     } else if (gui_str_eq(cmd, "ver") || gui_str_eq(cmd, "version")) {
         gui_terminal_write("openos x86_64 (UEFI GUI)\n");
+    } else if (gui_str_eq(cmd, "sync")) {
+        int sr = ramfs_snapshot_save();
+        if (sr == 0)      gui_terminal_write("sync: filesystem saved to disk\n");
+        else if (sr == -1) gui_terminal_write("sync: no data disk / fs not ready\n");
+        else               gui_terminal_write("sync: save failed\n");
     } else if (gui_str_eq(cmd, "pwd")) {
         gui_terminal_write(g_gui.terminal.cwd);
         gui_terminal_write("\n");

@@ -21,6 +21,7 @@ set "QEMU=C:\Program Files\qemu\qemu-system-x86_64.exe"
 set "OVMF_CODE=C:\Program Files\qemu\share\edk2-x86_64-code.fd"
 set "OVMF_VARS=%ROOT%\target\OVMF_VARS.fd"
 set "IMAGE=%ROOT%\target\openos-uefi.img"
+set "DATADISK=%ROOT%\target\openos-data.img"
 set "LOGDIR=%ROOT%\logs"
 set "SERLOG=%LOGDIR%\qfork.ser"
 
@@ -43,6 +44,16 @@ goto usage
 
 :args_done
 if not exist "%LOGDIR%" mkdir "%LOGDIR%" >nul 2>&1
+
+rem --- ensure persistent data disk exists (64MB raw) for ATA persistence ---
+if not exist "%DATADISK%" (
+  echo [build+run] creating data disk %DATADISK% ^(64MB^)
+  "%QEMU:qemu-system-x86_64.exe=qemu-img.exe%" create -f raw "%DATADISK%" 64M >nul 2>&1
+  if not exist "%DATADISK%" (
+    echo [build+run] qemu-img failed; creating via fsutil
+    fsutil file createnew "%DATADISK%" 67108864 >nul 2>&1
+  )
+)
 
 echo.
 echo === OpenOS build+run ===
@@ -112,10 +123,11 @@ goto run_gui
 
 :run_gui
 echo [build+run] GUI mode; serial mirrored to %SERLOG%
-"%QEMU%" -machine q35 -cpu qemu64 -smp 4 -m 256M ^
+"%QEMU%" -machine pc -cpu qemu64 -smp 4 -m 256M ^
   -drive if=pflash,format=raw,unit=0,file="%OVMF_CODE%",readonly=on ^
   -drive if=pflash,format=raw,unit=1,file="%OVMF_VARS%" ^
   -drive file="%IMAGE%",format=raw,media=disk,if=ide,index=0 ^
+  -drive file="%DATADISK%",format=raw,media=disk,if=ide,index=2 ^
   -boot c ^
   -serial file:"%SERLOG%" -vga std -net none
 set "QRC=%ERRORLEVEL%"
@@ -130,10 +142,11 @@ if exist "%SERLOG%" del /Q "%SERLOG%" >nul 2>&1
 set "QEMU_STDERR=%LOGDIR%\qemu.stderr"
 if exist "%QEMU_STDERR%" del /Q "%QEMU_STDERR%" >nul 2>&1
 rem  Launch QEMU detached; wait up to N seconds; force-kill remaining processes.
-start "" /B "%QEMU%" -machine q35 -cpu qemu64 -smp 4 -m 256M ^
+start "" /B "%QEMU%" -machine pc -cpu qemu64 -smp 4 -m 256M ^
   -drive "if=pflash,format=raw,unit=0,file=%OVMF_CODE%,readonly=on" ^
   -drive "if=pflash,format=raw,unit=1,file=%OVMF_VARS%" ^
   -drive "file=%IMAGE%,format=raw,media=disk,if=ide,index=0" ^
+  -drive "file=%DATADISK%,format=raw,media=disk,if=ide,index=2" ^
   -boot c -serial "file:%SERLOG%" -display none -no-reboot -no-shutdown 2>"%QEMU_STDERR%"
 timeout /T %HEADLESS_TIMEOUT_S% /NOBREAK >nul 2>&1
 rem  Fallback: 'timeout' bails on non-interactive stdin; use ping as a portable sleep.

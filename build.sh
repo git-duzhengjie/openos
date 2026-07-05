@@ -499,7 +499,8 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         src/arch/x86_64/gui64/framebuffer64.c \
         src/arch/x86_64/gui64/gui64_shims.c \
         src/arch/x86_64/gui64/gui64_stubs.c \
-        src/arch/x86_64/gui64/ramfs64.c; do
+        src/arch/x86_64/gui64/ramfs64.c \
+        src/arch/x86_64/gui64/ata64.c; do
         obj="$ARCH64_BUILD/$(basename "${cfile%.c}").o"
         gcc $GUI64_CFLAGS -c "$cfile" -o "$obj"
     done
@@ -597,8 +598,8 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         "$ARCH64_BUILD/framebuffer64.o" \
         "$ARCH64_BUILD/gui64_shims.o" \
         "$ARCH64_BUILD/gui64_stubs.o" \
-        "$ARCH64_BUILD/ramfs64.o"
-
+        "$ARCH64_BUILD/ramfs64.o" \
+        "$ARCH64_BUILD/ata64.o"
     echo "[5/5] x86_64 kernel and hello64 user ELF linked."
 
     echo "[UEFI] Building x86_64 BOOTX64.EFI via mingw-w64 (native PE)..."

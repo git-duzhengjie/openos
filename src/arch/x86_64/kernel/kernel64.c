@@ -12,6 +12,7 @@
 #include "../include/idt_selftest64.h"
 #include "../include/initrd64.h"
 #include "../include/ramfs64.h"
+#include "../include/ata64.h"
 #include "../include/pic64.h"
 #include "../include/pit64.h"
 #include "../include/pmm64.h"
@@ -194,10 +195,36 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
     arch_x86_64_initrd_print_status();
     arch_x86_64_vfs_print_status();
 
+    /* 阶段二：探测 secondary IDE 上的持久化数据盘（ATA PIO / LBA28）。
+     * 必须在 ramfs_init() 之前，以便后续从磁盘快照恢复文件树。 */
+    if (ata_init()) {
+        early_console64_write("[x86_64][ata] data disk ready\n");
+    } else {
+        early_console64_write("[x86_64][ata] no data disk (RAM-only mode)\n");
+    }
+
     /* 阶段一：初始化 RAMFS 内存树文件系统（将 initrd 导入为可读写树）。
      * 必须在 initrd 就绪之后调用；GUI 终端/文件浏览器的 vfs_* 均走此树。 */
     ramfs_init();
     early_console64_write("[x86_64][ramfs] tree ready\n");
+
+    /* 阶段二：若数据盘上存在有效快照，则加载覆盖内存树（持久化恢复）。 */
+    {
+        int lr = ramfs_snapshot_load();
+        if (lr == 0) {
+            early_console64_write("[x86_64][ramfs] snapshot restored from disk\n");
+        } else if (lr == 1) {
+            early_console64_write("[x86_64][ramfs] no snapshot on disk (fresh tree)\n");
+            /* 首次启动: 将 initrd 初始树落盘为初始快照, 使后续启动可持久化恢复 */
+            if (ramfs_snapshot_save() == 0) {
+                early_console64_write("[x86_64][ramfs] initial snapshot written to disk\n");
+            } else {
+                early_console64_write("[x86_64][ramfs] initial snapshot save skipped/failed\n");
+            }
+        } else {
+            early_console64_write("[x86_64][ramfs] snapshot load failed (fresh tree)\n");
+        }
+    }
 
     /* Step F.1 IDT registration selftest — runs as the very first selftest
      * because every later subsystem (syscall, sched, net, tsc, ring3 drop)

@@ -8,6 +8,7 @@
  * ============================================================ */
 
 #include "ramfs64.h"
+#include "ata64.h"
 #include "initrd64.h"
 
 /* ---- 外部依赖 ---- */
@@ -528,4 +529,271 @@ void ramfs_init(void) {
         }
     }
     ramfs_log("[RAMFS] init done, initrd imported\n");
+}
+
+/* ============================================================
+ * 磁盘快照持久化 (RAMFS <-> ATA secondary master)
+ *
+ * 磁盘布局 (512B 扇区):
+ *   扇区 0        : superblock
+ *   扇区 1..N     : 记录流 (record stream)
+ * 每条记录 (紧凑排列, 小端):
+ *   uint32 type   : 1=目录 2=文件
+ *   uint32 mode   : inode.mode 低位权限
+ *   uint32 pathlen: 路径字节数 (不含结尾)
+ *   uint32 datalen: 文件数据字节数 (目录为0)
+ *   char   path[pathlen]
+ *   char   data[datalen]
+ * 记录之间无对齐填充; 记录流以一条 type=0 的终止记录结束。
+ * ========================================================== */
+
+#define RAMFS_SNAP_MAGIC   0x52414d46u   /* 'RAMF' */
+#define RAMFS_SNAP_VERSION 1u
+#define RAMFS_SECTOR       512u
+#define RAMFS_SNAP_MAXSEC  16384u        /* 最多 8 MiB 快照 */
+
+typedef struct {
+    uint32_t magic;
+    uint32_t version;
+    uint32_t node_count;   /* 记录数(不含终止记录) */
+    uint32_t total_bytes;  /* 记录流总字节(含终止记录) */
+    uint32_t sector_count; /* 记录流占用扇区数 */
+    uint32_t reserved[3];
+} ramfs_snap_super_t;
+
+/* 写游标: 把记录流累积到扇区缓冲, 满 512B 就落盘 */
+typedef struct {
+    uint32_t lba;          /* 当前写入的扇区号 */
+    uint32_t off;          /* buf 内偏移 */
+    uint32_t total;        /* 已写字节总数 */
+    int      err;
+    uint8_t  buf[RAMFS_SECTOR];
+} ramfs_wcursor_t;
+
+static void snap_put_u32(uint8_t *p, uint32_t v) {
+    p[0] = (uint8_t)(v & 0xff);
+    p[1] = (uint8_t)((v >> 8) & 0xff);
+    p[2] = (uint8_t)((v >> 16) & 0xff);
+    p[3] = (uint8_t)((v >> 24) & 0xff);
+}
+static uint32_t snap_get_u32(const uint8_t *p) {
+    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
+           ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+
+/* 向写游标推入一段字节, 自动按扇区落盘 */
+static void wcursor_push(ramfs_wcursor_t *wc, const void *src, uint32_t len) {
+    const uint8_t *s = (const uint8_t *)src;
+    while (len > 0 && !wc->err) {
+        uint32_t space = RAMFS_SECTOR - wc->off;
+        uint32_t n = (len < space) ? len : space;
+        rmemcpy(wc->buf + wc->off, s, n);
+        wc->off   += n;
+        wc->total += n;
+        s         += n;
+        len       -= n;
+        if (wc->off == RAMFS_SECTOR) {
+            if (wc->lba >= 1u + RAMFS_SNAP_MAXSEC) { wc->err = -1; return; }
+            if (ata_write_sectors(wc->lba, 1, wc->buf) != 0) { wc->err = -2; return; }
+            wc->lba++;
+            wc->off = 0;
+        }
+    }
+}
+
+/* 冲刷写游标剩余不满一扇区的数据(补零) */
+static void wcursor_flush(ramfs_wcursor_t *wc) {
+    if (wc->err) return;
+    if (wc->off > 0) {
+        for (uint32_t i = wc->off; i < RAMFS_SECTOR; i++) wc->buf[i] = 0;
+        if (ata_write_sectors(wc->lba, 1, wc->buf) != 0) { wc->err = -2; return; }
+        wc->lba++;
+        wc->off = 0;
+    }
+}
+
+/* 递归写出一个节点及其子树 (path 为该节点绝对路径) */
+static void snap_write_node(ramfs_wcursor_t *wc, ramfs_node_t *n,
+                            char *path, uint32_t pathlen, uint32_t *count) {
+    if (!n || wc->err) return;
+    uint32_t is_dir = (n->inode.mode & FS_DIR) ? 1u : 2u;
+    /* 根目录本身不写记录(隐式存在), 只写其子节点 */
+    if (!(pathlen == 1 && path[0] == '/')) {
+        uint8_t hdr[16];
+        uint32_t datalen = (is_dir == 2u) ? (uint32_t)n->inode.size : 0u;
+        snap_put_u32(hdr + 0,  is_dir);
+        snap_put_u32(hdr + 4,  (uint32_t)(n->inode.mode & 0777));
+        snap_put_u32(hdr + 8,  pathlen);
+        snap_put_u32(hdr + 12, datalen);
+        wcursor_push(wc, hdr, 16);
+        wcursor_push(wc, path, pathlen);
+        if (datalen > 0 && n->data) wcursor_push(wc, n->data, datalen);
+        (*count)++;
+    }
+    /* 递归子节点 */
+    for (ramfs_node_t *c = n->child; c && !wc->err; c = c->sibling) {
+        uint32_t nl = rstrlen(c->dentry.name);
+        /* 组装子路径: path + '/' + name (根目录不重复 '/') */
+        char child_path[512];
+        uint32_t cl = 0;
+        if (pathlen == 1 && path[0] == '/') {
+            child_path[cl++] = '/';
+        } else {
+            for (uint32_t i = 0; i < pathlen && cl < 510; i++) child_path[cl++] = path[i];
+            child_path[cl++] = '/';
+        }
+        for (uint32_t i = 0; i < nl && cl < 511; i++) child_path[cl++] = c->dentry.name[i];
+        child_path[cl] = 0;
+        snap_write_node(wc, c, child_path, cl, count);
+    }
+}
+
+int ramfs_snapshot_save(void) {
+    if (!g_ramfs_ready || !g_root) { ramfs_log("[RAMFS] save: not ready\n"); return -1; }
+    if (!ata_present())            { ramfs_log("[RAMFS] save: no disk\n");   return -1; }
+
+    ramfs_wcursor_t wc;
+    wc.lba = 1; wc.off = 0; wc.total = 0; wc.err = 0;
+    for (int i = 0; i < (int)RAMFS_SECTOR; i++) wc.buf[i] = 0;
+
+    uint32_t count = 0;
+    char rootpath[2]; rootpath[0] = '/'; rootpath[1] = 0;
+    snap_write_node(&wc, g_root, rootpath, 1, &count);
+
+    /* 终止记录 type=0 */
+    if (!wc.err) {
+        uint8_t term[16];
+        for (int i = 0; i < 16; i++) term[i] = 0;
+        wcursor_push(&wc, term, 16);
+    }
+    uint32_t stream_bytes = wc.total;
+    wcursor_flush(&wc);
+    if (wc.err) { ramfs_log("[RAMFS] save: write error\n"); return -2; }
+
+    /* 写 superblock (扇区0) */
+    uint8_t sb[RAMFS_SECTOR];
+    for (int i = 0; i < (int)RAMFS_SECTOR; i++) sb[i] = 0;
+    ramfs_snap_super_t *S = (ramfs_snap_super_t *)sb;
+    S->magic        = RAMFS_SNAP_MAGIC;
+    S->version      = RAMFS_SNAP_VERSION;
+    S->node_count   = count;
+    S->total_bytes  = stream_bytes;
+    S->sector_count = wc.lba - 1u;
+    if (ata_write_sectors(0, 1, sb) != 0) { ramfs_log("[RAMFS] save: sb write err\n"); return -2; }
+    ata_flush();
+    ramfs_log("[RAMFS] snapshot saved\n");
+    return 0;
+}
+
+/* ---------- 反序列化: 读游标 ---------- */
+typedef struct {
+    uint32_t lba;              /* 下一个要读的扇区 */
+    uint32_t off;              /* buf 内已消费偏移 */
+    uint32_t valid;            /* buf 内有效字节(总为 512) */
+    uint32_t remain;           /* 记录流剩余未读字节 */
+    int      err;
+    uint8_t  buf[RAMFS_SECTOR];
+} ramfs_rcursor_t;
+
+static void rcursor_fill(ramfs_rcursor_t *rc) {
+    if (rc->err) return;
+    if (rc->lba >= 1u + RAMFS_SNAP_MAXSEC) { rc->err = -1; return; }
+    if (ata_read_sectors(rc->lba, 1, rc->buf) != 0) { rc->err = -2; return; }
+    rc->lba++;
+    rc->off = 0;
+    rc->valid = RAMFS_SECTOR;
+}
+
+/* 从读游标拉取 len 字节到 dst; 不足时自动读下一扇区 */
+static void rcursor_pull(ramfs_rcursor_t *rc, void *dst, uint32_t len) {
+    uint8_t *d = (uint8_t *)dst;
+    while (len > 0 && !rc->err) {
+        if (rc->off >= rc->valid) { rcursor_fill(rc); if (rc->err) return; }
+        uint32_t avail = rc->valid - rc->off;
+        uint32_t n = (len < avail) ? len : avail;
+        if (rc->remain < n) { rc->err = -3; return; }   /* 超出记录流长度 */
+        if (d) rmemcpy(d, rc->buf + rc->off, n);
+        rc->off    += n;
+        rc->remain -= n;
+        if (d) d   += n;
+        len        -= n;
+    }
+}
+
+/* 丢弃(skip) len 字节 */
+static void rcursor_skip(ramfs_rcursor_t *rc, uint32_t len) {
+    rcursor_pull(rc, 0, len);
+}
+
+int ramfs_snapshot_load(void) {
+    if (!g_ramfs_ready || !g_root) { ramfs_log("[RAMFS] load: not ready\n"); return -1; }
+    if (!ata_present())            { ramfs_log("[RAMFS] load: no disk\n");   return -1; }
+
+    /* 读 superblock */
+    uint8_t sb[RAMFS_SECTOR];
+    if (ata_read_sectors(0, 1, sb) != 0) { ramfs_log("[RAMFS] load: sb read err\n"); return -2; }
+    ramfs_snap_super_t *S = (ramfs_snap_super_t *)sb;
+    if (S->magic != RAMFS_SNAP_MAGIC) { ramfs_log("[RAMFS] load: no snapshot (bad magic)\n"); return 1; }
+    if (S->version != RAMFS_SNAP_VERSION) { ramfs_log("[RAMFS] load: version mismatch\n"); return -3; }
+
+    ramfs_rcursor_t rc;
+    rc.lba = 1; rc.off = 0; rc.valid = 0; rc.remain = S->total_bytes; rc.err = 0;
+
+    uint32_t restored = 0;
+    for (;;) {
+        uint8_t hdr[16];
+        if (rc.remain < 16) break;
+        rcursor_pull(&rc, hdr, 16);
+        if (rc.err) break;
+        uint32_t type    = snap_get_u32(hdr + 0);
+        uint32_t perm    = snap_get_u32(hdr + 4);
+        uint32_t pathlen = snap_get_u32(hdr + 8);
+        uint32_t datalen = snap_get_u32(hdr + 12);
+        if (type == 0) break;                 /* 终止记录 */
+        if (pathlen == 0 || pathlen >= 512) { rc.err = -4; break; }
+
+        char path[512];
+        rcursor_pull(&rc, path, pathlen);
+        if (rc.err) break;
+        path[pathlen] = 0;
+
+        if (type == 1u) {
+            /* 目录: ensure_dirs 会建中间段, leaf 为最后一段 */
+            char leaf[MAX_NAME];
+            ramfs_node_t *parent = ensure_dirs(path, leaf, sizeof(leaf));
+            if (parent && leaf[0]) {
+                ramfs_node_t *d = dir_lookup(parent, leaf, rstrlen(leaf));
+                if (!d) node_create(parent, leaf, FS_DIR | (perm & 0777));
+            }
+            restored++;
+        } else if (type == 2u) {
+            char leaf[MAX_NAME];
+            ramfs_node_t *parent = ensure_dirs(path, leaf, sizeof(leaf));
+            if (parent && leaf[0]) {
+                ramfs_node_t *n = dir_lookup(parent, leaf, rstrlen(leaf));
+                if (!n) n = node_create(parent, leaf, FS_FILE | (perm & 0777));
+                if (n && datalen > 0) {
+                    if (file_ensure_cap(n, (unsigned long)datalen) == 0) {
+                        rcursor_pull(&rc, n->data, datalen);
+                        n->inode.size = (unsigned long)datalen;
+                    } else {
+                        rcursor_skip(&rc, datalen);
+                    }
+                } else if (datalen > 0) {
+                    rcursor_skip(&rc, datalen);
+                }
+            } else {
+                rcursor_skip(&rc, datalen);
+            }
+            restored++;
+        } else {
+            /* 未知类型: 跳过数据 */
+            rcursor_skip(&rc, datalen);
+        }
+        if (rc.err) break;
+    }
+
+    if (rc.err) { ramfs_log("[RAMFS] load: stream error\n"); return -5; }
+    ramfs_log("[RAMFS] snapshot loaded\n");
+    return 0;
 }
