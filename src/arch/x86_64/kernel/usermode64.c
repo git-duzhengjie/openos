@@ -9,6 +9,10 @@
 #include "../include/pmm64.h"
 #include "../include/percpu64.h"
 #include "../include/proc64.h"
+#include "../include/elf64_loader.h"
+#include "../include/initrd64.h"
+#include "../include/heap64.h"
+#include "../../../kernel/core/fs/vfs.h" /* RAMFS-backed vfs_open/read/stat */
 
 extern void arch_x86_64_iretq_enter_user(const x86_64_user_iretq_frame_t *frame);
 extern void arch_x86_64_iretq_enter_user_full(const x86_64_user_iretq_frame_t *frame);
@@ -918,4 +922,123 @@ x86_64_virt_addr_t arch_x86_64_usermode_seed_user_stack_ex(
     /* P4.c.1: return the ring3-visible RSP (kernel did all writes via the
      * unbiased cursor, but ring3 enters with rsp = cursor + bias). */
     return (x86_64_virt_addr_t)(cursor + (uintptr_t)pointer_va_bias);
+}
+
+/* =====================================================================
+ * H.7: reusable program launcher (shell-facing entry point)
+ * ---------------------------------------------------------------------
+ * arch_x86_64_usermode_launch_path() wraps the full "load an ELF, build
+ * a fresh address space, spawn a user PCB, drop to ring3, and drive the
+ * execve/fork rounds until the program tree exits" flow that the boot
+ * path (kernel64.c) hand-rolls for /bin/launcher. Factoring it here lets
+ * the interactive shell start arbitrary programs by path.
+ *
+ * Image resolution mirrors do_exec(): VFS/RAMFS first (disk-backed,
+ * user-droppable), then the compiled-in initrd as a fallback.
+ *
+ * Returns the program's exit code (>=0), or -1 on load/spawn failure.
+ * ===================================================================== */
+int arch_x86_64_usermode_launch_path(const char *path,
+                                     int argc, const char **argv,
+                                     int envc, const char **envp)
+{
+    if (path == ((const char *)0) || path[0] == '\0') {
+        return -1;
+    }
+
+    /* --- resolve image: VFS first, initrd fallback --- */
+    const uint8_t *img_data = (const uint8_t *)0;
+    uint64_t       img_size = 0;
+    void          *vfs_buf  = (void *)0;
+    {
+        inode_t st;
+        if (vfs_stat(path, &st) == 0 && (st.mode & FS_FILE) && st.size > 0) {
+            void *buf = arch_x86_64_kmalloc((x86_64_size_t)st.size);
+            if (buf != (void *)0) {
+                int fd = vfs_open(path, 0, 0);
+                if (fd >= 0) {
+                    int got = vfs_read(fd, buf, (uint32_t)st.size);
+                    vfs_close(fd);
+                    if (got == (int)st.size) {
+                        vfs_buf  = buf;
+                        img_data = (const uint8_t *)buf;
+                        img_size = (uint64_t)st.size;
+                    } else {
+                        arch_x86_64_kfree(buf);
+                    }
+                } else {
+                    arch_x86_64_kfree(buf);
+                }
+            }
+        }
+    }
+    if (img_data == (const uint8_t *)0) {
+        const x86_64_initrd_file_t *file = arch_x86_64_initrd_find(path);
+        if (file == ((const x86_64_initrd_file_t *)0)) {
+            early_console64_write("[x86_64][launch] ENOENT path=");
+            early_console64_write(path);
+            early_console64_write("\n");
+            return -1;
+        }
+        img_data = file->data;
+        img_size = file->size;
+    }
+
+    /* --- build fresh AS + load ELF --- */
+    x86_64_address_space_t *as = arch_x86_64_as_create();
+    elf64_load_result_t lr =
+        arch_x86_64_elf64_load_image_into(img_data, img_size, as);
+    if (vfs_buf != (void *)0) {
+        arch_x86_64_kfree(vfs_buf);
+        vfs_buf = (void *)0;
+    }
+    if (lr.status != ELF64_LOADER_OK) {
+        early_console64_write("[x86_64][launch] elf-load-failed path=");
+        early_console64_write(path);
+        early_console64_write("\n");
+        if (as != ((x86_64_address_space_t *)0)) {
+            arch_x86_64_as_destroy(as);
+        }
+        return -1;
+    }
+
+    /* --- spawn PCB + bind AS --- */
+    (void)arch_x86_64_proc_spawn_user(path);
+    if (as != ((x86_64_address_space_t *)0)) {
+        arch_x86_64_proc_current_set_as(as);
+    }
+
+    /* --- seed argv/envp (default argv[0]=path when caller passes none) --- */
+    if (argc > 0 && argv != ((const char **)0)) {
+        arch_x86_64_usermode_set_args(argc, argv);
+    } else {
+        const char *default_argv[2] = { path, (const char *)0 };
+        arch_x86_64_usermode_set_args(1, default_argv);
+    }
+    if (envc > 0 && envp != ((const char **)0)) {
+        arch_x86_64_usermode_set_envs(envc, envp);
+    }
+
+    /* --- drive ring3 with execve/fork rounds (mirrors boot loop) --- */
+    x86_64_entry_t next_entry = lr.entry;
+    const int kExecRoundCap = 8;
+    int round = 0;
+    for (;;) {
+        (void)arch_x86_64_usermode_run(next_entry);
+        if (arch_x86_64_usermode_has_pending_exec()) {
+            next_entry = arch_x86_64_usermode_take_pending_exec();
+            if (++round >= kExecRoundCap) {
+                early_console64_write("[x86_64][launch] exec-round cap hit\n");
+                break;
+            }
+            continue;
+        }
+        break;
+    }
+
+    int code = 0;
+    if (arch_x86_64_usermode_has_exited()) {
+        code = arch_x86_64_usermode_exit_code();
+    }
+    return code;
 }

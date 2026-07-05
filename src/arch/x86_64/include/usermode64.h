@@ -38,6 +38,17 @@ uint8_t arch_x86_64_usermode_is_running(void);
 uint8_t arch_x86_64_usermode_has_exited(void);
 int arch_x86_64_usermode_exit_code(void);
 int arch_x86_64_usermode_run(x86_64_entry_t entry);
+
+/*
+ * Reusable program launcher for the interactive shell.
+ * Loads `path` (VFS/RAMFS first, initrd fallback), builds a fresh address
+ * space, spawns a user PCB, drops to ring3, and drives execve/fork rounds
+ * until the tree exits. Returns the exit code (>=0) or -1 on failure.
+ * argc/argv and envc/envp may be 0/NULL (defaults argv[0]=path).
+ */
+int arch_x86_64_usermode_launch_path(const char *path,
+                                     int argc, const char **argv,
+                                     int envc, const char **envp);
 void arch_x86_64_usermode_mark_exited(int code);
 void arch_x86_64_usermode_return_to_kernel(void) __attribute__((noreturn));
 

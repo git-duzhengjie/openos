@@ -10499,6 +10499,14 @@ static void gui_term_scpy(char *dst, const char *src, uint32_t cap) {
     if (src) { while (src[i] && i < cap - 1) { dst[i] = src[i]; i++; } }
     dst[i] = 0;
 }
+
+/* --- Route-2 bridges: run user programs from the GUI terminal --- */
+extern int  arch_x86_64_usermode_launch_path(const char *path, int argc, const char **argv, int envc, const char **envp);
+extern void arch_x86_64_fd_set_stdout_mirror(void (*sink)(char c));
+void gui_terminal_set_capture(int on);
+void gui_terminal_write(const char *text);
+void gui_terminal_enqueue_output(const char *text);
+
 /* resolve arg (may be relative/absolute) against cwd -> out (abs, normalized) */
 static void gui_term_resolve(const char *arg_in, char *out, uint32_t cap) {
     char tmp[128];
@@ -10914,6 +10922,41 @@ static void gui_terminal_run_command(const char *cmd) {
             gui_terminal_write(arg);
             gui_terminal_write("\n");
         }
+    } else if ((cmd[0] == 'r' && cmd[1] == 'u' && cmd[2] == 'n' && (cmd[3] == ' ' || cmd[3] == '\0')) ||
+               (cmd[0] == 'e' && cmd[1] == 'x' && cmd[2] == 'e' && cmd[3] == 'c' && (cmd[4] == ' ' || cmd[4] == '\0'))) {
+        /* run/exec <path>: launch a user-mode ELF program.
+         * Resolves relative paths against cwd, then hands off to the
+         * kernel launcher (VFS-first ELF load + ring3 execve/fork rounds).
+         * The call blocks until the program tree exits; program stdout is
+         * mirrored to the terminal via gui_terminal_write (see SYS_WRITE). */
+        const char *arg = cmd + ((cmd[0] == 'r') ? 3 : 4);
+        while (*arg == ' ') arg++;
+        if (*arg == 0) {
+            gui_terminal_write("run: missing program path\n");
+        } else {
+            char path[128];
+            gui_term_resolve(arg, path, sizeof(path));
+            gui_terminal_write("[run] launching ");
+            gui_terminal_write(path);
+            gui_terminal_write("\n");
+            gui_terminal_set_capture(1);
+            int code = arch_x86_64_usermode_launch_path(path, 0, 0, 0, 0);
+            gui_terminal_set_capture(0);
+            gui_terminal_write("[run] exit code=");
+            {
+                char nb[12];
+                int ni = 0;
+                int v = code;
+                if (v < 0) { gui_terminal_write("-"); v = -v; }
+                char tmp[12]; int ti = 0;
+                if (v == 0) tmp[ti++] = '0';
+                while (v > 0 && ti < 11) { tmp[ti++] = (char)('0' + (v % 10)); v /= 10; }
+                while (ti > 0) nb[ni++] = tmp[--ti];
+                nb[ni] = 0;
+                gui_terminal_write(nb);
+            }
+            gui_terminal_write("\n");
+        }
     } else {
         gui_terminal_write("unknown command: ");
         gui_terminal_write(cmd);
@@ -10980,6 +11023,21 @@ void gui_terminal_on_input(char ch) {
 void gui_terminal_write(const char *text) {
     if (!text) return;
     while (*text) gui_terminal_putc(*text++);
+}
+
+/* Mirror sink for foreground user programs: called by the syscall layer
+ * for every stdout/stderr byte while capture is active. We push into the
+ * thread-safe output queue rather than drawing directly, so it is safe to
+ * invoke from the ring3 dispatch context. */
+static void gui_terminal_mirror_sink(char c) {
+    char s[2];
+    s[0] = c;
+    s[1] = 0;
+    gui_terminal_enqueue_output(s);
+}
+
+void gui_terminal_set_capture(int on) {
+    arch_x86_64_fd_set_stdout_mirror(on ? gui_terminal_mirror_sink : (void (*)(char))0);
 }
 
 void gui_terminal_enqueue_output(const char *text) {

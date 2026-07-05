@@ -34,6 +34,7 @@
 #include "../include/usermode64.h"
 #include "../include/vfs64.h"
 #include "../include/percpu64.h"
+#include "../../../kernel/core/fs/vfs.h" /* RAMFS-backed vfs_open/read/stat */
 #include "syscall.h" /* canonical SYS_* numbers (shared with i386) */
 
 static uint64_t dispatch_total_count;
@@ -227,13 +228,61 @@ static uint64_t do_exec(uint64_t path_ptr, uint64_t argv_ptr, uint64_t envp_ptr)
         }
     }
 
-    const x86_64_initrd_file_t *file = arch_x86_64_initrd_find(path);
-    if (file == NULL) {
-        arch_x86_64_usermode_note_exec_fail();
-        early_console64_write("[x86_64][exec] ENOENT path=");
+    /*
+     * I.1: resolve the executable image. Priority order:
+     *   (1) VFS/RAMFS (disk-backed, persistent) -- lets users drop new
+     *       programs onto the filesystem and exec them without a rebuild.
+     *   (2) initrd (compiled-in) -- fallback for the boot-critical set
+     *       (/init, launcher, ...) that must exist before any disk mount.
+     *
+     * The loader (_load_image_into) *copies* PT_LOADs into fresh physical
+     * pages, so whatever buffer we hand it can be freed right after the
+     * load returns. For the VFS path we own a kmalloc'd buffer; for the
+     * initrd path the data is zero-copy inside the embedded image and must
+     * NOT be freed. `vfs_buf` tracks ownership.
+     */
+    const uint8_t *img_data = (const uint8_t *)0;
+    uint64_t       img_size = 0;
+    void          *vfs_buf  = (void *)0;
+
+    {
+        inode_t st;
+        if (vfs_stat(path, &st) == 0 && (st.mode & FS_FILE) && st.size > 0) {
+            void *buf = arch_x86_64_kmalloc((x86_64_size_t)st.size);
+            if (buf != (void *)0) {
+                int fd = vfs_open(path, 0 /*O_RDONLY*/, 0);
+                if (fd >= 0) {
+                    int got = vfs_read(fd, buf, (uint32_t)st.size);
+                    vfs_close(fd);
+                    if (got == (int)st.size) {
+                        vfs_buf  = buf;
+                        img_data = (const uint8_t *)buf;
+                        img_size = (uint64_t)st.size;
+                    } else {
+                        arch_x86_64_kfree(buf);
+                    }
+                } else {
+                    arch_x86_64_kfree(buf);
+                }
+            }
+        }
+    }
+
+    if (img_data == (const uint8_t *)0) {
+        const x86_64_initrd_file_t *file = arch_x86_64_initrd_find(path);
+        if (file == NULL) {
+            arch_x86_64_usermode_note_exec_fail();
+            early_console64_write("[x86_64][exec] ENOENT path=");
+            early_console64_write(path);
+            early_console64_write("\n");
+            return (uint64_t)-1;
+        }
+        img_data = file->data;
+        img_size = file->size;
+    } else {
+        early_console64_write("[x86_64][exec] vfs-load path=");
         early_console64_write(path);
         early_console64_write("\n");
-        return (uint64_t)-1;
     }
     /*
      * H.5b.2 step A: create a fresh AS for the replacement image and mirror
@@ -243,7 +292,12 @@ static uint64_t do_exec(uint64_t path_ptr, uint64_t argv_ptr, uint64_t envp_ptr)
      * (3) arch_x86_64_as_activate(new_as) right before iretq.
      */
     struct x86_64_address_space *new_as = arch_x86_64_as_create();
-    elf64_load_result_t lr = arch_x86_64_elf64_load_image_into(file->data, file->size, new_as);
+    elf64_load_result_t lr = arch_x86_64_elf64_load_image_into(img_data, img_size, new_as);
+    /* loader has copied everything it needs; release the VFS buffer now. */
+    if (vfs_buf != (void *)0) {
+        arch_x86_64_kfree(vfs_buf);
+        vfs_buf = (void *)0;
+    }
     if (lr.status != ELF64_LOADER_OK) {
         arch_x86_64_usermode_note_exec_fail();
         early_console64_write("[x86_64][exec] elf-load-failed path=");
@@ -281,7 +335,7 @@ static uint64_t do_exec(uint64_t path_ptr, uint64_t argv_ptr, uint64_t envp_ptr)
     early_console64_write(" entry=");
     early_console64_write_hex64((uint64_t)lr.entry);
     early_console64_write(" size=");
-    early_console64_write_hex64((uint64_t)file->size);
+    early_console64_write_hex64((uint64_t)img_size);
     early_console64_write(" argc=");
     early_console64_write_hex64((uint64_t)(uint32_t)argc_kern);
     early_console64_write(" envc=");

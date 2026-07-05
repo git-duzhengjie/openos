@@ -85,14 +85,26 @@ int arch_x86_64_fd_read(int fd, void *buf, x86_64_size_t count) {
     return (int)n;
 }
 
+/* Optional stdout/stderr mirror sink. When set (e.g. by the GUI terminal
+ * while it drives a foreground program), every byte written to fd 1/2 is
+ * echoed here in addition to the early console. NULL = no mirror. */
+static void (*g_stdout_mirror)(char c) = 0;
+
+void arch_x86_64_fd_set_stdout_mirror(void (*sink)(char c)) {
+    g_stdout_mirror = sink;
+}
+
 int arch_x86_64_fd_write(int fd, const void *buf, x86_64_size_t count) {
     if (buf == NULL && count > 0)
         return -1;
     if (fd != 1 && fd != 2)
         return -1;
     const char *p = (const char *)buf;
-    for (x86_64_size_t i = 0; i < count; ++i)
+    for (x86_64_size_t i = 0; i < count; ++i) {
         early_console64_putc(p[i]);
+        if (g_stdout_mirror)
+            g_stdout_mirror(p[i]);
+    }
     return (int)count;
 }
 

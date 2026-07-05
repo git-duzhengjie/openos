@@ -345,6 +345,15 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
      * 这里在 ring3 测试之前拉起 GUI 桌面。验证通过后再决定最终
      * 落点（或修复 fork wait 后移回文件末尾）。
      * ============================================================ */
+#ifdef SHELL_LAUNCH_SELFTEST
+    /* Route-2 end-to-end probe: exercise the shell 'run' path (which in
+     * turn drives arch_x86_64_usermode_launch_path + VFS-first ELF load)
+     * before the GUI desktop takes over the poll loop. Serial-only. */
+    early_console64_write("[x86_64][r2-selftest] shell 'run /bin/hello64' ...\n");
+    arch_x86_64_shell_exec_line("run /bin/hello64");
+    early_console64_write("[x86_64][r2-selftest] done\n");
+#endif
+
 #ifdef GUI_EARLY_VERIFY
     early_console64_write("[x86_64][gui] (early) starting desktop before ring3 test...\n");
     {

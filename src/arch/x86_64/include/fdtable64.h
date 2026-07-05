@@ -32,6 +32,11 @@ int  arch_x86_64_fd_read(int fd, void *buf, x86_64_size_t count);
 /* 向 fd 写 count 字节；fd=1/2 走 early_console，其它返回 -1。 */
 int  arch_x86_64_fd_write(int fd, const void *buf, x86_64_size_t count);
 
+/* Register (or clear, with NULL) a mirror sink that receives a copy of
+ * every byte written to stdout/stderr (fd 1/2). Used by the GUI terminal
+ * to display foreground-program output inside the terminal window. */
+void arch_x86_64_fd_set_stdout_mirror(void (*sink)(char c));
+
 /* 诊断：返回当前打开数。 */
 int  arch_x86_64_fd_open_count(void);
 

@@ -4,6 +4,7 @@
 
 #include "../include/early_console64.h"
 #include "../include/vfs64.h"
+#include "../include/usermode64.h"
 
 static uint8_t shell_ready;
 static uint8_t init_script_ran;
@@ -64,6 +65,26 @@ static void shell_exec_line(const char *line, x86_64_size_t len) {
         early_console64_write("\n");
     } else if (shell_starts_with(buffer, "cat ")) {
         shell_cat(buffer + 4);
+    } else if (shell_starts_with(buffer, "run ") ||
+               shell_starts_with(buffer, "exec ")) {
+        /* Launch a user-mode program by path (VFS first, initrd fallback).
+         * Blocks until the program tree exits, then reports its code. */
+        const char *path = buffer + (buffer[0] == 'r' ? 4 : 5);
+        while (*path == ' ') { ++path; }
+        if (*path == '\0') {
+            early_console64_write("[x86_64][shell] usage: run <path>\n");
+        } else {
+            early_console64_write("[x86_64][shell] launching ");
+            early_console64_write(path);
+            early_console64_write("\n");
+            int code = arch_x86_64_usermode_launch_path(path, 0, (const char **)0,
+                                                        0, (const char **)0);
+            early_console64_write("[x86_64][shell] ");
+            early_console64_write(path);
+            early_console64_write(" exited code=");
+            early_console64_write_hex64((uint64_t)(int64_t)code);
+            early_console64_write("\n");
+        }
     } else if (buffer[0] != '\0') {
         early_console64_write("[x86_64][shell] unsupported command: ");
         early_console64_write(buffer);
@@ -112,4 +133,15 @@ void arch_x86_64_shell_print_status(void) {
     early_console64_write(" cats=");
     early_console64_write_hex64(cat_count);
     early_console64_write("\n");
+}
+
+void arch_x86_64_shell_exec_line(const char *line) {
+    x86_64_size_t len = 0;
+    if (line == ((const char *)0)) {
+        return;
+    }
+    while (line[len] != '\0') {
+        ++len;
+    }
+    shell_exec_line(line, len);
 }
