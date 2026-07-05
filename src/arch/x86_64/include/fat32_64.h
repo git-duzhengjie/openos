@@ -50,7 +50,7 @@ int fat32_list(const char *path,
 /* 读文件内容到 buf（最多 max 字节）。返回实际读取字节数，负数错误。*/
 int fat32_read_file(const char *path, void *buf, uint32_t max);
 
-/* ---- 阶段 4-3：写入支持（仅 8.3 短文件名） ---- */
+/* ---- 阶段 4-3 / 4-4：写入支持（8.3 短名 + LFN 长文件名） ---- */
 
 /* 注册扇区写回调。挂载后调用一次即可开启写能力。*/
 void fat32_set_write_fn(fat32_write_fn write_fn);
@@ -59,13 +59,25 @@ void fat32_set_write_fn(fat32_write_fn write_fn);
 int fat32_writable(void);
 
 /* 写文件（覆盖已有内容 / 不存在则新建）。
- *   path : 完整路径，末段必须是合法 8.3 短名（如 /TEST.TXT、/DIR/A.BIN），
- *          不支持长文件名写入。
+ *   path : 完整路径，末段为文件名。8.3 短名直接写；含小写/长名/特殊
+ *          字符时自动生成 LFN 长文件名项 + 短名别名（NAME~1.EXT）。
  *   buf  : 数据；size : 字节数（可为 0，表示清空文件）。
- * 返回实际写入字节数，负数错误：
+ * 返回 0 成功，负数错误：
  *   -1 未挂载/不可写  -2 路径非法  -3 父目录不存在
  *   -4 目标是目录     -5 簇分配失败 -6 目录项写入失败  -7 内存不足 */
 int fat32_write_file(const char *path, const void *buf, uint32_t size);
+
+/* 创建目录（含 LFN 支持）。
+ *   path : 完整路径（如 /NEWDIR、/DOCS/子目录）。父目录须存在。
+ * 返回 0 成功，负数错误（-4 已存在同名项）。*/
+int fat32_mkdir(const char *path);
+
+/* 删除文件或空目录（含前置 LFN 项一并抹除，释放簇链）。
+ *   path : 完整路径。删除目录时目录必须为空。
+ * 返回 0 成功，负数错误：
+ *   -1 未挂载/不可写  -2 路径非法/根目录  -3 不存在
+ *   -4 目录非空       -6 写入失败 */
+int fat32_delete(const char *path);
 
 /* 查询单个路径的元信息。返回 0 成功并填充 out，负数错误。*/
 int fat32_stat(const char *path, fat32_dirent_t *out);
