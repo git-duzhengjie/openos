@@ -242,6 +242,47 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
         }
     }
 
+    /* 阶段 4-2：验证 FAT32 已接入 VFS 挂载点 /mnt/fat（走 vfs_* int-fd 接口，
+     * 与 GUI 终端 ls/cat 走同一条路径）。必须在 ramfs_init() 之后。 */
+    if (fat32_mounted()) {
+        early_console64_write("[x86_64][fat32-vfs] === /mnt/fat selftest ===\n");
+        /* 1) readdir 根目录 */
+        for (int i = 0; ; i++) {
+            dentry_t *de = vfs_readdir("/mnt/fat", i);
+            if (!de) break;
+            early_console64_write("[x86_64][fat32-vfs] entry: ");
+            early_console64_write(de->name);
+            if (de->inode && (de->inode->mode & FS_DIR))
+                early_console64_write("  <DIR>");
+            early_console64_write("\n");
+            if (i > 32) break;
+        }
+        /* 2) stat + open + read HELLO.TXT */
+        {
+            inode_t st;
+            if (vfs_stat("/mnt/fat/HELLO.TXT", &st) == 0) {
+                early_console64_write("[x86_64][fat32-vfs] stat HELLO.TXT size=");
+                early_console64_write_hex64((uint64_t)(uint32_t)st.size);
+                early_console64_write("\n");
+            }
+            int fd = vfs_open("/mnt/fat/HELLO.TXT", O_RDONLY, 0);
+            if (fd >= 0) {
+                char buf[128];
+                int rn = vfs_read(fd, buf, sizeof(buf) - 1);
+                if (rn > 0) {
+                    buf[rn] = 0;
+                    early_console64_write("[x86_64][fat32-vfs] read HELLO.TXT: ");
+                    early_console64_write(buf);
+                    early_console64_write("\n");
+                }
+                vfs_close(fd);
+            } else {
+                early_console64_write("[x86_64][fat32-vfs] open HELLO.TXT FAILED\n");
+            }
+        }
+        early_console64_write("[x86_64][fat32-vfs] === selftest done ===\n");
+    }
+
     /* Step F.1 IDT registration selftest — runs as the very first selftest
      * because every later subsystem (syscall, sched, net, tsc, ring3 drop)
      * needs the IDT to route #PF/#GP/#UD/etc. to our C handlers. A

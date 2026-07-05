@@ -219,6 +219,87 @@ static ramfs_file_t *fd_get(int fd) {
     return &g_fds[fd];
 }
 
+/* ============================================================
+ * FAT32 挂载点分发层（阶段 4-2：只读接入用户终端）
+ *   挂载点：/mnt/fat  → 转发到 fat32_64 驱动
+ *   - vfs_open   ：把整文件读进 kmalloc 缓冲，返回 fat fd
+ *   - vfs_read   ：从缓冲返回
+ *   - vfs_readdir：fat32_list
+ *   - vfs_stat   ：fat32_stat
+ * ============================================================ */
+#include "fat32_64.h"
+
+#define FAT_MNT      "/mnt/fat"
+#define FAT_MNT_LEN  8
+#define RAMFS_FAT_FD_BASE 4096   /* fat fd 与 ramfs fd 区分：>=4096 */
+#define RAMFS_MAX_FAT_FD  16
+
+typedef struct {
+    int           used;
+    char         *data;    /* 整文件缓冲 */
+    unsigned long size;    /* 文件字节数 */
+    unsigned long pos;     /* 当前读偏移 */
+} ramfs_fat_fd_t;
+
+static ramfs_fat_fd_t g_fat_fds[RAMFS_MAX_FAT_FD];
+
+/* 判断 path 是否落在 /mnt/fat 挂载点下。
+ * 返回：0=不是；1=正好是挂载点根；2=挂载点下的子路径（*sub 指向 fat 内部路径，以 '/' 开头） */
+static int fat_match(const char *path, const char **sub) {
+    if (!path) return 0;
+    /* 前缀匹配 /mnt/fat */
+    for (int i = 0; i < FAT_MNT_LEN; i++) {
+        if (path[i] != FAT_MNT[i]) return 0;
+    }
+    char c = path[FAT_MNT_LEN];
+    if (c == 0) { if (sub) *sub = "/"; return 1; }          /* 正好 /mnt/fat */
+    if (c == '/') { if (sub) *sub = path + FAT_MNT_LEN; return 2; } /* /mnt/fat/... */
+    return 0; /* 例如 /mnt/fatx 之类，不匹配 */
+}
+
+static int fat_fd_alloc(void) {
+    for (int i = 0; i < RAMFS_MAX_FAT_FD; i++) {
+        if (!g_fat_fds[i].used) { g_fat_fds[i].used = 1; return i; }
+    }
+    return -1;
+}
+
+static ramfs_fat_fd_t *fat_fd_get(int fd) {
+    if (fd < RAMFS_FAT_FD_BASE) return 0;
+    int i = fd - RAMFS_FAT_FD_BASE;
+    if (i < 0 || i >= RAMFS_MAX_FAT_FD) return 0;
+    if (!g_fat_fds[i].used) return 0;
+    return &g_fat_fds[i];
+}
+
+/* fat32_list 回调：抓取第 want 个条目。 */
+typedef struct {
+    int             want;
+    int             cur;
+    fat32_dirent_t *out;
+    int            *found;
+} fat_pick_ctx_t;
+
+static int fat_pick_cb(const fat32_dirent_t *ent, void *ud) {
+    fat_pick_ctx_t *c = (fat_pick_ctx_t *)ud;
+    if (c->cur == c->want) {
+        *(c->out)   = *ent;
+        *(c->found) = 1;
+        return 1; /* 停止遍历 */
+    }
+    c->cur++;
+    return 0;
+}
+
+/* 取目录 path 的第 index 个条目；命中则 *found=1 并填 out。 */
+static void fat32_list_pick(const char *path, int index,
+                            fat32_dirent_t *out, int *found) {
+    fat_pick_ctx_t c;
+    c.want = index; c.cur = 0; c.out = out; c.found = found;
+    *found = 0;
+    fat32_list(path, fat_pick_cb, &c);
+}
+
 /* ---- 确保文件数据缓冲至少有 need 字节容量（按块扩容）---- */
 static int file_ensure_cap(ramfs_node_t *n, unsigned long need) {
     if (need <= n->cap) return 0;
@@ -244,6 +325,35 @@ static int file_ensure_cap(ramfs_node_t *n, unsigned long need) {
 int vfs_open(const char *path, int flags, int mode) {
     (void)mode;
     if (!path || !g_ramfs_ready) return -1;
+
+    /* ---- FAT32 挂载点分发（只读）---- */
+    {
+        const char *sub = 0;
+        int m = fat_match(path, &sub);
+        if (m && fat32_mounted()) {
+            if (m == 1) return -1; /* /mnt/fat 本身是目录，不能当文件打开 */
+            /* 不支持写入 */
+            if ((flags & O_CREAT) || (flags & O_TRUNC) || ((flags & 3) != O_RDONLY))
+                return -1;
+            fat32_dirent_t st;
+            if (fat32_stat(sub, &st) != 0) return -1;
+            if (st.is_dir) return -1;
+            int slot = fat_fd_alloc();
+            if (slot < 0) return -1;
+            ramfs_fat_fd_t *ff = &g_fat_fds[slot];
+            ff->size = st.size;
+            ff->pos  = 0;
+            ff->data = 0;
+            if (st.size > 0) {
+                ff->data = (char *)RAMFS_KMALLOC(st.size);
+                if (!ff->data) { ff->used = 0; return -1; }
+                int rn = fat32_read_file(sub, ff->data, (uint32_t)st.size);
+                if (rn < 0) { RAMFS_KFREE(ff->data); ff->data = 0; ff->used = 0; return -1; }
+                ff->size = (unsigned long)rn;
+            }
+            return RAMFS_FAT_FD_BASE + slot;
+        }
+    }
 
     ramfs_node_t *n = (ramfs_node_t *)0;
     /* 先尝试直接解析 */
@@ -277,6 +387,12 @@ int vfs_open(const char *path, int flags, int mode) {
 }
 
 int vfs_close(int fd) {
+    ramfs_fat_fd_t *ff = fat_fd_get(fd);
+    if (ff) {
+        if (ff->data) RAMFS_KFREE(ff->data);
+        ff->data = 0; ff->size = 0; ff->pos = 0; ff->used = 0;
+        return 0;
+    }
     ramfs_file_t *f = fd_get(fd);
     if (!f) return -1;
     f->used = 0;
@@ -286,6 +402,17 @@ int vfs_close(int fd) {
 }
 
 int vfs_read(int fd, void *buf, uint32_t count) {
+    ramfs_fat_fd_t *ff = fat_fd_get(fd);
+    if (ff) {
+        if (!buf) return -1;
+        if (ff->pos >= ff->size) return 0;
+        unsigned long avail = ff->size - ff->pos;
+        unsigned long want  = count;
+        if (want > avail) want = avail;
+        if (want > 0 && ff->data) rmemcpy(buf, ff->data + ff->pos, want);
+        ff->pos += want;
+        return (int)want;
+    }
     ramfs_file_t *f = fd_get(fd);
     if (!f || !buf) return -1;
     ramfs_node_t *n = f->node;
@@ -318,6 +445,18 @@ int vfs_write(int fd, const void *buf, uint32_t count) {
 }
 
 int vfs_seek(int fd, int offset, int whence) {
+    ramfs_fat_fd_t *ff = fat_fd_get(fd);
+    if (ff) {
+        long base = 0;
+        if (whence == SEEK_SET)      base = 0;
+        else if (whence == SEEK_CUR) base = (long)ff->pos;
+        else if (whence == SEEK_END) base = (long)ff->size;
+        else return -1;
+        long np = base + offset;
+        if (np < 0) np = 0;
+        ff->pos = (unsigned long)np;
+        return (int)ff->pos;
+    }
     ramfs_file_t *f = fd_get(fd);
     if (!f) return -1;
     ramfs_node_t *n = f->node;
@@ -392,6 +531,41 @@ int vfs_unlink(const char *path) {
  * 越界或错误返回 NULL。 */
 dentry_t *vfs_readdir(const char *path, int index) {
     if (!path || !g_ramfs_ready || index < 0) return 0;
+
+    /* ---- FAT32 挂载点分发 ---- */
+    {
+        const char *sub = 0;
+        int m = fat_match(path, &sub);
+        if (m && fat32_mounted()) {
+            static dentry_t fat_de;
+            static inode_t  fat_in;
+            const char *fsub = (m == 1) ? "/" : sub;
+            /* 回调选择器：抓取第 index 个条目 */
+            fat32_dirent_t hit;
+            int found = 0;
+            fat32_list_pick(fsub, index, &hit, &found);
+            if (!found) return 0;
+            fat32_dirent_t *e = &hit;
+            /* 填 dentry */
+            {
+                int i = 0;
+                for (; i + 1 < MAX_NAME && e->name[i]; i++) fat_de.name[i] = e->name[i];
+                fat_de.name[i] = 0;
+            }
+            fat_in.ino     = 0;
+            fat_in.mode    = e->is_dir ? (FS_DIR | 0555) : (FS_FILE | 0444);
+            fat_in.size    = e->size;
+            fat_in.nlinks  = 1;
+            fat_in.fs_type = 0;
+            fat_de.inode   = &fat_in;
+            fat_de.parent  = 0;
+            fat_de.child   = 0;
+            fat_de.sibling = 0;
+            fat_de.mount   = 0;
+            return &fat_de;
+        }
+    }
+
     ramfs_node_t *dir = path_resolve(path, 0, 0, 0);
     if (!dir || !node_is_dir(dir)) return 0;
     int i = 0;
@@ -403,6 +577,29 @@ dentry_t *vfs_readdir(const char *path, int index) {
 
 int vfs_stat(const char *path, inode_t *st) {
     if (!path || !st || !g_ramfs_ready) return -1;
+
+    /* ---- FAT32 挂载点分发 ---- */
+    {
+        const char *sub = 0;
+        int m = fat_match(path, &sub);
+        if (m && fat32_mounted()) {
+            if (m == 1) {
+                /* /mnt/fat 根目录 */
+                st->ino = 0; st->mode = FS_DIR | 0555; st->size = 0;
+                st->nlinks = 1; st->fs_type = 0;
+                return 0;
+            }
+            fat32_dirent_t e;
+            if (fat32_stat(sub, &e) != 0) return -1;
+            st->ino = 0;
+            st->mode = e.is_dir ? (FS_DIR | 0555) : (FS_FILE | 0444);
+            st->size = e.size;
+            st->nlinks = 1;
+            st->fs_type = 0;
+            return 0;
+        }
+    }
+
     ramfs_node_t *n = path_resolve(path, 0, 0, 0);
     if (!n) return -1;
     *st = n->inode;   /* 结构拷贝（mode/size/nlink 等）*/
@@ -529,6 +726,14 @@ void ramfs_init(void) {
         }
     }
     ramfs_log("[RAMFS] init done, initrd imported\n");
+
+    /* 阶段 4-2：创建 FAT32 挂载点占位目录 /mnt/fat，使其在 ls /mnt 中可见。
+     * 实际 /mnt/fat/* 的访问由 vfs_* 分发层转发到 fat32 驱动。 */
+    {
+        char leaf[MAX_NAME];
+        ramfs_node_t *mp = ensure_dirs("/mnt/fat/", leaf, sizeof(leaf));
+        if (mp) ramfs_log("[RAMFS] mountpoint /mnt/fat ready\n");
+    }
 }
 
 /* ============================================================
