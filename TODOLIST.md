@@ -1553,14 +1553,16 @@
   - [√] 实机验证：PCI 扫到 1af4:1000，MAC=52:54:00:12:34:56，vq0/vq1 size=256，DRIVER_OK
   - [ ] 备选 e1000 / rtl8139（待需）
   - [ ] 网卡收包中断接入 IOAPIC（当前为轮询收包，后续改中断驱动）
-- [ ] M1.3：链路层 + 网络层
-  - [ ] 以太网帧收发（EtherType 分发）
-  - [ ] ARP（请求/应答 + 缓存表）
-  - [ ] IPv4（分片重组、校验和、路由表最小实现）
-  - [ ] ICMP（可被 ping / 可主动 ping）
-- [ ] M1.4：传输层
-  - [ ] UDP（收发 + 端口分发）
-  - [ ] TCP（三次握手 / 四次挥手 / 重传 / 滑动窗口 / 状态机）
+- [ ] M1.3：链路层 + 网络层 ✅ 已完成
+  - [√] 以太网帧收发（EtherType 分发：ARP/IPv4）
+  - [√] ARP（请求/应答 + 缓存表，pcap 实测 who-has/reply 交互）
+  - [√] IPv4（校验和、路由表最小实现：本网段直连 / 默认网关；分片重组待需）
+  - [√] ICMP（可主动 ping 网关 + 可被 ping；pcap 坐实 Echo Request/Reply）
+  - [√] netstack.c(908行) + netstack64.h，静态配置 IP 10.0.2.15/GW 10.0.2.2
+  - [√] 实机验证：串口 [net] PING PASS 网关可达 + ARP缓存1条；pcap 4帧(ARP req/reply+ICMP req/reply)
+- [ ] M1.4：传输层 （进行中：UDP✅ / TCP骨架 / socket待接）
+  - [√] UDP（收发 + 端口分发，netstack.c 已实现 udp_send/recv）
+  - [ ] TCP（三次握手 / 四次挥手 / 重传 / 滑动窗口 / 状态机；当前仅骨架）
   - [ ] socket 层真正接入 net64.c 骨架（bind/listen/accept/connect/send/recv）
 - [ ] M1.5：应用层打通真实上网
   - [ ] DHCP 客户端（自动获取 IP）
