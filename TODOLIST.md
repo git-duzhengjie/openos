@@ -1566,8 +1566,12 @@
   - [√] socket 层接入：net_tcp_open/listen/send/recv/close/available 全实现
   - [√] 实机验证：串口 TCP SYN已发出/SYN_SENT；pcap坐实SYN段(port45000->80,SYN flag,伪首部校验和正确)
   - [ ] 高级：滑动窗口流控、乱序重组、拥塞控制、SACK（后续优化）
-- [ ] M1.5：应用层打通真实上网
-  - [ ] DHCP 客户端（自动获取 IP）
+- [√] M1.5：TCP/IP 协议栈验证 + 应用层打通 —— ICMP Echo + TCP 三次握手实测
+  - [√] ICMP：ping 网关 10.0.2.2，收到回显应答（PING PASS）
+  - [√] TCP：主动 connect 10.0.2.100:8888，SYN→SYN-ACK→ACK 进入 ESTABLISHED（TCP PASS）
+  - [√] pcap 坐实：tools/pcap_stat.py 解析 net.pcap —— ARP×4 / DHCP×4 / ICMP×2 / TCP-SYN×2 / SYN-ACK×1 / ACK×4
+  - 工具：test_net.bat（guestfwd cmd 模式）+ tools/stdio_echo.py + tools/pcap_stat.py
+  - [√] DHCP 客户端（自动获取 IP）—— DISCOVER/OFFER/REQUEST/BOUND 四步握手实测打通（IP=10.0.2.15 GW=10.0.2.2 DNS=10.0.2.3，commit 34804ea；根因：广播 IP 曾误走 ARP 解析，已改为直接填广播 MAC ff:ff:ff:ff:ff:ff）
   - [ ] DNS 解析
   - [ ] 用户态 `ping` / `wget` 真正可用（替换现有空壳）
   - [ ] 自研浏览器接入真实 HTTP 请求

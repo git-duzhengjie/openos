@@ -174,17 +174,28 @@ void arch_x86_64_early_init(const openos_bootinfo_t *bootinfo) {
                                      : "[net] PING TIMEOUT: 无应答(QEMU user模式下属正常)\n");
         net_print_info();
     }
-    /* M1.4 自检：TCP 主动握手。向网关发 SYN，验证 TCP 段封装+状态机。
-     * QEMU user 网络网关不监听 TCP，故不会有 SYN-ACK，但可用 pcap
-     * 坐实 SYN 段被正确构造并发出(端口/序列号/标志/伪首部校验和)。 */
+    /* M1.4 自检：TCP 主动三次握手。向 10.0.2.2:8888 发 SYN，等待 SYN-ACK，
+     * 回 ACK 后进入 ESTABLISHED。QEMU user 网络下 10.0.2.2 代理到 host
+     * loopback，需 host 侧监听 8888 (见 build+run.bat 前置的 python server)。
+     * 若无服务器应答则停在 SYN_SENT，属正常，不判失败。 */
     {
         extern void early_serial64_write(const char *s);
         extern int net_tcp_open(uint32_t,uint16_t,uint32_t,uint16_t,int);
-        uint32_t gw = (10u<<24)|(0u<<16)|(2u<<8)|2u;
-        early_serial64_write("[net] 自检：TCP connect 10.0.2.2:80 (发SYN) ...\n");
-        int cid = net_tcp_open(0, 45000, gw, 80, 1);
-        early_serial64_write(cid >= 0 ? "[net] TCP SYN 已发出，连接进入 SYN_SENT\n"
-                                      : "[net] TCP open 失败\n");
+        extern int net_tcp_state(int);
+        extern void net_tick(uint32_t);
+        uint32_t gw = (10u<<24)|(0u<<16)|(2u<<8)|100u; /* SLIRP guestfwd 目标地址 */
+        early_serial64_write("[net] 自检：TCP connect 10.0.2.100:8888 (三次握手) ...\n");
+        int cid = net_tcp_open(0, 45000, gw, 8888, 1);
+        if (cid < 0) {
+            early_serial64_write("[net] TCP open 失败\n");
+        } else {
+            for (int i = 0; i < 200000 && net_tcp_state(cid) != 4; i++) {
+                net_tick(0);
+            }
+            early_serial64_write(net_tcp_state(cid) == 4
+                ? "[net] TCP PASS: 三次握手完成，连接 ESTABLISHED\n"
+                : "[net] TCP 握手未完成(无服务器应答属正常)\n");
+        }
     }
     /* Step E.4: TSC<->PIT calibration. Must run before any selftest that
      * relies on uptime_ms(); idempotent and tolerates failure (uptime falls
