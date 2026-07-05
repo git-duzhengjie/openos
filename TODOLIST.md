@@ -1543,11 +1543,16 @@
   - [√] `pci_dump_devices` 调试输出 + 开机自动 pci_scan_all（lspci 风格串口打印）
   - [√] 实机验证：QEMU i440fx 扫到 5 设备（主桥/ISA/IDE/ACPI/VGA），VGA BAR0=fb@0x80000000 16MB 反向印证 BAR 解析正确
   - [√] 提供使能 API：pci_enable_bus_master / mmio / io；查找 API：pci_find_by_class / by_id / get_device
-- [ ] M1.2：网卡驱动（至少一款可在 QEMU 跑通）
-  - [ ] 首选 virtio-net（QEMU 默认、实现最简）：virtqueue + tx/rx ring
-  - [ ] 备选 e1000（Intel 82540EM，QEMU `-nic model=e1000`）
-  - [ ] 备选 rtl8139（老牌简单，资料多）
-  - [ ] 网卡收发中断接入 IOAPIC + 收包 DMA 环形缓冲
+- [ ] M1.2：网卡驱动（至少一款可在 QEMU 跑通） ✅ 已完成
+  - [√] 首选 virtio-net（QEMU 默认、实现最简）：legacy PCI(BAR0 IO) + split virtqueue tx/rx ring
+  - [√] virtio.h 补充 split virtqueue 结构（virtq_desc/avail/used + virtqueue_t 运行时）
+  - [√] virtio_net64.c：特性协商(MAC+STATUS) + 读 MAC + RX 缓冲池投递 + DRIVER_OK
+  - [√] API：virtio_net_init / device_count / get_mac / send / poll_recv / dump
+  - [√] 接入 pmm 物理连续多页分配（identity map 低512MB, PFN=phys>>12）
+  - [√] build.sh 编译+链接接入；build+run.bat QEMU 加 -netdev user + virtio-net-pci
+  - [√] 实机验证：PCI 扫到 1af4:1000，MAC=52:54:00:12:34:56，vq0/vq1 size=256，DRIVER_OK
+  - [ ] 备选 e1000 / rtl8139（待需）
+  - [ ] 网卡收包中断接入 IOAPIC（当前为轮询收包，后续改中断驱动）
 - [ ] M1.3：链路层 + 网络层
   - [ ] 以太网帧收发（EtherType 分发）
   - [ ] ARP（请求/应答 + 缓存表）

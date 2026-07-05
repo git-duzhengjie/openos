@@ -140,7 +140,7 @@ echo [build+run] GUI mode; serial mirrored to %SERLOG%
   -drive file="%DATADISK%",format=raw,media=disk,if=ide,index=2 ^
   -drive file="%FATDISK%",format=raw,media=disk,if=ide,index=3 ^
   -boot c ^
-  -serial file:"%SERLOG%" -vga std -net none
+  -serial file:"%SERLOG%" -vga std -netdev user,id=n0 -device virtio-net-pci,netdev=n0
 set "QRC=%ERRORLEVEL%"
 echo [build+run] QEMU exited rc=%QRC%
 echo [build+run] serial log: %SERLOG%
@@ -159,7 +159,7 @@ start "" /B "%QEMU%" -machine pc -cpu qemu64 -smp 4 -m 256M ^
   -drive "file=%IMAGE%,format=raw,media=disk,if=ide,index=0" ^
   -drive "file=%DATADISK%,format=raw,media=disk,if=ide,index=2" ^
   -drive "file=%FATDISK%,format=raw,media=disk,if=ide,index=3" ^
-  -boot c -serial "file:%SERLOG%" -display none -no-reboot -no-shutdown 2>"%QEMU_STDERR%"
+  -boot c -serial "file:%SERLOG%" -netdev user,id=n0 -device virtio-net-pci,netdev=n0 -display none -no-reboot -no-shutdown 2>"%QEMU_STDERR%"
 timeout /T %HEADLESS_TIMEOUT_S% /NOBREAK >nul 2>&1
 rem  Fallback: 'timeout' bails on non-interactive stdin; use ping as a portable sleep.
 set /A _PN=%HEADLESS_TIMEOUT_S% + 1

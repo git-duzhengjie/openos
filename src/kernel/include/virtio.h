@@ -36,6 +36,57 @@
 
 #define VIRTQ_DESC_F_NEXT           1u
 #define VIRTQ_DESC_F_WRITE          2u
+#define VIRTQ_DESC_F_INDIRECT       4u
+
+#define VIRTQ_AVAIL_F_NO_INTERRUPT  1u
+#define VIRTQ_USED_F_NO_NOTIFY      1u
+
+/* legacy virtqueue 对齐要求：avail/used 之间按 4096 页对齐 */
+#define VIRTIO_PCI_VRING_ALIGN      4096u
+
+/* ---- Split Virtqueue 结构（legacy layout，全部小端） ---- */
+
+/* 描述符：指向一段 guest 物理内存 */
+typedef struct virtq_desc {
+    uint64_t addr;   /* guest 物理地址 */
+    uint32_t len;    /* 长度 */
+    uint16_t flags;  /* VIRTQ_DESC_F_* */
+    uint16_t next;   /* 链式下一个描述符索引 */
+} __attribute__((packed)) virtq_desc_t;
+
+/* 可用环：driver 填入待处理描述符索引 */
+typedef struct virtq_avail {
+    uint16_t flags;
+    uint16_t idx;
+    uint16_t ring[]; /* [queue_size] */
+} __attribute__((packed)) virtq_avail_t;
+
+/* 已用环元素 */
+typedef struct virtq_used_elem {
+    uint32_t id;     /* 起始描述符索引 */
+    uint32_t len;    /* 设备写入的字节数 */
+} __attribute__((packed)) virtq_used_elem_t;
+
+/* 已用环：device 填入处理完成的描述符 */
+typedef struct virtq_used {
+    uint16_t flags;
+    uint16_t idx;
+    virtq_used_elem_t ring[]; /* [queue_size] */
+} __attribute__((packed)) virtq_used_t;
+
+/* 运行时管理的 split virtqueue（指针指向物理连续、页对齐的内存） */
+typedef struct virtqueue {
+    uint16_t         queue_size;   /* 描述符数量（2 的幂） */
+    uint16_t         queue_index;  /* 队列号 */
+    uint16_t         free_head;    /* 空闲描述符链表头 */
+    uint16_t         num_free;     /* 空闲描述符数量 */
+    uint16_t         last_used;    /* 上次消费到的 used->idx */
+    volatile virtq_desc_t  *desc;  /* 描述符表 */
+    volatile virtq_avail_t *avail; /* 可用环 */
+    volatile virtq_used_t  *used;  /* 已用环 */
+    uint64_t         ring_phys;    /* 整块 ring 的物理基址（用于 PFN） */
+    uint32_t         ring_bytes;   /* 整块 ring 占用字节数 */
+} virtqueue_t;
 
 typedef enum virtio_transport_kind {
     VIRTIO_TRANSPORT_LEGACY_PCI = 0,

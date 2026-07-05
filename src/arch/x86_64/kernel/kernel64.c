@@ -15,6 +15,7 @@
 #include "../include/ata64.h"
 #include "../include/fat32_64.h"
 #include "pci.h"
+#include "virtio_net.h"
 #include "../include/pic64.h"
 #include "../include/pit64.h"
 #include "../include/pmm64.h"
@@ -132,6 +133,11 @@ void arch_x86_64_early_init(const openos_bootinfo_t *bootinfo) {
      * 仅做只读枚举 + 日志，无中断依赖，安全早期执行。 */
     pci_scan_all();
     pci_dump_devices();
+    /* Step M1.2: virtio-net 网卡驱动。基于上面的 PCI 枚举查找 1af4:1000，
+     * 建立 legacy split virtqueue，读取 MAC，投递 RX 缓冲，进入 DRIVER_OK。
+     * 之后即可通过 virtio_net_send / virtio_net_poll_recv 收发以太网帧。 */
+    virtio_net_init();
+    virtio_net_dump();
     /* Step E.4: TSC<->PIT calibration. Must run before any selftest that
      * relies on uptime_ms(); idempotent and tolerates failure (uptime falls
      * back to the legacy rdtsc>>20 estimate). */
