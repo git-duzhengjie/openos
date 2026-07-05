@@ -197,6 +197,17 @@ void arch_x86_64_early_init(const openos_bootinfo_t *bootinfo) {
                 : "[net] TCP 握手未完成(无服务器应答属正常)\n");
         }
     }
+    /* M1.5.2 自检：DNS 解析 A 记录(向 DHCP 下发的 DNS 服务器) */
+    {
+        extern void early_serial64_write(const char *s);
+        extern int net_dns_resolve(const char *hostname, uint32_t *out_ip);
+        uint32_t rip = 0;
+        early_serial64_write("[net] 自检：DNS 解析 example.com ...\n");
+        int dr = net_dns_resolve("example.com", &rip);
+        early_serial64_write(dr == 0
+            ? "[net] DNS PASS: 域名解析成功\n"
+            : "[net] DNS 解析未完成(无网络应答属正常)\n");
+    }
     /* Step E.4: TSC<->PIT calibration. Must run before any selftest that
      * relies on uptime_ms(); idempotent and tolerates failure (uptime falls
      * back to the legacy rdtsc>>20 estimate). */

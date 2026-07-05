@@ -1572,7 +1572,7 @@
   - [√] pcap 坐实：tools/pcap_stat.py 解析 net.pcap —— ARP×4 / DHCP×4 / ICMP×2 / TCP-SYN×2 / SYN-ACK×1 / ACK×4
   - 工具：test_net.bat（guestfwd cmd 模式）+ tools/stdio_echo.py + tools/pcap_stat.py
   - [√] DHCP 客户端（自动获取 IP）—— DISCOVER/OFFER/REQUEST/BOUND 四步握手实测打通（IP=10.0.2.15 GW=10.0.2.2 DNS=10.0.2.3，commit 34804ea；根因：广播 IP 曾误走 ARP 解析，已改为直接填广播 MAC ff:ff:ff:ff:ff:ff）
-  - [ ] DNS 解析
+  - [√] DNS 解析 —— A 记录查询/响应实测打通（example.com -> 104.20.23.154，穿透 SLIRP 打到真实外网 DNS 10.0.2.3；支持指针压缩 0xC0 跳转 + CNAME 跳过 + 16 条缓存 + IP 字面量直返；pcap 坐实 DNS×2；net_dns_resolve() API）
   - [ ] 用户态 `ping` / `wget` 真正可用（替换现有空壳）
   - [ ] 自研浏览器接入真实 HTTP 请求
 

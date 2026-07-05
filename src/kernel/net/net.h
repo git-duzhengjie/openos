@@ -208,6 +208,7 @@ int net_get_diag_stats(net_diag_stats_t *stats);
 int net_config_ipv4(uint32_t ip, uint32_t netmask, uint32_t gateway, uint32_t dns);
 int net_dhcp_start(void);
 int net_dhcp_state(void);
+int net_dns_resolve(const char *hostname, uint32_t *out_ip);
 int net_firewall_get(uint32_t index, net_firewall_rule_t *rule);
 int net_firewall_add(const net_firewall_rule_t *rule);
 int net_firewall_delete(uint32_t index);

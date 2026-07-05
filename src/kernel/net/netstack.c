@@ -1347,3 +1347,198 @@ int net_dhcp_start(void) {
 
 /* 返回 DHCP 状态：3=已获取地址 */
 int net_dhcp_state(void) { return (int)g_dhcp_state; }
+
+/* ============================================================
+ * DNS 客户端（M1.5.2）
+ *   A 记录查询：构造 QNAME -> 单播 UDP 53 -> 解析响应
+ *   支持指针压缩(0xC0)跳转、CNAME 跳过、简单缓存
+ * ============================================================ */
+#define DNS_PORT          53
+#define DNS_LOCAL_PORT    50053
+#define DNS_TYPE_A        1
+#define DNS_TYPE_CNAME    5
+#define DNS_CLASS_IN      1
+#define DNS_CACHE_MAX     16
+#define DNS_NAME_MAX      128
+
+typedef struct {
+    char     name[DNS_NAME_MAX];
+    uint32_t ip;
+    uint8_t  valid;
+} dns_cache_entry_t;
+
+static dns_cache_entry_t g_dns_cache[DNS_CACHE_MAX];
+static uint16_t g_dns_xid       = 0x1234;
+static uint16_t g_dns_query_xid  = 0;
+static volatile uint32_t g_dns_result_ip = 0;
+static volatile uint8_t  g_dns_got_reply = 0;
+static uint8_t g_dns_bound = 0;
+
+/* 比较两个 C 字符串是否相等 */
+static int dns_streq(const char *a, const char *b) {
+    while (*a && *b) { if (*a != *b) return 0; a++; b++; }
+    return *a == *b;
+}
+
+/* 查缓存 */
+static uint32_t dns_cache_lookup(const char *name) {
+    for (int i = 0; i < DNS_CACHE_MAX; i++)
+        if (g_dns_cache[i].valid && dns_streq(g_dns_cache[i].name, name))
+            return g_dns_cache[i].ip;
+    return 0;
+}
+
+/* 写缓存(简单轮转覆盖) */
+static void dns_cache_store(const char *name, uint32_t ip) {
+    static int slot = 0;
+    /* 已存在则更新 */
+    for (int i = 0; i < DNS_CACHE_MAX; i++)
+        if (g_dns_cache[i].valid && dns_streq(g_dns_cache[i].name, name)) {
+            g_dns_cache[i].ip = ip;
+            return;
+        }
+    dns_cache_entry_t *e = &g_dns_cache[slot];
+    slot = (slot + 1) % DNS_CACHE_MAX;
+    int j = 0;
+    while (name[j] && j < DNS_NAME_MAX - 1) { e->name[j] = name[j]; j++; }
+    e->name[j] = '\0';
+    e->ip = ip;
+    e->valid = 1;
+}
+
+/* 将 "www.a.com" 编码为 DNS QNAME 格式: 3www1a3com0，返回写入字节数 */
+static int dns_encode_qname(const char *host, uint8_t *out) {
+    int op = 0;
+    const char *p = host;
+    while (*p) {
+        const char *label = p;
+        int len = 0;
+        while (*p && *p != '.') { p++; len++; }
+        if (len == 0 || len > 63) return -1;
+        out[op++] = (uint8_t)len;
+        for (int i = 0; i < len; i++) out[op++] = (uint8_t)label[i];
+        if (*p == '.') p++;
+    }
+    out[op++] = 0;  /* 根标签 */
+    return op;
+}
+
+/* 跳过一个可能压缩的名字，返回跳过后的偏移 */
+static uint16_t dns_skip_name(const uint8_t *msg, uint16_t len, uint16_t off) {
+    while (off < len) {
+        uint8_t l = msg[off];
+        if (l == 0) { off++; break; }
+        if ((l & 0xC0) == 0xC0) { off += 2; break; }  /* 压缩指针占2字节 */
+        off += 1 + l;
+    }
+    return off;
+}
+
+/* 解析 DNS 响应，提取第一个 A 记录 IP */
+static uint32_t dns_parse_response(const uint8_t *msg, uint16_t len) {
+    if (len < 12) return 0;
+    uint16_t xid    = rd_be16(msg + 0);
+    uint16_t flags  = rd_be16(msg + 2);
+    uint16_t qdcnt  = rd_be16(msg + 4);
+    uint16_t ancnt  = rd_be16(msg + 6);
+    if (xid != g_dns_query_xid) return 0;
+    if (!(flags & 0x8000)) return 0;       /* 非响应 */
+    if ((flags & 0x000F) != 0) return 0;   /* RCODE 非0 */
+    uint16_t off = 12;
+    /* 跳过问题区 */
+    for (uint16_t q = 0; q < qdcnt; q++) {
+        off = dns_skip_name(msg, len, off);
+        off += 4; /* QTYPE + QCLASS */
+    }
+    /* 遍历回答区 */
+    for (uint16_t a = 0; a < ancnt && off + 10 <= len; a++) {
+        off = dns_skip_name(msg, len, off);
+        if (off + 10 > len) break;
+        uint16_t rtype  = rd_be16(msg + off);
+        uint16_t rdlen  = rd_be16(msg + off + 8);
+        off += 10;
+        if (off + rdlen > len) break;
+        if (rtype == DNS_TYPE_A && rdlen == 4) {
+            return rd_be32(msg + off);
+        }
+        off += rdlen;  /* CNAME 等跳过 */
+    }
+    return 0;
+}
+
+/* UDP 本地端口回调：处理 DNS 响应 */
+static void dns_udp_cb(uint32_t src_ip, uint16_t src_port,
+                       uint16_t dst_port, const uint8_t *data, uint16_t len) {
+    (void)src_ip; (void)src_port; (void)dst_port;
+    if (g_dns_got_reply) return;
+    uint32_t ip = dns_parse_response(data, len);
+    if (ip != 0) {
+        g_dns_result_ip = ip;
+        g_dns_got_reply = 1;
+    }
+}
+
+/* 阻塞式 DNS 解析：返回0成功，*out_ip 主机序 */
+int net_dns_resolve(const char *hostname, uint32_t *out_ip) {
+    if (!hostname || !out_ip || !g_default_dev) return -1;
+    /* 若本身就是点分十进制，直接解析 */
+    uint32_t direct;
+    if (net_parse_ipv4(hostname, &direct) == 0) { *out_ip = direct; return 0; }
+    /* 查缓存 */
+    uint32_t cached = dns_cache_lookup(hostname);
+    if (cached != 0) { *out_ip = cached; return 0; }
+
+    uint32_t dns_server = g_default_dev->dns;
+    if (dns_server == 0) { ns_puts("[dns] 无 DNS 服务器\n"); return -1; }
+
+    /* 绑定本地端口(仅首次) */
+    if (!g_dns_bound) {
+        if (net_udp_bind(DNS_LOCAL_PORT, dns_udp_cb) < 0) {
+            ns_puts("[dns] 绑定端口失败\n");
+            return -1;
+        }
+        g_dns_bound = 1;
+    }
+
+    /* 构造查询报文 */
+    static uint8_t buf[512];
+    ns_memset(buf, 0, sizeof(buf));
+    g_dns_query_xid = g_dns_xid++;
+    wr_be16(buf + 0, g_dns_query_xid);
+    wr_be16(buf + 2, 0x0100);   /* 标准查询，期望递归 */
+    wr_be16(buf + 4, 1);        /* QDCOUNT=1 */
+    /* ANCOUNT/NSCOUNT/ARCOUNT = 0 */
+    int qn = dns_encode_qname(hostname, buf + 12);
+    if (qn < 0) { ns_puts("[dns] 主机名非法\n"); return -1; }
+    uint16_t o = (uint16_t)(12 + qn);
+    wr_be16(buf + o, DNS_TYPE_A);  o += 2;
+    wr_be16(buf + o, DNS_CLASS_IN); o += 2;
+
+    g_dns_got_reply = 0;
+    g_dns_result_ip = 0;
+    ns_puts("[dns] 查询 "); ns_puts(hostname);
+    ns_puts(" @ "); ns_put_ip(dns_server); ns_puts("\n");
+
+    /* 发送(带重试等 ARP) */
+    int sent = -1;
+    for (int attempt = 0; attempt < 4 && sent != 0; attempt++) {
+        sent = net_send_udp(dns_server, DNS_LOCAL_PORT, DNS_PORT, buf, o);
+        if (sent != 0)
+            for (int w = 0; w < 100000; w++) net_poll();
+    }
+    if (sent != 0) { ns_puts("[dns] 发送失败\n"); return -1; }
+
+    /* 轮询等待响应 */
+    for (int w = 0; w < 3000000; w++) {
+        net_poll();
+        if (g_dns_got_reply) {
+            *out_ip = g_dns_result_ip;
+            dns_cache_store(hostname, g_dns_result_ip);
+            ns_puts("[dns] 解析成功 "); ns_puts(hostname);
+            ns_puts(" -> "); ns_put_ip(g_dns_result_ip); ns_puts("\n");
+            return 0;
+        }
+    }
+    ns_puts("[dns] 查询超时\n");
+    return -1;
+}
