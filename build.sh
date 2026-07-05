@@ -350,7 +350,7 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
     ARCH64_USER_BUILD="$ARCH64_BUILD/user"
     ARCH64_BOOT_BUILD="$ARCH64_BUILD/boot"
     ARCH64_BIN_BUILD="$ARCH64_BUILD/bin"
-    ARCH64_CFLAGS="-m64 -mcmodel=kernel -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-80387 -mno-avx -ffreestanding -nostdlib -Wall -Wextra -O2 -fno-pic -fno-pie -fno-PIE -fno-stack-protector -fno-builtin -DGUI_EARLY_VERIFY -I$ARCH64_SRC/include -Isrc/kernel/include -Isrc/kernel"
+    ARCH64_CFLAGS="-m64 -mcmodel=kernel -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-80387 -mno-avx -ffreestanding -nostdlib -Wall -Wextra -O2 -fno-pic -fno-pie -fno-PIE -fno-stack-protector -fno-builtin -DGUI_EARLY_VERIFY -DSHELL_LAUNCH_SELFTEST -I$ARCH64_SRC/include -Isrc/kernel/include -Isrc/kernel"
     ARCH64_ASFLAGS="-m64 -mcmodel=kernel -mno-red-zone -fno-pic -fno-pie -fno-PIE -I$ARCH64_SRC/include -Isrc/kernel/include"
     ARCH64_USER_CFLAGS="-m64 -mcmodel=large -ffreestanding -nostdlib -Wall -Wextra -O2 -fno-pic -fno-pie -fno-PIE -fno-stack-protector -fno-builtin -I$ARCH64_SRC/user"
     ARCH64_USER_ASFLAGS="-m64 -mcmodel=large -fno-pic -fno-pie -fno-PIE -I$ARCH64_SRC/user"
@@ -416,6 +416,39 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
     readelf -h "$ARCH64_BIN_BUILD/launcher.elf" | grep -q 'Machine:.*X86-64'
     nm "$ARCH64_BIN_BUILD/launcher.elf" | grep -q ' openos64_main$'
     python3 _embed_elf.py "$ARCH64_BIN_BUILD/launcher.elf" "$ARCH64_SRC/include/embed_launcher.h" launcher_elf
+
+    echo "[1d/5] Building x86_64 /bin/ifconfig ELF (M1.5.3 net tool)..."
+    gcc $ARCH64_USER_CFLAGS -c "$ARCH64_SRC/user/ifconfig64.c" -o "$ARCH64_USER_BUILD/ifconfig64.o"
+    ld $ARCH64_USER_LDFLAGS -o "$ARCH64_BIN_BUILD/ifconfig64.elf" \
+        "$ARCH64_USER_BUILD/start.o" \
+        "$ARCH64_USER_BUILD/crt0.o" \
+        "$ARCH64_USER_BUILD/ifconfig64.o"
+    readelf -h "$ARCH64_BIN_BUILD/ifconfig64.elf" | grep -q 'Class:.*ELF64'
+    readelf -h "$ARCH64_BIN_BUILD/ifconfig64.elf" | grep -q 'Machine:.*X86-64'
+    nm "$ARCH64_BIN_BUILD/ifconfig64.elf" | grep -q ' openos64_main$'
+    python3 _embed_elf.py "$ARCH64_BIN_BUILD/ifconfig64.elf" "$ARCH64_SRC/include/embed_ifconfig64.h" ifconfig64_elf
+
+    echo "[1e/5] Building x86_64 /bin/ping ELF (M1.5.3 net tool)..."
+    gcc $ARCH64_USER_CFLAGS -c "$ARCH64_SRC/user/ping64.c" -o "$ARCH64_USER_BUILD/ping64.o"
+    ld $ARCH64_USER_LDFLAGS -o "$ARCH64_BIN_BUILD/ping64.elf" \
+        "$ARCH64_USER_BUILD/start.o" \
+        "$ARCH64_USER_BUILD/crt0.o" \
+        "$ARCH64_USER_BUILD/ping64.o"
+    readelf -h "$ARCH64_BIN_BUILD/ping64.elf" | grep -q 'Class:.*ELF64'
+    readelf -h "$ARCH64_BIN_BUILD/ping64.elf" | grep -q 'Machine:.*X86-64'
+    nm "$ARCH64_BIN_BUILD/ping64.elf" | grep -q ' openos64_main$'
+    python3 _embed_elf.py "$ARCH64_BIN_BUILD/ping64.elf" "$ARCH64_SRC/include/embed_ping64.h" ping64_elf
+
+    echo "[1f/5] Building x86_64 /bin/nslookup ELF (M1.5.3 net tool)..."
+    gcc $ARCH64_USER_CFLAGS -c "$ARCH64_SRC/user/nslookup64.c" -o "$ARCH64_USER_BUILD/nslookup64.o"
+    ld $ARCH64_USER_LDFLAGS -o "$ARCH64_BIN_BUILD/nslookup64.elf" \
+        "$ARCH64_USER_BUILD/start.o" \
+        "$ARCH64_USER_BUILD/crt0.o" \
+        "$ARCH64_USER_BUILD/nslookup64.o"
+    readelf -h "$ARCH64_BIN_BUILD/nslookup64.elf" | grep -q 'Class:.*ELF64'
+    readelf -h "$ARCH64_BIN_BUILD/nslookup64.elf" | grep -q 'Machine:.*X86-64'
+    nm "$ARCH64_BIN_BUILD/nslookup64.elf" | grep -q ' openos64_main$'
+    python3 _embed_elf.py "$ARCH64_BIN_BUILD/nslookup64.elf" "$ARCH64_SRC/include/embed_nslookup64.h" nslookup64_elf
 
     echo "[2/5] Compiling x86_64 C files..."
     for cfile in \

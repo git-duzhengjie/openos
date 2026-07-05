@@ -72,6 +72,14 @@ static uint64_t usermode_exit_count;
 #define PREPARED_USER_FRAME (arch_x86_64_proc_current()->saved_user_frame)
 #define USERMODE_RETURN_RSP (arch_x86_64_proc_current()->kernel_return_rsp)
 #define USERMODE_CANARY     (arch_x86_64_proc_current()->usermode_canary)
+/*
+ * Global backup of the kernel return RSP for the *outermost* usermode_run
+ * frame. arch_x86_64_usermode_mark_exited() tears down the ring3 PCB via
+ * proc_exit(), which flips `current` back to the kernel proc — after that
+ * USERMODE_RETURN_RSP (a per-proc field) reads 0 and the exit trampoline
+ * would fall through into a hlt loop instead of unwinding usermode_run().
+ * We snapshot the RSP here so return_to_kernel() can always unwind. */
+static uint64_t g_usermode_return_rsp_backup;
 static x86_64_phys_addr_t bootstrap_user_stack_base;  /* phys == virt (identity) */
 
 /*
@@ -394,6 +402,7 @@ int arch_x86_64_usermode_run(x86_64_entry_t entry) {
         "leaq 1f(%%rip), %%rax\n\t"
         "pushq %%rax\n\t"             /* RIP slot on top -- ret target */
         "movq %%rsp, %0\n\t"          /* publish kernel return rsp */
+        "movq %%rsp, g_usermode_return_rsp_backup(%%rip)\n\t" /* + global backup */
         "movq %3, %%rdi\n\t"
         "call arch_x86_64_iretq_enter_user_full\n\t"
         /* Should never fall through here -- iretq goes to ring3. */
@@ -413,6 +422,10 @@ int arch_x86_64_usermode_run(x86_64_entry_t entry) {
           "r8", "r9", "r10", "r11",
           "memory", "cc"
     );
+    /* snapshot the just-published return RSP so the exit trampoline can
+     * still unwind even after mark_exited() flipped `current` to the
+     * kernel proc (which zeroes the per-proc kernel_return_rsp field). */
+    g_usermode_return_rsp_backup = USERMODE_RETURN_RSP;
     (void)exited_local; (void)code_local;
 
     /*
@@ -615,9 +628,26 @@ void arch_x86_64_usermode_note_exec_fail(void) {
     ++usermode_exec_fail_count;
 }
 
+void arch_x86_64_usermode_snapshot_return_rsp(void) {
+    /* Capture the kernel return RSP while `current` still points at the
+     * exiting user proc. mark_exited()->proc_exit() will flip current to
+     * the kernel proc whose kernel_return_rsp is 0, so we must stash it
+     * here first for return_to_kernel() to unwind on. */
+    uint64_t rsp = USERMODE_RETURN_RSP;
+    if (rsp != 0) {
+        g_usermode_return_rsp_backup = rsp;
+    }
+}
+
 void arch_x86_64_usermode_return_to_kernel(void) {
-    if (USERMODE_RETURN_RSP != 0) {
-        __asm__ __volatile__("movq %0, %%rsp\n\tret" : : "r"(USERMODE_RETURN_RSP) : "memory");
+    uint64_t rsp = USERMODE_RETURN_RSP;
+    if (rsp == 0) {
+        /* current proc may already be the kernel proc (mark_exited ran
+         * proc_exit); fall back to the outermost usermode_run snapshot. */
+        rsp = g_usermode_return_rsp_backup;
+    }
+    if (rsp != 0) {
+        __asm__ __volatile__("movq %0, %%rsp\n\tret" : : "r"(rsp) : "memory");
     }
     for (;;) {
         __asm__ __volatile__("hlt");

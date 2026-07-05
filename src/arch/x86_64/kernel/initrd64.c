@@ -13,6 +13,9 @@
 #include "../include/embed_hello64_v2.h"  /* H.3: execve target image */
 #include "../include/embed_hello_fork.h"  /* A2.P5: standalone fork/wait target */
 #include "../include/embed_launcher.h"     /* H.3: initial /bin/launcher  */
+#include "../include/embed_ifconfig64.h"   /* M1.5.3: /bin/ifconfig net tool */
+#include "../include/embed_ping64.h"       /* M1.5.3: /bin/ping net tool */
+#include "../include/embed_nslookup64.h"   /* M1.5.3: /bin/nslookup net tool */
 
 static const uint8_t init_script[] =
     "echo OpenOS x86_64 initrd mounted\n"
@@ -47,6 +50,11 @@ static const x86_64_initrd_file_t initrd_files[] = {
      * execve inside /bin/hello64_v2. Splitting the historical inline [wait]
      * block out here decouples execve and fork/wait regressions. */
     { .name = "/bin/hello_fork", .data = hello_fork_elf, .size = (x86_64_size_t)hello_fork_elf_size, .mode = 0755u },
+    /* M1.5.3: userland network tools backed by the live virtio-net TCP/IP
+     * stack (SYS_NETINFO/PING/DNSLOOKUP). */
+    { .name = "/bin/ifconfig", .data = ifconfig64_elf, .size = (x86_64_size_t)ifconfig64_elf_size, .mode = 0755u },
+    { .name = "/bin/ping",     .data = ping64_elf,     .size = (x86_64_size_t)ping64_elf_size,     .mode = 0755u },
+    { .name = "/bin/nslookup", .data = nslookup64_elf, .size = (x86_64_size_t)nslookup64_elf_size, .mode = 0755u },
 };
 
 static const x86_64_initrd_image_t builtin_initrd = {

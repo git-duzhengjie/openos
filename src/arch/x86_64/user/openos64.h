@@ -27,6 +27,10 @@
 #define OPENOS64_SYS_BIND     284ULL
 #define OPENOS64_SYS_SENDTO   290ULL
 #define OPENOS64_SYS_RECVFROM 291ULL
+#define OPENOS64_SYS_NETINFO   292ULL
+#define OPENOS64_SYS_PING      293ULL
+#define OPENOS64_SYS_NETCONFIG 294ULL
+#define OPENOS64_SYS_DNSLOOKUP 316ULL
 #define OPENOS64_SYS_UPTIME_MS 317ULL
 
 /* The kernel currently only accepts AF_OPENOS / SOCK_DGRAM / PROTO_DEFAULT. */
@@ -219,6 +223,77 @@ static inline openos64_ssize_t openos64_recvfrom(int fd,
                                                len,
                                                0,
                                                (uint64_t)(uintptr_t)src_port_out);
+}
+
+/* ------------------ M1.5.3 live TCP/IP stack helpers ------------------
+ * These wrap the real virtio-net stack syscalls (netinfo/ping/dns/netconfig)
+ * so userland tools (ifconfig/ping/nslookup) can talk to it directly.
+ * The struct below must stay byte-identical with the kernel assembler in
+ * src/arch/x86_64/kernel/syscall_dispatch64.c do_netinfo(). */
+typedef struct openos64_netinfo {
+    char     name[16];
+    uint8_t  mac[6];
+    uint32_t ip, netmask, gateway, dns, flags, config_mode;
+    uint32_t rx_packets, tx_packets, rx_dropped, tx_dropped;
+    uint32_t arp_entries, udp_bindings, tcp_listeners, tcp_connections;
+    uint32_t icmp_echo_requests, icmp_echo_replies;
+    uint32_t last_ipv4_src, last_ipv4_dst, last_ipv4_protocol;
+    uint32_t last_icmp_src, last_icmp_type, last_icmp_code;
+    uint32_t ipv4_drop_short, ipv4_drop_version, ipv4_drop_ihl;
+    uint32_t ipv4_drop_len, ipv4_drop_checksum, ipv4_drop_dst;
+    uint32_t last_ipv4_tx_src, last_ipv4_tx_dst, last_ipv4_tx_next_hop;
+    uint32_t last_ipv4_tx_protocol, last_ipv4_tx_len;
+    int32_t  last_ipv4_tx_result;
+    uint32_t last_ping_dst, last_ping_id, last_ping_seq;
+    int32_t  last_ping_send_result;
+} openos64_netinfo_t;
+
+/* config_mode values reported in openos64_netinfo_t.config_mode
+ * (must match kernel net_config_mode_t) */
+#define OPENOS64_NETCFG_NONE   0u
+#define OPENOS64_NETCFG_STATIC 1u
+#define OPENOS64_NETCFG_DHCP   2u
+
+/* flags bits reported in openos64_netinfo_t.flags
+ * (must match kernel NET_DEVICE_FLAG_*) */
+#define OPENOS64_NETFLAG_PRESENT 0x01u
+#define OPENOS64_NETFLAG_UP      0x02u
+#define OPENOS64_NETFLAG_LINK_UP 0x04u
+#define OPENOS64_NETFLAG_DHCP    0x08u
+
+/* Fill *out with the primary interface state. Returns 0 on success, -1 on error. */
+static inline int openos64_netinfo(openos64_netinfo_t *out) {
+    return (int)openos64_syscall1(OPENOS64_SYS_NETINFO,
+                                  (uint64_t)(uintptr_t)out);
+}
+
+/* Send one ICMP echo to dst_ip (network byte order). timeout_ms is advisory.
+ * Returns 0 on reply received, -1 on timeout/error. */
+static inline int openos64_ping(uint32_t dst_ip_be, uint32_t timeout_ms) {
+    return (int)openos64_syscall2(OPENOS64_SYS_PING,
+                                  (uint64_t)dst_ip_be,
+                                  (uint64_t)timeout_ms);
+}
+
+/* Resolve hostname -> IPv4 (network byte order) into *out_ip.
+ * Returns 0 on success, -1 on failure. */
+static inline int openos64_dnslookup(const char *hostname, uint32_t *out_ip) {
+    return (int)openos64_syscall2(OPENOS64_SYS_DNSLOOKUP,
+                                  (uint64_t)(uintptr_t)hostname,
+                                  (uint64_t)(uintptr_t)out_ip);
+}
+
+/* Reconfigure the interface. mode 0 = DHCP (async), 1 = static.
+ * For static mode pass ip/netmask/gateway/dns in network byte order.
+ * Returns 0 on success, -1 on error. */
+static inline int openos64_netconfig(uint32_t mode, uint32_t ip, uint32_t netmask,
+                                     uint32_t gateway, uint32_t dns) {
+    return (int)openos64_syscall5(OPENOS64_SYS_NETCONFIG,
+                                  (uint64_t)mode,
+                                  (uint64_t)ip,
+                                  (uint64_t)netmask,
+                                  (uint64_t)gateway,
+                                  (uint64_t)dns);
 }
 
 openos64_size_t openos64_strlen(const char *text);

@@ -68,22 +68,39 @@ static void shell_exec_line(const char *line, x86_64_size_t len) {
     } else if (shell_starts_with(buffer, "run ") ||
                shell_starts_with(buffer, "exec ")) {
         /* Launch a user-mode program by path (VFS first, initrd fallback).
-         * Blocks until the program tree exits, then reports its code. */
-        const char *path = buffer + (buffer[0] == 'r' ? 4 : 5);
-        while (*path == ' ') { ++path; }
-        if (*path == '\0') {
-            early_console64_write("[x86_64][shell] usage: run <path>\n");
+         * Blocks until the program tree exits, then reports its code.
+         * M1.5.3: split trailing whitespace-separated tokens into argv so
+         * tools like `run /bin/ping 10.0.2.2 3` receive their arguments. */
+        char *cursor = buffer + (buffer[0] == 'r' ? 4 : 5);
+        while (*cursor == ' ') { ++cursor; }
+        if (*cursor == '\0') {
+            early_console64_write("[x86_64][shell] usage: run <path> [args...]\n");
         } else {
+            /* Tokenize in place: argv[0]=path, argv[1..]=args. Max 8 tokens. */
+            #define SHELL_MAX_ARGV 8
+            const char *argv[SHELL_MAX_ARGV];
+            int argc = 0;
+            while (*cursor != '\0' && argc < SHELL_MAX_ARGV) {
+                argv[argc++] = cursor;
+                while (*cursor != '\0' && *cursor != ' ') { ++cursor; }
+                if (*cursor == ' ') {
+                    *cursor = '\0';
+                    ++cursor;
+                    while (*cursor == ' ') { ++cursor; }
+                }
+            }
+            const char *path = argv[0];
             early_console64_write("[x86_64][shell] launching ");
             early_console64_write(path);
             early_console64_write("\n");
-            int code = arch_x86_64_usermode_launch_path(path, 0, (const char **)0,
+            int code = arch_x86_64_usermode_launch_path(path, argc, argv,
                                                         0, (const char **)0);
             early_console64_write("[x86_64][shell] ");
             early_console64_write(path);
             early_console64_write(" exited code=");
             early_console64_write_hex64((uint64_t)(int64_t)code);
             early_console64_write("\n");
+            #undef SHELL_MAX_ARGV
         }
     } else if (buffer[0] != '\0') {
         early_console64_write("[x86_64][shell] unsupported command: ");

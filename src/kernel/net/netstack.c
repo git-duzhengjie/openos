@@ -855,6 +855,10 @@ int net_udp_bind(uint16_t port, udp_recv_func_t cb) {
 /* 发送 ICMP echo 请求并轮询等待应答。返回0=成功 -1=超时 */
 int net_ping_ipv4(uint32_t dst_ip) {
     if (!g_default_dev) return -1;
+    /* Ensure interrupts are enabled while we busy-poll the NIC: when this
+     * runs inside a syscall/interrupt gate IF may be cleared, which would
+     * starve virtio RX and make every echo reply time out. */
+    __asm__ __volatile__("sti");
     g_ping_got_reply = 0;
     g_ping_reply_from = 0;
     g_icmp_seq++;
@@ -1319,8 +1323,10 @@ static void dhcp_udp_cb(uint32_t src_ip, uint16_t src_port,
         ns_puts("[dhcp] 已发 REQUEST\n");
     } else if (mt == DHCP_MSG_ACK && g_dhcp_state == 2) {
         g_dhcp_state = 3;
-        /* 应用配置 */
-        net_config_ipv4(g_dhcp_offered_ip, g_dhcp_subnet ? g_dhcp_subnet : 0xFFFFFF00u,
+        /* 应用配置：使用 DHCP 专用配置函数，保留 config_mode=DHCP
+         * （net_config_ipv4 会强制设为 STATIC，导致 ifconfig 误报） */
+        net_set_default_ipv4_dhcp(g_dhcp_offered_ip,
+                        g_dhcp_subnet ? g_dhcp_subnet : 0xFFFFFF00u,
                         g_dhcp_router, g_dhcp_dns);
         ns_puts("[dhcp] BOUND! IP="); ns_put_ip(g_dhcp_offered_ip);
         ns_puts(" GW="); ns_put_ip(g_dhcp_router);
@@ -1481,6 +1487,8 @@ static void dns_udp_cb(uint32_t src_ip, uint16_t src_port,
 /* 阻塞式 DNS 解析：返回0成功，*out_ip 主机序 */
 int net_dns_resolve(const char *hostname, uint32_t *out_ip) {
     if (!hostname || !out_ip || !g_default_dev) return -1;
+    /* keep interrupts on while polling the NIC (see net_ping_ipv4) */
+    __asm__ __volatile__("sti");
     /* 若本身就是点分十进制，直接解析 */
     uint32_t direct;
     if (net_parse_ipv4(hostname, &direct) == 0) { *out_ip = direct; return 0; }

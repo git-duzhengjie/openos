@@ -50,6 +50,7 @@ int arch_x86_64_usermode_launch_path(const char *path,
                                      int argc, const char **argv,
                                      int envc, const char **envp);
 void arch_x86_64_usermode_mark_exited(int code);
+void arch_x86_64_usermode_snapshot_return_rsp(void);
 void arch_x86_64_usermode_return_to_kernel(void) __attribute__((noreturn));
 
 /*
