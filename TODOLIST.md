@@ -1573,7 +1573,8 @@
   - 工具：test_net.bat（guestfwd cmd 模式）+ tools/stdio_echo.py + tools/pcap_stat.py
   - [√] DHCP 客户端（自动获取 IP）—— DISCOVER/OFFER/REQUEST/BOUND 四步握手实测打通（IP=10.0.2.15 GW=10.0.2.2 DNS=10.0.2.3，commit 34804ea；根因：广播 IP 曾误走 ARP 解析，已改为直接填广播 MAC ff:ff:ff:ff:ff:ff）
   - [√] DNS 解析 —— A 记录查询/响应实测打通（example.com -> 104.20.23.154，穿透 SLIRP 打到真实外网 DNS 10.0.2.3；支持指针压缩 0xC0 跳转 + CNAME 跳过 + 16 条缓存 + IP 字面量直返；pcap 坐实 DNS×2；net_dns_resolve() API）
-  - [ ] 用户态 `ping` / `wget` 真正可用（替换现有空壳）
+  - [√] 用户态 `ping` / `ifconfig` / `nslookup` 真正可用（ring3 端到端打通，commit be0aaf8）—— ifconfig 全字段正确显示 (10.0.2.15/255.255.255.0/gw/dns, UP)；ping 10.0.2.2 三次全 reply；nslookup example.com 解析成功。核心修复两处：① do_exit 返回死锁（mark_exited 切回 kernel proc 致 return_to_kernel RSP=0，新增 snapshot_return_rsp 提前快照）；② net syscall 忙等轮询 NIC 时 IF=0 中断关闭致 virtio RX 饥饿全 timeout，在 net_ping_ipv4/net_dns_resolve 入口显式 sti。三工具接入 build.sh 编译+embed，initrd 注册 /bin/{ifconfig,ping,nslookup}
+  - [ ] 用户态 `wget` 真正可用（HTTP GET，替换现有空壳）
   - [ ] 自研浏览器接入真实 HTTP 请求
 
 ### M2：现代存储与设备（🟠 第二优先级）
