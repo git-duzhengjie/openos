@@ -208,6 +208,18 @@ void arch_x86_64_early_init(const openos_bootinfo_t *bootinfo) {
             ? "[net] DNS PASS: 域名解析成功\n"
             : "[net] DNS 解析未完成(无网络应答属正常)\n");
     }
+    /* M1.6 自检：真·联网 —— DNS + TCP 三次握手 + HTTP GET + 收响应。
+     * 走 QEMU user 网络 NAT 出口，能连到宿主机真实网络。
+     * wrapper 内部保存/恢复 IF；此处 PIC 尚未 remap，IF 由 wrapper 托管。 */
+    {
+        extern void early_serial64_write(const char *s);
+        extern int net_http_get_selftest(const char *host, const char *path);
+        early_serial64_write("[net] 自检：真·联网 HTTP GET http://example.com/ ...\n");
+        int hr = net_http_get_selftest("example.com", "/");
+        early_serial64_write(hr >= 0
+            ? "[net] HTTP PASS: 真·联网成功，已收到 HTTP 响应\n"
+            : "[net] HTTP 未完成(无外网应答属正常，见上方阶段码)\n");
+    }
     /* Step E.4: TSC<->PIT calibration. Must run before any selftest that
      * relies on uptime_ms(); idempotent and tolerates failure (uptime falls
      * back to the legacy rdtsc>>20 estimate). */

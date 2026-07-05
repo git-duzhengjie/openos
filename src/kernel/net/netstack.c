@@ -978,7 +978,7 @@ static void fill_device_info(net_device_t *d, net_device_info_t *out) {
     ns_memcpy(out->mac, d->mac, 6);
     out->mtu = ETH_MTU;
     out->flags = 0;
-    if (d->link_up) out->flags |= NET_DEVICE_FLAG_UP;
+    if (d->link_up) out->flags |= NET_DEVICE_FLAG_UP | NET_DEVICE_FLAG_LINK_UP;
     out->ip = d->ip;
     out->netmask = d->netmask;
     out->gateway = d->gateway;
@@ -1563,6 +1563,151 @@ int net_dns_resolve(const char *hostname, uint32_t *out_ip) {
     __asm__ __volatile__("pushfq; popq %0" : "=r"(fl) :: "memory");
     __asm__ __volatile__("sti");
     int r = net_dns_resolve_impl(hostname, out_ip);
+    if (!(fl & 0x200UL)) __asm__ __volatile__("cli");
+    return r;
+}
+
+/* ============================================================
+ * M1.6 真·联网自测：DNS -> TCP 三次握手 -> HTTP GET -> 收响应
+ * ============================================================ */
+#define HTTP_POLL_STEP      1  /* net_poll 每轮次数放大器 */
+
+/* 忙等推进网络栈：poll rx + tick 重传，共 loops 轮，命中 pred 提前返回 1 */
+static int http_pump(int conn_id, int *done_flag, uint32_t loops) {
+    for (uint32_t i = 0; i < loops; i++) {
+        net_poll();
+        /* 每约 6.5 万轮推一次 tick（含 poll + TCP 重传/TIME_WAIT 扫描） */
+        if ((i & 0xFFFF) == 0) net_tick(1);
+        if (done_flag && *done_flag) return 1;
+        (void)conn_id;
+    }
+    return 0;
+}
+
+static int net_http_get_selftest_impl(const char *host, const char *path) {
+    if (!host || !path || !g_default_dev) {
+        ns_puts("[http] 参数或设备无效\n");
+        return -1;
+    }
+
+    /* 1) DNS 解析（内部会先看是否为点分十进制/缓存） */
+    uint32_t remote_ip = 0;
+    if (net_dns_resolve_impl(host, &remote_ip) != 0 || remote_ip == 0) {
+        ns_puts("[http] DNS 解析失败: "); ns_puts(host); ns_puts("\n");
+        return -1;
+    }
+    ns_puts("[http] 目标 "); ns_puts(host);
+    ns_puts(" -> "); ns_put_ip(remote_ip);
+    ns_puts(" :80\n");
+
+    /* 2) TCP 主动连接（本地 IP=0 表示用设备当前地址，本地端口 0 表示自动分配） */
+    uint16_t local_port = (uint16_t)(40000 + (g_net_ticks & 0x3FFF));
+    int conn = net_tcp_open(0, local_port, remote_ip, 80, 1 /* active */);
+    if (conn < 0) {
+        ns_puts("[http] TCP open 失败\n");
+        return -2;
+    }
+    ns_puts("[http] TCP 连接发起 (conn="); ns_put_dec((uint32_t)conn);
+    ns_puts(", 本地端口="); ns_put_dec(local_port); ns_puts(")\n");
+
+    /* 3) 等待三次握手完成 -> ESTABLISHED */
+    int established = 0;
+    for (uint32_t round = 0; round < 60; round++) {
+        http_pump(conn, 0, 50000 * HTTP_POLL_STEP);
+        int st = net_tcp_state(conn);
+        if (st == NET_TCP_STATE_ESTABLISHED) { established = 1; break; }
+        if (st == NET_TCP_STATE_CLOSED) {
+            ns_puts("[http] 连接被拒绝/重置\n");
+            net_tcp_close(conn);
+            return -3;
+        }
+    }
+    if (!established) {
+        ns_puts("[http] TCP 握手超时\n");
+        net_tcp_close(conn);
+        return -3;
+    }
+    ns_puts("[http] TCP 握手完成 (ESTABLISHED)\n");
+
+    /* 4) 构造并发送 HTTP/1.0 GET 请求 */
+    static char req[512];
+    int p = 0;
+    const char *m = "GET ";
+    for (int i = 0; m[i]; i++) req[p++] = m[i];
+    for (int i = 0; path[i] && p < 400; i++) req[p++] = path[i];
+    const char *h1 = " HTTP/1.0\r\nHost: ";
+    for (int i = 0; h1[i]; i++) req[p++] = h1[i];
+    for (int i = 0; host[i] && p < 480; i++) req[p++] = host[i];
+    const char *h2 = "\r\nConnection: close\r\nUser-Agent: openos/1.0\r\n\r\n";
+    for (int i = 0; h2[i]; i++) req[p++] = h2[i];
+
+    if (net_tcp_send(conn, (const uint8_t *)req, (uint16_t)p) < 0) {
+        ns_puts("[http] 请求发送失败\n");
+        net_tcp_close(conn);
+        return -4;
+    }
+    ns_puts("[http] 已发送 GET 请求 ("); ns_put_dec((uint32_t)p);
+    ns_puts(" 字节)\n");
+
+    /* 5) 轮询接收响应，累计打印前若干字节（状态行 + 头部预览） */
+    static uint8_t rbuf[1024];
+    int total = 0;
+    int printed_hdr = 0;
+    for (uint32_t round = 0; round < 120; round++) {
+        http_pump(conn, 0, 50000 * HTTP_POLL_STEP);
+        int avail = net_tcp_available(conn);
+        if (avail > 0) {
+            int want = avail;
+            if (want > (int)sizeof(rbuf)) want = (int)sizeof(rbuf);
+            int got = net_tcp_recv(conn, rbuf, (uint16_t)want);
+            if (got > 0) {
+                total += got;
+                /* 首次收到数据时打印状态行（第一行）作为铁证 */
+                if (!printed_hdr) {
+                    ns_puts("[http] <<< 响应首行: ");
+                    for (int i = 0; i < got; i++) {
+                        char c = (char)rbuf[i];
+                        if (c == '\r' || c == '\n') break;
+                        char tmp[2] = { c, 0 };
+                        ns_puts(tmp);
+                    }
+                    ns_puts("\n");
+                    printed_hdr = 1;
+                }
+            }
+        }
+        int st = net_tcp_state(conn);
+        if (st == NET_TCP_STATE_CLOSE_WAIT || st == NET_TCP_STATE_CLOSED) {
+            /* 对端已发 FIN，再多收一轮残余数据 */
+            http_pump(conn, 0, 20000 * HTTP_POLL_STEP);
+            int avail2 = net_tcp_available(conn);
+            if (avail2 > 0) {
+                int got2 = net_tcp_recv(conn, rbuf,
+                    (uint16_t)(avail2 > (int)sizeof(rbuf) ? (int)sizeof(rbuf) : avail2));
+                if (got2 > 0) total += got2;
+            }
+            break;
+        }
+    }
+
+    net_tcp_close(conn);
+
+    if (total <= 0) {
+        ns_puts("[http] 未收到任何响应数据\n");
+        return -5;
+    }
+    ns_puts("[http] 真·联网成功！累计接收 ");
+    ns_put_dec((uint32_t)total);
+    ns_puts(" 字节 HTTP 响应\n");
+    return total;
+}
+
+/* wrapper: busy-poll 期间需 IF=1，退出时恢复调用者原 IF 状态（同 DNS/ping） */
+int net_http_get_selftest(const char *host, const char *path) {
+    unsigned long fl;
+    __asm__ __volatile__("pushfq; popq %0" : "=r"(fl) :: "memory");
+    __asm__ __volatile__("sti");
+    int r = net_http_get_selftest_impl(host, path);
     if (!(fl & 0x200UL)) __asm__ __volatile__("cli");
     return r;
 }

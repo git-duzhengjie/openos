@@ -202,6 +202,11 @@ int net_tcp_get_endpoint(int conn_id, uint32_t *local_ip, uint16_t *local_port,
                          uint32_t *remote_ip, uint16_t *remote_port);
 void net_tick(uint32_t elapsed_ms);
 int net_tcp_send_syn(uint32_t dst_ip, uint16_t src_port, uint16_t dst_port);
+/* M1.6 真·联网自测：DNS 解析 host -> TCP 三次握手 -> HTTP GET path -> 收响应。
+ * 返回 >=0 为收到的响应字节数（成功），<0 为失败阶段码：
+ * -1 DNS 失败, -2 TCP open 失败, -3 握手超时, -4 send 失败, -5 无响应。
+ * 内部已用 impl+wrapper 保存/恢复调用方 IF 状态。 */
+int net_http_get_selftest(const char *host, const char *path);
 int net_ping_self(void);
 int net_ping_ipv4(uint32_t dst_ip);
 int net_get_diag_stats(net_diag_stats_t *stats);

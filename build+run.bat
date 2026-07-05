@@ -140,7 +140,7 @@ echo [build+run] GUI mode; serial mirrored to %SERLOG%
   -drive file="%DATADISK%",format=raw,media=disk,if=ide,index=2 ^
   -drive file="%FATDISK%",format=raw,media=disk,if=ide,index=3 ^
   -boot c ^
-  -serial file:"%SERLOG%" -vga std -netdev user,id=n0 -device virtio-net-pci,netdev=n0
+  -serial file:"%SERLOG%" -vga std -netdev user,id=n0 -device virtio-net-pci,netdev=n0 -object filter-dump,id=f0,netdev=n0,file=%CD%\logs\net.pcap
 set "QRC=%ERRORLEVEL%"
 echo [build+run] QEMU exited rc=%QRC%
 echo [build+run] serial log: %SERLOG%

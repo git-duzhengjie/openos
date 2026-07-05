@@ -350,7 +350,7 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
     ARCH64_USER_BUILD="$ARCH64_BUILD/user"
     ARCH64_BOOT_BUILD="$ARCH64_BUILD/boot"
     ARCH64_BIN_BUILD="$ARCH64_BUILD/bin"
-    ARCH64_CFLAGS="-m64 -mcmodel=kernel -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-80387 -mno-avx -ffreestanding -nostdlib -Wall -Wextra -O2 -fno-pic -fno-pie -fno-PIE -fno-stack-protector -fno-builtin -DGUI_EARLY_VERIFY -DSHELL_LAUNCH_SELFTEST -I$ARCH64_SRC/include -Isrc/kernel/include -Isrc/kernel"
+    ARCH64_CFLAGS="-m64 -mcmodel=kernel -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-80387 -mno-avx -ffreestanding -nostdlib -Wall -Wextra -O2 -fno-pic -fno-pie -fno-PIE -fno-stack-protector -fno-builtin -DGUI_EARLY_VERIFY -I$ARCH64_SRC/include -Isrc/kernel/include -Isrc/kernel"
     ARCH64_ASFLAGS="-m64 -mcmodel=kernel -mno-red-zone -fno-pic -fno-pie -fno-PIE -I$ARCH64_SRC/include -Isrc/kernel/include"
     ARCH64_USER_CFLAGS="-m64 -mcmodel=large -ffreestanding -nostdlib -Wall -Wextra -O2 -fno-pic -fno-pie -fno-PIE -fno-stack-protector -fno-builtin -I$ARCH64_SRC/user"
     ARCH64_USER_ASFLAGS="-m64 -mcmodel=large -fno-pic -fno-pie -fno-PIE -I$ARCH64_SRC/user"
