@@ -853,12 +853,8 @@ int net_udp_bind(uint16_t port, udp_recv_func_t cb) {
  * ping + IP 配置 + 格式化 API
  * ============================================================ */
 /* 发送 ICMP echo 请求并轮询等待应答。返回0=成功 -1=超时 */
-int net_ping_ipv4(uint32_t dst_ip) {
+static int net_ping_ipv4_impl(uint32_t dst_ip) {
     if (!g_default_dev) return -1;
-    /* Ensure interrupts are enabled while we busy-poll the NIC: when this
-     * runs inside a syscall/interrupt gate IF may be cleared, which would
-     * starve virtio RX and make every echo reply time out. */
-    __asm__ __volatile__("sti");
     g_ping_got_reply = 0;
     g_ping_reply_from = 0;
     g_icmp_seq++;
@@ -890,6 +886,18 @@ int net_ping_ipv4(uint32_t dst_ip) {
         if (g_ping_got_reply) return 0;
     }
     return -1;
+}
+
+/* wrapper: busy-poll 期间需要 IF=1 才能收 NIC 中断，但必须在退出时
+ * 恢复调用者原有的 IF 状态——否则若在早期启动/关中断上下文调用，泄漏的
+ * IF=1 会在后续 PIC 重映射窗口引发定时器中断投递到未装好的 IDT[0x20] -> #GP。 */
+int net_ping_ipv4(uint32_t dst_ip) {
+    unsigned long fl;
+    __asm__ __volatile__("pushfq; popq %0" : "=r"(fl) :: "memory");
+    __asm__ __volatile__("sti");
+    int r = net_ping_ipv4_impl(dst_ip);
+    if (!(fl & 0x200UL)) __asm__ __volatile__("cli");
+    return r;
 }
 
 /* 向自身 IP 发 ping（回环测试） */
@@ -1485,10 +1493,8 @@ static void dns_udp_cb(uint32_t src_ip, uint16_t src_port,
 }
 
 /* 阻塞式 DNS 解析：返回0成功，*out_ip 主机序 */
-int net_dns_resolve(const char *hostname, uint32_t *out_ip) {
+static int net_dns_resolve_impl(const char *hostname, uint32_t *out_ip) {
     if (!hostname || !out_ip || !g_default_dev) return -1;
-    /* keep interrupts on while polling the NIC (see net_ping_ipv4) */
-    __asm__ __volatile__("sti");
     /* 若本身就是点分十进制，直接解析 */
     uint32_t direct;
     if (net_parse_ipv4(hostname, &direct) == 0) { *out_ip = direct; return 0; }
@@ -1549,4 +1555,14 @@ int net_dns_resolve(const char *hostname, uint32_t *out_ip) {
     }
     ns_puts("[dns] 查询超时\n");
     return -1;
+}
+
+/* wrapper: 同 net_ping_ipv4，busy-poll 需 IF=1，退出时恢复调用者原 IF 状态 */
+int net_dns_resolve(const char *hostname, uint32_t *out_ip) {
+    unsigned long fl;
+    __asm__ __volatile__("pushfq; popq %0" : "=r"(fl) :: "memory");
+    __asm__ __volatile__("sti");
+    int r = net_dns_resolve_impl(hostname, out_ip);
+    if (!(fl & 0x200UL)) __asm__ __volatile__("cli");
+    return r;
 }
