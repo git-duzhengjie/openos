@@ -35,22 +35,7 @@ int      dns_query_a(const char *name) { (void)name; return -1; }
 uint32_t dns_get_last_result(void) { return 0; }
 dns_state_t dns_get_state(void) { return (dns_state_t)0; }
 
-net_device_t *net_get_default_device(void) { return 0; }
-int net_get_device_info(uint32_t index, net_device_info_t *out) { (void)index; (void)out; return -1; }
-int net_get_device_info_by_name(const char *name, net_device_info_t *out) { (void)name; (void)out; return -1; }
-uint32_t net_scan_wifi(net_wifi_network_info_t *out_list, uint32_t max_results) { (void)out_list; (void)max_results; return 0; }
-int net_set_device_admin_up(const char *name, int up) { (void)name; (void)up; return -1; }
-int net_refresh_device_status(const char *name) { (void)name; return -1; }
-void net_poll(void) {}
-int net_config_ipv4(uint32_t ip, uint32_t netmask, uint32_t gateway, uint32_t dns) { (void)ip; (void)netmask; (void)gateway; (void)dns; return -1; }
-int net_parse_ipv4(const char *text, uint32_t *out) { (void)text; if (out) *out = 0; return -1; }
-
-int net_tcp_open(uint32_t local_ip, uint16_t local_port, uint32_t remote_ip, uint16_t remote_port, int active) { (void)local_ip; (void)local_port; (void)remote_ip; (void)remote_port; (void)active; return -1; }
-int net_tcp_send(int conn_id, const uint8_t *data, uint16_t len) { (void)conn_id; (void)data; (void)len; return -1; }
-int net_tcp_recv(int conn_id, uint8_t *data, uint16_t len) { (void)conn_id; (void)data; (void)len; return -1; }
-int net_tcp_close(int conn_id) { (void)conn_id; return -1; }
-int net_tcp_state(int conn_id) { (void)conn_id; return -1; }
-int net_tcp_send_syn(uint32_t dst_ip, uint16_t src_port, uint16_t dst_port) { (void)dst_ip; (void)src_port; (void)dst_port; return -1; }
+/* net_* / net_tcp_* 真实实现已迁移到 src/kernel/net/netstack.c (M1.3) */
 
 int net_config_save_dhcp(void) { return -1; }
 int net_config_save_static(uint32_t ip, uint32_t netmask, uint32_t gateway, uint32_t dns) { (void)ip; (void)netmask; (void)gateway; (void)dns; return -1; }

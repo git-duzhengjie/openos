@@ -503,6 +503,7 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         src/arch/x86_64/gui64/gui64_stubs.c \
         src/arch/x86_64/gui64/ramfs64.c \
         src/arch/x86_64/gui64/ata64.c \
+        src/kernel/net/netstack.c \
         src/arch/x86_64/gui64/fat32_64.c; do
         obj="$ARCH64_BUILD/$(basename "${cfile%.c}").o"
         gcc $GUI64_CFLAGS -c "$cfile" -o "$obj"
@@ -605,6 +606,7 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         "$ARCH64_BUILD/gui64_stubs.o" \
         "$ARCH64_BUILD/ramfs64.o" \
         "$ARCH64_BUILD/ata64.o" \
+        "$ARCH64_BUILD/netstack.o" \
         "$ARCH64_BUILD/fat32_64.o"
     echo "[5/5] x86_64 kernel and hello64 user ELF linked."
 

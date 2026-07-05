@@ -16,6 +16,10 @@
 #include "../include/fat32_64.h"
 #include "pci.h"
 #include "virtio_net.h"
+/* M1.3 网络协议栈入口（netstack.c） */
+extern void net_init(void);
+extern int net_ping_ipv4(uint32_t dst_ip);
+extern void net_print_info(void);
 #include "../include/pic64.h"
 #include "../include/pit64.h"
 #include "../include/pmm64.h"
@@ -138,6 +142,20 @@ void arch_x86_64_early_init(const openos_bootinfo_t *bootinfo) {
      * 之后即可通过 virtio_net_send / virtio_net_poll_recv 收发以太网帧。 */
     virtio_net_init();
     virtio_net_dump();
+    /* Step M1.3: 真实网络协议栈（Ethernet + ARP + IPv4 + ICMP + UDP）。
+     * 挂载到 virtio-net 之上，注册 eth0，配置静态 IP(10.0.2.15)，
+     * 之后可响应 ARP、被 ping、主动 ping、收发 UDP。 */
+    net_init();
+    /* M1.3 自检：主动 ping 网关 10.0.2.2，验证 ARP+ICMP 全链路 */
+    {
+        extern void early_serial64_write(const char *s);
+        uint32_t gw = (10u<<24)|(0u<<16)|(2u<<8)|2u;
+        early_serial64_write("[net] 自检：ping 10.0.2.2 ...\n");
+        int pr = net_ping_ipv4(gw);
+        early_serial64_write(pr == 0 ? "[net] PING PASS: 网关可达\n"
+                                     : "[net] PING TIMEOUT: 无应答(QEMU user模式下属正常)\n");
+        net_print_info();
+    }
     /* Step E.4: TSC<->PIT calibration. Must run before any selftest that
      * relies on uptime_ms(); idempotent and tolerates failure (uptime falls
      * back to the legacy rdtsc>>20 estimate). */
