@@ -412,24 +412,219 @@ static int udp_send_impl(net_device_t *dev, uint32_t dst_ip, uint16_t src_port,
 }
 
 /* ============================================================
- * TCP（精简：当前仅维护连接表骨架，完整状态机待 M1.4）
+ * TCP：完整状态机（M1.4）
+ *   - 三次握手（主动 connect / 被动 listen+accept）
+ *   - 数据收发（累积 ACK + 简单接收环形缓冲）
+ *   - 四次挥手（FIN/ACK）
+ *   - 超时重传（单一 SYN/数据重传定时器，基于 net_tick 驱动）
  * ============================================================ */
+#define TCP_RX_BUF_SZ    2048   /* 每连接接收缓冲 */
+#define TCP_TX_BUF_SZ    2048   /* 每连接未确认发送缓冲(用于重传) */
+#define TCP_MSS          1460   /* 最大段大小(以太网MTU-20-20) */
+#define TCP_RTO_TICKS    50     /* 重传超时(net_tick 单位, ~按调用频率) */
+#define TCP_MAX_RETRIES  5      /* 最大重传次数, 超过则放弃 */
+#define TCP_DEFAULT_WIN  TCP_RX_BUF_SZ
+
 typedef struct {
     uint8_t  used;
-    uint8_t  state;
+    uint8_t  state;             /* NET_TCP_STATE_* */
+    uint8_t  is_server_child;   /* 由 listen 派生的已连接子连接 */
+    uint8_t  listen_idx;        /* 派生自哪个 listen 槽(用于回调继承) */
     uint32_t remote_ip;
     uint16_t remote_port;
     uint16_t local_port;
-    uint32_t snd_nxt;
-    uint32_t rcv_nxt;
+    /* 发送方序号空间 */
+    uint32_t snd_una;           /* 最早未确认序号 */
+    uint32_t snd_nxt;           /* 下一个要发送的序号 */
+    uint32_t iss;               /* 初始发送序号 */
+    uint16_t snd_wnd;           /* 对端通告窗口 */
+    /* 接收方序号空间 */
+    uint32_t rcv_nxt;           /* 期望收到的下一个序号 */
+    uint32_t irs;               /* 初始接收序号 */
+    uint16_t rcv_wnd;           /* 本地通告窗口 */
+    /* 接收环形缓冲 */
+    uint8_t  rx_buf[TCP_RX_BUF_SZ];
+    uint32_t rx_head;           /* 读指针 */
+    uint32_t rx_tail;           /* 写指针 */
+    uint32_t rx_len;            /* 缓冲内有效字节 */
+    /* 未确认发送缓冲(重传用) */
+    uint8_t  tx_buf[TCP_TX_BUF_SZ];
+    uint32_t tx_len;            /* 未确认字节数 */
+    uint32_t tx_seq;            /* tx_buf[0] 对应的序号 */
+    uint8_t  tx_flags;          /* 未确认段携带的标志(SYN/FIN) */
+    /* 重传定时器 */
+    int32_t  rto_timer;         /* >0 倒计时; <=0 停用 */
+    uint8_t  retries;
     tcp_recv_func_t cb;
     void *ctx;
 } tcp_conn_t;
 static tcp_conn_t g_tcp_conns[TCP_CONN_MAX];
 
+/* 单调递增的 ISS 生成器(简易) */
+static uint32_t g_tcp_iss_gen = 0x1000;
+static uint32_t tcp_gen_iss(void) { g_tcp_iss_gen += 0x4000; return g_tcp_iss_gen; }
+
+/* TCP 标志位 */
+#define TCP_FIN 0x01
+#define TCP_SYN 0x02
+#define TCP_RST 0x04
+#define TCP_PSH 0x08
+#define TCP_ACK 0x10
+
+/* 前置声明 */
+static tcp_conn_t *tcp_find_conn(uint32_t rip, uint16_t rport, uint16_t lport);
+static tcp_conn_t *tcp_alloc_conn(void);
+
+/* 发送一个 TCP 段（payload 可为空）。使用伪首部计算校验和 */
+static int tcp_send_segment(tcp_conn_t *c, uint8_t flags,
+                            const uint8_t *payload, uint16_t plen) {
+    net_device_t *dev = g_devices[0];
+    static uint8_t seg[20 + TCP_MSS];
+    if (plen > TCP_MSS) plen = TCP_MSS;
+    wr_be16(seg + 0, c->local_port);
+    wr_be16(seg + 2, c->remote_port);
+    wr_be32(seg + 4, c->snd_nxt);
+    wr_be32(seg + 8, (flags & TCP_ACK) ? c->rcv_nxt : 0);
+    seg[12] = (5 << 4);
+    seg[13] = flags;
+    wr_be16(seg + 14, c->rcv_wnd);
+    wr_be16(seg + 16, 0);
+    wr_be16(seg + 18, 0);
+    if (payload && plen) ns_memcpy(seg + 20, payload, plen);
+    uint16_t seglen = (uint16_t)(20 + plen);
+    /* 伪首部部分和 */
+    uint32_t pseudo = 0;
+    pseudo += (dev->ip >> 16) & 0xFFFF; pseudo += dev->ip & 0xFFFF;
+    pseudo += (c->remote_ip >> 16) & 0xFFFF; pseudo += c->remote_ip & 0xFFFF;
+    pseudo += IP_PROTO_TCP;
+    pseudo += seglen;
+    uint16_t csum = net_checksum(seg, seglen, pseudo);
+    wr_be16(seg + 16, csum);
+    return ipv4_send(dev, c->remote_ip, IP_PROTO_TCP, seg, seglen);
+}
+
+/* 把收到的数据压入接收环形缓冲 */
+static void tcp_rx_push(tcp_conn_t *c, const uint8_t *data, uint16_t len) {
+    for (uint16_t i = 0; i < len && c->rx_len < TCP_RX_BUF_SZ; i++) {
+        c->rx_buf[c->rx_tail] = data[i];
+        c->rx_tail = (c->rx_tail + 1) % TCP_RX_BUF_SZ;
+        c->rx_len++;
+    }
+    /* 更新通告窗口 */
+    c->rcv_wnd = (uint16_t)(TCP_RX_BUF_SZ - c->rx_len);
+}
+
 static void tcp_input(net_device_t *dev, uint32_t src_ip, const uint8_t *data, uint16_t len) {
-    /* M1.3 阶段：TCP 接收仅记录统计，完整状态机待 M1.4 */
-    (void)dev; (void)src_ip; (void)data; (void)len;
+    (void)dev;
+    if (len < 20) return;
+    uint16_t sport = rd_be16(data + 0);
+    uint16_t dport = rd_be16(data + 2);
+    uint32_t seq   = rd_be32(data + 4);
+    uint32_t ack   = rd_be32(data + 8);
+    uint8_t  doff  = (uint8_t)((data[12] >> 4) * 4);
+    uint8_t  flags = data[13];
+    uint16_t wnd   = rd_be16(data + 14);
+    if (doff < 20 || doff > len) return;
+    const uint8_t *payload = data + doff;
+    uint16_t plen = (uint16_t)(len - doff);
+
+    tcp_conn_t *c = tcp_find_conn(src_ip, sport, dport);
+
+    /* 无匹配连接：检查是否有 LISTEN 槽在监听该端口 */
+    if (!c) {
+        tcp_conn_t *lst = NULL;
+        for (int i = 0; i < TCP_CONN_MAX; i++) {
+            if (g_tcp_conns[i].used && g_tcp_conns[i].state == NET_TCP_STATE_LISTEN
+                && g_tcp_conns[i].local_port == dport) { lst = &g_tcp_conns[i]; break; }
+        }
+        if (lst && (flags & TCP_SYN) && !(flags & TCP_ACK)) {
+            /* 被动打开：派生子连接，发送 SYN+ACK */
+            tcp_conn_t *nc = tcp_alloc_conn();
+            if (!nc) return;
+            nc->state = NET_TCP_STATE_SYN_RECEIVED;
+            nc->is_server_child = 1;
+            nc->remote_ip = src_ip; nc->remote_port = sport; nc->local_port = dport;
+            nc->irs = seq; nc->rcv_nxt = seq + 1;
+            nc->iss = tcp_gen_iss(); nc->snd_una = nc->iss; nc->snd_nxt = nc->iss;
+            nc->snd_wnd = wnd; nc->rcv_wnd = TCP_DEFAULT_WIN;
+            nc->cb = lst->cb; nc->ctx = lst->ctx;
+            tcp_send_segment(nc, TCP_SYN | TCP_ACK, NULL, 0);
+            nc->snd_nxt = nc->iss + 1;
+            nc->rto_timer = TCP_RTO_TICKS; nc->retries = 0;
+            nc->tx_flags = TCP_SYN;
+        }
+        return;
+    }
+
+    /* RST：直接关闭 */
+    if (flags & TCP_RST) { c->state = NET_TCP_STATE_CLOSED; c->used = 0; return; }
+
+    switch (c->state) {
+    case NET_TCP_STATE_SYN_SENT:
+        /* 主动打开等待 SYN+ACK */
+        if ((flags & TCP_SYN) && (flags & TCP_ACK)) {
+            if (ack != c->iss + 1) { tcp_send_segment(c, TCP_RST, NULL, 0); return; }
+            c->irs = seq; c->rcv_nxt = seq + 1;
+            c->snd_una = ack; c->snd_wnd = wnd;
+            c->state = NET_TCP_STATE_ESTABLISHED;
+            c->rto_timer = 0; c->retries = 0; c->tx_flags = 0;
+            tcp_send_segment(c, TCP_ACK, NULL, 0);
+        }
+        break;
+    case NET_TCP_STATE_SYN_RECEIVED:
+        /* 被动打开等待握手最后 ACK */
+        if (flags & TCP_ACK) {
+            if (ack == c->iss + 1) {
+                c->snd_una = ack; c->snd_wnd = wnd;
+                c->state = NET_TCP_STATE_ESTABLISHED;
+                c->rto_timer = 0; c->retries = 0; c->tx_flags = 0;
+            }
+        }
+        break;
+    case NET_TCP_STATE_ESTABLISHED:
+        /* 确认我方数据 */
+        if (flags & TCP_ACK) { if (ack > c->snd_una) c->snd_una = ack; c->snd_wnd = wnd;
+            if (c->snd_una >= c->tx_seq + c->tx_len) { c->tx_len = 0; c->rto_timer = 0; } }
+        /* 收到按序数据 */
+        if (plen > 0 && seq == c->rcv_nxt) {
+            tcp_rx_push(c, payload, plen);
+            c->rcv_nxt += plen;
+            tcp_send_segment(c, TCP_ACK, NULL, 0);
+            if (c->cb) c->cb(src_ip, sport, dport, payload, plen);
+        } else if (plen > 0) {
+            /* 乱序/重复：重发 ACK */
+            tcp_send_segment(c, TCP_ACK, NULL, 0);
+        }
+        /* 对端请求关闭 */
+        if (flags & TCP_FIN) {
+            c->rcv_nxt += 1;
+            tcp_send_segment(c, TCP_ACK, NULL, 0);
+            c->state = NET_TCP_STATE_CLOSE_WAIT;
+        }
+        break;
+    case NET_TCP_STATE_FIN_WAIT_1:
+        if (flags & TCP_ACK) { if (ack > c->snd_una) c->snd_una = ack;
+            if (c->snd_una >= c->snd_nxt) c->state = NET_TCP_STATE_FIN_WAIT_2; }
+        if (flags & TCP_FIN) {
+            c->rcv_nxt += 1; tcp_send_segment(c, TCP_ACK, NULL, 0);
+            c->state = (c->state == NET_TCP_STATE_FIN_WAIT_2)
+                       ? NET_TCP_STATE_TIME_WAIT : NET_TCP_STATE_CLOSING;
+        }
+        break;
+    case NET_TCP_STATE_FIN_WAIT_2:
+        if (flags & TCP_FIN) {
+            c->rcv_nxt += 1; tcp_send_segment(c, TCP_ACK, NULL, 0);
+            c->state = NET_TCP_STATE_TIME_WAIT; c->rto_timer = TCP_RTO_TICKS;
+        }
+        break;
+    case NET_TCP_STATE_CLOSING:
+        if (flags & TCP_ACK) { c->state = NET_TCP_STATE_TIME_WAIT; c->rto_timer = TCP_RTO_TICKS; }
+        break;
+    case NET_TCP_STATE_LAST_ACK:
+        if (flags & TCP_ACK) { c->state = NET_TCP_STATE_CLOSED; c->used = 0; }
+        break;
+    default: break;
+    }
 }
 
 /* ============================================================
@@ -469,6 +664,39 @@ void net_tick(uint32_t elapsed_ms) {
     (void)elapsed_ms;
     g_net_ticks++;
     net_poll();
+    /* TCP 重传 / TIME_WAIT 回收扫描 */
+    for (int i = 0; i < TCP_CONN_MAX; i++) {
+        tcp_conn_t *c = &g_tcp_conns[i];
+        if (!c->used || c->rto_timer <= 0) continue;
+        c->rto_timer--;
+        if (c->rto_timer > 0) continue;
+        /* 定时器到期 */
+        if (c->state == NET_TCP_STATE_TIME_WAIT) {
+            c->used = 0; c->state = NET_TCP_STATE_CLOSED; continue;
+        }
+        if (c->retries >= TCP_MAX_RETRIES) {
+            /* 放弃连接 */
+            tcp_send_segment(c, TCP_RST, NULL, 0);
+            c->used = 0; c->state = NET_TCP_STATE_CLOSED; continue;
+        }
+        c->retries++;
+        /* 根据状态重传 */
+        if (c->state == NET_TCP_STATE_SYN_SENT) {
+            uint32_t save = c->snd_nxt; c->snd_nxt = c->iss;
+            tcp_send_segment(c, TCP_SYN, NULL, 0); c->snd_nxt = save;
+        } else if (c->state == NET_TCP_STATE_SYN_RECEIVED) {
+            uint32_t save = c->snd_nxt; c->snd_nxt = c->iss;
+            tcp_send_segment(c, TCP_SYN | TCP_ACK, NULL, 0); c->snd_nxt = save;
+        } else if (c->tx_flags & TCP_FIN) {
+            uint32_t save = c->snd_nxt; c->snd_nxt--;
+            tcp_send_segment(c, TCP_FIN | TCP_ACK, NULL, 0); c->snd_nxt = save;
+        } else if (c->tx_len > 0) {
+            uint32_t save = c->snd_nxt; c->snd_nxt = c->tx_seq;
+            tcp_send_segment(c, TCP_PSH | TCP_ACK, c->tx_buf, (uint16_t)c->tx_len);
+            c->snd_nxt = save;
+        } else { c->rto_timer = 0; continue; }
+        c->rto_timer = TCP_RTO_TICKS;
+    }
 }
 
 /* ============================================================
@@ -790,14 +1018,35 @@ uint32_t net_scan_wifi(net_wifi_network_info_t *out_list, uint32_t max_results) 
 }
 
 /* ============================================================
- * TCP API（M1.3 精简：骨架层，完整状态机待 M1.4）
+ * TCP API（M1.4 完整状态机）
  * ============================================================ */
+static tcp_conn_t *tcp_find_conn(uint32_t rip, uint16_t rport, uint16_t lport) {
+    for (int i = 0; i < TCP_CONN_MAX; i++) {
+        tcp_conn_t *c = &g_tcp_conns[i];
+        if (c->used && c->state != NET_TCP_STATE_LISTEN
+            && c->remote_ip == rip && c->remote_port == rport && c->local_port == lport)
+            return c;
+    }
+    return NULL;
+}
+static tcp_conn_t *tcp_alloc_conn(void) {
+    for (int i = 0; i < TCP_CONN_MAX; i++)
+        if (!g_tcp_conns[i].used) {
+            ns_memset(&g_tcp_conns[i], 0, sizeof(tcp_conn_t));
+            g_tcp_conns[i].used = 1;
+            g_tcp_conns[i].rcv_wnd = TCP_DEFAULT_WIN;
+            return &g_tcp_conns[i];
+        }
+    return NULL;
+}
 int net_tcp_listen(uint16_t port, tcp_recv_func_t cb) {
     for (int i = 0; i < TCP_CONN_MAX; i++) {
         if (!g_tcp_conns[i].used) {
+            ns_memset(&g_tcp_conns[i], 0, sizeof(tcp_conn_t));
             g_tcp_conns[i].used = 1;
             g_tcp_conns[i].state = NET_TCP_STATE_LISTEN;
             g_tcp_conns[i].local_port = port;
+            g_tcp_conns[i].rcv_wnd = TCP_DEFAULT_WIN;
             g_tcp_conns[i].cb = cb;
             return i;
         }
@@ -806,33 +1055,84 @@ int net_tcp_listen(uint16_t port, tcp_recv_func_t cb) {
 }
 int net_tcp_open(uint32_t local_ip, uint16_t local_port,
                  uint32_t remote_ip, uint16_t remote_port, int active) {
-    (void)local_ip; (void)active;
-    for (int i = 0; i < TCP_CONN_MAX; i++) {
-        if (!g_tcp_conns[i].used) {
-            g_tcp_conns[i].used = 1;
-            g_tcp_conns[i].state = NET_TCP_STATE_CLOSED;
-            g_tcp_conns[i].local_port = local_port;
-            g_tcp_conns[i].remote_ip = remote_ip;
-            g_tcp_conns[i].remote_port = remote_port;
-            return i;
-        }
+    (void)local_ip;
+    tcp_conn_t *c = tcp_alloc_conn();
+    if (!c) return -1;
+    c->local_port = local_port ? local_port : (uint16_t)(40000 + (g_tcp_iss_gen & 0x3FFF));
+    c->remote_ip = remote_ip;
+    c->remote_port = remote_port;
+    if (active) {
+        /* 主动打开：发 SYN */
+        c->iss = tcp_gen_iss();
+        c->snd_una = c->iss;
+        c->snd_nxt = c->iss;
+        c->state = NET_TCP_STATE_SYN_SENT;
+        tcp_send_segment(c, TCP_SYN, NULL, 0);
+        c->snd_nxt = c->iss + 1;
+        c->rto_timer = TCP_RTO_TICKS;
+        c->retries = 0;
+        c->tx_flags = TCP_SYN;
+    } else {
+        c->state = NET_TCP_STATE_CLOSED;
     }
-    return -1;
+    return (int)(c - g_tcp_conns);
 }
 int net_tcp_send(int conn_id, const uint8_t *data, uint16_t len) {
-    (void)conn_id; (void)data; (void)len;
-    return -1;  /* M1.4 实现 */
+    if (conn_id < 0 || conn_id >= TCP_CONN_MAX) return -1;
+    tcp_conn_t *c = &g_tcp_conns[conn_id];
+    if (!c->used || c->state != NET_TCP_STATE_ESTABLISHED) return -1;
+    if (len > TCP_MSS) len = TCP_MSS;
+    /* 发送 PSH+ACK 数据段 */
+    tcp_send_segment(c, TCP_PSH | TCP_ACK, data, len);
+    /* 存入未确认缓冲用于重传 */
+    if (len <= TCP_TX_BUF_SZ) {
+        ns_memcpy(c->tx_buf, data, len);
+        c->tx_len = len;
+        c->tx_seq = c->snd_nxt;
+        c->tx_flags = 0;
+        c->rto_timer = TCP_RTO_TICKS;
+        c->retries = 0;
+    }
+    c->snd_nxt += len;
+    return (int)len;
 }
-int net_tcp_available(int conn_id) { (void)conn_id; return 0; }
+int net_tcp_available(int conn_id) {
+    if (conn_id < 0 || conn_id >= TCP_CONN_MAX || !g_tcp_conns[conn_id].used) return 0;
+    return (int)g_tcp_conns[conn_id].rx_len;
+}
 int net_tcp_recv(int conn_id, uint8_t *data, uint16_t len) {
-    (void)conn_id; (void)data; (void)len;
-    return 0;
+    if (conn_id < 0 || conn_id >= TCP_CONN_MAX) return -1;
+    tcp_conn_t *c = &g_tcp_conns[conn_id];
+    if (!c->used) return -1;
+    uint16_t n = 0;
+    while (n < len && c->rx_len > 0) {
+        data[n++] = c->rx_buf[c->rx_head];
+        c->rx_head = (c->rx_head + 1) % TCP_RX_BUF_SZ;
+        c->rx_len--;
+    }
+    c->rcv_wnd = (uint16_t)(TCP_RX_BUF_SZ - c->rx_len);
+    return (int)n;
 }
 int net_tcp_close(int conn_id) {
     if (conn_id < 0 || conn_id >= TCP_CONN_MAX) return -1;
-    if (!g_tcp_conns[conn_id].used) return -1;
-    g_tcp_conns[conn_id].used = 0;
-    g_tcp_conns[conn_id].state = NET_TCP_STATE_CLOSED;
+    tcp_conn_t *c = &g_tcp_conns[conn_id];
+    if (!c->used) return -1;
+    if (c->state == NET_TCP_STATE_ESTABLISHED) {
+        /* 主动关闭：发 FIN */
+        tcp_send_segment(c, TCP_FIN | TCP_ACK, NULL, 0);
+        c->snd_nxt += 1;
+        c->state = NET_TCP_STATE_FIN_WAIT_1;
+        c->rto_timer = TCP_RTO_TICKS; c->retries = 0; c->tx_flags = TCP_FIN;
+    } else if (c->state == NET_TCP_STATE_CLOSE_WAIT) {
+        /* 被动关闭：回 FIN 进入 LAST_ACK */
+        tcp_send_segment(c, TCP_FIN | TCP_ACK, NULL, 0);
+        c->snd_nxt += 1;
+        c->state = NET_TCP_STATE_LAST_ACK;
+        c->rto_timer = TCP_RTO_TICKS; c->retries = 0; c->tx_flags = TCP_FIN;
+    } else {
+        c->used = 0;
+        c->state = NET_TCP_STATE_CLOSED;
+    }
     return 0;
 }
 int net_tcp_state(int conn_id) {
@@ -851,8 +1151,7 @@ int net_tcp_get_endpoint(int conn_id, uint32_t *local_ip, uint16_t *local_port,
     return 0;
 }
 int net_tcp_send_syn(uint32_t dst_ip, uint16_t src_port, uint16_t dst_port) {
-    (void)dst_ip; (void)src_port; (void)dst_port;
-    return -1;  /* M1.4 实现 */
+    return net_tcp_open(0, src_port, dst_ip, dst_port, 1);
 }
 
 /* ============================================================

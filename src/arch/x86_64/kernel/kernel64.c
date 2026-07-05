@@ -18,6 +18,7 @@
 #include "virtio_net.h"
 /* M1.3 网络协议栈入口（netstack.c） */
 extern void net_init(void);
+extern void net_tick(uint32_t elapsed_ms);
 extern int net_ping_ipv4(uint32_t dst_ip);
 extern void net_print_info(void);
 #include "../include/pic64.h"
@@ -155,6 +156,18 @@ void arch_x86_64_early_init(const openos_bootinfo_t *bootinfo) {
         early_serial64_write(pr == 0 ? "[net] PING PASS: 网关可达\n"
                                      : "[net] PING TIMEOUT: 无应答(QEMU user模式下属正常)\n");
         net_print_info();
+    }
+    /* M1.4 自检：TCP 主动握手。向网关发 SYN，验证 TCP 段封装+状态机。
+     * QEMU user 网络网关不监听 TCP，故不会有 SYN-ACK，但可用 pcap
+     * 坐实 SYN 段被正确构造并发出(端口/序列号/标志/伪首部校验和)。 */
+    {
+        extern void early_serial64_write(const char *s);
+        extern int net_tcp_open(uint32_t,uint16_t,uint32_t,uint16_t,int);
+        uint32_t gw = (10u<<24)|(0u<<16)|(2u<<8)|2u;
+        early_serial64_write("[net] 自检：TCP connect 10.0.2.2:80 (发SYN) ...\n");
+        int cid = net_tcp_open(0, 45000, gw, 80, 1);
+        early_serial64_write(cid >= 0 ? "[net] TCP SYN 已发出，连接进入 SYN_SENT\n"
+                                      : "[net] TCP open 失败\n");
     }
     /* Step E.4: TSC<->PIT calibration. Must run before any selftest that
      * relies on uptime_ms(); idempotent and tolerates failure (uptime falls
@@ -726,6 +739,7 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
             early_console64_write("[x86_64][gui] desktop up, entering poll loop\n");
             for (;;) {
                 window_manager_poll();
+                net_tick(0);   /* 驱动 TCP 重传定时器 + 收包轮询 */
                 __asm__ __volatile__("hlt");
             }
         }
