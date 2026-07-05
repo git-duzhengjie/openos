@@ -279,7 +279,14 @@ static int ipv4_send(net_device_t *dev, uint32_t dst_ip, uint8_t proto,
     if (payload_len > ETH_MTU - 20) return -2;
     uint32_t next_hop = ip_next_hop(dev, dst_ip);
     uint8_t dmac[6];
-    if (arp_resolve(dev, next_hop, dmac) != 0) return -1; /* ARP未就绪 */
+    /* 受限广播(255.255.255.255) 或 子网定向广播 直接用广播MAC，跳过ARP */
+    if (dst_ip == 0xFFFFFFFFu || next_hop == 0xFFFFFFFFu ||
+        (dev->netmask && (dst_ip | dev->netmask) == 0xFFFFFFFFu &&
+         (dst_ip & dev->netmask) == (dev->ip & dev->netmask))) {
+        for (int _bi = 0; _bi < 6; _bi++) dmac[_bi] = 0xFF;
+    } else if (arp_resolve(dev, next_hop, dmac) != 0) {
+        return -1; /* ARP未就绪 */
+    }
 
     uint8_t pkt[ETH_MTU];
     uint16_t total_len = (uint16_t)(20 + payload_len);
@@ -1205,3 +1212,138 @@ void net_print_info(void) {
     ns_puts("ARP 缓存: "); ns_put_dec(arp_cache_count()); ns_puts(" 条\n");
     ns_puts("====================\n");
 }
+
+/* ============================================================
+ * DHCP 客户端（M1.5.1）
+ *   DISCOVER -> OFFER -> REQUEST -> ACK 四步拿 IP
+ *   复用 UDP 广播(bootpc 68 -> bootps 67)
+ * ============================================================ */
+#define DHCP_OP_REQUEST   1
+#define DHCP_OP_REPLY     2
+#define DHCP_HTYPE_ETH    1
+#define DHCP_MAGIC        0x63825363u
+#define DHCP_MSG_DISCOVER 1
+#define DHCP_MSG_OFFER    2
+#define DHCP_MSG_REQUEST  3
+#define DHCP_MSG_ACK      5
+#define DHCP_MSG_NAK      6
+#define DHCP_OPT_SUBNET   1
+#define DHCP_OPT_ROUTER   3
+#define DHCP_OPT_DNS      6
+#define DHCP_OPT_REQ_IP   50
+#define DHCP_OPT_MSGTYPE  53
+#define DHCP_OPT_SERVER   54
+#define DHCP_OPT_PARAMS   55
+#define DHCP_OPT_END      255
+
+static uint8_t  g_dhcp_state = 0;   /* 0=idle 1=discover发出 2=request发出 3=bound */
+static uint32_t g_dhcp_xid = 0x4f504f53;  /* 'OPOS' */
+static uint32_t g_dhcp_offered_ip = 0;
+static uint32_t g_dhcp_server_ip = 0;
+static uint32_t g_dhcp_router = 0;
+static uint32_t g_dhcp_subnet = 0;
+static uint32_t g_dhcp_dns = 0;
+
+/* 构造并发送一个 DHCP 报文(DISCOVER 或 REQUEST) */
+static void dhcp_send(uint8_t msg_type) {
+    net_device_t *dev = g_devices[0];
+    if (!dev) return;
+    static uint8_t buf[300];
+    ns_memset(buf, 0, sizeof(buf));
+    buf[0] = DHCP_OP_REQUEST;
+    buf[1] = DHCP_HTYPE_ETH;
+    buf[2] = 6;      /* hlen */
+    buf[3] = 0;      /* hops */
+    wr_be32(buf + 4, g_dhcp_xid);
+    wr_be16(buf + 8, 0);      /* secs */
+    wr_be16(buf + 10, 0x8000);/* flags: broadcast */
+    /* ciaddr/yiaddr/siaddr/giaddr = 0 (offset 12..27) */
+    ns_memcpy(buf + 28, dev->mac, 6);  /* chaddr */
+    /* magic cookie @ offset 236 */
+    wr_be32(buf + 236, DHCP_MAGIC);
+    uint32_t o = 240;
+    /* option 53: message type */
+    buf[o++] = DHCP_OPT_MSGTYPE; buf[o++] = 1; buf[o++] = msg_type;
+    if (msg_type == DHCP_MSG_REQUEST) {
+        /* option 50: requested IP */
+        buf[o++] = DHCP_OPT_REQ_IP; buf[o++] = 4;
+        wr_be32(buf + o, g_dhcp_offered_ip); o += 4;
+        /* option 54: server id */
+        buf[o++] = DHCP_OPT_SERVER; buf[o++] = 4;
+        wr_be32(buf + o, g_dhcp_server_ip); o += 4;
+    }
+    /* option 55: parameter request list */
+    buf[o++] = DHCP_OPT_PARAMS; buf[o++] = 3;
+    buf[o++] = DHCP_OPT_SUBNET; buf[o++] = DHCP_OPT_ROUTER; buf[o++] = DHCP_OPT_DNS;
+    buf[o++] = DHCP_OPT_END;
+    net_send_udp_broadcast(68, 67, buf, (uint16_t)o);
+}
+
+/* 解析 DHCP 选项，返回报文类型 */
+static uint8_t dhcp_parse(const uint8_t *data, uint16_t len) {
+    if (len < 240) return 0;
+    if (rd_be32(data + 236) != DHCP_MAGIC) return 0;
+    uint8_t msg_type = 0;
+    g_dhcp_offered_ip = rd_be32(data + 16);  /* yiaddr */
+    uint32_t o = 240;
+    while (o < len) {
+        uint8_t opt = data[o++];
+        if (opt == DHCP_OPT_END) break;
+        if (opt == 0) continue;
+        if (o >= len) break;
+        uint8_t l = data[o++];
+        if (o + l > len) break;
+        switch (opt) {
+        case DHCP_OPT_MSGTYPE: msg_type = data[o]; break;
+        case DHCP_OPT_SERVER:  g_dhcp_server_ip = rd_be32(data + o); break;
+        case DHCP_OPT_SUBNET:  g_dhcp_subnet = rd_be32(data + o); break;
+        case DHCP_OPT_ROUTER:  g_dhcp_router = rd_be32(data + o); break;
+        case DHCP_OPT_DNS:     g_dhcp_dns = rd_be32(data + o); break;
+        default: break;
+        }
+        o += l;
+    }
+    return msg_type;
+}
+
+/* UDP 68 端口回调：处理 OFFER / ACK */
+static void dhcp_udp_cb(uint32_t src_ip, uint16_t src_port,
+                        uint16_t dst_port, const uint8_t *data, uint16_t len) {
+    (void)src_ip; (void)src_port; (void)dst_port;
+    uint8_t mt = dhcp_parse(data, len);
+    if (mt == DHCP_MSG_OFFER && g_dhcp_state == 1) {
+        ns_puts("[dhcp] 收到 OFFER, IP="); ns_put_ip(g_dhcp_offered_ip);
+        ns_puts(" server="); ns_put_ip(g_dhcp_server_ip); ns_puts("\n");
+        g_dhcp_state = 2;
+        dhcp_send(DHCP_MSG_REQUEST);
+        ns_puts("[dhcp] 已发 REQUEST\n");
+    } else if (mt == DHCP_MSG_ACK && g_dhcp_state == 2) {
+        g_dhcp_state = 3;
+        /* 应用配置 */
+        net_config_ipv4(g_dhcp_offered_ip, g_dhcp_subnet ? g_dhcp_subnet : 0xFFFFFF00u,
+                        g_dhcp_router, g_dhcp_dns);
+        ns_puts("[dhcp] BOUND! IP="); ns_put_ip(g_dhcp_offered_ip);
+        ns_puts(" GW="); ns_put_ip(g_dhcp_router);
+        ns_puts(" DNS="); ns_put_ip(g_dhcp_dns); ns_puts("\n");
+    } else if (mt == DHCP_MSG_NAK) {
+        ns_puts("[dhcp] 收到 NAK, 重新 DISCOVER\n");
+        g_dhcp_state = 0;
+    }
+}
+
+/* 启动 DHCP：绑定 68 端口并发 DISCOVER */
+int net_dhcp_start(void) {
+    g_dhcp_state = 0;
+    g_dhcp_offered_ip = g_dhcp_server_ip = g_dhcp_router = g_dhcp_subnet = g_dhcp_dns = 0;
+    if (net_udp_bind(68, dhcp_udp_cb) < 0) {
+        ns_puts("[dhcp] 绑定 68 端口失败\n");
+        return -1;
+    }
+    g_dhcp_state = 1;
+    dhcp_send(DHCP_MSG_DISCOVER);
+    ns_puts("[dhcp] 已发 DISCOVER, 等待 OFFER...\n");
+    return 0;
+}
+
+/* 返回 DHCP 状态：3=已获取地址 */
+int net_dhcp_state(void) { return (int)g_dhcp_state; }

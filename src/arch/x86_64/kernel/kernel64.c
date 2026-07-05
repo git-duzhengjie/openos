@@ -147,6 +147,23 @@ void arch_x86_64_early_init(const openos_bootinfo_t *bootinfo) {
      * 挂载到 virtio-net 之上，注册 eth0，配置静态 IP(10.0.2.15)，
      * 之后可响应 ARP、被 ping、主动 ping、收发 UDP。 */
     net_init();
+    /* M1.5.1 自检：DHCP 动态获取 IP。发 DISCOVER，轮询等待 OFFER/ACK。
+     * QEMU user 网络内置 DHCP 服务器(10.0.2.2)，正常会分配 10.0.2.15。 */
+    {
+        extern void early_serial64_write(const char *s);
+        extern int net_dhcp_start(void);
+        extern int net_dhcp_state(void);
+        extern void net_tick(uint32_t);
+        early_serial64_write("[net] 自检：DHCP 动态获取 IP ...\n");
+        net_dhcp_start();
+        /* 轮询驱动收包，最多等待若干轮 */
+        for (int i = 0; i < 200000 && net_dhcp_state() != 3; i++) {
+            net_tick(0);
+        }
+        early_serial64_write(net_dhcp_state() == 3
+            ? "[net] DHCP PASS: 已动态获取 IP\n"
+            : "[net] DHCP 未完成(回退静态或稍后重试)\n");
+    }
     /* M1.3 自检：主动 ping 网关 10.0.2.2，验证 ARP+ICMP 全链路 */
     {
         extern void early_serial64_write(const char *s);
