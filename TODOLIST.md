@@ -1560,10 +1560,12 @@
   - [√] ICMP（可主动 ping 网关 + 可被 ping；pcap 坐实 Echo Request/Reply）
   - [√] netstack.c(908行) + netstack64.h，静态配置 IP 10.0.2.15/GW 10.0.2.2
   - [√] 实机验证：串口 [net] PING PASS 网关可达 + ARP缓存1条；pcap 4帧(ARP req/reply+ICMP req/reply)
-- [ ] M1.4：传输层 （进行中：UDP✅ / TCP骨架 / socket待接）
-  - [√] UDP（收发 + 端口分发，netstack.c 已实现 udp_send/recv）
-  - [ ] TCP（三次握手 / 四次挥手 / 重传 / 滑动窗口 / 状态机；当前仅骨架）
-  - [ ] socket 层真正接入 net64.c 骨架（bind/listen/accept/connect/send/recv）
+- [ ] M1.4：传输层 ✅ 基本完成（TCP状态机已可用，高级优化待补）
+  - [√] UDP（收发 + 端口分发）
+  - [√] TCP 完整状态机：三次握手（主动connect/被动listen）+ 四次挥手 + 数据收发 + 累积ACK + 超时重传（net_tick驱动）
+  - [√] socket 层接入：net_tcp_open/listen/send/recv/close/available 全实现
+  - [√] 实机验证：串口 TCP SYN已发出/SYN_SENT；pcap坐实SYN段(port45000->80,SYN flag,伪首部校验和正确)
+  - [ ] 高级：滑动窗口流控、乱序重组、拥塞控制、SACK（后续优化）
 - [ ] M1.5：应用层打通真实上网
   - [ ] DHCP 客户端（自动获取 IP）
   - [ ] DNS 解析
