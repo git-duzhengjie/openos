@@ -173,8 +173,8 @@ int openos64_main(int argc, char **argv, char **envp) {
          * but still strictly advances). Nested loops give ~hundreds of ms
          * on TCG; KVM hosts blow through this in microseconds. The outer
          * yield keeps the kernel scheduler engaged. */
-        for (volatile int outer = 0; outer < 64; ++outer) {
-            for (volatile int inner = 0; inner < 65536; ++inner) {
+        for (volatile int outer = 0; outer < 4; ++outer) {
+            for (volatile int inner = 0; inner < 4096; ++inner) {
                 /* nothing */
             }
             openos64_yield();

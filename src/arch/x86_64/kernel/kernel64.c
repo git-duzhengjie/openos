@@ -470,18 +470,6 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
 
     /* Step G.4.1: SMP topology snapshot (no AP wakeup yet). Must run AFTER
      * apic_selftest so LAPIC is initialized and BSP apic_id is readable. */
-#ifdef SHELL_LAUNCH_SELFTEST
-    /* M1.5.3 (TEMP EARLY): run ring3 network round-trip BEFORE the lengthy
-     * SMP/priority self-tests, whose duration varies run-to-run and can push
-     * this probe past the headless serial window. */
-    early_console64_write("[x86_64][net-r3] /bin/ifconfig ...\n");
-    arch_x86_64_shell_exec_line("run /bin/ifconfig");
-    early_console64_write("[x86_64][net-r3] /bin/nslookup example.com ...\n");
-    arch_x86_64_shell_exec_line("run /bin/nslookup example.com");
-    early_console64_write("[x86_64][net-r3] /bin/ping 10.0.2.2 3 ...\n");
-    arch_x86_64_shell_exec_line("run /bin/ping 10.0.2.2 3");
-    early_console64_write("[x86_64][net-r3] done\n");
-#endif
     arch_x86_64_smp_selftest_run();
 
     /* Step G.2: priority-weighted scheduling self-test. Spawns three
@@ -501,8 +489,16 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
      * 落点（或修复 fork wait 后移回文件末尾）。
      * ============================================================ */
 #ifdef SHELL_LAUNCH_SELFTEST
-    /* M1.5.3 net round-trip already executed above (moved before SMP
-     * selftest to fit the headless serial window). */
+    /* M1.5.3: ring3 network round-trip. Runs AFTER smp/prio self-tests so
+     * that stage 19's "syscall_user_rsp == 0 at boot" invariant is not
+     * violated by these user-mode syscalls firing early. */
+    early_console64_write("[x86_64][net-r3] /bin/ifconfig ...\n");
+    arch_x86_64_shell_exec_line("run /bin/ifconfig");
+    early_console64_write("[x86_64][net-r3] /bin/nslookup example.com ...\n");
+    arch_x86_64_shell_exec_line("run /bin/nslookup example.com");
+    early_console64_write("[x86_64][net-r3] /bin/ping 10.0.2.2 3 ...\n");
+    arch_x86_64_shell_exec_line("run /bin/ping 10.0.2.2 3");
+    early_console64_write("[x86_64][net-r3] done\n");
 
     /* Route-2 end-to-end probe: exercise the shell 'run' path (which in
      * turn drives arch_x86_64_usermode_launch_path + VFS-first ELF load)

@@ -147,7 +147,7 @@ echo [build+run] serial log: %SERLOG%
 exit /b %QRC%
 
 :run_headless
-set "HEADLESS_TIMEOUT_S=25"
+set "HEADLESS_TIMEOUT_S=90"
 echo [build+run] headless mode; timeout %HEADLESS_TIMEOUT_S% s, serial -> %SERLOG%
 if exist "%SERLOG%" del /Q "%SERLOG%" >nul 2>&1
 set "QEMU_STDERR=%LOGDIR%\qemu.stderr"
