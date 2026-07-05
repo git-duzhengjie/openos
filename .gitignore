@@ -5,6 +5,9 @@ build/
 *.bin
 target/
 
+# 磁盘镜像（数据盘 / FAT32 交换盘等运行时产物）
+openos-*.img
+
 # Scratch / scan output
 .scan_*.sh
 .scan_*.txt

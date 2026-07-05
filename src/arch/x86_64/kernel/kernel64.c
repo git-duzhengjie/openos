@@ -13,6 +13,7 @@
 #include "../include/initrd64.h"
 #include "../include/ramfs64.h"
 #include "../include/ata64.h"
+#include "../include/fat32_64.h"
 #include "../include/pic64.h"
 #include "../include/pit64.h"
 #include "../include/pmm64.h"
@@ -201,6 +202,21 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
         early_console64_write("[x86_64][ata] data disk ready\n");
     } else {
         early_console64_write("[x86_64][ata] no data disk (RAM-only mode)\n");
+    }
+
+    /* 阶段 4-1：探测 secondary slave 上的 FAT32 数据盘并挂载。
+     * 与 master 持久化盘隔离，可与 Windows/U盘交换文件。 */
+    if (ata_slave_init()) {
+        early_console64_write("[x86_64][ata] FAT32 disk detected (slave)\n");
+        /* part_lba 传 0：自动探测 MBR 分区，无分区则整盘 FAT32 */
+        if (fat32_mount(ata_slave_read_sectors, 0) == 0) {
+            early_console64_write("[x86_64][fat32] mounted at /mnt/fat\n");
+            fat32_selftest();
+        } else {
+            early_console64_write("[x86_64][fat32] mount failed\n");
+        }
+    } else {
+        early_console64_write("[x86_64][ata] no FAT32 disk\n");
     }
 
     /* 阶段一：初始化 RAMFS 内存树文件系统（将 initrd 导入为可读写树）。

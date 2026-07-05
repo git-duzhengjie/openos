@@ -212,3 +212,84 @@ int ata_flush(void) {
     if (ata_wait_not_busy() < 0) return -3;
     return 0;
 }
+
+/* ============================================================
+ * secondary slave（FAT32 数据盘）
+ * 与 master 共享同一总线寄存器，仅 drive select 不同：
+ *   master = 0xA0/0xE0，slave = 0xB0/0xF0。
+ * 只实现只读（阶段 4-1）。
+ * ============================================================ */
+static int g_slave_present = 0;
+
+int ata_slave_init(void) {
+    g_slave_present = 0;
+
+    /* 选择 slave (drive/head = 0xB0) */
+    outb(ATA_REG_DRIVE, 0xB0);
+    ata_io_delay();
+
+    uint8_t st = inb(ATA_REG_STATUS);
+    if (st == 0xFF) {
+        ata_log("[ATA] slave: floating bus\n");
+        return 0;
+    }
+
+    outb(ATA_REG_SECCOUNT, 0);
+    outb(ATA_REG_LBA_LO, 0);
+    outb(ATA_REG_LBA_MID, 0);
+    outb(ATA_REG_LBA_HI, 0);
+    outb(ATA_REG_COMMAND, ATA_CMD_IDENTIFY);
+    ata_io_delay();
+
+    st = inb(ATA_REG_STATUS);
+    if (st == 0) {
+        ata_log("[ATA] slave: no drive (status 0)\n");
+        return 0;
+    }
+    if (ata_wait_not_busy() < 0) {
+        ata_log("[ATA] slave: IDENTIFY BSY timeout\n");
+        return 0;
+    }
+    if (inb(ATA_REG_LBA_MID) != 0 || inb(ATA_REG_LBA_HI) != 0) {
+        ata_log("[ATA] slave: signature mismatch\n");
+        return 0;
+    }
+    if (ata_wait_drq() < 0) {
+        ata_log("[ATA] slave: IDENTIFY DRQ timeout/err\n");
+        return 0;
+    }
+    uint16_t id[256];
+    for (int i = 0; i < 256; i++) id[i] = inw(ATA_REG_DATA);
+
+    g_slave_present = 1;
+    ata_log("[ATA] secondary slave detected (FAT32 disk)\n");
+    return 1;
+}
+
+int ata_slave_present(void) { return g_slave_present; }
+
+int ata_slave_read_sectors(uint32_t lba, uint32_t count, void *buf) {
+    if (!g_slave_present) return -1;
+    if (count == 0) return 0;
+    uint16_t *ptr = (uint16_t *)buf;
+
+    for (uint32_t s = 0; s < count; s++) {
+        uint32_t cur = lba + s;
+        if (ata_wait_not_busy() < 0) return -2;
+
+        /* slave + LBA28 高 4 位：0xF0 */
+        outb(ATA_REG_DRIVE, 0xF0 | ((cur >> 24) & 0x0F));
+        outb(ATA_REG_FEATURES, 0);
+        outb(ATA_REG_SECCOUNT, 1);
+        outb(ATA_REG_LBA_LO,  (uint8_t)(cur & 0xFF));
+        outb(ATA_REG_LBA_MID, (uint8_t)((cur >> 8) & 0xFF));
+        outb(ATA_REG_LBA_HI,  (uint8_t)((cur >> 16) & 0xFF));
+        outb(ATA_REG_COMMAND, ATA_CMD_READ_PIO);
+
+        if (ata_wait_drq() < 0) return -3;
+
+        for (int i = 0; i < 256; i++) *ptr++ = inw(ATA_REG_DATA);
+        ata_io_delay();
+    }
+    return 0;
+}

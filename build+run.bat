@@ -22,6 +22,7 @@ set "OVMF_CODE=C:\Program Files\qemu\share\edk2-x86_64-code.fd"
 set "OVMF_VARS=%ROOT%\target\OVMF_VARS.fd"
 set "IMAGE=%ROOT%\target\openos-uefi.img"
 set "DATADISK=%ROOT%\target\openos-data.img"
+set "FATDISK=%ROOT%\target\openos-fat.img"
 set "LOGDIR=%ROOT%\logs"
 set "SERLOG=%LOGDIR%\qfork.ser"
 
@@ -52,6 +53,15 @@ if not exist "%DATADISK%" (
   if not exist "%DATADISK%" (
     echo [build+run] qemu-img failed; creating via fsutil
     fsutil file createnew "%DATADISK%" 67108864 >nul 2>&1
+  )
+)
+
+rem --- FAT32 exchange disk (32MB) : do NOT overwrite if present ---
+if not exist "%FATDISK%" (
+  echo [build+run] creating blank FAT32 disk %FATDISK% ^(32MB^)
+  "%QEMU:qemu-system-x86_64.exe=qemu-img.exe%" create -f raw "%FATDISK%" 32M >nul 2>&1
+  if not exist "%FATDISK%" (
+    fsutil file createnew "%FATDISK%" 33554432 >nul 2>&1
   )
 )
 
@@ -128,6 +138,7 @@ echo [build+run] GUI mode; serial mirrored to %SERLOG%
   -drive if=pflash,format=raw,unit=1,file="%OVMF_VARS%" ^
   -drive file="%IMAGE%",format=raw,media=disk,if=ide,index=0 ^
   -drive file="%DATADISK%",format=raw,media=disk,if=ide,index=2 ^
+  -drive file="%FATDISK%",format=raw,media=disk,if=ide,index=3 ^
   -boot c ^
   -serial file:"%SERLOG%" -vga std -net none
 set "QRC=%ERRORLEVEL%"
@@ -147,6 +158,7 @@ start "" /B "%QEMU%" -machine pc -cpu qemu64 -smp 4 -m 256M ^
   -drive "if=pflash,format=raw,unit=1,file=%OVMF_VARS%" ^
   -drive "file=%IMAGE%,format=raw,media=disk,if=ide,index=0" ^
   -drive "file=%DATADISK%,format=raw,media=disk,if=ide,index=2" ^
+  -drive "file=%FATDISK%,format=raw,media=disk,if=ide,index=3" ^
   -boot c -serial "file:%SERLOG%" -display none -no-reboot -no-shutdown 2>"%QEMU_STDERR%"
 timeout /T %HEADLESS_TIMEOUT_S% /NOBREAK >nul 2>&1
 rem  Fallback: 'timeout' bails on non-interactive stdin; use ping as a portable sleep.

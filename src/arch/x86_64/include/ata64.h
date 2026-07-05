@@ -38,4 +38,12 @@ int ata_write_sectors(uint32_t lba, uint32_t count, const void *buf);
 /* 刷新磁盘缓存，确保数据真正落盘。返回 0 成功 */
 int ata_flush(void);
 
+/* ---- secondary slave（FAT32 盘，与 master 数据盘隔离）---- */
+/* 初始化并探测 secondary slave。返回 1=发现磁盘，0=无磁盘 */
+int ata_slave_init(void);
+/* slave 是否可用 */
+int ata_slave_present(void);
+/* 从 slave 读取 count 个扇区到 buf。返回 0 成功，负数失败 */
+int ata_slave_read_sectors(uint32_t lba, uint32_t count, void *buf);
+
 #endif /* ATA64_H */
