@@ -14,6 +14,7 @@
 #include "../include/ramfs64.h"
 #include "../include/ata64.h"
 #include "../include/fat32_64.h"
+#include "pci.h"
 #include "../include/pic64.h"
 #include "../include/pit64.h"
 #include "../include/pmm64.h"
@@ -126,6 +127,11 @@ void arch_x86_64_early_init(const openos_bootinfo_t *bootinfo) {
     /* Step E.3: loopback socket layer. Allocation-free, lives in .bss so it
      * is safe to bring up alongside fd_init / vfs_init in early boot. */
     arch_x86_64_net_init();
+    /* Step M1.1: PCI 总线枚举。扫描所有总线/设备/功能，解析 BAR 与 IRQ，
+     * 为后续网卡 / AHCI / NVMe / xHCI / 声卡驱动提供设备发现基础。
+     * 仅做只读枚举 + 日志，无中断依赖，安全早期执行。 */
+    pci_scan_all();
+    pci_dump_devices();
     /* Step E.4: TSC<->PIT calibration. Must run before any selftest that
      * relies on uptime_ms(); idempotent and tolerates failure (uptime falls
      * back to the legacy rdtsc>>20 estimate). */

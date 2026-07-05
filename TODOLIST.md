@@ -1527,3 +1527,87 @@
     - [ ] H.5b.3：用户栈搬家到 PML4[1] + trampoline iretq 前 CR3 切换
     - [ ] H.5b.4：去 U 位收口（PML4[0] 内核低 4GiB 叶子去 U，只保留必须共享的项）
 
+---
+
+## P0-MODERN：现代操作系统能力缺口清单（2026-07-05 评估新增）
+
+> 背景：截至 x86_64 主线（UEFI + GUI 桌面 + 抢占式 SMP 调度 + fork/exec/wait + FAT32 只读/短名写）已具备成熟玩具 OS 水平。以下为对标「现代操作系统」仍缺失的能力，按优先级分梯队。评估依据：网络栈 net64.c 仅 socket 骨架无真实收发包、无网卡驱动、PCI/USB/声卡仅有头文件无实现、syscall 仅 22 个、无信号机制、无 AHCI/NVMe。
+
+### M1：网络栈从零到通（🔴 第一优先级 · 现代 OS 硬指标）
+
+- [ ] M1.1：PCI 总线枚举（所有后续设备驱动的前置基础） ✅ 已完成
+  - [√] `pci.h` 补全实现：Config 空间读写（0xCF8/0xCFC 端口机制）
+  - [√] 全总线/设备/功能扫描，枚举 vendor/device/class/subclass（含 PCI-PCI 桥递归）
+  - [√] BAR 解析（IO/MMIO 基址与大小探测、支持 64 位 BAR）
+  - [√] 中断线（IRQ line / pin）读取（MSI/MSI-X 待网卡阶段按需扩展）
+  - [√] `pci_dump_devices` 调试输出 + 开机自动 pci_scan_all（lspci 风格串口打印）
+  - [√] 实机验证：QEMU i440fx 扫到 5 设备（主桥/ISA/IDE/ACPI/VGA），VGA BAR0=fb@0x80000000 16MB 反向印证 BAR 解析正确
+  - [√] 提供使能 API：pci_enable_bus_master / mmio / io；查找 API：pci_find_by_class / by_id / get_device
+- [ ] M1.2：网卡驱动（至少一款可在 QEMU 跑通）
+  - [ ] 首选 virtio-net（QEMU 默认、实现最简）：virtqueue + tx/rx ring
+  - [ ] 备选 e1000（Intel 82540EM，QEMU `-nic model=e1000`）
+  - [ ] 备选 rtl8139（老牌简单，资料多）
+  - [ ] 网卡收发中断接入 IOAPIC + 收包 DMA 环形缓冲
+- [ ] M1.3：链路层 + 网络层
+  - [ ] 以太网帧收发（EtherType 分发）
+  - [ ] ARP（请求/应答 + 缓存表）
+  - [ ] IPv4（分片重组、校验和、路由表最小实现）
+  - [ ] ICMP（可被 ping / 可主动 ping）
+- [ ] M1.4：传输层
+  - [ ] UDP（收发 + 端口分发）
+  - [ ] TCP（三次握手 / 四次挥手 / 重传 / 滑动窗口 / 状态机）
+  - [ ] socket 层真正接入 net64.c 骨架（bind/listen/accept/connect/send/recv）
+- [ ] M1.5：应用层打通真实上网
+  - [ ] DHCP 客户端（自动获取 IP）
+  - [ ] DNS 解析
+  - [ ] 用户态 `ping` / `wget` 真正可用（替换现有空壳）
+  - [ ] 自研浏览器接入真实 HTTP 请求
+
+### M2：现代存储与设备（🟠 第二优先级）
+
+- [ ] M2.1：AHCI/SATA 驱动（替代/补充 ATA PIO，支持现代 SATA 盘 + DMA）
+- [ ] M2.2：NVMe 驱动（现代 SSD 主流接口）
+- [ ] M2.3：USB 栈（`usb.h` 补实现）
+  - [ ] xHCI 控制器驱动（USB 3.x，现代机型主流）
+  - [ ] USB HID（键盘/鼠标）
+  - [ ] USB 大容量存储（U 盘）
+- [ ] M2.4：声卡/音频（`sound.h` 补实现，AC97 或 Intel HDA + PCM 播放）
+
+### M3：文件系统完善（🟠 第二优先级）
+
+- [ ] M3.1：FAT32 完整读写（LFN 长文件名 / mkdir / rm 收尾，见阶段4-4）
+- [ ] M3.2：ext2/ext4 只读（对接 Linux 生态镜像）
+- [ ] M3.3：统一 VFS 多类型挂载（mount/umount 任意 FS 到任意挂载点）
+- [ ] M3.4：文件权限模型（rwx / uid / gid / 属主）
+- [ ] M3.5：软链接 / 硬链接支持
+
+### M4：内核接口与进程模型补齐（🟠 第二优先级）
+
+- [ ] M4.1：syscall 扩充（当前仅 22 个，缺以下关键项）
+  - [ ] 内存：`mmap` / `munmap` / `mprotect` / `brk`
+  - [ ] IPC：`pipe` / `dup` / `dup2`
+  - [ ] 文件元数据：`stat` / `fstat` / `lstat` / `mkdir` / `unlink` / `rename` / `ioctl`
+  - [ ] 时间：`nanosleep` / `gettimeofday` / `clock_gettime`
+  - [ ] 进程：`getpid` / `getppid` / `kill`
+- [ ] M4.2：信号机制（signal / sigaction / kill / Ctrl-C 终止前台进程）
+- [ ] M4.3：管道与 IPC（匿名管道 + 命名管道 FIFO + 共享内存）
+- [ ] M4.4：伪终端 / TTY 子系统（行规程 / 作业控制 / 前后台进程组）
+
+### M5：生态与运行时（🟡 第三优先级）
+
+- [ ] M5.1：动态链接（.so + 动态链接器 + PLT/GOT 重定位）
+- [ ] M5.2：用户态多线程（clone / pthread / 用户级线程库）
+- [ ] M5.3：标准 C 库对齐（向 musl/newlib 兼容子集靠拢，便于移植第三方软件）
+- [ ] M5.4：包管理 / 软件安装机制（最小可用的程序分发）
+
+### M6：现代体验与安全（🟡 第三优先级）
+
+- [ ] M6.1：ACPI 电源管理（关机 / 重启 / 休眠 S3）
+- [ ] M6.2：CPU 频率/温度管理（P-state / C-state）
+- [ ] M6.3：图形加速（2D blit 加速 / 可选 GPU 驱动 / 双缓冲无撕裂）
+- [ ] M6.4：安全加固（ASLR / W^X 强制 / SMEP / SMAP / 栈保护）
+- [ ] M6.5：多用户与会话（完整 uid/gid 体系 + 登录管理 + 权限隔离）
+- [ ] M6.6：系统日志 / dmesg / journald 风格日志子系统
+
+> 推荐攻关顺序：**M1.1 PCI → M1.2 virtio-net → M1.3/M1.4 TCP/IP 栈 → M1.5 真实上网**。此路线打通后 OpenOS 才真正跨入现代 OS 门槛；M2/M4 可并行推进。
+

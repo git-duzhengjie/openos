@@ -464,7 +464,8 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         kernel/heap64.c \
         kernel/elf64_loader.c \
         kernel/usermode64.c \
-        kernel/early_console64.c; do
+        kernel/early_console64.c \
+        kernel/pci64.c; do
         obj="$ARCH64_BUILD/$(basename "${cfile%.c}").o"
         gcc $ARCH64_CFLAGS -c "$ARCH64_SRC/$cfile" -o "$obj"
     done
@@ -581,6 +582,7 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         "$ARCH64_BUILD/usermode64.o" \
         "$ARCH64_BUILD/usermode64_asm.o" \
         "$ARCH64_BUILD/early_console64.o" \
+        "$ARCH64_BUILD/pci64.o" \
         "$ARCH64_BUILD/arch_ops.o" \
         "$ARCH64_BUILD/platform_ops.o" \
         "$ARCH64_BUILD/device.o" \
