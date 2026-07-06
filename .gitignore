@@ -49,3 +49,5 @@ logs/
 *.bak
 *_new.c
 *.ppm
+*.ser
+*.pcap
