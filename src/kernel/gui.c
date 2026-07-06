@@ -10934,13 +10934,31 @@ static void gui_terminal_run_command(const char *cmd) {
         if (*arg == 0) {
             gui_terminal_write("run: missing program path\n");
         } else {
+            /* M1.8: 按空格分词，token0=程序路径，其余作为 argv 传给 ring3 程序，
+             * 让 `run /bin/wget example.com /` 这类带参命令能正确工作。 */
+            #define GUI_MAX_ARGV 8
+            static char argbuf[256];
+            int bl = 0;
+            while (arg[bl] && bl < (int)sizeof(argbuf) - 1) { argbuf[bl] = arg[bl]; bl++; }
+            argbuf[bl] = 0;
+            const char *toks[GUI_MAX_ARGV];
+            int ntok = 0;
+            char *cur = argbuf;
+            while (*cur && ntok < GUI_MAX_ARGV) {
+                toks[ntok++] = cur;
+                while (*cur && *cur != ' ') cur++;
+                if (*cur == ' ') { *cur = 0; cur++; while (*cur == ' ') cur++; }
+            }
             char path[128];
-            gui_term_resolve(arg, path, sizeof(path));
+            gui_term_resolve(toks[0], path, sizeof(path));
+            const char *argv[GUI_MAX_ARGV];
+            argv[0] = path;
+            for (int ai = 1; ai < ntok; ai++) argv[ai] = toks[ai];
             gui_terminal_write("[run] launching ");
             gui_terminal_write(path);
             gui_terminal_write("\n");
             gui_terminal_set_capture(1);
-            int code = arch_x86_64_usermode_launch_path(path, 0, 0, 0, 0);
+            int code = arch_x86_64_usermode_launch_path(path, ntok, argv, 0, 0);
             gui_terminal_set_capture(0);
             gui_terminal_write("[run] exit code=");
             {
@@ -10956,6 +10974,7 @@ static void gui_terminal_run_command(const char *cmd) {
                 gui_terminal_write(nb);
             }
             gui_terminal_write("\n");
+            #undef GUI_MAX_ARGV
         }
     } else {
         gui_terminal_write("unknown command: ");
