@@ -540,6 +540,7 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         src/kernel/gui_terminal.c \
         src/kernel/gui_sticky.c \
         src/kernel/gui_file_preview.c \
+        src/kernel/gui_settings.c \
         src/kernel/gui_user.c \
         src/kernel/i18n.c \
         src/kernel/font.c \
@@ -650,6 +651,7 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         "$ARCH64_BUILD/gui_terminal.o" \
         "$ARCH64_BUILD/gui_sticky.o" \
         "$ARCH64_BUILD/gui_file_preview.o" \
+        "$ARCH64_BUILD/gui_settings.o" \
         "$ARCH64_BUILD/gui_user.o" \
         "$ARCH64_BUILD/i18n.o" \
         "$ARCH64_BUILD/font.o" \

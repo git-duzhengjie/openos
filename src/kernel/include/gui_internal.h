@@ -11,6 +11,7 @@
 #include "gui.h"
 #include "types.h"
 #include "i18n.h"
+#include "net/net.h"
 
 /* ---- gui.c 导出给子模块的共享全局状态 ---- */
 extern gui_system_t g_gui;
@@ -131,5 +132,13 @@ void gui_desktop_note_add(gui_desktop_note_store_t *store, const char *line, int
 /* sticky -> external callers (gui.c desktop/start_menu): */
 void gui_stickynote_open(void);
 int sticky_export_to_desktop_store(gui_desktop_note_store_t *store);
+
+/* === Settings panel & network config subsystem (gui_settings.c) === */
+/* gui.c -> settings: desktop label refresher (called after language change) */
+void gui_desktop_refresh_i18n_labels(void);
+/* settings -> gui.c: primary NIC info query (used by tray status) */
+int gui_get_primary_net_info(net_device_info_t *out);
+/* gui.c -> settings: slider drag released; rebuild settings win if owned by it */
+int gui_settings_on_slider_released(gui_widget_t *w);
 
 #endif /* OPENOS_GUI_INTERNAL_H */
