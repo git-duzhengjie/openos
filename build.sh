@@ -535,17 +535,17 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
     # framebuffer 后端由 framebuffer64.c(UEFI GOP) + gui64_shims.c 提供。
     GUI64_CFLAGS="$ARCH64_CFLAGS -Isrc/kernel"
     for cfile in \
-        src/kernel/gui.c \
-        src/kernel/gui_browser.c \
-        src/kernel/gui_terminal.c \
-        src/kernel/gui_sticky.c \
-        src/kernel/gui_file_preview.c \
-        src/kernel/gui_settings.c \
-        src/kernel/gui_applets.c \
-        src/kernel/gui_user.c \
+        src/kernel/gui/gui.c \
+        src/kernel/gui/gui_browser.c \
+        src/kernel/gui/gui_terminal.c \
+        src/kernel/gui/gui_sticky.c \
+        src/kernel/gui/gui_file_preview.c \
+        src/kernel/gui/gui_settings.c \
+        src/kernel/gui/gui_applets.c \
+        src/kernel/gui/gui_user.c \
         src/kernel/i18n.c \
         src/kernel/font.c \
-        src/kernel/window_manager.c \
+        src/kernel/gui/window_manager.c \
         src/kernel/generated/cjk_font.c \
         src/kernel/crypto/sha256.c \
         src/kernel/lockscreen.c \
