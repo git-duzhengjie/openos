@@ -223,6 +223,9 @@ int net_tcp_close_blocking(int conn_id);
 
 int net_ping_self(void);
 int net_ping_ipv4(uint32_t dst_ip);
+/* 非阻塞 ping（GUI tick 驱动）：start 发起，poll 返回 1=应答 0=进行中 -1=超时 */
+int net_ping_start(uint32_t dst_ip);
+int net_ping_poll(void);
 int net_get_diag_stats(net_diag_stats_t *stats);
 int net_config_ipv4(uint32_t ip, uint32_t netmask, uint32_t gateway, uint32_t dns);
 int net_dhcp_start(void);

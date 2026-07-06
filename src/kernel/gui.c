@@ -86,6 +86,15 @@ static int  gui_scrollview_clamp_x(gui_widget_t *widget, int scroll_x);
 static int  gui_scrollview_clamp_y(gui_widget_t *widget, int scroll_y);
 static void browser_load_start(void);
 static void browser_load_tick(void);
+static void gui_nettool_tick(void);
+/* 网络工具异步状态机类型（定义前置，供终端命令分支使用） */
+typedef enum {
+    NT_TOOL_NONE = 0,
+    NT_TOOL_PING,
+    NT_TOOL_NSLOOKUP,
+    NT_TOOL_WGET,
+} nt_tool_t;
+static int gui_nettool_start(nt_tool_t tool, const char *host, const char *path2);
 static void browser_load_finish(const char *status);
 static int  browser_str_starts_ci(const char *p, const char *prefix);
 static int  browser_header_name_eq(const char *p, const char *name);
@@ -10939,30 +10948,55 @@ static void gui_terminal_run_command(const char *cmd) {
             gui_terminal_write(arg);
             gui_terminal_write("\n");
         }
+    } else if (gui_net_alias_match(cmd)) {
+        /* M2.3 异步化：网络工具（ping/nslookup/wget）不再走 launch_path 同步阻塞，
+         * 改为启动 gui_nettool 状态机，由 GUI 主循环每帧 tick 驱动，不卡界面。 */
+        static char ntbuf[256];
+        int bl = 0;
+        while (cmd[bl] && bl < (int)sizeof(ntbuf) - 1) { ntbuf[bl] = cmd[bl]; bl++; }
+        ntbuf[bl] = 0;
+        /* 分词：tok0=工具名，其余为参数 */
+        const char *toks[8];
+        int ntok = 0;
+        char *cur = ntbuf;
+        while (*cur && ntok < 8) {
+            toks[ntok++] = cur;
+            while (*cur && *cur != ' ') cur++;
+            if (*cur == ' ') { *cur = 0; cur++; while (*cur == ' ') cur++; }
+        }
+        const char *tool = toks[0];
+        nt_tool_t nt = NT_TOOL_NONE;
+        if (tool[0]=='p'&&tool[1]=='i'&&tool[2]=='n'&&tool[3]=='g') nt = NT_TOOL_PING;
+        else if (tool[0]=='n'&&tool[1]=='s') nt = NT_TOOL_NSLOOKUP;
+        else if (tool[0]=='w'&&tool[1]=='g') nt = NT_TOOL_WGET;
+        else if (tool[0]=='i'&&tool[1]=='f') {
+            /* ifconfig 仍走旧 ring3（不阻塞，瞬间返回），这里直接提示用 run */
+            gui_terminal_write("ifconfig: use 'run /bin/ifconfig'\n");
+            nt = NT_TOOL_NONE;
+        }
+        if (nt == NT_TOOL_NONE) {
+            /* 无法映射到异步工具，不处理 */
+        } else {
+            /* 参数解析：跳过以 '-' 开头的选项，取第一个非选项作为 host，下一个作为 path */
+            const char *host = 0, *p2 = 0;
+            for (int ai = 1; ai < ntok; ai++) {
+                if (toks[ai][0] == '-') continue;
+                if (!host) host = toks[ai];
+                else if (!p2) { p2 = toks[ai]; break; }
+            }
+            gui_nettool_start(nt, host, p2);
+            /* 注意：不在此处显示提示符；由 nt_finish 在状态机完成时回调 */
+        }
+        return;
     } else if ((cmd[0] == 'r' && cmd[1] == 'u' && cmd[2] == 'n' && (cmd[3] == ' ' || cmd[3] == '\0')) ||
-               (cmd[0] == 'e' && cmd[1] == 'x' && cmd[2] == 'e' && cmd[3] == 'c' && (cmd[4] == ' ' || cmd[4] == '\0')) ||
-               gui_net_alias_match(cmd)) {
+               (cmd[0] == 'e' && cmd[1] == 'x' && cmd[2] == 'e' && cmd[3] == 'c' && (cmd[4] == ' ' || cmd[4] == '\0'))) {
         /* run/exec <path>: launch a user-mode ELF program.
          * Resolves relative paths against cwd, then hands off to the
          * kernel launcher (VFS-first ELF load + ring3 execve/fork rounds).
          * The call blocks until the program tree exits; program stdout is
          * mirrored to the terminal via gui_terminal_write (see SYS_WRITE). */
-        /* M2.0: 网络工具内建别名（wget/ping/...）直接拼 /bin/<name>；
-         * 否则按 run/exec 前缀剔除得到参数串。 */
-        int alias = gui_net_alias_match(cmd);
-        static char aliasbuf[256];
-        const char *arg;
-        if (alias) {
-            /* aliasbuf = "/bin/" + cmd，例如 "wget -1 example.com" -> "/bin/wget -1 example.com" */
-            int p = 0;
-            const char *pre = "/bin/";
-            for (int k = 0; pre[k] && p < (int)sizeof(aliasbuf) - 1; k++) aliasbuf[p++] = pre[k];
-            for (int s = 0; cmd[s] && p < (int)sizeof(aliasbuf) - 1; s++) aliasbuf[p++] = cmd[s];
-            aliasbuf[p] = 0;
-            arg = aliasbuf;
-        } else {
-            arg = cmd + ((cmd[0] == 'r') ? 3 : 4);
-        }
+        /* run/exec <path>：剔除前缀得到参数串。（网络工具别名已在前面分支异步处理） */
+        const char *arg = cmd + ((cmd[0] == 'r') ? 3 : 4);
         while (*arg == ' ') arg++;
         if (*arg == 0) {
             gui_terminal_write("run: missing program path\n");
@@ -11999,6 +12033,7 @@ void gui_poll(void) {
     gui_poll_mouse();
     gui_process_events();
     browser_load_tick();
+    gui_nettool_tick();
     gui_terminal_drain_output_queue();
     gui_terminal_tick_cursor();
     /* clock tick: invalidate taskbar clock area once per second */
@@ -13505,10 +13540,321 @@ static void browser_load_tick(void) {
     }
 }
 
+/* ============================================================
+ * gui_nettool：终端网络工具异步状态机（ping/nslookup/wget）
+ * 不走 launch_path 同步阻塞，由 GUI 主循环每帧 tick 驱动，不卡界面。
+ * ============================================================ */
+/* nt_tool_t 已在文件前部前置定义 */
+
+typedef enum {
+    NT_ST_IDLE = 0,
+    NT_ST_RESOLVING,   /* 等 DNS */
+    NT_ST_PING_WAIT,   /* 等 ping 回包 */
+    NT_ST_CONNECTING,  /* 等 TCP ESTABLISHED */
+    NT_ST_SENDING,     /* 发 HTTP 请求 */
+    NT_ST_RECV,        /* 收 HTTP 响应 */
+    NT_ST_DONE,
+} nt_state_t;
+
+static struct {
+    int          active;
+    nt_tool_t    tool;
+    nt_state_t   state;
+    char         host[128];   /* 目标主机名或 IP 字符串 */
+    char         path[128];   /* wget 路径 */
+    uint32_t     ip;          /* 解析后的目标 IP */
+    int          conn;        /* TCP 句柄 */
+    uint32_t     start_ticks; /* 启动时间（net_ticks_ms 基准） */
+    int          ping_count;  /* 已发 ping 次数 */
+    int          ping_ok;     /* 成功回应次数 */
+    uint32_t     recv_total;  /* wget 已收字节 */
+} g_nt;
+
+/* 终端命令执行后，异步工具未完成时提示符不能立即显示；
+ * 由状态机 DONE 时回调 gui_terminal_show_prompt（定义在前面）。 */
+
+static int  gui_nettool_active(void) { return g_nt.active; }
+
+static void nt_print_ip(uint32_t ip) {
+    char buf[16];
+    unsigned a = (ip >> 24) & 0xFF, b = (ip >> 16) & 0xFF;
+    unsigned c = (ip >> 8) & 0xFF, d = ip & 0xFF;
+    int n = 0;
+    /* 手写 IP 格式化 */
+    char tmp[4];
+    unsigned parts[4] = { a, b, c, d };
+    for (int p = 0; p < 4; p++) {
+        unsigned v = parts[p]; int ti = 0;
+        if (v == 0) tmp[ti++] = '0';
+        else { char rev[3]; int ri = 0; while (v) { rev[ri++] = (char)('0'+v%10); v/=10; } while (ri) tmp[ti++]=rev[--ri]; }
+        for (int k = 0; k < ti; k++) buf[n++] = tmp[k];
+        if (p < 3) buf[n++] = '.';
+    }
+    buf[n] = 0;
+    gui_terminal_write(buf);
+}
+
+static void nt_finish(const char *msg) {
+    if (msg) { gui_terminal_write(msg); gui_terminal_write("\n"); }
+    if (g_nt.conn >= 0) { net_tcp_close(g_nt.conn); g_nt.conn = -1; }
+    g_nt.active = 0;
+    g_nt.state = NT_ST_IDLE;
+    g_nt.tool = NT_TOOL_NONE;
+    gui_terminal_show_prompt();
+}
+
 static void browser_on_nav(gui_widget_t *w, void *ud) {
     (void)w;
     (void)ud;
     browser_load_start();
+}
+
+/* 已经过去多少 ms（sched_time_ms 基准） */
+static int nt_timed_out(uint32_t ms) {
+    return (sched_time_ms() - g_nt.start_ticks) >= ms;
+}
+
+/* 启动一个网络工具任务。tool=工具类型，args=第一个参数（主机），arg2=路径（wget 可选）
+ * 返回 0=已启动（后续 tick 驱动，提示符延后显示），-1=参数错误（已即时处理完） */
+static int gui_nettool_start(nt_tool_t tool, const char *host, const char *path2) {
+    memset(&g_nt, 0, sizeof(g_nt));
+    g_nt.conn = -1;
+    g_nt.tool = tool;
+    g_nt.start_ticks = sched_time_ms();
+
+    if (!host || !host[0]) {
+        gui_terminal_write("usage: need a host argument\n");
+        return -1;
+    }
+    /* 拷贝主机名 */
+    int i = 0;
+    while (host[i] && i < (int)sizeof(g_nt.host) - 1) { g_nt.host[i] = host[i]; i++; }
+    g_nt.host[i] = 0;
+    /* 路径（wget） */
+    if (path2 && path2[0]) {
+        int j = 0;
+        while (path2[j] && j < (int)sizeof(g_nt.path) - 1) { g_nt.path[j] = path2[j]; j++; }
+        g_nt.path[j] = 0;
+    } else {
+        g_nt.path[0] = '/'; g_nt.path[1] = 0;
+    }
+
+    if (net_dhcp_state() != 3) {
+        gui_terminal_write("network is not up (no DHCP lease?)\n");
+        return -1;
+    }
+
+    g_nt.active = 1;
+
+    /* 先尝试把 host 当作 IP 直接解析；否则发 DNS 查询 */
+    if (net_parse_ipv4(g_nt.host, &g_nt.ip) == 0) {
+        /* 直接是 IP */
+        if (tool == NT_TOOL_NSLOOKUP) {
+            gui_terminal_write("Name:    ");
+            gui_terminal_write(g_nt.host);
+            gui_terminal_write("\nAddress: ");
+            nt_print_ip(g_nt.ip);
+            gui_terminal_write("\n");
+            nt_finish(0);
+            return 0;
+        }
+        if (tool == NT_TOOL_PING) {
+            gui_terminal_write("PING ");
+            gui_terminal_write(g_nt.host);
+            gui_terminal_write("\n");
+            net_ping_start(g_nt.ip);
+            g_nt.ping_count = 1;
+            g_nt.state = NT_ST_PING_WAIT;
+            g_nt.start_ticks = sched_time_ms();
+            return 0;
+        }
+        /* wget */
+        g_nt.state = NT_ST_CONNECTING;
+        {
+            uint32_t lport = 43000u + (sched_time_ms() % 2000u);
+            g_nt.conn = net_tcp_open(0, (uint16_t)lport, g_nt.ip, 80, 1);
+        }
+        if (g_nt.conn < 0) { nt_finish("wget: TCP open failed"); return 0; }
+        g_nt.start_ticks = sched_time_ms();
+        return 0;
+    }
+
+    /* 需要 DNS 解析 */
+    if (dns_query_a(g_nt.host) != 0) {
+        nt_finish("DNS query failed");
+        return 0;
+    }
+    if (tool == NT_TOOL_NSLOOKUP) {
+        gui_terminal_write("Resolving ");
+        gui_terminal_write(g_nt.host);
+        gui_terminal_write(" ...\n");
+    }
+    g_nt.state = NT_ST_RESOLVING;
+    g_nt.start_ticks = sched_time_ms();
+    return 0;
+}
+
+/* 向 wget 连接发送 HTTP/1.0 GET 请求 */
+static void nt_send_http_get(void) {
+    static char req[512];
+    int pos = 0;
+    req[0] = 0;
+    pos = fp_str_append(req, pos, sizeof(req), "GET ");
+    pos = fp_str_append(req, pos, sizeof(req), g_nt.path);
+    pos = fp_str_append(req, pos, sizeof(req), " HTTP/1.0\r\nHost: ");
+    pos = fp_str_append(req, pos, sizeof(req), g_nt.host);
+    pos = fp_str_append(req, pos, sizeof(req),
+                        "\r\nConnection: close\r\nUser-Agent: OpenOSwget/0.1\r\n\r\n");
+    (void)pos;
+    if (net_tcp_send(g_nt.conn, (const uint8_t *)req, (uint16_t)strlen(req)) != 0) {
+        nt_finish("wget: send failed");
+        return;
+    }
+    g_nt.recv_total = 0;
+    g_nt.state = NT_ST_RECV;
+    g_nt.start_ticks = sched_time_ms();
+}
+
+/* GUI 主循环每帧调用：推进网络工具状态机（不阻塞） */
+static void gui_nettool_tick(void) {
+    if (!g_nt.active) return;
+    net_poll();
+
+    switch (g_nt.state) {
+    case NT_ST_RESOLVING: {
+        dns_state_t ds = dns_get_state();
+        if (ds == DNS_STATE_RESOLVED) {
+            g_nt.ip = dns_get_last_result();
+            if (!g_nt.ip) { nt_finish("DNS: no address"); return; }
+            if (g_nt.tool == NT_TOOL_NSLOOKUP) {
+                gui_terminal_write("Name:    ");
+                gui_terminal_write(g_nt.host);
+                gui_terminal_write("\nAddress: ");
+                nt_print_ip(g_nt.ip);
+                gui_terminal_write("\n");
+                nt_finish(0);
+                return;
+            }
+            if (g_nt.tool == NT_TOOL_PING) {
+                gui_terminal_write("PING ");
+                gui_terminal_write(g_nt.host);
+                gui_terminal_write(" (");
+                nt_print_ip(g_nt.ip);
+                gui_terminal_write(")\n");
+                net_ping_start(g_nt.ip);
+                g_nt.ping_count = 1;
+                g_nt.state = NT_ST_PING_WAIT;
+                g_nt.start_ticks = sched_time_ms();
+                return;
+            }
+            /* wget */
+            {
+                uint32_t lport = 43000u + (sched_time_ms() % 2000u);
+                g_nt.conn = net_tcp_open(0, (uint16_t)lport, g_nt.ip, 80, 1);
+            }
+            if (g_nt.conn < 0) { nt_finish("wget: TCP open failed"); return; }
+            g_nt.state = NT_ST_CONNECTING;
+            g_nt.start_ticks = sched_time_ms();
+            return;
+        }
+        if (ds == DNS_STATE_FAILED || nt_timed_out(3000u)) {
+            nt_finish("DNS lookup failed or timed out");
+        }
+        return;
+    }
+
+    case NT_ST_PING_WAIT: {
+        int r = net_ping_poll();
+        if (r == 1) {
+            g_nt.ping_ok++;
+            gui_terminal_write("reply from ");
+            nt_print_ip(g_nt.ip);
+            gui_terminal_write(": icmp_seq=");
+            char sb[8]; int si = 0; int v = g_nt.ping_count;
+            if (v == 0) sb[si++]='0'; else { char rev[8]; int ri=0; while(v){rev[ri++]=(char)('0'+v%10);v/=10;} while(ri) sb[si++]=rev[--ri]; }
+            sb[si]=0; gui_terminal_write(sb);
+            gui_terminal_write(" ok\n");
+            if (g_nt.ping_count >= 4) {
+                gui_terminal_write("--- ping done: ");
+                char cb[8]; int ci=0; v=g_nt.ping_ok;
+                if (v==0) cb[ci++]='0'; else { char rev[8]; int ri=0; while(v){rev[ri++]=(char)('0'+v%10);v/=10;} while(ri) cb[ci++]=rev[--ri]; }
+                cb[ci]=0; gui_terminal_write(cb);
+                gui_terminal_write("/4 replies ---\n");
+                nt_finish(0);
+                return;
+            }
+            /* 发下一包 */
+            g_nt.ping_count++;
+            net_ping_start(g_nt.ip);
+            g_nt.start_ticks = sched_time_ms();
+            return;
+        }
+        if (r < 0) {
+            gui_terminal_write("request timeout icmp_seq=");
+            char sb[8]; int si=0; int v=g_nt.ping_count;
+            if (v==0) sb[si++]='0'; else { char rev[8]; int ri=0; while(v){rev[ri++]=(char)('0'+v%10);v/=10;} while(ri) sb[si++]=rev[--ri]; }
+            sb[si]=0; gui_terminal_write(sb); gui_terminal_write("\n");
+            if (g_nt.ping_count >= 4) {
+                gui_terminal_write("--- ping done: ");
+                char cb[8]; int ci=0; v=g_nt.ping_ok;
+                if (v==0) cb[ci++]='0'; else { char rev[8]; int ri=0; while(v){rev[ri++]=(char)('0'+v%10);v/=10;} while(ri) cb[ci++]=rev[--ri]; }
+                cb[ci]=0; gui_terminal_write(cb);
+                gui_terminal_write("/4 replies ---\n");
+                nt_finish(0);
+                return;
+            }
+            g_nt.ping_count++;
+            net_ping_start(g_nt.ip);
+            g_nt.start_ticks = sched_time_ms();
+            return;
+        }
+        return;   /* 进行中 */
+    }
+
+    case NT_ST_CONNECTING: {
+        int st = net_tcp_state(g_nt.conn);
+        if (st == NET_TCP_STATE_ESTABLISHED) {
+            nt_send_http_get();
+        } else if (st < 0 || st == NET_TCP_STATE_CLOSED || nt_timed_out(5000u)) {
+            nt_finish("wget: connection failed or timed out");
+        }
+        return;
+    }
+
+    case NT_ST_RECV: {
+        uint8_t buf[512];
+        int got = net_tcp_recv(g_nt.conn, buf, (uint16_t)(sizeof(buf) - 1));
+        if (got > 0) {
+            buf[got] = 0;
+            gui_terminal_write((const char *)buf);
+            g_nt.recv_total += (uint32_t)got;
+            g_nt.start_ticks = sched_time_ms();
+            if (g_nt.recv_total >= 1024u * 1024u) {
+                gui_terminal_write("\n[wget: 1MiB limit reached]\n");
+                nt_finish(0);
+            }
+            return;
+        }
+        int st = net_tcp_state(g_nt.conn);
+        if (st == NET_TCP_STATE_CLOSED || st == NET_TCP_STATE_CLOSE_WAIT) {
+            gui_terminal_write("\n[wget done: ");
+            char nb[12]; int ni=0; uint32_t v=g_nt.recv_total;
+            if (v==0) nb[ni++]='0'; else { char rev[12]; int ri=0; while(v){rev[ri++]=(char)('0'+v%10);v/=10;} while(ri) nb[ni++]=rev[--ri]; }
+            nb[ni]=0; gui_terminal_write(nb);
+            gui_terminal_write(" bytes]\n");
+            nt_finish(0);
+            return;
+        }
+        if (nt_timed_out(8000u)) {
+            nt_finish("\nwget: receive timed out");
+        }
+        return;
+    }
+
+    default:
+        g_nt.active = 0;
+        return;
+    }
 }
 
 static int browser_handle_address_enter(int key) {

@@ -907,6 +907,80 @@ int net_ping_ipv4(uint32_t dst_ip) {
     return r;
 }
 
+/* ============================================================
+ * 非阻塞 ping 状态机（供 GUI 主循环 tick 驱动，不阻塞界面）
+ * 用法：net_ping_start(ip) 发起一次 echo -> 循环调 net_ping_poll()
+ *   返回 1=收到应答, 0=进行中, -1=超时/失败
+ * ============================================================ */
+static int      g_np_active = 0;      /* 是否有进行中的非阻塞 ping */
+static uint32_t g_np_dst = 0;
+static uint16_t g_np_seq = 0;         /* 本次 echo 的 seq，用于匹配应答 */
+static int      g_np_arp_tries = 0;   /* ARP 重试计数 */
+static uint32_t g_np_ticks = 0;       /* poll 次数，用于超时 */
+#define NP_ARP_MAX_TRIES  4
+#define NP_TIMEOUT_TICKS  4000        /* 每次 poll 约推进一步，超时上限 */
+
+/* 组装并发送一枚 ICMP echo；返回 ipv4_send 结果(0=已发出, !=0=ARP未就绪) */
+static int np_send_echo(void) {
+    if (!g_default_dev) return -1;
+    g_ping_got_reply = 0;
+    g_ping_reply_from = 0;
+    g_icmp_seq++;
+    g_np_seq = g_icmp_seq;
+    uint8_t icmp[64];
+    icmp[0] = ICMP_TYPE_ECHO_REQUEST;
+    icmp[1] = 0;
+    wr_be16(icmp + 2, 0);
+    wr_be16(icmp + 4, g_icmp_id);
+    wr_be16(icmp + 6, g_icmp_seq);
+    for (int i = 0; i < 32; i++) icmp[8 + i] = (uint8_t)('a' + (i % 26));
+    uint16_t icmp_len = 8 + 32;
+    uint16_t csum = net_checksum(icmp, icmp_len, 0);
+    wr_be16(icmp + 2, csum);
+    return ipv4_send(g_default_dev, g_np_dst, IP_PROTO_ICMP, icmp, icmp_len);
+}
+
+/* 发起一次非阻塞 ping。返回0=已受理 -1=无设备 */
+int net_ping_start(uint32_t dst_ip) {
+    if (!g_default_dev) return -1;
+    g_np_active = 1;
+    g_np_dst = dst_ip;
+    g_np_arp_tries = 0;
+    g_np_ticks = 0;
+    /* 首次尝试发送；若 ARP 未就绪，poll 里会重试 */
+    if (np_send_echo() != 0) {
+        g_np_arp_tries = 1;   /* 标记需重试，poll 中驱动 ARP */
+    }
+    return 0;
+}
+
+/* 推进非阻塞 ping。返回 1=收到应答 0=进行中 -1=超时/失败
+ * 调用者应在每帧调用一次（内部会 net_poll 收包）。 */
+int net_ping_poll(void) {
+    if (!g_np_active) return -1;
+    net_poll();
+    if (g_ping_got_reply) {
+        g_np_active = 0;
+        return 1;
+    }
+    g_np_ticks++;
+    /* ARP 未就绪时，隔若干 tick 重发一次 echo（此时 ARP 应答多半已回来） */
+    if (g_np_arp_tries > 0 && g_np_arp_tries <= NP_ARP_MAX_TRIES) {
+        if ((g_np_ticks % 200) == 0) {
+            if (np_send_echo() == 0) {
+                g_np_arp_tries = 0;   /* 发出成功，转入纯等待应答 */
+            } else {
+                g_np_arp_tries++;
+            }
+        }
+    }
+    if (g_np_ticks >= NP_TIMEOUT_TICKS) {
+        g_np_active = 0;
+        return -1;
+    }
+    return 0;
+}
+
 /* 向自身 IP 发 ping（回环测试） */
 int net_ping_self(void) {
     if (!g_default_dev) return -1;
