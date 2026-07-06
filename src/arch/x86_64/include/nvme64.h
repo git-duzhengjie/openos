@@ -39,6 +39,11 @@ int nvme_write_sectors(uint64_t lba, uint32_t count, const void *buf);
 /* FLUSH，确保写入落盘。返回 0 成功，负数失败。 */
 int nvme_flush(void);
 
+/* FAT32 blockdev 适配器（512B 扇区语义，lba 收窄为 uint32）。
+ * 仅当原生块大小=512 时可用，否则返回 -1 交由上层回退 ATA。 */
+int nvme_fat_read(uint32_t lba, uint32_t count, void *buf);
+int nvme_fat_write(uint32_t lba, uint32_t count, const void *buf);
+
 /* headless 自测：IDENTIFY 出容量 + 写一块读回校验。返回 0 全 PASS。 */
 int nvme_selftest(void);
 

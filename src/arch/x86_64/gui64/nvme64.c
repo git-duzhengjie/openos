@@ -501,6 +501,22 @@ int nvme_flush(void) {
     return (st == 0) ? 0 : -1;
 }
 
+/* ==================== FAT32 blockdev 适配器 ====================
+ * fat32_read_fn/write_fn 的 lba 是 uint32_t（512B 扇区语义），
+ * 而 nvme_read/write_sectors 用 uint64_t lba + 原生块大小。
+ * 这里做签名收窄 + 512B→原生块的换算，供 fat32_mount 依赖注入。
+ * 约定：FAT32 以 512B 逻辑扇区寻址；若 NVMe 原生块=512 则直通，
+ *       否则暂不支持（返回 -1，交由上层回退 ATA）。 */
+int nvme_fat_read(uint32_t lba, uint32_t count, void *buf) {
+    if (!g_present || g_blksz != 512) return -1;
+    return nvme_read_sectors((uint64_t)lba, count, buf);
+}
+
+int nvme_fat_write(uint32_t lba, uint32_t count, const void *buf) {
+    if (!g_present || g_blksz != 512) return -1;
+    return nvme_write_sectors((uint64_t)lba, count, buf);
+}
+
 /* ==================== 对外查询接口 ==================== */
 int      nvme_present(void)      { return g_present; }
 uint64_t nvme_sector_count(void) { return g_present ? g_nsze : 0; }

@@ -358,23 +358,40 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
         early_console64_write("[x86_64][nvme] NVMe disk selftest skipped/FAIL\n");
     }
 
-    /* 阶段 4-1：探测 secondary slave 上的 FAT32 数据盘并挂载。
-     * 与 master 持久化盘隔离，可与 Windows/U盘交换文件。 */
-    if (ata_slave_init()) {
-        early_console64_write("[x86_64][ata] FAT32 disk detected (slave)\n");
-        /* part_lba 传 0：自动探测 MBR 分区，无分区则整盘 FAT32 */
-        if (fat32_mount(ata_slave_read_sectors, 0) == 0) {
-            early_console64_write("[x86_64][fat32] mounted at /mnt/fat\n");
-            /* 阶段 4-3：使能写入（注入 slave 写扇区回调） */
-            fat32_set_write_fn(ata_slave_write_sectors);
+    /* 阶段 4-1：探测并挂载 FAT32 数据盘。
+     * 优先尝试 NVMe（现代存储，块大小=512 才可直通），
+     * 否则回退到 ATA secondary slave。与 master 持久化盘隔离。 */
+    int fat_mounted = 0;
+    if (nvme_present() && nvme_block_size() == 512) {
+        early_console64_write("[x86_64][nvme] trying FAT32 mount on NVMe...\n");
+        if (fat32_mount(nvme_fat_read, 0) == 0) {
+            early_console64_write("[x86_64][fat32] mounted at /mnt/fat (NVMe)\n");
+            fat32_set_write_fn(nvme_fat_write);
             if (fat32_writable())
                 early_console64_write("[x86_64][fat32] write enabled (RW)\n");
             fat32_selftest();
+            fat_mounted = 1;
         } else {
-            early_console64_write("[x86_64][fat32] mount failed\n");
+            early_console64_write("[x86_64][fat32] NVMe mount failed, fallback to ATA\n");
         }
-    } else {
-        early_console64_write("[x86_64][ata] no FAT32 disk\n");
+    }
+    if (!fat_mounted) {
+        if (ata_slave_init()) {
+            early_console64_write("[x86_64][ata] FAT32 disk detected (slave)\n");
+            /* part_lba 传 0：自动探测 MBR 分区，无分区则整盘 FAT32 */
+            if (fat32_mount(ata_slave_read_sectors, 0) == 0) {
+                early_console64_write("[x86_64][fat32] mounted at /mnt/fat\n");
+                /* 阶段 4-3：使能写入（注入 slave 写扇区回调） */
+                fat32_set_write_fn(ata_slave_write_sectors);
+                if (fat32_writable())
+                    early_console64_write("[x86_64][fat32] write enabled (RW)\n");
+                fat32_selftest();
+            } else {
+                early_console64_write("[x86_64][fat32] mount failed\n");
+            }
+        } else {
+            early_console64_write("[x86_64][ata] no FAT32 disk\n");
+        }
     }
 
     /* 阶段一：初始化 RAMFS 内存树文件系统（将 initrd 导入为可读写树）。

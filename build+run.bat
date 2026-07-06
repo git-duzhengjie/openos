@@ -76,13 +76,16 @@ if not exist "%AHCIDISK%" (
   )
 )
 
-rem --- NVMe test disk (64MB) for M2.2 NVMe driver dev ---
+rem --- NVMe test disk (64MB, FAT32) for M2.2 NVMe driver + VFS ---
 if not exist "%NVMEDISK%" (
-  echo [build+run] creating NVMe disk %NVMEDISK% ^(64MB^)
+  echo [build+run] creating NVMe disk %NVMEDISK% ^(64MB, FAT32^)
   "%QEMU:qemu-system-x86_64.exe=qemu-img.exe%" create -f raw "%NVMEDISK%" 64M >nul 2>&1
   if not exist "%NVMEDISK%" (
     fsutil file createnew "%NVMEDISK%" 67108864 >nul 2>&1
   )
+  rem 格式化为 FAT32（通过 WSL mkfs.vfat），使 NVMe 盘可被内核 fat32_mount 直接挂载
+  wsl -d %WSL_DISTRO% bash -c "mkfs.vfat -F 32 -s 1 -n OPENOSNVME /mnt/e/openos/target/openos-nvme.img && cd /tmp && printf 'Hello from NVMe FAT32!\n' > HELLO.TXT && mcopy -i /mnt/e/openos/target/openos-nvme.img HELLO.TXT ::HELLO.TXT" >nul 2>&1
+  echo [build+run] NVMe disk formatted FAT32 + seeded HELLO.TXT
 )
 
 echo.

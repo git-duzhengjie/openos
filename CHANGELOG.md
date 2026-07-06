@@ -4,6 +4,20 @@
 
 ## [Unreleased]
 
+### Added — NVMe 盘接入 FAT32/VFS，NVMe 优先挂载 (2026-07-06)
+
+- **目标**：让 M2.2 打通的 NVMe 驱动真正当文件系统用，而非仅做 block 自测。
+- **blockdev 适配层**：`nvme64.c` 新增 `nvme_fat_read/write`（512B 扇区语义，
+  lba 收窄为 uint32）+ `nvme_present`/`nvme_block_size`/`nvme_sector_count`，
+  仅当原生块大小=512 时可直通 FAT32。
+- **挂载策略**：`kernel64.c` 改为 **NVMe 优先、ATA 回退**——先试 NVMe
+  （block=512 才直通），`fat32_mount` 失败才回退到 ATA secondary slave。
+- **镜像**：`build+run.bat` 创建 NVMe 裸盘后自动 `mkfs.vfat -F 32` 格式化
+  并用 mtools 植入 `HELLO.TXT` 种子文件，保证流程可复现。
+- **验证（headless 全绿）**：`mounted at /mnt/fat (NVMe)` ✅（走 NVMe 分支非回退）；
+  读 `/HELLO.TXT` → `Hello from NVMe FAT32!` ✅（真从 NVMe 块设备读到）；
+  写 `/OSWRITE.TXT` rc=0 + 回读 32 字节 ✅。
+
 ### Fixed — NVMe DMA 完成后缺内存屏障导致读到脏缓存 (2026-07-06)
 
 - **现象**：NVMe IDENTIFY controller/namespace 命令 status 均返回成功，但数据缓冲
