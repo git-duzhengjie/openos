@@ -879,7 +879,10 @@ static int net_ping_ipv4_impl(uint32_t dst_ip) {
         sent = ipv4_send(g_default_dev, dst_ip, IP_PROTO_ICMP, icmp, icmp_len);
         if (sent != 0) {
             /* ARP 未就绪，轮询收包等 ARP 应答 */
-            for (int w = 0; w < 100000; w++) net_poll();
+            for (int w = 0; w < 100000; w++) {
+                net_poll();
+                if ((w & 0x0FFF) == 0) arch_x86_64_proc_yield();
+            }
         }
     }
     if (sent != 0) return -1;
@@ -887,6 +890,7 @@ static int net_ping_ipv4_impl(uint32_t dst_ip) {
     for (int w = 0; w < 2000000; w++) {
         net_poll();
         if (g_ping_got_reply) return 0;
+        if ((w & 0x0FFF) == 0) arch_x86_64_proc_yield();
     }
     return -1;
 }
@@ -1541,7 +1545,10 @@ static int net_dns_resolve_impl(const char *hostname, uint32_t *out_ip) {
     for (int attempt = 0; attempt < 4 && sent != 0; attempt++) {
         sent = net_send_udp(dns_server, DNS_LOCAL_PORT, DNS_PORT, buf, o);
         if (sent != 0)
-            for (int w = 0; w < 100000; w++) net_poll();
+            for (int w = 0; w < 100000; w++) {
+                net_poll();
+                if ((w & 0x0FFF) == 0) arch_x86_64_proc_yield();
+            }
     }
     if (sent != 0) { ns_puts("[dns] 发送失败\n"); return -1; }
 
@@ -1555,6 +1562,7 @@ static int net_dns_resolve_impl(const char *hostname, uint32_t *out_ip) {
             ns_puts(" -> "); ns_put_ip(g_dns_result_ip); ns_puts("\n");
             return 0;
         }
+        if ((w & 0x0FFF) == 0) arch_x86_64_proc_yield();
     }
     ns_puts("[dns] 查询超时\n");
     return -1;
