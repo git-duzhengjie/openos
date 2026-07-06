@@ -77,4 +77,8 @@ uint32_t blockdev_size_bytes(blockdev_t *dev);
 /* 注册内核内置块设备，并创建 /dev 节点 */
 void blockdev_register_builtin_devices(void);
 
+/* x86_64 硬件探测注册（blockdev_hw.c 实现）：
+ * 依据各驱动 *_present() 结果注册 nvme0/sda/hda/hdb，返回注册数量。 */
+int blockdev_register_hw_devices(void);
+
 #endif /* BLOCKDEV_H */

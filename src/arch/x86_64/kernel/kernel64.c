@@ -14,6 +14,7 @@
 #include "../include/ramfs64.h"
 #include "../include/ata64.h"
 #include "../include/fat32_64.h"
+#include "blockdev.h"
 #include "pci.h"
 #include "virtio_net.h"
 /* M1.3 网络协议栈入口（netstack.c） */
@@ -356,6 +357,17 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
         early_console64_write("[x86_64][nvme] NVMe disk selftest PASS\n");
     } else {
         early_console64_write("[x86_64][nvme] NVMe disk selftest skipped/FAIL\n");
+    }
+
+    /* M2.2：硬件探测完成后，将各就绪驱动注册进块设备抽象层（nvme0/sda/hda/hdb）。
+     * 上层（未来 VFS/工具）可经 blockdev_find(name) 做设备无关的读写。 */
+    blockdev_init();
+    {
+        int bd_n = blockdev_register_hw_devices();
+        if (bd_n > 0)
+            early_console64_write("[x86_64][blockdev] registered hw block devices\n");
+        else
+            early_console64_write("[x86_64][blockdev] no hw block device registered\n");
     }
 
     /* 阶段 4-1：探测并挂载 FAT32 数据盘。

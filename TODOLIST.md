@@ -1592,7 +1592,7 @@
   - [√] Admin 命令：CREATE IO CQ/SQ + IDENTIFY controller/namespace
   - [√] IO 命令：阻塞式 READ/WRITE(nvme_submit 轮询 phase tag) + 自测 write/read/verify PASS
   - [√] 根治“IDENTIFY 成功但数据全零”：`nvme_submit` 完成判定后读 DMA 前加 `mfence`，敲门铃前加 `sfence`（“加 klog 就好”的时序陷阱，同 headless 假 PASS）
-  - [ ] 接入 blockdev 抽象层 + 与 FAT32/VFS 挂接
+  - [√] 接入 blockdev 抽象层 + 与 FAT32/VFS 挂接（新增 `src/kernel/drivers/blockdev.c` 统一注册表/分发层 + `src/arch/x86_64/gui64/blockdev_hw.c` 硬件适配层，把 nvme0/sda/hda/hdb 包装为 blockdev_ops 注册；kernel64 启动时序：驱动 selftest→`blockdev_register_hw_devices()`→FAT32 mount；QEMU 实测 `[x86_64][blockdev] registered hw block devices` PASS，FAT32 读写 HELLO.TXT 正常）
   - [ ] 中断驱动（现为轮询，MSI-X 待接）
 - [ ] M2.3：USB 栈（`usb.h` 补实现）
   - [ ] xHCI 控制器驱动（USB 3.x，现代机型主流）
