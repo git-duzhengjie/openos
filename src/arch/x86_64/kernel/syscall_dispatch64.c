@@ -526,6 +526,67 @@ static uint64_t do_uptime_ms(void) {
 }
 
 /*
+ * SYS_CLOCK_GETTIME (332): fill a user openos_timespec_t with a monotonic
+ * timestamp derived from do_uptime_ms(). Only CLOCK_MONOTONIC is meaningful
+ * on this kernel (no RTC wall-clock wiring yet); any clk_id is accepted and
+ * treated as monotonic so callers get a usable steady clock. Returns 0 on
+ * success, -1 on a bogus user pointer.
+ */
+static uint64_t do_clock_gettime(uint64_t clk_id, uint64_t ts_ptr) {
+    (void)clk_id;
+    if (!validate_user_buf(ts_ptr, sizeof(openos_timespec_t))) return (uint64_t)-1;
+    uint64_t ms = do_uptime_ms();
+    openos_timespec_t *ts = (openos_timespec_t *)ts_ptr;
+    ts->tv_sec  = (int64_t)(ms / 1000ULL);
+    ts->tv_nsec = (int64_t)((ms % 1000ULL) * 1000000ULL);
+    return 0;
+}
+
+/*
+ * Shared busy-wait sleep core: spin-yield until `ms` milliseconds of
+ * monotonic uptime have elapsed. This kernel has no blocking timer queue yet,
+ * so we cooperatively yield each iteration to let other tasks run instead of
+ * hard-spinning. A zero/short sleep still yields once (POSIX-friendly).
+ */
+static void sleep_ms_busy(uint64_t ms) {
+    uint64_t start = do_uptime_ms();
+    do {
+        (void)arch_x86_64_proc_yield();
+    } while ((do_uptime_ms() - start) < ms);
+}
+
+/*
+ * SYS_SLEEP (200): sleep for `seconds` whole seconds. Returns 0 (no remaining
+ * time tracking on this cooperative implementation).
+ */
+static uint64_t do_sleep(uint64_t seconds) {
+    sleep_ms_busy(seconds * 1000ULL);
+    return 0;
+}
+
+/*
+ * SYS_NANOSLEEP (348): sleep for the duration in the user openos_timespec_t
+ * pointed to by req_ptr, at millisecond granularity (kernel clock resolution).
+ * rem_ptr, if non-NULL, is zeroed since this cooperative sleep is not
+ * interruptible. Returns 0 on success, -1 on a bogus req pointer.
+ */
+static uint64_t do_nanosleep(uint64_t req_ptr, uint64_t rem_ptr) {
+    if (!validate_user_buf(req_ptr, sizeof(openos_timespec_t))) return (uint64_t)-1;
+    const openos_timespec_t *req = (const openos_timespec_t *)req_ptr;
+    int64_t sec  = req->tv_sec;
+    int64_t nsec = req->tv_nsec;
+    if (sec < 0 || nsec < 0) return (uint64_t)-1;
+    uint64_t ms = (uint64_t)sec * 1000ULL + (uint64_t)nsec / 1000000ULL;
+    sleep_ms_busy(ms);
+    if (rem_ptr != 0 && validate_user_buf(rem_ptr, sizeof(openos_timespec_t))) {
+        openos_timespec_t *rem = (openos_timespec_t *)rem_ptr;
+        rem->tv_sec  = 0;
+        rem->tv_nsec = 0;
+    }
+    return 0;
+}
+
+/*
  * SYS_YIELD: Step E.1 routes the call through proc64's cooperative yield
  * counter. The dispatcher itself stays branchless so future sched64 work
  * only has to swap proc64_yield()'s body for a real reschedule. We still
@@ -1018,6 +1079,11 @@ uint64_t arch_x86_64_syscall_dispatch_common(uint64_t num,
 
     /* -------- time -------- */
     case SYS_UPTIME_MS:   return do_uptime_ms();
+
+    /* -------- time / clock (M4.1) -------- */
+    case SYS_CLOCK_GETTIME: return do_clock_gettime(a0, a1);
+    case SYS_SLEEP:         return do_sleep(a0);
+    case SYS_NANOSLEEP:     return do_nanosleep(a0, a1);
 
     /* -------- net (Step E.3, loopback only) -------- */
     case SYS_SOCKET:      return do_socket(a0, a1, a2);

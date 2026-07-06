@@ -32,6 +32,9 @@
 #define OPENOS64_SYS_NETCONFIG 294ULL
 #define OPENOS64_SYS_DNSLOOKUP 316ULL
 #define OPENOS64_SYS_UPTIME_MS 317ULL
+#define OPENOS64_SYS_SLEEP         200ULL
+#define OPENOS64_SYS_CLOCK_GETTIME 332ULL
+#define OPENOS64_SYS_NANOSLEEP     348ULL
 /* M1.7 ring3 用户态 TCP */
 #define OPENOS64_SYS_TCP_CONNECT 460ULL
 #define OPENOS64_SYS_TCP_SEND    461ULL
@@ -191,6 +194,37 @@ static inline long openos64_waitpid(long pid, int *status) {
  * non-decreasing only — not wall clock. */
 static inline uint64_t openos64_uptime_ms(void) {
     return (uint64_t)openos64_syscall0(OPENOS64_SYS_UPTIME_MS);
+}
+
+/* ------------------ M4.1 time / clock helpers ------------------
+ * openos_timespec mirrors the kernel openos_timespec_t layout
+ * (int64 tv_sec + int64 tv_nsec). Only CLOCK_MONOTONIC is meaningful. */
+#define OPENOS64_CLOCK_MONOTONIC 1
+typedef struct openos64_timespec {
+    int64_t tv_sec;
+    int64_t tv_nsec;
+} openos64_timespec_t;
+
+/* Fill *ts with a monotonic timestamp (seconds since boot). Returns 0 on
+ * success, -1 on a bad pointer. */
+static inline int openos64_clock_gettime(int clk_id, openos64_timespec_t *ts) {
+    return (int)openos64_syscall2(OPENOS64_SYS_CLOCK_GETTIME,
+                                  (uint64_t)clk_id,
+                                  (uint64_t)(uintptr_t)ts);
+}
+
+/* Sleep for whole seconds (cooperative busy-yield). Returns 0. */
+static inline int openos64_sleep(unsigned int seconds) {
+    return (int)openos64_syscall1(OPENOS64_SYS_SLEEP, (uint64_t)seconds);
+}
+
+/* Sleep for the duration in *req (ms granularity). rem may be NULL.
+ * Returns 0 on success, -1 on a bad/negative request. */
+static inline int openos64_nanosleep(const openos64_timespec_t *req,
+                                     openos64_timespec_t *rem) {
+    return (int)openos64_syscall2(OPENOS64_SYS_NANOSLEEP,
+                                  (uint64_t)(uintptr_t)req,
+                                  (uint64_t)(uintptr_t)rem);
 }
 
 /* ------------------ Step E.3 socket helpers ------------------ */

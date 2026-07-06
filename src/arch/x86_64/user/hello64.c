@@ -205,5 +205,62 @@ int openos64_main(int argc, char **argv, char **envp) {
         }
     }
 
+    /*
+     * M4.1 verification: exercise clock_gettime + nanosleep from ring3.
+     *   1. clock_gettime(MONOTONIC) fills a timespec; tv_nsec in [0,1e9).
+     *   2. nanosleep for ~120ms; uptime_ms must advance by >=1 across it.
+     * Results are printed in hex to the serial log for offline diagnosis.
+     */
+    {
+        openos64_timespec_t ts;
+        int cg = openos64_clock_gettime(OPENOS64_CLOCK_MONOTONIC, &ts);
+
+        char cb[112];
+        openos64_size_t ci = 0;
+        static const char chex[] = "0123456789abcdef";
+        const char *cp = "[hello64] M4.1 clock_gettime: rc=";
+        for (const char *p = cp; *p; ++p) cb[ci++] = *p;
+        cb[ci++] = (cg == 0) ? '0' : 'E';
+        const char *sp = " sec=0x";
+        for (const char *p = sp; *p; ++p) cb[ci++] = *p;
+        for (int s = 28; s >= 0; s -= 4) cb[ci++] = chex[((uint64_t)ts.tv_sec >> s) & 0xF];
+        const char *np = " nsec=0x";
+        for (const char *p = np; *p; ++p) cb[ci++] = *p;
+        for (int s = 28; s >= 0; s -= 4) cb[ci++] = chex[((uint64_t)ts.tv_nsec >> s) & 0xF];
+        cb[ci++] = '\n';
+        (void)openos64_write(OPENOS64_STDOUT_FILENO, cb, ci);
+
+        if (cg != 0 || ts.tv_nsec < 0 || ts.tv_nsec >= 1000000000) {
+            write_str(OPENOS64_STDERR_FILENO,
+                      "[hello64] ERR: clock_gettime bad result\n");
+            return 8;
+        }
+
+        /* nanosleep ~120ms and assert uptime advanced */
+        uint64_t before = openos64_uptime_ms();
+        openos64_timespec_t req = { .tv_sec = 0, .tv_nsec = 120000000 };
+        int ns = openos64_nanosleep(&req, 0);
+        uint64_t after = openos64_uptime_ms();
+
+        char nb[96];
+        openos64_size_t ni = 0;
+        const char *nq = "[hello64] M4.1 nanosleep: rc=";
+        for (const char *p = nq; *p; ++p) nb[ni++] = *p;
+        nb[ni++] = (ns == 0) ? '0' : 'E';
+        const char *dp = " dt=0x";
+        for (const char *p = dp; *p; ++p) nb[ni++] = *p;
+        uint64_t dt = after - before;
+        for (int s = 28; s >= 0; s -= 4) nb[ni++] = chex[(dt >> s) & 0xF];
+        const char *tag2 = (ns == 0 && after >= before) ? " OK\n" : " FAIL\n";
+        for (const char *p = tag2; *p; ++p) nb[ni++] = *p;
+        (void)openos64_write(OPENOS64_STDOUT_FILENO, nb, ni);
+
+        if (ns != 0 || after < before) {
+            write_str(OPENOS64_STDERR_FILENO,
+                      "[hello64] ERR: nanosleep failed\n");
+            return 9;
+        }
+    }
+
     return 0;
 }
