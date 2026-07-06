@@ -536,6 +536,7 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
     GUI64_CFLAGS="$ARCH64_CFLAGS -Isrc/kernel"
     for cfile in \
         src/kernel/gui.c \
+        src/kernel/gui_browser.c \
         src/kernel/gui_user.c \
         src/kernel/i18n.c \
         src/kernel/font.c \
@@ -642,6 +643,7 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         "$ARCH64_BUILD/x86_64_arch_ops.o" \
         "$ARCH64_BUILD/pc_uefi_platform_ops.o" \
         "$ARCH64_BUILD/gui.o" \
+        "$ARCH64_BUILD/gui_browser.o" \
         "$ARCH64_BUILD/gui_user.o" \
         "$ARCH64_BUILD/i18n.o" \
         "$ARCH64_BUILD/font.o" \
