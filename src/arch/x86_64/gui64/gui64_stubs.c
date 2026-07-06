@@ -31,9 +31,14 @@ extern void  arch_x86_64_kfree(void *ptr);
  * ============================================================ */
 int  dhcp_start(void) { return -1; }
 
-int      dns_query_a(const char *name) { (void)name; return -1; }
-uint32_t dns_get_last_result(void) { return 0; }
-dns_state_t dns_get_state(void) { return (dns_state_t)0; }
+/* ---- 非阻塞 DNS：转发到 netstack.c 真实实现（M2.4） ---- */
+extern int      net_dns_query_start(const char *hostname);
+extern int      net_dns_query_state(void);
+extern uint32_t net_dns_query_result(void);
+
+int      dns_query_a(const char *name) { return net_dns_query_start(name); }
+uint32_t dns_get_last_result(void) { return net_dns_query_result(); }
+dns_state_t dns_get_state(void) { return (dns_state_t)net_dns_query_state(); }
 
 /* net_* / net_tcp_* 真实实现已迁移到 src/kernel/net/netstack.c (M1.3) */
 

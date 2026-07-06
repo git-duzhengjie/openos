@@ -1574,7 +1574,13 @@
   - [√] DHCP 客户端（自动获取 IP）—— DISCOVER/OFFER/REQUEST/BOUND 四步握手实测打通（IP=10.0.2.15 GW=10.0.2.2 DNS=10.0.2.3，commit 34804ea；根因：广播 IP 曾误走 ARP 解析，已改为直接填广播 MAC ff:ff:ff:ff:ff:ff）
   - [√] DNS 解析 —— A 记录查询/响应实测打通（example.com -> 104.20.23.154，穿透 SLIRP 打到真实外网 DNS 10.0.2.3；支持指针压缩 0xC0 跳转 + CNAME 跳过 + 16 条缓存 + IP 字面量直返；pcap 坐实 DNS×2；net_dns_resolve() API）
   - [√] 用户态 `ping` / `ifconfig` / `nslookup` 真正可用（ring3 端到端打通，commit be0aaf8）—— ifconfig 全字段正确显示 (10.0.2.15/255.255.255.0/gw/dns, UP)；ping 10.0.2.2 三次全 reply；nslookup example.com 解析成功。核心修复两处：① do_exit 返回死锁（mark_exited 切回 kernel proc 致 return_to_kernel RSP=0，新增 snapshot_return_rsp 提前快照）；② net syscall 忙等轮询 NIC 时 IF=0 中断关闭致 virtio RX 饥饿全 timeout，在 net_ping_ipv4/net_dns_resolve 入口显式 sti。三工具接入 build.sh 编译+embed，initrd 注册 /bin/{ifconfig,ping,nslookup}
-  - [ ] 用户态 `wget` 真正可用（HTTP GET，替换现有空壳）
+  - [√] 用户态 `wget` 真正可用（HTTP GET，替换现有空壳）—— ring3 端到端打通（commit f41d8ca/7e41fdb）。新增 4 个阻塞式 TCP 导出 + `SYS_TCP_*`(460-463) + `SYS_HTTP_GET`(464)；`net_http_get_buf` 把 HTTP 响应真写回用户缓冲（上限 1MiB）；wget64.c `-1` one-shot 模式。
+  - [√] **网络工具接入 GUI 终端全链路打通**（commit 593078c/b0f4f53/90ea58a/d20f18e/M2.4）—— GUI 终端实测 `nslookup`/`ping`/`wget` 三工具均可用且**不卡界面**。关键里程碑：
+    - GUI 终端内建别名 `gui_net_alias_match()`：`wget`/`ping`/`nslookup`/`ifconfig` 免 `run /bin/` 前缀（593078c）
+    - 修复卡死根因①：`http_pump`/`net_ping_ipv4_impl`/`net_dns_resolve` 的 busy-poll 循环加 yield（b0f4f53/90ea58a）——但 GUI 终端走 `launch_path` 同步阻塞时无其他 kthread 可切，yield 为空转，治标不治本
+    - **正统异步化**（d20f18e）：新增非阻塞 `net_ping_start/poll` + `gui_nettool` 状态机（RESOLVING/PING_WAIT/CONNECTING/SENDING/RECV/DONE），仿 `browser_load_tick` 挂进 GUI 主循环；网络别名不再走同步 `launch_path`，启动状态机后立即返回，提示符由 DONE 回调显示
+    - **补真实非阻塞 DNS**（M2.4）：发现 `gui64_stubs.c` 里 `dns_query_a`/`dns_get_state`/`dns_get_last_result` 是空桩直返 -1 从未接网络栈（headless 走内核内直调 `net_dns_resolve` 绕过桩，故一直假 PASS）；新增 `net_dns_query_start/state/result` 非阻塞 DNS 状态机，三桩改为转发
+    - ⚠️ 编号说明：本网络工具链里程碑内部用 M1.6~M2.4，与下方 M2（现代存储设备）体系不同名，勿混淆
   - [ ] 自研浏览器接入真实 HTTP 请求
 
 ### M2：现代存储与设备（🟠 第二优先级）

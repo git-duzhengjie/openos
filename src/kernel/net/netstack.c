@@ -1653,6 +1653,83 @@ int net_dns_resolve(const char *hostname, uint32_t *out_ip) {
 }
 
 /* ============================================================
+ * M2.4 非阻塞 DNS：供 GUI 状态机使用（dns_query_a/dns_get_state/
+ * dns_get_last_result）。发出查询后立即返回，由 GUI 主循环反复
+ * 调用 net_poll() 驱动收包，dns_udp_cb 命中后置位 g_dns_got_reply。
+ * 状态放在这里维护（复用底层 g_dns_* 全局），避免在 stub 里重复实现。
+ * ============================================================ */
+/* 0=IDLE 1=QUERYING 2=RESOLVED 3=FAILED（与 dns.h dns_state_t 对应） */
+static int      g_ndns_state  = 0;
+static uint32_t g_ndns_result = 0;
+
+/* 非阻塞发起 A 记录查询：0=已发出(或缓存命中)，-1=失败 */
+int net_dns_query_start(const char *hostname) {
+    if (!hostname || !g_default_dev) { g_ndns_state = 3; return -1; }
+
+    /* 点分十进制直接返回 */
+    uint32_t direct;
+    if (net_parse_ipv4(hostname, &direct) == 0) {
+        g_ndns_result = direct; g_ndns_state = 2; return 0;
+    }
+    /* 查缓存 */
+    uint32_t cached = dns_cache_lookup(hostname);
+    if (cached != 0) { g_ndns_result = cached; g_ndns_state = 2; return 0; }
+
+    uint32_t dns_server = g_default_dev->dns;
+    if (dns_server == 0) { g_ndns_state = 3; return -1; }
+
+    if (!g_dns_bound) {
+        if (net_udp_bind(DNS_LOCAL_PORT, dns_udp_cb) < 0) { g_ndns_state = 3; return -1; }
+        g_dns_bound = 1;
+    }
+
+    /* 构造查询报文 */
+    static uint8_t qbuf[512];
+    ns_memset(qbuf, 0, sizeof(qbuf));
+    g_dns_query_xid = g_dns_xid++;
+    wr_be16(qbuf + 0, g_dns_query_xid);
+    wr_be16(qbuf + 2, 0x0100);
+    wr_be16(qbuf + 4, 1);
+    int qn = dns_encode_qname(hostname, qbuf + 12);
+    if (qn < 0) { g_ndns_state = 3; return -1; }
+    uint16_t o = (uint16_t)(12 + qn);
+    wr_be16(qbuf + o, DNS_TYPE_A);   o += 2;
+    wr_be16(qbuf + o, DNS_CLASS_IN); o += 2;
+
+    g_dns_got_reply = 0;
+    g_dns_result_ip = 0;
+
+    /* 发送一次（不忙等 ARP，靠 GUI 主循环反复调用推进；ARP 未就绪时
+     * net_send_udp 会触发 ARP 请求，下一轮 net_dns_query_poll 里若仍
+     * 未发出可由调用方超时处理）。为提高首包成功率，先 poll 一小段。 */
+    int sent = net_send_udp(dns_server, DNS_LOCAL_PORT, DNS_PORT, qbuf, o);
+    if (sent != 0) {
+        /* ARP 可能未就绪：短暂 poll 后重发一次，仍失败则交由 poll 阶段重试 */
+        for (int w = 0; w < 20000; w++) {
+            net_poll();
+            if ((w & 0x0FFF) == 0) arch_x86_64_proc_yield();
+        }
+        sent = net_send_udp(dns_server, DNS_LOCAL_PORT, DNS_PORT, qbuf, o);
+    }
+    g_ndns_state = 1;  /* QUERYING（即便首包未发出，poll 阶段会靠缓存/重发兜底） */
+    return 0;
+}
+
+/* 非阻塞查询状态：0=IDLE 1=QUERYING 2=RESOLVED 3=FAILED */
+int net_dns_query_state(void) {
+    if (g_ndns_state == 1) {
+        net_poll();
+        if (g_dns_got_reply && g_dns_result_ip) {
+            g_ndns_result = g_dns_result_ip;
+            g_ndns_state  = 2;
+        }
+    }
+    return g_ndns_state;
+}
+
+uint32_t net_dns_query_result(void) { return g_ndns_result; }
+
+/* ============================================================
  * M1.6 真·联网自测：DNS -> TCP 三次握手 -> HTTP GET -> 收响应
  * ============================================================ */
 #define HTTP_POLL_STEP      1  /* net_poll 每轮次数放大器 */

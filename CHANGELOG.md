@@ -4,6 +4,35 @@
 
 ## [Unreleased]
 
+### Added — ring3 网络工具全链路 + GUI 终端交互 (2026-07-06)
+
+继内核网络栈（virtio-net + 以太网/ARP/IPv4/ICMP/UDP/DHCP/DNS/TCP + NAT 出口）打通后，
+本轮完成 **ring3 用户态网络工具 wget，并把 ifconfig/ping/nslookup/wget 接入 GUI 终端
+实现交互式使用，最终 GUI 实测三工具全部可用且不卡界面**。
+
+- **M1.7 ring3 用户态 TCP**（`f41d8ca`）：4 个阻塞式 TCP 导出 + `SYS_TCP_*`(460-463)
+  + `SYS_HTTP_GET`(464) + `wget64.c`。
+- **M1.8 GUI 终端交互式**（`3501fbe`）：终端 run/exec 分支改为空格分词传 argv（最多 8 参）。
+- **M1.9 HTTP 写回缓冲**（`7e41fdb`）：`net_http_get_buf` 把响应真写回用户缓冲（上限 1MiB）
+  + wget `-1` one-shot 模式。
+- **M2.0 GUI 终端网络工具内建别名**（`593078c`）：`gui_net_alias_match()` 识别
+  `wget`/`ping`/`nslookup`/`ifconfig`，免 `run /bin/` 前缀。
+- **M2.1/M2.2 卡死初步修复**（`b0f4f53`/`90ea58a`）：`http_pump` + `net_ping_ipv4_impl`
+  + `net_dns_resolve` 的 busy-poll 循环加 yield；TCP/HTTP 系统调用号 400-404→460-464
+  避开 GUI 控件撞号。
+- **M2.3 网络工具异步化重构**（`d20f18e`）：**根治卡死**。根因是 GUI 终端走
+  `launch_path` 同步阻塞跑 ring3 程序，for(;;) 死等进程退出堵死 GUI 主线程，
+  此时无其他 kthread 可切，yield 空转救不了。方案 A：新增非阻塞 `net_ping_start/poll`
+  + `gui_nettool` 状态机（RESOLVING/PING_WAIT/CONNECTING/SENDING/RECV/DONE），
+  仿 `browser_load_tick` 挂进 GUI 主循环；网络别名不再走 launch_path，启动状态机
+  后立即返回，界面持续响应。
+- **M2.4 补真实非阻塞 DNS**：发现 `gui64_stubs.c` 里 `dns_query_a`/`dns_get_state`/
+  `dns_get_last_result` 是空桩直返 -1，从未接网络栈（headless 走内核内直调
+  `net_dns_resolve` 绕过桩，故一直假 PASS）。新增 `net_dns_query_start/state/result`
+  非阻塞 DNS 状态机，三桩改为转发。
+- **验收**：GUI 终端实测 `nslookup example.com`（出 IP）/ `ping 10.0.2.2` / `wget example.com`
+  全部可用，敲命令后界面不卡、结果逐行刷出。
+
 ### Removed — i386 (32-bit) 分支归档 (2026-07-03)
 
 经依赖差集分析确认 x86_64 主线不再引用后，物理删除了 **150 个 i386 专属源文件**，
