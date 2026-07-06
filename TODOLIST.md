@@ -1587,6 +1587,13 @@
 
 - [ ] M2.1：AHCI/SATA 驱动（替代/补充 ATA PIO，支持现代 SATA 盘 + DMA）
 - [ ] M2.2：NVMe 驱动（现代 SSD 主流接口）
+  - [√] PCI 枚举识别 NVMe(class 0x0108) + BAR0 MMIO 映射 + CAP/版本读取
+  - [√] 控制器初始化：复位、Admin SQ/CQ 创建、CC.EN 使能、CSTS.RDY 等待
+  - [√] Admin 命令：CREATE IO CQ/SQ + IDENTIFY controller/namespace
+  - [√] IO 命令：阻塞式 READ/WRITE(nvme_submit 轮询 phase tag) + 自测 write/read/verify PASS
+  - [√] 根治“IDENTIFY 成功但数据全零”：`nvme_submit` 完成判定后读 DMA 前加 `mfence`，敲门铃前加 `sfence`（“加 klog 就好”的时序陷阱，同 headless 假 PASS）
+  - [ ] 接入 blockdev 抽象层 + 与 FAT32/VFS 挂接
+  - [ ] 中断驱动（现为轮询，MSI-X 待接）
 - [ ] M2.3：USB 栈（`usb.h` 补实现）
   - [ ] xHCI 控制器驱动（USB 3.x，现代机型主流）
   - [ ] USB HID（键盘/鼠标）

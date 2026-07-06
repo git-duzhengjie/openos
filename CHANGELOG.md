@@ -4,6 +4,22 @@
 
 ## [Unreleased]
 
+### Fixed — NVMe DMA 完成后缺内存屏障导致读到脏缓存 (2026-07-06)
+
+- **现象**：NVMe IDENTIFY controller/namespace 命令 status 均返回成功，但数据缓冲
+  区（型号字符串 MN、容量 nsze）全零；诡异的是**只要在读缓冲前插一条 `klog`
+  调试打印就恢复正常，去掉又变回全零**。
+- **根因**：`nvme_submit` 轮询到 CQ 的 phase tag 翻转、判定命令完成后，直接读取
+  DMA 写入的数据缓冲区，**中间缺少内存屏障**。x86 虽为强内存序，但
+  设备 DMA 写与 CPU 读之间无 `mfence` 时，编译器/CPU 可能沿用旧缓存值；
+  之前"加 klog 就好"正是因为串口 MMIO 写顺带充当了屏障，掩盖了真 bug。
+  ——与网络栈当初的"headless 假 PASS"同属**时序陷阱**。
+- **修复**：`nvme_submit` 中
+  ① 敲提交门铃前加 `sfence`，确保 SQE 写入对设备可见；
+  ② 判定 completion 就绪后、读数据前加 `mfence`，确保拿到 DMA 最新值。
+- **验证**：headless 实测 `ctrl MN=QEMU NVMe Ctrl`、`ns1: blocks=131072 blksz=512`、
+  `write/read/verify PASS @ lba=131068`、`=== selftest PASS ===` 全绿。
+
 ### Added — ring3 网络工具全链路 + GUI 终端交互 (2026-07-06)
 
 继内核网络栈（virtio-net + 以太网/ARP/IPv4/ICMP/UDP/DHCP/DNS/TCP + NAT 出口）打通后，

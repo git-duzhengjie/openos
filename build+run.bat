@@ -24,6 +24,7 @@ set "IMAGE=%ROOT%\target\openos-uefi.img"
 set "DATADISK=%ROOT%\target\openos-data.img"
 set "FATDISK=%ROOT%\target\openos-fat.img"
 set "AHCIDISK=%ROOT%\target\openos-ahci.img"
+set "NVMEDISK=%ROOT%\target\openos-nvme.img"
 set "LOGDIR=%ROOT%\logs"
 set "SERLOG=%LOGDIR%\qfork.ser"
 
@@ -72,6 +73,15 @@ if not exist "%AHCIDISK%" (
   "%QEMU:qemu-system-x86_64.exe=qemu-img.exe%" create -f raw "%AHCIDISK%" 64M >nul 2>&1
   if not exist "%AHCIDISK%" (
     fsutil file createnew "%AHCIDISK%" 67108864 >nul 2>&1
+  )
+)
+
+rem --- NVMe test disk (64MB) for M2.2 NVMe driver dev ---
+if not exist "%NVMEDISK%" (
+  echo [build+run] creating NVMe disk %NVMEDISK% ^(64MB^)
+  "%QEMU:qemu-system-x86_64.exe=qemu-img.exe%" create -f raw "%NVMEDISK%" 64M >nul 2>&1
+  if not exist "%NVMEDISK%" (
+    fsutil file createnew "%NVMEDISK%" 67108864 >nul 2>&1
   )
 )
 
@@ -150,6 +160,7 @@ echo [build+run] GUI mode; serial mirrored to %SERLOG%
   -drive file="%DATADISK%",format=raw,media=disk,if=ide,index=2 ^
   -drive file="%FATDISK%",format=raw,media=disk,if=ide,index=3 ^
   -device ich9-ahci,id=ahci0 -drive file="%AHCIDISK%",format=raw,if=none,id=sata0 -device ide-hd,drive=sata0,bus=ahci0.0 ^
+  -drive file="%NVMEDISK%",format=raw,if=none,id=nvm0 -device nvme,serial=openos-nvme0,id=nvme0 -device nvme-ns,drive=nvm0,bus=nvme0 ^
   -boot c ^
   -serial file:"%SERLOG%" -vga std -netdev user,id=n0 -device virtio-net-pci,netdev=n0 -object filter-dump,id=f0,netdev=n0,file=%CD%\logs\net.pcap
 set "QRC=%ERRORLEVEL%"
@@ -171,6 +182,7 @@ start "" /B "%QEMU%" -machine pc -cpu qemu64 -smp 4 -m 256M ^
   -drive "file=%DATADISK%,format=raw,media=disk,if=ide,index=2" ^
   -drive "file=%FATDISK%,format=raw,media=disk,if=ide,index=3" ^
   -device ich9-ahci,id=ahci0 -drive "file=%AHCIDISK%,format=raw,if=none,id=sata0" -device ide-hd,drive=sata0,bus=ahci0.0 ^
+  -drive "file=%NVMEDISK%,format=raw,if=none,id=nvm0" -device nvme,serial=openos-nvme0,id=nvme0 -device nvme-ns,drive=nvm0,bus=nvme0 ^
   -boot c -serial "file:%SERLOG%" -netdev user,id=n0,hostfwd=udp::15353-:53 -device virtio-net-pci,netdev=n0 -object filter-dump,id=f0,netdev=n0,file=%CD%\logs\net.pcap -display none -no-reboot -no-shutdown 2>"%QEMU_STDERR%"
 timeout /T %HEADLESS_TIMEOUT_S% /NOBREAK >nul 2>&1
 rem  Fallback: 'timeout' bails on non-interactive stdin; use ping as a portable sleep.
