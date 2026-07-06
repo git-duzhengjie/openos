@@ -39,4 +39,37 @@ int  gui_nettool_start(nt_tool_t tool, const char *host, const char *path2);
 void gui_nettool_tick(void);
 int  gui_nettool_active(void);
 
+/* ---- gui.c 导出给 gui_terminal.c 的绘制/辅助原语 ---- */
+void gui_raw_fill_rect(int x, int y, int w, int h, uint32_t color);
+void gui_set_clip_rect(const gui_rect_t *rect);
+void gui_clear_clip_rect(void);
+int  gui_net_alias_match(const char *c);
+void gui_set_focused_widget(gui_widget_t *wg);
+int  gui_str_eq(const char *a, const char *b);
+
+/* ---- gui_terminal.c 导出给 gui.c 的终端视图/控制接口 ---- */
+void gui_terminal_invalidate_cursor(void);
+void gui_terminal_invalidate_body(void);
+void gui_terminal_tick_cursor(void);
+void gui_terminal_drain_output_queue(void);
+int  gui_terminal_point_to_cell(int x, int y, uint32_t *col, uint32_t *row);
+void gui_terminal_view_init(gui_terminal_view_t *view, uint32_t cols, uint32_t rows);
+void gui_terminal_view_clear(gui_terminal_view_t *view);
+void gui_terminal_view_make_layout(gui_rect_t viewport, int padding_x, int padding_y, gui_terminal_view_layout_t *layout);
+int  gui_terminal_view_point_to_cell(const gui_terminal_view_t *view, const gui_terminal_view_layout_t *layout, int x, int y, uint32_t *col, uint32_t *row);
+void gui_terminal_view_begin_selection(gui_terminal_view_t *view, uint32_t col, uint32_t row);
+void gui_terminal_view_update_selection(gui_terminal_view_t *view, uint32_t col, uint32_t row);
+void gui_terminal_view_end_selection(gui_terminal_view_t *view);
+int  gui_terminal_view_cell_selected(const gui_terminal_view_t *view, uint32_t col, uint32_t row);
+int  gui_terminal_view_copy_selection(gui_terminal_view_t *view);
+int  gui_terminal_view_has_clipboard_text(const gui_terminal_view_t *view);
+int  gui_terminal_view_set_clipboard_text(gui_terminal_view_t *view, const char *text);
+const char *gui_terminal_view_get_clipboard_text(const gui_terminal_view_t *view);
+void gui_terminal_view_draw(const gui_terminal_view_t *view, const gui_terminal_view_layout_t *layout, int draw_cursor, uint32_t fg, uint32_t selection_bg, uint32_t selection_fg, uint32_t cursor_color);
+void gui_terminal_view_scroll(gui_terminal_view_t *view);
+void gui_terminal_update_selection(uint32_t col, uint32_t row);
+void gui_terminal_set_input_focus(int focused);
+int  gui_terminal_set_clipboard_text(const char *text);
+const char *gui_terminal_get_clipboard_text(void);
+
 #endif /* OPENOS_GUI_INTERNAL_H */
