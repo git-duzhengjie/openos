@@ -23,6 +23,7 @@ set "OVMF_VARS=%ROOT%\target\OVMF_VARS.fd"
 set "IMAGE=%ROOT%\target\openos-uefi.img"
 set "DATADISK=%ROOT%\target\openos-data.img"
 set "FATDISK=%ROOT%\target\openos-fat.img"
+set "AHCIDISK=%ROOT%\target\openos-ahci.img"
 set "LOGDIR=%ROOT%\logs"
 set "SERLOG=%LOGDIR%\qfork.ser"
 
@@ -62,6 +63,15 @@ if not exist "%FATDISK%" (
   "%QEMU:qemu-system-x86_64.exe=qemu-img.exe%" create -f raw "%FATDISK%" 32M >nul 2>&1
   if not exist "%FATDISK%" (
     fsutil file createnew "%FATDISK%" 33554432 >nul 2>&1
+  )
+)
+
+rem --- AHCI/SATA test disk (64MB) for M2 AHCI driver dev ---
+if not exist "%AHCIDISK%" (
+  echo [build+run] creating AHCI/SATA disk %AHCIDISK% ^(64MB^)
+  "%QEMU:qemu-system-x86_64.exe=qemu-img.exe%" create -f raw "%AHCIDISK%" 64M >nul 2>&1
+  if not exist "%AHCIDISK%" (
+    fsutil file createnew "%AHCIDISK%" 67108864 >nul 2>&1
   )
 )
 
@@ -139,6 +149,7 @@ echo [build+run] GUI mode; serial mirrored to %SERLOG%
   -drive file="%IMAGE%",format=raw,media=disk,if=ide,index=0 ^
   -drive file="%DATADISK%",format=raw,media=disk,if=ide,index=2 ^
   -drive file="%FATDISK%",format=raw,media=disk,if=ide,index=3 ^
+  -device ich9-ahci,id=ahci0 -drive file="%AHCIDISK%",format=raw,if=none,id=sata0 -device ide-hd,drive=sata0,bus=ahci0.0 ^
   -boot c ^
   -serial file:"%SERLOG%" -vga std -netdev user,id=n0 -device virtio-net-pci,netdev=n0 -object filter-dump,id=f0,netdev=n0,file=%CD%\logs\net.pcap
 set "QRC=%ERRORLEVEL%"
@@ -159,6 +170,7 @@ start "" /B "%QEMU%" -machine pc -cpu qemu64 -smp 4 -m 256M ^
   -drive "file=%IMAGE%,format=raw,media=disk,if=ide,index=0" ^
   -drive "file=%DATADISK%,format=raw,media=disk,if=ide,index=2" ^
   -drive "file=%FATDISK%,format=raw,media=disk,if=ide,index=3" ^
+  -device ich9-ahci,id=ahci0 -drive "file=%AHCIDISK%,format=raw,if=none,id=sata0" -device ide-hd,drive=sata0,bus=ahci0.0 ^
   -boot c -serial "file:%SERLOG%" -netdev user,id=n0,hostfwd=udp::15353-:53 -device virtio-net-pci,netdev=n0 -object filter-dump,id=f0,netdev=n0,file=%CD%\logs\net.pcap -display none -no-reboot -no-shutdown 2>"%QEMU_STDERR%"
 timeout /T %HEADLESS_TIMEOUT_S% /NOBREAK >nul 2>&1
 rem  Fallback: 'timeout' bails on non-interactive stdin; use ping as a portable sleep.

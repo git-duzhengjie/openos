@@ -33,6 +33,7 @@ extern void net_print_info(void);
 #include "../include/sched_selftest64.h"
 #include "../include/net64.h"
 #include "../include/net_selftest64.h"
+#include "../include/ahci64.h"
 #include "../include/tsc64.h"
 #include "../include/tsc_selftest64.h"
 #include "../include/irq_selftest64.h"
@@ -340,6 +341,13 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
         early_console64_write("[x86_64][ata] data disk ready\n");
     } else {
         early_console64_write("[x86_64][ata] no data disk (RAM-only mode)\n");
+    }
+
+    /* M2.1：AHCI/SATA 驱动自测（读写回校验） */
+    if (ahci_selftest() == 0) {
+        early_console64_write("[x86_64][ahci] SATA disk selftest PASS\n");
+    } else {
+        early_console64_write("[x86_64][ahci] SATA disk selftest skipped/FAIL\n");
     }
 
     /* 阶段 4-1：探测 secondary slave 上的 FAT32 数据盘并挂载。
