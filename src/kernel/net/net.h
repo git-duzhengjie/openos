@@ -208,6 +208,11 @@ int net_tcp_send_syn(uint32_t dst_ip, uint16_t src_port, uint16_t dst_port);
  * 内部已用 impl+wrapper 保存/恢复调用方 IF 状态。 */
 int net_http_get_selftest(const char *host, const char *path);
 
+/* M1.9: 完整 HTTP GET，将响应写入 out 缓冲（out 可为 NULL 仅计数），
+ * 返回写入字节数 (>=0)，<0 为错误。 */
+int net_http_get_buf(const char *host, const char *path,
+                     uint8_t *out, int out_cap);
+
 /* M1.7 ring3 用户态 TCP：阻塞式封装，内部自带 net_poll pump 驱动握手/收发。
  * 供 SYS_TCP_* 系统调用直通调用，复用 M1.6 已验证的握手/pump 逻辑。
  * 均已用 impl+wrapper 保存/恢复调用方 IF 状态。 */

@@ -40,12 +40,48 @@ int openos64_main(int argc, char **argv, char **envp) {
     (void)envp;
 
     if (argc < 2) {
-        put_str("用法: wget <域名> [路径]\n例: wget example.com /\n");
+        put_str("用法: wget [-1] <域名> [路径]\n");
+        put_str("  -1  使用单次 SYS_HTTP_GET 系统调用(内核内完成 DNS+连接+GET+收)，响应写回缓冲\n");
+        put_str("例: wget example.com /   或   wget -1 example.com /\n");
         return 1;
     }
 
-    const char *host = argv[1];
-    const char *path = (argc >= 3) ? argv[2] : "/";
+    /* -1 / --http: one-shot 模式，走 M1.9 的 SYS_HTTP_GET，响应正文写回用户缓冲 */
+    int oneshot = 0;
+    int ai = 1;
+    if (argv[1][0] == '-' && (argv[1][1] == '1' || argv[1][1] == 'h')) {
+        oneshot = 1;
+        ai = 2;
+    }
+    if (ai >= argc) {
+        put_str("wget: 缺少域名参数\n");
+        return 1;
+    }
+
+    const char *host = argv[ai];
+    const char *path = (argc >= ai + 2) ? argv[ai + 1] : "/";
+
+    if (oneshot) {
+        static char page[8192];
+        put_str("[one-shot] 调用 SYS_HTTP_GET: ");
+        put_str(host); put_str(path); put_str("\n---- 响应开始 ----\n");
+        int n = openos64_http_get(host, path, page, sizeof(page));
+        if (n < 0) {
+            put_str("\nwget: SYS_HTTP_GET 失败\n");
+            return 1;
+        }
+        openos64_write(1, page, (openos64_size_t)n);
+        put_str("\n---- 响应结束 ----\n");
+        {
+            char line[64];
+            int p = 0;
+            p = app_str(line, p, "共接收 ");
+            app_u32(line, &p, (uint32_t)n);
+            p = app_str(line, p, " 字节 (写回缓冲)\n");
+            openos64_write(1, line, (openos64_size_t)p);
+        }
+        return 0;
+    }
 
     /* 1) DNS 解析 */
     uint32_t ip_h = 0;

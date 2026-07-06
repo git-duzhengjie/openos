@@ -951,17 +951,26 @@ static uint64_t do_tcp_close(uint64_t conn_id) {
 }
 
 /* SYS_HTTP_GET (404): a0 = host str, a1 = path str, a2 = user buf, a3 = buflen.
- * 辇便封装：运行一次完整 HTTP GET 自测（DNS+握手+GET+收），返回 0/-1。
- * 当前复用 M1.6 selftest，响应写串口日志（写回 user buf 待后续升级）。 */
+ * M1.9: 完整 HTTP GET，将响应正文写回用户缓冲 buf[0..buflen)，
+ * 返回实际写入字节数 (>=0)；参数非法/失败返回 (uint64_t)-1。
+ * buf 可为 0（仅触发下载、返回响应总长）。 */
 static uint64_t do_http_get(uint64_t host_ptr, uint64_t path_ptr, uint64_t buf, uint64_t buflen) {
-    (void)buf; (void)buflen;
     if (!validate_user_buf(host_ptr, 1)) return (uint64_t)-1;
     if (!validate_user_buf(path_ptr, 1)) return (uint64_t)-1;
     const char *host = (const char *)(uintptr_t)host_ptr;
     const char *path = (const char *)(uintptr_t)path_ptr;
     if (k_strlen(host) == 0 || k_strlen(host) > 253) return (uint64_t)-1;
-    int r = net_http_get_selftest(host, path);
-    return (r == 0) ? 0 : (uint64_t)-1;
+
+    uint8_t *out = 0;
+    int cap = 0;
+    if (buf) {
+        if (buflen == 0 || buflen > (1u << 20)) return (uint64_t)-1; /* 上限 1MiB */
+        if (!validate_user_buf(buf, buflen)) return (uint64_t)-1;
+        out = (uint8_t *)(uintptr_t)buf;
+        cap = (int)buflen;
+    }
+    int r = net_http_get_buf(host, path, out, cap);
+    return (r < 0) ? (uint64_t)-1 : (uint64_t)r;
 }
 
 /* ---------------------------------------------------------------------------

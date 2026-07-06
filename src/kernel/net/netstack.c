@@ -1717,13 +1717,18 @@ int net_http_get_selftest(const char *host, const char *path) {
  * 复用 http_pump 驱动 net_poll/net_tick，与 M1.6 selftest 同款 pump 逻辑。
  * ========================================================================= */
 
-static int net_tcp_connect_blocking_impl(uint32_t dst_ip, uint16_t dst_port) {
-    if (!g_default_dev || dst_ip == 0 || dst_port == 0) return -1;
-    /* 本地端口：用独立递增计数器，保证与前一条连接(可能仍在 FIN_WAIT/TIME_WAIT)四元组不冲突 */
+/* 共享临时端口分配器：递增计数，确保多次连接不复用同一四元组(防 TIME_WAIT 冲突) */
+static uint16_t next_eph_port(void) {
     static uint16_t s_eph_port = 49152;
     s_eph_port++;
     if (s_eph_port < 49152 || s_eph_port == 0) s_eph_port = 49152;
-    uint16_t local_port = s_eph_port;
+    return s_eph_port;
+}
+
+static int net_tcp_connect_blocking_impl(uint32_t dst_ip, uint16_t dst_port) {
+    if (!g_default_dev || dst_ip == 0 || dst_port == 0) return -1;
+    /* 本地端口：用共享递增计数器，保证与前一条连接(可能仍在 FIN_WAIT/TIME_WAIT)四元组不冲突 */
+    uint16_t local_port = next_eph_port();
     int conn = net_tcp_open(0, local_port, dst_ip, dst_port, 1 /* active */);
     if (conn < 0) return -2;
     /* 等待三次握手 -> ESTABLISHED */
@@ -1815,6 +1820,102 @@ int net_tcp_close_blocking(int conn_id) {
     __asm__ __volatile__("pushfq; popq %0" : "=r"(fl) :: "memory");
     __asm__ __volatile__("sti");
     int r = net_tcp_close_blocking_impl(conn_id);
+    if (!(fl & 0x200UL)) __asm__ __volatile__("cli");
+    return r;
+}
+
+/* =========================================================================
+ * M1.9 HTTP GET 写回缓冲区：完整跑一次 GET，把响应累积到调用者提供的 out 缓冲，
+ * 返回写入字节数 (>=0)，<0 为错误。out 可为 NULL（仅计数/串口预览）。
+ * 复用 M1.6 selftest 同款 pump 逻辑，wrapper 保存/恢复 IF。
+ * ========================================================================= */
+static int net_http_get_buf_impl(const char *host, const char *path,
+                                 uint8_t *out, int out_cap) {
+    if (!host || !path || !g_default_dev) return -1;
+
+    uint32_t remote_ip = 0;
+    if (net_dns_resolve_impl(host, &remote_ip) != 0 || remote_ip == 0) {
+        ns_puts("[http] DNS 解析失败: "); ns_puts(host); ns_puts("\n");
+        return -2;
+    }
+
+    uint16_t local_port = next_eph_port();
+    int conn = net_tcp_open(0, local_port, remote_ip, 80, 1);
+    if (conn < 0) return -3;
+
+    int established = 0;
+    for (uint32_t round = 0; round < 60; round++) {
+        http_pump(conn, 0, 50000 * HTTP_POLL_STEP);
+        int st = net_tcp_state(conn);
+        if (st == NET_TCP_STATE_ESTABLISHED) { established = 1; break; }
+        if (st == NET_TCP_STATE_CLOSED) { net_tcp_close(conn); return -4; }
+    }
+    if (!established) { net_tcp_close(conn); return -4; }
+
+    /* 构造 HTTP/1.0 GET（Connection: close 让服务端发完即挥手） */
+    static char req[512];
+    int p = 0;
+    const char *m = "GET ";
+    for (int i = 0; m[i]; i++) req[p++] = m[i];
+    for (int i = 0; path[i] && p < 400; i++) req[p++] = path[i];
+    const char *h1 = " HTTP/1.0\r\nHost: ";
+    for (int i = 0; h1[i]; i++) req[p++] = h1[i];
+    for (int i = 0; host[i] && p < 480; i++) req[p++] = host[i];
+    const char *h2 = "\r\nConnection: close\r\nUser-Agent: openos/1.0\r\n\r\n";
+    for (int i = 0; h2[i]; i++) req[p++] = h2[i];
+
+    if (net_tcp_send(conn, (const uint8_t *)req, (uint16_t)p) < 0) {
+        net_tcp_close(conn); return -5;
+    }
+
+    /* 轮询接收，累积写入 out（写满即停止累积但继续 drain 到连接关闭） */
+    static uint8_t rbuf[1536];
+    int written = 0;
+    for (uint32_t round = 0; round < 200; round++) {
+        http_pump(conn, 0, 50000 * HTTP_POLL_STEP);
+        int avail = net_tcp_available(conn);
+        if (avail > 0) {
+            int want = avail > (int)sizeof(rbuf) ? (int)sizeof(rbuf) : avail;
+            int got = net_tcp_recv(conn, rbuf, (uint16_t)want);
+            if (got > 0 && out && written < out_cap) {
+                int cp = got;
+                if (written + cp > out_cap) cp = out_cap - written;
+                for (int i = 0; i < cp; i++) out[written + i] = rbuf[i];
+                written += cp;
+            } else if (got > 0 && !out) {
+                written += got; /* 无 out 时仅计数 */
+            }
+        }
+        int st = net_tcp_state(conn);
+        if (st == NET_TCP_STATE_CLOSE_WAIT || st == NET_TCP_STATE_CLOSED) {
+            http_pump(conn, 0, 20000 * HTTP_POLL_STEP);
+            int avail2 = net_tcp_available(conn);
+            if (avail2 > 0) {
+                int want2 = avail2 > (int)sizeof(rbuf) ? (int)sizeof(rbuf) : avail2;
+                int got2 = net_tcp_recv(conn, rbuf, (uint16_t)want2);
+                if (got2 > 0 && out && written < out_cap) {
+                    int cp = got2;
+                    if (written + cp > out_cap) cp = out_cap - written;
+                    for (int i = 0; i < cp; i++) out[written + i] = rbuf[i];
+                    written += cp;
+                } else if (got2 > 0 && !out) {
+                    written += got2;
+                }
+            }
+            break;
+        }
+    }
+
+    net_tcp_close(conn);
+    return written;
+}
+
+int net_http_get_buf(const char *host, const char *path,
+                     uint8_t *out, int out_cap) {
+    unsigned long fl;
+    __asm__ __volatile__("pushfq; popq %0" : "=r"(fl) :: "memory");
+    __asm__ __volatile__("sti");
+    int r = net_http_get_buf_impl(host, path, out, out_cap);
     if (!(fl & 0x200UL)) __asm__ __volatile__("cli");
     return r;
 }
