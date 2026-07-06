@@ -10,6 +10,7 @@
 
 #include "gui.h"
 #include "types.h"
+#include "i18n.h"
 
 /* ---- gui.c 导出给子模块的共享全局状态 ---- */
 extern gui_system_t g_gui;
@@ -19,8 +20,18 @@ uint32_t gui_rgb(uint8_t r, uint8_t g, uint8_t b);
 void     gui_notify(const char *text);
 int      gui_is_enter_key(int key);
 int      gui_append_uint(char *dst, int pos, int cap, uint32_t v);
+int      gui_append_hex_byte(char *dst, int pos, int cap, uint8_t v);
+void     gui_format_ipv4_inline(uint32_t ip, char *buf, int cap);
+void     gui_format_mac_inline(const uint8_t mac[6], char *buf, int cap);
+int      gui_settings_append_field(char *dst, int pos, int cap, i18n_key_t key, const char *value);
+int      gui_text_center_y(int top, int height);
+void     gui_taskbar_search_copy(char *dst, uint32_t dst_len, const char *src);
 void     gui_terminal_show_prompt(void);
 int      fp_str_append(char *dst, int pos, int cap, const char *src);
+void     fp_itoa(int n, char *buf);
+
+/* ---- gui_file_preview.c 导出给 gui.c 的文件预览接口 ---- */
+gui_window_t *gui_file_preview_window(void);  /* 返回文件预览窗口指针，供窗口关闭/任务栏图标比较 */
 
 /* ---- gui_browser.c 导出给 gui.c 的浏览器/网络工具接口 ---- */
 /* 网络工具异步状态机类型（gui.c 终端命令分支与 gui_browser.c 共享）*/
