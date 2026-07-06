@@ -1,410 +1,201 @@
 /* ============================================================
- * openos - i18n (Internationalization) - Phase 1
+ * openos - i18n (Internationalization) - JSON-backed
  *
- * Lookup table based translation. Two locales bundled:
- *   - EN (English)   : fallback locale for missing keys
- *   - ZH (Simplified Chinese): default locale at boot, rendered through
- *                              the generated CJK font backend.
+ * 译文以 JSON 文件为唯一数据源，不在代码中写死：
+ *   - res/i18n/en.json  →  /etc/i18n/en.json  （英文，缺失 key 的回退语言）
+ *   - res/i18n/zh.json  →  /etc/i18n/zh.json  （简体中文，启动默认语言）
+ * 两个 JSON 于构建期经 _embed_elf.py 嵌入 initrd，运行时由本模块
+ * 经 VFS 读取并解析填表。i18n_init() 在 GUI 启动早期调用，此时
+ * initrd/FAT32 已挂载完毕（见 kernel64.c 时序）。
  *
- * Design rules:
- *   - i18n_t() always returns a non-NULL string.
- *   - If the requested locale lacks a key, fall back to EN.
- *   - If EN also lacks the key (table mismatch), return a literal
- *     "?<key>" placeholder string so it is visible in the UI.
+ * 设计约定：
+ *   - i18n_t() 恒返回非 NULL 字符串。
+ *   - 请求语言缺失某 key 时回退 EN。
+ *   - EN 也缺失（或 JSON 加载失败）时返回 "?<key>" 占位，便于 UI 排错。
+ *   - JSON 解析失败不致命：表保持空，i18n_t 走占位分支，系统仍可运行。
  * ============================================================ */
 
 #include "i18n.h"
+#include "string.h"
+#include "heap.h"
+#include "core/fs/vfs.h"
+
+/* JSON key 名 → 枚举下标映射（自动生成，顺序与 i18n_key_t 严格一致） */
+#include "i18n_keys.inc"
 
 static i18n_locale_t g_i18n_locale = I18N_LOCALE_ZH;
 static int g_i18n_inited = 0;
 
-/* English (fallback, ASCII) ------------------------------------------------- */
-static const char *const k_strings_en[I18N_KEY_COUNT] = {
-    /* notifications */
-    [I18N_KEY_NOTIFY_WELCOME]            = "Welcome to OpenOS desktop",
-    [I18N_KEY_NOTIFY_THEME_TIP]          = "Tip: click Theme icon to switch wallpaper",
-    [I18N_KEY_NOTIFY_DESKTOP_REFRESHED]  = "Desktop refreshed",
+/* 运行时译文表：指针指向解析后驻留在堆上的 UTF-8 字符串（含结尾 \0）。
+ * 未加载 / 缺失的槽位为 NULL。 */
+static const char *g_strings_en[I18N_KEY_COUNT];
+static const char *g_strings_zh[I18N_KEY_COUNT];
 
-    /* desktop icons */
-    [I18N_KEY_ICON_FILES]                = "Files",
-    [I18N_KEY_ICON_RECYCLE_BIN]          = "Recycle Bin",
-    [I18N_KEY_ICON_BROWSER]              = "Browser",
-
-    /* launcher */
-    [I18N_KEY_LAUNCHER_TITLE]            = "OpenOS Launcher",
-    [I18N_KEY_APP_TERMINAL]              = "Terminal",
-    [I18N_KEY_APP_SETTINGS]              = "Settings",
-    [I18N_KEY_APP_WINDOW_DEMO]           = "Window Demo",
-    [I18N_KEY_APP_ABOUT_OPENOS]          = "About OpenOS",
-    [I18N_KEY_TASKBAR_SEARCH]            = "Search",
-
-    /* welcome banner */
-    [I18N_KEY_BANNER_LINE0]              = "Welcome to OpenOS",
-    [I18N_KEY_BANNER_LINE1]              = "Desktop environment is ready.",
-    [I18N_KEY_BANNER_LINE2]              = "Use menu icon to launch tools.",
-
-    /* context menu */
-    [I18N_KEY_CTXMENU_OPEN_FILES]        = "Open Files",
-    [I18N_KEY_CTXMENU_OPEN_TERMINAL]     = "Open Terminal",
-    [I18N_KEY_CTXMENU_CHANGE_WALLPAPER]  = "Change Wallpaper",
-    [I18N_KEY_WALLPAPER_DEFAULT]         = "Default",
-    [I18N_KEY_WALLPAPER_DAY]             = "Day",
-    [I18N_KEY_WALLPAPER_SOLID]           = "Solid",
-    [I18N_KEY_CTXMENU_REFRESH]           = "Refresh",
-    [I18N_KEY_CTXMENU_SETTINGS]          = "Settings",
-    [I18N_KEY_CTXMENU_ABOUT]             = "About OpenOS",
-
-    /* Phase 2: Window layer ------------------------------------------------ */
-    [I18N_KEY_WINDOW_DEFAULT]            = "Window",
-
-    /* demo window */
-    [I18N_KEY_WIN_CONTROL_CENTER]        = "OpenOS Control Center",
-    [I18N_KEY_DEMO_WELCOME]              = "Welcome to OpenOS Window",
-    [I18N_KEY_DEMO_DRAG_HINT]            = "Drag the title bar to move me",
-    [I18N_KEY_DEMO_BTN_CLICK]            = "Click",
-    [I18N_KEY_DEMO_BTN_MINIMIZE]         = "Minimize",
-    [I18N_KEY_DEMO_MVP]                  = "Lightweight Window Manager (MVP)",
-    [I18N_KEY_DEMO_FRAMEBUFFER]          = "Framebuffer Composition",
-
-    /* about */
-    [I18N_KEY_WIN_ABOUT]                 = "About OpenOS",
-    [I18N_KEY_ABOUT_TAGLINE]             = "OpenOS - The lightweight desktop kernel",
-    [I18N_KEY_ABOUT_VERSION]             = "Version: 0.17.x",
-    [I18N_KEY_ABOUT_BUILD]                = "Build: dev",
-    [I18N_KEY_ABOUT_LICENSE]             = "License: MIT",
-
-    /* settings */
-    [I18N_KEY_WIN_SETTINGS]              = "Settings",
-    [I18N_KEY_SETTINGS_LANGUAGE]          = "Language",
-    [I18N_KEY_SETTINGS_TEXT_SIZE]         = "Text size",
-    [I18N_KEY_SETTINGS_CURRENT_LANGUAGE]  = "Current language",
-    [I18N_KEY_SETTINGS_CURRENT_TEXT_SIZE] = "Current text size",
-    [I18N_KEY_SETTINGS_LANGUAGE_ENGLISH]  = "English",
-    [I18N_KEY_SETTINGS_LANGUAGE_CHINESE]  = "Chinese",
-    [I18N_KEY_SETTINGS_TEXT_SIZE_SMALL]   = "Small",
-    [I18N_KEY_SETTINGS_TEXT_SIZE_MEDIUM]  = "Medium",
-    [I18N_KEY_SETTINGS_TEXT_SIZE_LARGE]   = "Large",
-    [I18N_KEY_SETTINGS_NETWORK]           = "Network",
-    [I18N_KEY_SETTINGS_NETWORK_NO_DEVICE] = "No network device",
-    [I18N_KEY_SETTINGS_NETWORK_DEVICE]    = "Device",
-    [I18N_KEY_SETTINGS_NETWORK_STATUS]    = "Status",
-    [I18N_KEY_SETTINGS_NETWORK_MAC]       = "MAC",
-    [I18N_KEY_SETTINGS_NETWORK_IP]        = "IP",
-    [I18N_KEY_SETTINGS_NETWORK_NETMASK]   = "Netmask",
-    [I18N_KEY_SETTINGS_NETWORK_GATEWAY]   = "Gateway",
-    [I18N_KEY_SETTINGS_NETWORK_DNS]       = "DNS",
-    [I18N_KEY_SETTINGS_NETWORK_MODE]      = "Mode",
-    [I18N_KEY_SETTINGS_NETWORK_TRAFFIC]   = "Traffic",
-    [I18N_KEY_SETTINGS_NETWORK_UP]        = "Up",
-    [I18N_KEY_SETTINGS_NETWORK_DOWN]      = "Down",
-    [I18N_KEY_SETTINGS_NETWORK_LINK_UP]   = "Link up",
-    [I18N_KEY_SETTINGS_NETWORK_LINK_DOWN] = "Link down",
-    [I18N_KEY_SETTINGS_NETWORK_DHCP]      = "DHCP",
-    [I18N_KEY_SETTINGS_NETWORK_STATIC]    = "Static",
-    [I18N_KEY_SETTINGS_NETWORK_NONE]      = "None",
-    [I18N_KEY_SETTINGS_NETWORK_APPLY_STATIC] = "Apply static",
-    [I18N_KEY_WIFI_AVAILABLE_NETWORKS]    = "Available wireless networks",
-    [I18N_KEY_WIFI_NO_NETWORKS]           = "No available wireless networks",
-    [I18N_KEY_WIFI_CONNECTED]             = "Connected",
-    [I18N_KEY_WIFI_SECURED]               = "Secured",
-    [I18N_KEY_WIFI_OPEN]                  = "Open",
-    [I18N_KEY_SETTINGS_APPLIED]           = "Settings applied",
-
-    /* recycle */
-    [I18N_KEY_WIN_RECYCLE_BIN]           = "Recycle Bin",
-    [I18N_KEY_RECYCLE_EMPTY]             = "Recycle Bin is empty",
-
-    /* notifications window */
-    [I18N_KEY_WIN_NOTIFICATIONS]         = "Notifications",
-    [I18N_KEY_NOTIF_TOTAL]               = "Total",
-    [I18N_KEY_NOTIF_UNREAD]              = "Unread",
-    [I18N_KEY_BTN_CLEAR]                 = "Clear",
-
-    /* terminal */
-    [I18N_KEY_WIN_TERMINAL]              = "Terminal",
-
-    /* network browser */
-    [I18N_KEY_WIN_BROWSER]               = "Browser",
-    [I18N_KEY_BROWSER_ADDRESS]           = "Address",
-    [I18N_KEY_BROWSER_BACK]              = "<",
-    [I18N_KEY_BROWSER_FORWARD]           = ">",
-    [I18N_KEY_BROWSER_REFRESH]           = "Refresh",
-    [I18N_KEY_BROWSER_GO]                = "Go",
-    [I18N_KEY_BROWSER_HOME_TITLE]        = "OpenOS Browser",
-    [I18N_KEY_BROWSER_HOME_HINT]         = "Enter an address above to browse the network.",
-    [I18N_KEY_BROWSER_STATUS_READY]      = "Ready",
-    [I18N_KEY_BROWSER_STATUS_PLACEHOLDER] = "HTTP rendering will be connected to the network stack next.",
-
-    /* files browser */
-    [I18N_KEY_WIN_FILES]                 = "Files",
-    [I18N_KEY_WIN_FILE_VIEWER]           = "File Viewer",
-    [I18N_KEY_WIN_FILE_EDITOR]           = "File Editor",
-    [I18N_KEY_HEADER_PATH]               = "Path: ",
-    [I18N_KEY_HEADER_FILE]               = "File: ",
-    [I18N_KEY_HEADER_EDIT]               = "Edit: ",
-    [I18N_KEY_PAGE]                      = "Page ",
-    [I18N_KEY_PAGE_OF]                   = "/",
-    [I18N_KEY_PAGE_OPEN_PAREN]           = " (",
-    [I18N_KEY_PAGE_ITEMS]                = " items)",
-    [I18N_KEY_LINE]                      = "Line ",
-    [I18N_KEY_LINE_DASH]                 = "-",
-    [I18N_KEY_LINE_OF]                   = " / ",
-    [I18N_KEY_TYPE_UP]                   = "<up>",
-    [I18N_KEY_TYPE_FILE]                 = "<file>",
-    [I18N_KEY_FILE_COL_NAME]             = "Name",
-    [I18N_KEY_FILE_COL_MODIFIED]         = "Modified",
-    [I18N_KEY_FILE_COL_TYPE]             = "Type",
-    [I18N_KEY_FILE_COL_SIZE]             = "Size",
-    [I18N_KEY_FILE_TYPE_FOLDER]          = "Folder",
-    [I18N_KEY_FILE_TYPE_FILE]            = "File",
-    [I18N_KEY_FILE_TYPE_C_SOURCE]        = "C Source",
-    [I18N_KEY_FILE_TYPE_MARKDOWN]        = "Markdown",
-    [I18N_KEY_FILE_TYPE_TEXT]            = "Text",
-    [I18N_KEY_FILE_TYPE_SHELL]           = "Shell",
-    [I18N_KEY_FILE_TYPE_CONFIG]          = "Config",
-    [I18N_KEY_FILE_TYPE_IMAGE]           = "Image",
-    [I18N_KEY_FILE_TYPE_ARCHIVE]         = "Archive",
-    [I18N_KEY_FILE_TYPE_EXEC]            = "Exec",
-    [I18N_KEY_BTN_NEXT]                  = "Next >",
-    [I18N_KEY_BTN_PREV]                  = "< Prev",
-    [I18N_KEY_BTN_BACK]                  = "< Back",
-    [I18N_KEY_BTN_ENGLISH]               = "English",
-    [I18N_KEY_BTN_CHINESE]               = "Chinese",
-    [I18N_KEY_BTN_FONT_SMALL]            = "Small",
-    [I18N_KEY_BTN_FONT_MEDIUM]           = "Medium",
-    [I18N_KEY_BTN_FONT_LARGE]            = "Large",
-    [I18N_KEY_BTN_NEW_FILE]              = "New File",
-    [I18N_KEY_BTN_NEW_DIR]               = "New Dir",
-    [I18N_KEY_BTN_RENAME]                = "Rename",
-    [I18N_KEY_BTN_DELETE]                = "Delete",
-    [I18N_KEY_BTN_REFRESH]               = "Refresh",
-    [I18N_KEY_BTN_EDIT]                  = "Edit",
-    [I18N_KEY_BTN_SAVE]                  = "Save",
-    [I18N_KEY_BTN_CANCEL]                = "Cancel",
-    [I18N_KEY_BTN_OK]                    = "OK",
-    [I18N_KEY_BTN_CLOSE]                 = "Close",
-    [I18N_KEY_PROMPT_NEW_FILE]           = "Create file name:",
-    [I18N_KEY_PROMPT_NEW_DIR]            = "Create directory name:",
-    [I18N_KEY_PROMPT_RENAME]             = "Rename to:",
-    [I18N_KEY_PROMPT_DELETE_CONFIRM]     = "Delete the selected item?",
-    [I18N_KEY_STATUS_INVALID_NAME]       = "Invalid name",
-    [I18N_KEY_STATUS_ALREADY_EXISTS]     = "Already exists",
-    [I18N_KEY_STATUS_CREATE_FAILED]      = "Create failed",
-    [I18N_KEY_STATUS_FILE_CREATED]       = "File created",
-    [I18N_KEY_STATUS_MKDIR_FAILED]       = "mkdir failed",
-    [I18N_KEY_STATUS_DIR_CREATED]        = "Directory created",
-    [I18N_KEY_STATUS_TARGET_EXISTS]      = "Target exists",
-    [I18N_KEY_STATUS_RENAME_FAILED]      = "Rename failed",
-    [I18N_KEY_STATUS_RENAMED]            = "Renamed",
-    [I18N_KEY_STATUS_RMDIR_FAILED]       = "rmdir failed",
-    [I18N_KEY_STATUS_DELETE_FAILED]      = "Delete failed",
-    [I18N_KEY_STATUS_DELETED]            = "Deleted",
-    [I18N_KEY_STATUS_ENTER_TARGET]       = "Enter target inside the dialog",
-    [I18N_KEY_STATUS_CLICK_FILE_FIRST]   = "Click a file first",
-    [I18N_KEY_STATUS_REFRESHED]          = "Refreshed",
-    [I18N_KEY_STATUS_SAVED_PREFIX]       = "Saved: ",
-
-    [I18N_KEY_APP_DEMO_NAME]             = "Window Demo",
-};
-
-/* Simplified Chinese (UTF-8) ----------------------------------------------- */
-/* Rendered by the generated 16x16 CJK bitmap font backend.                  */
-static const char *const k_strings_zh[I18N_KEY_COUNT] = {
-    /* notifications */
-    [I18N_KEY_NOTIFY_WELCOME]            = "欢迎使用 OpenOS 桌面",
-    [I18N_KEY_NOTIFY_THEME_TIP]          = "提示：点击主题图标切换壁纸",
-    [I18N_KEY_NOTIFY_DESKTOP_REFRESHED]  = "桌面已刷新",
-
-    /* desktop icons */
-    [I18N_KEY_ICON_FILES]                = "文件",
-    [I18N_KEY_ICON_RECYCLE_BIN]          = "回收站",
-    [I18N_KEY_ICON_BROWSER]              = "浏览器",
-
-    /* launcher */
-    [I18N_KEY_LAUNCHER_TITLE]            = "OpenOS 应用启动器",
-    [I18N_KEY_APP_TERMINAL]              = "终端",
-    [I18N_KEY_APP_SETTINGS]              = "设置",
-    [I18N_KEY_APP_WINDOW_DEMO]           = "窗口演示",
-    [I18N_KEY_APP_ABOUT_OPENOS]          = "关于 OpenOS",
-    [I18N_KEY_TASKBAR_SEARCH]            = "搜索",
-
-    /* welcome banner */
-    [I18N_KEY_BANNER_LINE0]              = "欢迎来到 OpenOS",
-    [I18N_KEY_BANNER_LINE1]              = "桌面环境已就绪。",
-    [I18N_KEY_BANNER_LINE2]              = "点击菜单图标启动应用。",
-
-    /* context menu */
-    [I18N_KEY_CTXMENU_OPEN_FILES]        = "打开文件",
-    [I18N_KEY_CTXMENU_OPEN_TERMINAL]     = "打开终端",
-    [I18N_KEY_CTXMENU_CHANGE_WALLPAPER]  = "更换壁纸",
-    [I18N_KEY_WALLPAPER_DEFAULT]         = "默认",
-    [I18N_KEY_WALLPAPER_DAY]             = "白天",
-    [I18N_KEY_WALLPAPER_SOLID]           = "纯色",
-    [I18N_KEY_CTXMENU_REFRESH]           = "刷新",
-    [I18N_KEY_CTXMENU_SETTINGS]          = "设置",
-    [I18N_KEY_CTXMENU_ABOUT]             = "关于 OpenOS",
-
-    /* Phase 2: Window layer ------------------------------------------------ */
-    [I18N_KEY_WINDOW_DEFAULT]            = "窗口",
-
-    /* demo window */
-    [I18N_KEY_WIN_CONTROL_CENTER]        = "OpenOS 控制中心",
-    [I18N_KEY_DEMO_WELCOME]              = "欢迎使用 OpenOS 窗口",
-    [I18N_KEY_DEMO_DRAG_HINT]            = "拖动标题栏可以移动窗口",
-    [I18N_KEY_DEMO_BTN_CLICK]            = "点击",
-    [I18N_KEY_DEMO_BTN_MINIMIZE]         = "最小化",
-    [I18N_KEY_DEMO_MVP]                  = "轻量级窗口管理器（MVP）",
-    [I18N_KEY_DEMO_FRAMEBUFFER]          = "帧缓冲合成",
-
-    /* about */
-    [I18N_KEY_WIN_ABOUT]                 = "关于 OpenOS",
-    [I18N_KEY_ABOUT_TAGLINE]             = "OpenOS - 轻量级桌面内核",
-    [I18N_KEY_ABOUT_VERSION]             = "版本：0.17.x",
-    [I18N_KEY_ABOUT_BUILD]               = "构建：dev",
-    [I18N_KEY_ABOUT_LICENSE]             = "许可证：MIT",
-
-    /* settings */
-    [I18N_KEY_WIN_SETTINGS]              = "设置",
-    [I18N_KEY_SETTINGS_LANGUAGE]          = "语言",
-    [I18N_KEY_SETTINGS_TEXT_SIZE]         = "文字大小",
-    [I18N_KEY_SETTINGS_CURRENT_LANGUAGE]  = "当前语言",
-    [I18N_KEY_SETTINGS_CURRENT_TEXT_SIZE] = "当前文字大小",
-    [I18N_KEY_SETTINGS_LANGUAGE_ENGLISH]  = "英文",
-    [I18N_KEY_SETTINGS_LANGUAGE_CHINESE]  = "中文",
-    [I18N_KEY_SETTINGS_TEXT_SIZE_SMALL]   = "小",
-    [I18N_KEY_SETTINGS_TEXT_SIZE_MEDIUM]  = "中",
-    [I18N_KEY_SETTINGS_TEXT_SIZE_LARGE]   = "大",
-    [I18N_KEY_SETTINGS_NETWORK]           = "网络",
-    [I18N_KEY_SETTINGS_NETWORK_NO_DEVICE] = "未发现网络设备",
-    [I18N_KEY_SETTINGS_NETWORK_DEVICE]    = "设备",
-    [I18N_KEY_SETTINGS_NETWORK_STATUS]    = "状态",
-    [I18N_KEY_SETTINGS_NETWORK_MAC]       = "MAC",
-    [I18N_KEY_SETTINGS_NETWORK_IP]        = "IP",
-    [I18N_KEY_SETTINGS_NETWORK_NETMASK]   = "掩码",
-    [I18N_KEY_SETTINGS_NETWORK_GATEWAY]   = "网关",
-    [I18N_KEY_SETTINGS_NETWORK_DNS]       = "DNS",
-    [I18N_KEY_SETTINGS_NETWORK_MODE]      = "模式",
-    [I18N_KEY_SETTINGS_NETWORK_TRAFFIC]   = "流量",
-    [I18N_KEY_SETTINGS_NETWORK_UP]        = "启用",
-    [I18N_KEY_SETTINGS_NETWORK_DOWN]      = "禁用",
-    [I18N_KEY_SETTINGS_NETWORK_LINK_UP]   = "已连接",
-    [I18N_KEY_SETTINGS_NETWORK_LINK_DOWN] = "未连接",
-    [I18N_KEY_SETTINGS_NETWORK_DHCP]      = "DHCP",
-    [I18N_KEY_SETTINGS_NETWORK_STATIC]    = "静态",
-    [I18N_KEY_SETTINGS_NETWORK_NONE]      = "无",
-    [I18N_KEY_SETTINGS_NETWORK_APPLY_STATIC] = "应用静态",
-    [I18N_KEY_WIFI_AVAILABLE_NETWORKS]    = "可用无线网络",
-    [I18N_KEY_WIFI_NO_NETWORKS]           = "未发现可用无线网络",
-    [I18N_KEY_WIFI_CONNECTED]             = "已连接",
-    [I18N_KEY_WIFI_SECURED]               = "加密",
-    [I18N_KEY_WIFI_OPEN]                  = "开放",
-    [I18N_KEY_SETTINGS_APPLIED]           = "设置已应用",
-
-    /* recycle */
-    [I18N_KEY_WIN_RECYCLE_BIN]           = "回收站",
-    [I18N_KEY_RECYCLE_EMPTY]             = "回收站为空",
-
-    /* notifications window */
-    [I18N_KEY_WIN_NOTIFICATIONS]         = "通知",
-    [I18N_KEY_NOTIF_TOTAL]               = "总计",
-    [I18N_KEY_NOTIF_UNREAD]              = "未读",
-    [I18N_KEY_BTN_CLEAR]                 = "清空",
-
-    /* terminal */
-    [I18N_KEY_WIN_TERMINAL]              = "终端",
-
-    /* network browser */
-    [I18N_KEY_WIN_BROWSER]               = "浏览器",
-    [I18N_KEY_BROWSER_ADDRESS]           = "地址",
-    [I18N_KEY_BROWSER_BACK]              = "<",
-    [I18N_KEY_BROWSER_FORWARD]           = ">",
-    [I18N_KEY_BROWSER_REFRESH]           = "刷新",
-    [I18N_KEY_BROWSER_GO]                = "前往",
-    [I18N_KEY_BROWSER_HOME_TITLE]        = "OpenOS 浏览器",
-    [I18N_KEY_BROWSER_HOME_HINT]         = "在上方输入地址，开始访问网络。",
-    [I18N_KEY_BROWSER_STATUS_READY]      = "就绪",
-    [I18N_KEY_BROWSER_STATUS_PLACEHOLDER] = "下一步会接入 HTTP 渲染和网络协议栈。",
-
-    /* files browser */
-    [I18N_KEY_WIN_FILES]                 = "文件",
-    [I18N_KEY_WIN_FILE_VIEWER]           = "文件查看器",
-    [I18N_KEY_WIN_FILE_EDITOR]           = "文件编辑器",
-    [I18N_KEY_HEADER_PATH]               = "路径：",
-    [I18N_KEY_HEADER_FILE]               = "文件：",
-    [I18N_KEY_HEADER_EDIT]               = "编辑：",
-    [I18N_KEY_PAGE]                      = "第 ",
-    [I18N_KEY_PAGE_OF]                   = " / ",
-    [I18N_KEY_PAGE_OPEN_PAREN]           = "（",
-    [I18N_KEY_PAGE_ITEMS]                = " 项）",
-    [I18N_KEY_LINE]                      = "第 ",
-    [I18N_KEY_LINE_DASH]                 = "-",
-    [I18N_KEY_LINE_OF]                   = " / ",
-    [I18N_KEY_TYPE_UP]                   = "<上级>",
-    [I18N_KEY_TYPE_FILE]                 = "<文件>",
-    [I18N_KEY_FILE_COL_NAME]             = "名称",
-    [I18N_KEY_FILE_COL_MODIFIED]         = "修改时间",
-    [I18N_KEY_FILE_COL_TYPE]             = "类型",
-    [I18N_KEY_FILE_COL_SIZE]             = "大小",
-    [I18N_KEY_FILE_TYPE_FOLDER]          = "文件夹",
-    [I18N_KEY_FILE_TYPE_FILE]            = "文件",
-    [I18N_KEY_FILE_TYPE_C_SOURCE]        = "C 源码",
-    [I18N_KEY_FILE_TYPE_MARKDOWN]        = "Markdown",
-    [I18N_KEY_FILE_TYPE_TEXT]            = "文本",
-    [I18N_KEY_FILE_TYPE_SHELL]           = "脚本",
-    [I18N_KEY_FILE_TYPE_CONFIG]          = "配置",
-    [I18N_KEY_FILE_TYPE_IMAGE]           = "图片",
-    [I18N_KEY_FILE_TYPE_ARCHIVE]         = "压缩包",
-    [I18N_KEY_FILE_TYPE_EXEC]            = "程序",
-    [I18N_KEY_BTN_NEXT]                  = "下一页 >",
-    [I18N_KEY_BTN_PREV]                  = "< 上一页",
-    [I18N_KEY_BTN_BACK]                  = "< 返回",
-    [I18N_KEY_BTN_ENGLISH]               = "英文",
-    [I18N_KEY_BTN_CHINESE]               = "中文",
-    [I18N_KEY_BTN_FONT_SMALL]            = "小",
-    [I18N_KEY_BTN_FONT_MEDIUM]           = "中",
-    [I18N_KEY_BTN_FONT_LARGE]            = "大",
-    [I18N_KEY_BTN_NEW_FILE]              = "新建文件",
-    [I18N_KEY_BTN_NEW_DIR]               = "新建目录",
-    [I18N_KEY_BTN_RENAME]                = "重命名",
-    [I18N_KEY_BTN_DELETE]                = "删除",
-    [I18N_KEY_BTN_REFRESH]               = "刷新",
-    [I18N_KEY_BTN_EDIT]                  = "编辑",
-    [I18N_KEY_BTN_SAVE]                  = "保存",
-    [I18N_KEY_BTN_CANCEL]                = "取消",
-    [I18N_KEY_BTN_OK]                    = "确定",
-    [I18N_KEY_BTN_CLOSE]                 = "关闭",
-    [I18N_KEY_PROMPT_NEW_FILE]           = "请输入文件名：",
-    [I18N_KEY_PROMPT_NEW_DIR]            = "请输入目录名：",
-    [I18N_KEY_PROMPT_RENAME]             = "重命名为：",
-    [I18N_KEY_PROMPT_DELETE_CONFIRM]     = "确定删除所选项目？",
-    [I18N_KEY_STATUS_INVALID_NAME]       = "名称无效",
-    [I18N_KEY_STATUS_ALREADY_EXISTS]     = "已存在",
-    [I18N_KEY_STATUS_CREATE_FAILED]      = "创建失败",
-    [I18N_KEY_STATUS_FILE_CREATED]       = "文件已创建",
-    [I18N_KEY_STATUS_MKDIR_FAILED]       = "创建目录失败",
-    [I18N_KEY_STATUS_DIR_CREATED]        = "目录已创建",
-    [I18N_KEY_STATUS_TARGET_EXISTS]      = "目标已存在",
-    [I18N_KEY_STATUS_RENAME_FAILED]      = "重命名失败",
-    [I18N_KEY_STATUS_RENAMED]            = "已重命名",
-    [I18N_KEY_STATUS_RMDIR_FAILED]       = "删除目录失败",
-    [I18N_KEY_STATUS_DELETE_FAILED]      = "删除失败",
-    [I18N_KEY_STATUS_DELETED]            = "已删除",
-    [I18N_KEY_STATUS_ENTER_TARGET]       = "请在对话框中输入目标",
-    [I18N_KEY_STATUS_CLICK_FILE_FIRST]   = "请先点击一个文件",
-    [I18N_KEY_STATUS_REFRESHED]          = "已刷新",
-    [I18N_KEY_STATUS_SAVED_PREFIX]       = "已保存：",
-
-    [I18N_KEY_APP_DEMO_NAME]             = "窗口演示",
-};
+/* 每种语言持有一块「原始文件缓冲」，解析出的字符串就地驻留其中（原地反转义、
+ * 以 \0 分隔），故只需保留缓冲本身，无需逐条 kfree。 */
+static char *g_buf_en = 0;
+static char *g_buf_zh = 0;
 
 static const char *const *k_locale_tables[I18N_LOCALE_COUNT] = {
-    [I18N_LOCALE_EN] = k_strings_en,
-    [I18N_LOCALE_ZH] = k_strings_zh,
+    [I18N_LOCALE_EN] = g_strings_en,
+    [I18N_LOCALE_ZH] = g_strings_zh,
 };
+
+/* ---- key 名 → 枚举下标 -------------------------------------------------- */
+static int i18n_key_index(const char *name, int len) {
+    for (int i = 0; i < I18N_KEY_COUNT; i++) {
+        const char *k = k_key_names[i];
+        if (!k) continue;
+        int j = 0;
+        while (j < len && k[j] && k[j] == name[j]) j++;
+        if (j == len && k[j] == '\0') return i;
+    }
+    return -1;
+}
+
+/* ---- 迷你 JSON 解析器 ----------------------------------------------------
+ * 仅支持扁平对象：{ "KEY": "VALUE", "KEY2": "VALUE2", ... }
+ * - 就地解析：把字符串内容原地反转义并以 \0 收尾，table[idx] 指向缓冲内部。
+ * - 支持转义：\" \\ \/ \n \t \r \b \f \uXXXX(仅 BMP，转 UTF-8)。
+ * - 忽略对象外的空白；不支持嵌套对象/数组（i18n 数据无需）。
+ * 返回填入的条目数。 */
+static void put_utf8(char **dst, unsigned int cp) {
+    char *d = *dst;
+    if (cp < 0x80u) {
+        *d++ = (char)cp;
+    } else if (cp < 0x800u) {
+        *d++ = (char)(0xC0u | (cp >> 6));
+        *d++ = (char)(0x80u | (cp & 0x3Fu));
+    } else {
+        *d++ = (char)(0xE0u | (cp >> 12));
+        *d++ = (char)(0x80u | ((cp >> 6) & 0x3Fu));
+        *d++ = (char)(0x80u | (cp & 0x3Fu));
+    }
+    *dst = d;
+}
+
+static int hexval(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+/* 就地解析一个 JSON 字符串：p 指向起始引号内的首字符（引号已跳过）。
+ * 反转义后的内容写回 out（out 与源可重叠，因输出永不长于输入）。
+ * 返回结束引号之后的位置；out_end 输出反转义结果的结束位置。 */
+static char *parse_json_string(char *p, char *out, char **out_end) {
+    char *o = out;
+    while (*p && *p != '"') {
+        if (*p == '\\' && p[1]) {
+            char e = p[1];
+            p += 2;
+            switch (e) {
+                case 'n': *o++ = '\n'; break;
+                case 't': *o++ = '\t'; break;
+                case 'r': *o++ = '\r'; break;
+                case 'b': *o++ = '\b'; break;
+                case 'f': *o++ = '\f'; break;
+                case '/': *o++ = '/';  break;
+                case '"': *o++ = '"';  break;
+                case '\\': *o++ = '\\'; break;
+                case 'u': {
+                    int h0 = hexval(p[0]), h1 = hexval(p[1]);
+                    int h2 = hexval(p[2]), h3 = hexval(p[3]);
+                    if (h0 >= 0 && h1 >= 0 && h2 >= 0 && h3 >= 0) {
+                        unsigned int cp = (unsigned int)((h0 << 12) | (h1 << 8) | (h2 << 4) | h3);
+                        put_utf8(&o, cp);
+                        p += 4;
+                    } else {
+                        *o++ = 'u';
+                    }
+                    break;
+                }
+                default: *o++ = e; break;
+            }
+        } else {
+            *o++ = *p++;
+        }
+    }
+    if (*p == '"') p++;   /* 跳过结束引号 */
+    *out_end = o;
+    return p;
+}
+
+/* 解析整块 JSON，填充 table[]。就地修改 buf。返回填入条目数。 */
+static int i18n_parse_json(char *buf, const char **table) {
+    int filled = 0;
+    char *p = buf;
+    while (*p && *p != '{') p++;
+    if (*p == '{') p++;
+    for (;;) {
+        while (*p && *p != '"' && *p != '}') p++;
+        if (*p == '}' || *p == '\0') break;
+        /* key */
+        p++;                       /* skip opening quote */
+        char *key = p;
+        while (*p && *p != '"') {
+            if (*p == '\\' && p[1]) p += 2; else p++;
+        }
+        int key_len = (int)(p - key);
+        if (*p == '"') p++;
+        /* colon */
+        while (*p && *p != ':') p++;
+        if (*p == ':') p++;
+        /* value string */
+        while (*p && *p != '"' && *p != '}') p++;
+        if (*p != '"') { if (*p == '}') break; continue; }
+        p++;                       /* skip opening quote of value */
+        char *val = p;
+        char *val_end = 0;
+        p = parse_json_string(p, val, &val_end);
+        *val_end = '\0';           /* 就地收尾 */
+        int idx = i18n_key_index(key, key_len);
+        if (idx >= 0) {
+            table[idx] = val;
+            filled++;
+        }
+    }
+    return filled;
+}
+
+/* 读取整个文件到堆缓冲（自动追加结尾 \0）。成功返回缓冲指针，失败返回 0。 */
+static char *i18n_read_file(const char *path) {
+    inode_t st;
+    if (vfs_stat(path, &st) != 0) return 0;
+    uint32_t sz = (uint32_t)st.size;
+    if (sz == 0 || sz > (1u << 20)) return 0;   /* 上限 1MB 防御 */
+    int fd = vfs_open(path, O_RDONLY, 0);
+    if (fd < 0) return 0;
+    char *buf = (char *)kmalloc(sz + 1);
+    if (!buf) { vfs_close(fd); return 0; }
+    uint32_t got = 0;
+    while (got < sz) {
+        int n = vfs_read(fd, buf + got, sz - got);
+        if (n <= 0) break;
+        got += (uint32_t)n;
+    }
+    vfs_close(fd);
+    buf[got] = '\0';
+    return buf;
+}
+
+static void i18n_load_locale(const char *path, const char **table, char **buf_slot) {
+    char *buf = i18n_read_file(path);
+    if (!buf) return;
+    *buf_slot = buf;             /* 持有缓冲，字符串就地驻留 */
+    i18n_parse_json(buf, table);
+}
 
 void i18n_init(void) {
     if (g_i18n_inited) return;
     g_i18n_locale = I18N_LOCALE_ZH;
+    for (int i = 0; i < I18N_KEY_COUNT; i++) {
+        g_strings_en[i] = 0;
+        g_strings_zh[i] = 0;
+    }
+    i18n_load_locale("/etc/i18n/en.json", g_strings_en, &g_buf_en);
+    i18n_load_locale("/etc/i18n/zh.json", g_strings_zh, &g_buf_zh);
     g_i18n_inited = 1;
 }
 
@@ -432,9 +223,10 @@ const char *i18n_t(i18n_key_t key) {
     if (s && s[0]) return s;
 
     /* fallback to EN */
-    s = k_strings_en[key];
+    s = g_strings_en[key];
     if (s && s[0]) return s;
 
-    /* table mismatch */
-    return "?missing";
+    /* table mismatch / JSON 未加载：返回可见占位 */
+    const char *name = k_key_names[key];
+    return name ? name : "?missing";
 }

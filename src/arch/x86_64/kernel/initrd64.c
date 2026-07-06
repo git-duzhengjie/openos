@@ -17,6 +17,8 @@
 #include "../include/embed_ping64.h"       /* M1.5.3: /bin/ping net tool */
 #include "../include/embed_nslookup64.h"   /* M1.5.3: /bin/nslookup net tool */
 #include "../include/embed_wget64.h"       /* M1.7: /bin/wget ring3 TCP tool */
+#include "../include/embed_i18n_en.h"      /* i18n: /etc/i18n/en.json 译文数据源 */
+#include "../include/embed_i18n_zh.h"      /* i18n: /etc/i18n/zh.json 译文数据源 */
 
 static const uint8_t init_script[] =
     "echo OpenOS x86_64 initrd mounted\n"
@@ -57,6 +59,10 @@ static const x86_64_initrd_file_t initrd_files[] = {
     { .name = "/bin/ping",     .data = ping64_elf,     .size = (x86_64_size_t)ping64_elf_size,     .mode = 0755u },
     { .name = "/bin/nslookup", .data = nslookup64_elf, .size = (x86_64_size_t)nslookup64_elf_size, .mode = 0755u },
     { .name = "/bin/wget", .data = wget64_elf, .size = (x86_64_size_t)wget64_elf_size, .mode = 0755u },
+    /* i18n: yi JSON wei wei-yi shu-ju-yuan (res/i18n/en.json, zh.json).
+     * yun-xing-shi i18n.c jing VFS du /etc/i18n/{en,zh}.json jie-xi tian-biao. */
+    { .name = "/etc/i18n/en.json", .data = i18n_en_json, .size = (x86_64_size_t)i18n_en_json_size, .mode = 0644u },
+    { .name = "/etc/i18n/zh.json", .data = i18n_zh_json, .size = (x86_64_size_t)i18n_zh_json_size, .mode = 0644u },
 };
 
 static const x86_64_initrd_image_t builtin_initrd = {

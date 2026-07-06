@@ -461,6 +461,14 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
     nm "$ARCH64_BIN_BUILD/wget64.elf" | grep -q ' openos64_main$'
     python3 _embed_elf.py "$ARCH64_BIN_BUILD/wget64.elf" "$ARCH64_SRC/include/embed_wget64.h" wget64_elf
 
+    echo "[1z/5] Embedding i18n JSON translation files into initrd..."
+    # i18n 译文以 JSON 为唯一数据源 (res/i18n/*.json)，编译期嵌入 initrd，
+    # 运行时由 i18n.c 经 VFS 读取 /etc/i18n/*.json 解析填表，代码不写死任何译文。
+    # 先从 i18n.h 枚举自动生成 key 名映射表，保证与枚举永久同步。
+    python3 tools/gen_i18n_keys.py
+    python3 _embed_elf.py "res/i18n/en.json" "$ARCH64_SRC/include/embed_i18n_en.h" i18n_en_json
+    python3 _embed_elf.py "res/i18n/zh.json" "$ARCH64_SRC/include/embed_i18n_zh.h" i18n_zh_json
+
     echo "[2/5] Compiling x86_64 C files..."
     for cfile in \
         kernel/kernel64.c \
