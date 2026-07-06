@@ -105,4 +105,20 @@ uint32_t gui_utf8_step_bytes(const char *s);
 void gui_wifi_open(void);
 gui_window_t *gui_window_at(int x, int y);
 
+/* === Sticky Note subsystem (gui_sticky.c) === */
+/* Desktop note store shared between desktop layer (gui.c) and sticky notes */
+#ifndef GUI_DESKTOP_NOTE_MAX_COUNT
+#define GUI_DESKTOP_NOTE_MAX_COUNT 5
+#define GUI_DESKTOP_NOTE_MAX_TEXT  96
+typedef struct gui_desktop_note_store {
+    char items[GUI_DESKTOP_NOTE_MAX_COUNT][GUI_DESKTOP_NOTE_MAX_TEXT + 1];
+    int count;
+} gui_desktop_note_store_t;
+#endif
+/* gui.c -> sticky: none. sticky -> gui.c(desktop): note store writer */
+void gui_desktop_note_add(gui_desktop_note_store_t *store, const char *line, int len);
+/* sticky -> external callers (gui.c desktop/start_menu): */
+void gui_stickynote_open(void);
+int sticky_export_to_desktop_store(gui_desktop_note_store_t *store);
+
 #endif /* OPENOS_GUI_INTERNAL_H */
