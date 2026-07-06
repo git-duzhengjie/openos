@@ -1767,31 +1767,36 @@ static int net_http_get_selftest_impl(const char *host, const char *path) {
     ns_puts(" -> "); ns_put_ip(remote_ip);
     ns_puts(" :80\n");
 
-    /* 2) TCP 主动连接（本地 IP=0 表示用设备当前地址，本地端口 0 表示自动分配） */
-    uint16_t local_port = (uint16_t)(40000 + (g_net_ticks & 0x3FFF));
-    int conn = net_tcp_open(0, local_port, remote_ip, 80, 1 /* active */);
-    if (conn < 0) {
-        ns_puts("[http] TCP open 失败\n");
-        return -2;
-    }
-    ns_puts("[http] TCP 连接发起 (conn="); ns_put_dec((uint32_t)conn);
-    ns_puts(", 本地端口="); ns_put_dec(local_port); ns_puts(")\n");
-
-    /* 3) 等待三次握手完成 -> ESTABLISHED */
+    /* 2+3) TCP 主动连接 + 三次握手，带冷启动重连重试。
+     *   QEMU user-mode NAT 首次外网连接需先建立 NAT 映射 + 冷 ARP 解析网关 MAC，
+     *   开机后第一条外网连接的首个 SYN 往返偏慢，易在 120 轮内误超时；
+     *   失败后换本地端口自动重连(避免复用四元组撞 TIME_WAIT)，二次通常即成功。 */
+    int conn = -1;
     int established = 0;
-    for (uint32_t round = 0; round < 60; round++) {
-        http_pump(conn, 0, 50000 * HTTP_POLL_STEP);
-        int st = net_tcp_state(conn);
-        if (st == NET_TCP_STATE_ESTABLISHED) { established = 1; break; }
-        if (st == NET_TCP_STATE_CLOSED) {
-            ns_puts("[http] 连接被拒绝/重置\n");
+    for (int attempt = 0; attempt < 3 && !established; attempt++) {
+        uint16_t local_port = (uint16_t)(40000 + ((g_net_ticks + (uint32_t)attempt * 997u) & 0x3FFF));
+        conn = net_tcp_open(0, local_port, remote_ip, 80, 1 /* active */);
+        if (conn < 0) {
+            ns_puts("[http] TCP open 失败\n");
+            return -2;
+        }
+        ns_puts("[http] TCP 连接发起 (conn="); ns_put_dec((uint32_t)conn);
+        ns_puts(", 本地端口="); ns_put_dec(local_port);
+        ns_puts(", 第"); ns_put_dec((uint32_t)(attempt + 1)); ns_puts("次)\n");
+
+        for (uint32_t round = 0; round < 120; round++) {
+            http_pump(conn, 0, 50000 * HTTP_POLL_STEP);
+            int st = net_tcp_state(conn);
+            if (st == NET_TCP_STATE_ESTABLISHED) { established = 1; break; }
+            if (st == NET_TCP_STATE_CLOSED) break; /* 被拒/重置：换端口重连 */
+        }
+        if (!established) {
+            ns_puts("[http] 握手未完成，换端口重连...\n");
             net_tcp_close(conn);
-            return -3;
         }
     }
     if (!established) {
         ns_puts("[http] TCP 握手超时\n");
-        net_tcp_close(conn);
         return -3;
     }
     ns_puts("[http] TCP 握手完成 (ESTABLISHED)\n");

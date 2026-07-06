@@ -1581,7 +1581,7 @@
     - **正统异步化**（d20f18e）：新增非阻塞 `net_ping_start/poll` + `gui_nettool` 状态机（RESOLVING/PING_WAIT/CONNECTING/SENDING/RECV/DONE），仿 `browser_load_tick` 挂进 GUI 主循环；网络别名不再走同步 `launch_path`，启动状态机后立即返回，提示符由 DONE 回调显示
     - **补真实非阻塞 DNS**（M2.4）：发现 `gui64_stubs.c` 里 `dns_query_a`/`dns_get_state`/`dns_get_last_result` 是空桩直返 -1 从未接网络栈（headless 走内核内直调 `net_dns_resolve` 绕过桩，故一直假 PASS）；新增 `net_dns_query_start/state/result` 非阻塞 DNS 状态机，三桩改为转发
     - ⚠️ 编号说明：本网络工具链里程碑内部用 M1.6~M2.4，与下方 M2（现代存储设备）体系不同名，勿混淆
-  - [ ] 自研浏览器接入真实 HTTP 请求
+  - [x] 自研浏览器接入真实 HTTP 请求（DNS+真实TCP三次握手+HTTP/1.0 GET；冷ARP首连加120轮+换端口重连兜底，QEMU实测 HTTP/1.1 200 OK 827B PASS）
 
 ### M2：现代存储与设备（🟠 第二优先级）
 

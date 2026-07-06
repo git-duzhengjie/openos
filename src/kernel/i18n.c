@@ -180,11 +180,29 @@ static char *i18n_read_file(const char *path) {
     return buf;
 }
 
+extern void early_serial64_write(const char *s);
+static void i18n_log_count(const char *path, int n) {
+    char msg[64]; int i = 0;
+    const char *pfx = "[i18n] loaded ";
+    while (pfx[i]) { msg[i] = pfx[i]; i++; }
+    /* n -> decimal (n < 1000) */
+    char num[8]; int ni = 0; int v = n;
+    if (v == 0) num[ni++] = '0';
+    while (v > 0) { num[ni++] = (char)('0' + v % 10); v /= 10; }
+    while (ni > 0) msg[i++] = num[--ni];
+    const char *sfx = " entries from ";
+    for (int j = 0; sfx[j]; j++) msg[i++] = sfx[j];
+    for (int j = 0; path[j] && i < 62; j++) msg[i++] = path[j];
+    msg[i++] = '\n'; msg[i] = '\0';
+    early_serial64_write(msg);
+}
+
 static void i18n_load_locale(const char *path, const char **table, char **buf_slot) {
     char *buf = i18n_read_file(path);
-    if (!buf) return;
+    if (!buf) { early_serial64_write("[i18n] MISSING "); early_serial64_write(path); early_serial64_write("\n"); return; }
     *buf_slot = buf;             /* 持有缓冲，字符串就地驻留 */
-    i18n_parse_json(buf, table);
+    int n = i18n_parse_json(buf, table);
+    i18n_log_count(path, n);
 }
 
 void i18n_init(void) {
