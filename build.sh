@@ -472,6 +472,7 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         kernel/proc64.c \
         kernel/syscall64.c \
         kernel/syscall_dispatch64.c \
+        kernel/syscall_net64.c \
         kernel/syscall_selftest64.c \
         kernel/sched_selftest64.c \
         kernel/net64.c \
@@ -589,6 +590,7 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         "$ARCH64_BUILD/context_switch64.o" \
         "$ARCH64_BUILD/syscall64.o" \
         "$ARCH64_BUILD/syscall_dispatch64.o" \
+        "$ARCH64_BUILD/syscall_net64.o" \
         "$ARCH64_BUILD/syscall_selftest64.o" \
         "$ARCH64_BUILD/sched_selftest64.o" \
         "$ARCH64_BUILD/net64.o" \
