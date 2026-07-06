@@ -10502,6 +10502,20 @@ static void gui_term_scpy(char *dst, const char *src, uint32_t cap) {
 
 /* --- Route-2 bridges: run user programs from the GUI terminal --- */
 extern int  arch_x86_64_usermode_launch_path(const char *path, int argc, const char **argv, int envc, const char **envp);
+
+/* M2.0: 网络工具内建别名——识别 wget/ping/nslookup/ifconfig 作为第一个词，
+ * 命中后直接映射到 /bin/<name>，免去用户敲 `run /bin/` 前缀。
+ * 返回命中的命令名长度（>0），未命中返回 0。 */
+static int gui_net_alias_match(const char *c) {
+    static const char *const names[] = { "wget", "ping", "nslookup", "ifconfig", 0 };
+    for (int i = 0; names[i]; i++) {
+        int n = 0; while (names[i][n]) n++;
+        int eq = 1;
+        for (int k = 0; k < n; k++) { if (c[k] != names[i][k]) { eq = 0; break; } }
+        if (eq && (c[n] == ' ' || c[n] == '\0')) return n;
+    }
+    return 0;
+}
 extern void arch_x86_64_fd_set_stdout_mirror(void (*sink)(char c));
 void gui_terminal_set_capture(int on);
 void gui_terminal_write(const char *text);
@@ -10744,6 +10758,9 @@ static void gui_terminal_run_command(const char *cmd) {
         gui_terminal_write("          ls cat pwd cd mkdir rmdir rm touch\n");
         gui_terminal_write("          echo TEXT > FILE  (write to file)\n");
         gui_terminal_write("          sync  (save filesystem to disk)\n");
+        gui_terminal_write("  net:    ifconfig  ping HOST  nslookup HOST\n");
+        gui_terminal_write("          wget [-1] HOST [PATH]  (fetch webpage)\n");
+        gui_terminal_write("          run /bin/PROG [args]  (launch user ELF)\n");
     } else if (gui_str_eq(cmd, "clear") || gui_str_eq(cmd, "cls")) {
         gui_terminal_clear();
     } else if (gui_str_eq(cmd, "ver") || gui_str_eq(cmd, "version")) {
@@ -10923,13 +10940,29 @@ static void gui_terminal_run_command(const char *cmd) {
             gui_terminal_write("\n");
         }
     } else if ((cmd[0] == 'r' && cmd[1] == 'u' && cmd[2] == 'n' && (cmd[3] == ' ' || cmd[3] == '\0')) ||
-               (cmd[0] == 'e' && cmd[1] == 'x' && cmd[2] == 'e' && cmd[3] == 'c' && (cmd[4] == ' ' || cmd[4] == '\0'))) {
+               (cmd[0] == 'e' && cmd[1] == 'x' && cmd[2] == 'e' && cmd[3] == 'c' && (cmd[4] == ' ' || cmd[4] == '\0')) ||
+               gui_net_alias_match(cmd)) {
         /* run/exec <path>: launch a user-mode ELF program.
          * Resolves relative paths against cwd, then hands off to the
          * kernel launcher (VFS-first ELF load + ring3 execve/fork rounds).
          * The call blocks until the program tree exits; program stdout is
          * mirrored to the terminal via gui_terminal_write (see SYS_WRITE). */
-        const char *arg = cmd + ((cmd[0] == 'r') ? 3 : 4);
+        /* M2.0: 网络工具内建别名（wget/ping/...）直接拼 /bin/<name>；
+         * 否则按 run/exec 前缀剔除得到参数串。 */
+        int alias = gui_net_alias_match(cmd);
+        static char aliasbuf[256];
+        const char *arg;
+        if (alias) {
+            /* aliasbuf = "/bin/" + cmd，例如 "wget -1 example.com" -> "/bin/wget -1 example.com" */
+            int p = 0;
+            const char *pre = "/bin/";
+            for (int k = 0; pre[k] && p < (int)sizeof(aliasbuf) - 1; k++) aliasbuf[p++] = pre[k];
+            for (int s = 0; cmd[s] && p < (int)sizeof(aliasbuf) - 1; s++) aliasbuf[p++] = cmd[s];
+            aliasbuf[p] = 0;
+            arg = aliasbuf;
+        } else {
+            arg = cmd + ((cmd[0] == 'r') ? 3 : 4);
+        }
         while (*arg == ' ') arg++;
         if (*arg == 0) {
             gui_terminal_write("run: missing program path\n");
