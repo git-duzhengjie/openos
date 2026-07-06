@@ -220,6 +220,50 @@ void arch_x86_64_early_init(const openos_bootinfo_t *bootinfo) {
             ? "[net] HTTP PASS: 真·联网成功，已收到 HTTP 响应\n"
             : "[net] HTTP 未完成(无外网应答属正常，见上方阶段码)\n");
     }
+    /* M1.7 自检：ring3 TCP blocking API —— 直接调用 net_tcp_connect/send/recv/close
+     * blocking 封装(与 SYS_TCP_* 系统调用同一条链路)，向 example.com:80 发一次真实
+     * HTTP GET 并收响应。验证用户态 wget 依赖的内核 TCP 出口链路可用。 */
+    {
+        extern void early_serial64_write(const char *s);
+        extern int net_dns_resolve(const char *hostname, uint32_t *out_ip);
+        extern int net_tcp_connect_blocking(uint32_t dst_ip, uint16_t dst_port);
+        extern int net_tcp_send_blocking(int conn_id, const uint8_t *data, uint16_t len);
+        extern int net_tcp_recv_blocking(int conn_id, uint8_t *buf, uint16_t len, uint32_t poll_loops);
+        extern int net_tcp_close_blocking(int conn_id);
+        early_serial64_write("[net] 自检：M1.7 TCP blocking API 直连 example.com:80 ...\n");
+        uint32_t hip = 0;
+        if (net_dns_resolve("example.com", &hip) == 0 && hip != 0) {
+            int conn = net_tcp_connect_blocking(hip, 80);
+            if (conn >= 0) {
+                early_serial64_write("[net] M1.7 TCP: 三次握手完成 (ESTABLISHED)\n");
+                static const char req[] =
+                    "GET / HTTP/1.1\r\nHost: example.com\r\n"
+                    "Connection: close\r\nUser-Agent: openos-m17/1.0\r\n\r\n";
+                int sent = net_tcp_send_blocking(conn, (const uint8_t *)req,
+                                                 (uint16_t)(sizeof(req) - 1));
+                if (sent > 0) {
+                    early_serial64_write("[net] M1.7 TCP: HTTP GET 已发出\n");
+                    static uint8_t rbuf[1024];
+                    int total = 0, empty = 0;
+                    for (int i = 0; i < 20; i++) {
+                        int g = net_tcp_recv_blocking(conn, rbuf, (uint16_t)sizeof(rbuf), 120);
+                        if (g > 0) { total += g; empty = 0; }
+                        else if (++empty >= 3) break;
+                    }
+                    early_serial64_write(total > 0
+                        ? "[net] M1.7 TCP PASS: 收到 HTTP 响应(见 net.pcap)\n"
+                        : "[net] M1.7 TCP: 未收到响应(无外网应答属正常)\n");
+                } else {
+                    early_serial64_write("[net] M1.7 TCP: 发送失败\n");
+                }
+                net_tcp_close_blocking(conn);
+            } else {
+                early_serial64_write("[net] M1.7 TCP: 连接失败(无外网应答属正常)\n");
+            }
+        } else {
+            early_serial64_write("[net] M1.7 TCP: DNS 未解析，跳过\n");
+        }
+    }
     /* Step E.4: TSC<->PIT calibration. Must run before any selftest that
      * relies on uptime_ms(); idempotent and tolerates failure (uptime falls
      * back to the legacy rdtsc>>20 estimate). */
@@ -510,6 +554,8 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
     arch_x86_64_shell_exec_line("run /bin/nslookup example.com");
     early_console64_write("[x86_64][net-r3] /bin/ping 10.0.2.2 3 ...\n");
     arch_x86_64_shell_exec_line("run /bin/ping 10.0.2.2 3");
+    early_console64_write("[x86_64][net-r3] /bin/wget example.com / (ring3 TCP) ...\n");
+    arch_x86_64_shell_exec_line("run /bin/wget example.com /");
     early_console64_write("[x86_64][net-r3] done\n");
 
     /* Route-2 end-to-end probe: exercise the shell 'run' path (which in

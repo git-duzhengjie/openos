@@ -450,6 +450,17 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
     nm "$ARCH64_BIN_BUILD/nslookup64.elf" | grep -q ' openos64_main$'
     python3 _embed_elf.py "$ARCH64_BIN_BUILD/nslookup64.elf" "$ARCH64_SRC/include/embed_nslookup64.h" nslookup64_elf
 
+    echo "[1g/5] Building x86_64 /bin/wget ELF (M1.7 ring3 TCP tool)..."
+    gcc $ARCH64_USER_CFLAGS -c "$ARCH64_SRC/user/wget64.c" -o "$ARCH64_USER_BUILD/wget64.o"
+    ld $ARCH64_USER_LDFLAGS -o "$ARCH64_BIN_BUILD/wget64.elf" \
+        "$ARCH64_USER_BUILD/start.o" \
+        "$ARCH64_USER_BUILD/crt0.o" \
+        "$ARCH64_USER_BUILD/wget64.o"
+    readelf -h "$ARCH64_BIN_BUILD/wget64.elf" | grep -q 'Class:.*ELF64'
+    readelf -h "$ARCH64_BIN_BUILD/wget64.elf" | grep -q 'Machine:.*X86-64'
+    nm "$ARCH64_BIN_BUILD/wget64.elf" | grep -q ' openos64_main$'
+    python3 _embed_elf.py "$ARCH64_BIN_BUILD/wget64.elf" "$ARCH64_SRC/include/embed_wget64.h" wget64_elf
+
     echo "[2/5] Compiling x86_64 C files..."
     for cfile in \
         kernel/kernel64.c \

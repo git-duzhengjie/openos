@@ -1711,3 +1711,110 @@ int net_http_get_selftest(const char *host, const char *path) {
     if (!(fl & 0x200UL)) __asm__ __volatile__("cli");
     return r;
 }
+
+/* =========================================================================
+ * M1.7 ring3 用户态 TCP：阻塞式封装 (impl + wrapper 保存/恢复 IF)
+ * 复用 http_pump 驱动 net_poll/net_tick，与 M1.6 selftest 同款 pump 逻辑。
+ * ========================================================================= */
+
+static int net_tcp_connect_blocking_impl(uint32_t dst_ip, uint16_t dst_port) {
+    if (!g_default_dev || dst_ip == 0 || dst_port == 0) return -1;
+    /* 本地端口：用独立递增计数器，保证与前一条连接(可能仍在 FIN_WAIT/TIME_WAIT)四元组不冲突 */
+    static uint16_t s_eph_port = 49152;
+    s_eph_port++;
+    if (s_eph_port < 49152 || s_eph_port == 0) s_eph_port = 49152;
+    uint16_t local_port = s_eph_port;
+    int conn = net_tcp_open(0, local_port, dst_ip, dst_port, 1 /* active */);
+    if (conn < 0) return -2;
+    /* 等待三次握手 -> ESTABLISHED */
+    for (uint32_t round = 0; round < 120; round++) {
+        http_pump(conn, 0, 50000 * HTTP_POLL_STEP);
+        int st = net_tcp_state(conn);
+        if (st == NET_TCP_STATE_ESTABLISHED) return conn;
+        if (st == NET_TCP_STATE_CLOSED) { net_tcp_close(conn); return -3; }
+    }
+    net_tcp_close(conn);
+    return -3;
+}
+
+int net_tcp_connect_blocking(uint32_t dst_ip, uint16_t dst_port) {
+    unsigned long fl;
+    __asm__ __volatile__("pushfq; popq %0" : "=r"(fl) :: "memory");
+    __asm__ __volatile__("sti");
+    int r = net_tcp_connect_blocking_impl(dst_ip, dst_port);
+    if (!(fl & 0x200UL)) __asm__ __volatile__("cli");
+    return r;
+}
+
+static int net_tcp_send_blocking_impl(int conn_id, const uint8_t *data, uint16_t len) {
+    if (conn_id < 0 || !data || len == 0) return -1;
+    if (net_tcp_state(conn_id) != NET_TCP_STATE_ESTABLISHED) return -2;
+    int r = net_tcp_send(conn_id, data, len);
+    if (r < 0) return -3;
+    /* 推几轮把数据真正吐到网卡 + 收 ACK */
+    http_pump(conn_id, 0, 30000 * HTTP_POLL_STEP);
+    return r;
+}
+
+int net_tcp_send_blocking(int conn_id, const uint8_t *data, uint16_t len) {
+    unsigned long fl;
+    __asm__ __volatile__("pushfq; popq %0" : "=r"(fl) :: "memory");
+    __asm__ __volatile__("sti");
+    int r = net_tcp_send_blocking_impl(conn_id, data, len);
+    if (!(fl & 0x200UL)) __asm__ __volatile__("cli");
+    return r;
+}
+
+static int net_tcp_recv_blocking_impl(int conn_id, uint8_t *buf, uint16_t len, uint32_t poll_loops) {
+    if (conn_id < 0 || !buf || len == 0) return -1;
+    if (poll_loops == 0) poll_loops = 120;
+    for (uint32_t round = 0; round < poll_loops; round++) {
+        http_pump(conn_id, 0, 50000 * HTTP_POLL_STEP);
+        int avail = net_tcp_available(conn_id);
+        if (avail > 0) {
+            int want = avail;
+            if (want > (int)len) want = (int)len;
+            int got = net_tcp_recv(conn_id, buf, (uint16_t)want);
+            if (got > 0) return got;
+        }
+        int st = net_tcp_state(conn_id);
+        if (st == NET_TCP_STATE_CLOSE_WAIT || st == NET_TCP_STATE_CLOSED) {
+            /* 对端已发 FIN，再收一轮残余 */
+            http_pump(conn_id, 0, 20000 * HTTP_POLL_STEP);
+            int avail2 = net_tcp_available(conn_id);
+            if (avail2 > 0) {
+                int want2 = avail2 > (int)len ? (int)len : avail2;
+                int got2 = net_tcp_recv(conn_id, buf, (uint16_t)want2);
+                if (got2 > 0) return got2;
+            }
+            return 0; /* 对端关闭且无残余数据 */
+        }
+    }
+    return 0; /* 超时，暂无数据 */
+}
+
+int net_tcp_recv_blocking(int conn_id, uint8_t *buf, uint16_t len, uint32_t poll_loops) {
+    unsigned long fl;
+    __asm__ __volatile__("pushfq; popq %0" : "=r"(fl) :: "memory");
+    __asm__ __volatile__("sti");
+    int r = net_tcp_recv_blocking_impl(conn_id, buf, len, poll_loops);
+    if (!(fl & 0x200UL)) __asm__ __volatile__("cli");
+    return r;
+}
+
+static int net_tcp_close_blocking_impl(int conn_id) {
+    if (conn_id < 0) return -1;
+    int r = net_tcp_close(conn_id);
+    /* 推几轮把 FIN 发出去、完成四次挥手 */
+    http_pump(conn_id, 0, 30000 * HTTP_POLL_STEP);
+    return r;
+}
+
+int net_tcp_close_blocking(int conn_id) {
+    unsigned long fl;
+    __asm__ __volatile__("pushfq; popq %0" : "=r"(fl) :: "memory");
+    __asm__ __volatile__("sti");
+    int r = net_tcp_close_blocking_impl(conn_id);
+    if (!(fl & 0x200UL)) __asm__ __volatile__("cli");
+    return r;
+}

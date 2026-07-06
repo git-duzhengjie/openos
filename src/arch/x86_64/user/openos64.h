@@ -32,6 +32,12 @@
 #define OPENOS64_SYS_NETCONFIG 294ULL
 #define OPENOS64_SYS_DNSLOOKUP 316ULL
 #define OPENOS64_SYS_UPTIME_MS 317ULL
+/* M1.7 ring3 用户态 TCP */
+#define OPENOS64_SYS_TCP_CONNECT 400ULL
+#define OPENOS64_SYS_TCP_SEND    401ULL
+#define OPENOS64_SYS_TCP_RECV    402ULL
+#define OPENOS64_SYS_TCP_CLOSE   403ULL
+#define OPENOS64_SYS_HTTP_GET    404ULL
 
 /* The kernel currently only accepts AF_OPENOS / SOCK_DGRAM / PROTO_DEFAULT. */
 #define OPENOS64_AF_OPENOS     1
@@ -296,9 +302,41 @@ static inline int openos64_netconfig(uint32_t mode, uint32_t ip, uint32_t netmas
                                   (uint64_t)dns);
 }
 
+/* ------- M1.7 ring3 用户态 TCP（阻塞式，直通真 netstack）------- */
+/* 建立 TCP 连接。dst_ip 为 host 字节序（与 dnslookup 输出的 network 序相反，需自行转换）。
+ * 返回 conn_id>=0，<0 失败。 */
+static inline int openos64_tcp_connect(uint32_t dst_ip_host, uint16_t dst_port) {
+    return (int)openos64_syscall2(OPENOS64_SYS_TCP_CONNECT,
+                                  (uint64_t)dst_ip_host,
+                                  (uint64_t)dst_port);
+}
+static inline int openos64_tcp_send(int conn_id, const void *buf, uint32_t len) {
+    return (int)openos64_syscall3(OPENOS64_SYS_TCP_SEND,
+                                  (uint64_t)conn_id,
+                                  (uint64_t)(uintptr_t)buf,
+                                  (uint64_t)len);
+}
+static inline int openos64_tcp_recv(int conn_id, void *buf, uint32_t len, uint32_t poll_loops) {
+    return (int)openos64_syscall4(OPENOS64_SYS_TCP_RECV,
+                                  (uint64_t)conn_id,
+                                  (uint64_t)(uintptr_t)buf,
+                                  (uint64_t)len,
+                                  (uint64_t)poll_loops);
+}
+static inline int openos64_tcp_close(int conn_id) {
+    return (int)openos64_syscall2(OPENOS64_SYS_TCP_CLOSE, (uint64_t)conn_id, 0);
+}
+/* 辇便：一次性 HTTP GET 自测（内部 DNS+握手+GET+收，日志写串口）。返回 0/-1。 */
+static inline int openos64_http_get(const char *host, const char *path, void *buf, uint32_t buflen) {
+    return (int)openos64_syscall4(OPENOS64_SYS_HTTP_GET,
+                                  (uint64_t)(uintptr_t)host,
+                                  (uint64_t)(uintptr_t)path,
+                                  (uint64_t)(uintptr_t)buf,
+                                  (uint64_t)buflen);
+}
+
 openos64_size_t openos64_strlen(const char *text);
-int openos64_main(int argc, char **argv, char **envp);
-/* H.5a: receives argc/argv/envp from crt0.S, never returns (calls openos64_exit). */
+int openos64_main(int argc, char **argv, char **envp);/* H.5a: receives argc/argv/envp from crt0.S, never returns (calls openos64_exit). */
 void openos64_start(int argc, char **argv, char **envp) __attribute__((noreturn));
 const openos64_runtime_info_t *openos64_runtime_get_info(void);
 

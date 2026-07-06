@@ -207,6 +207,15 @@ int net_tcp_send_syn(uint32_t dst_ip, uint16_t src_port, uint16_t dst_port);
  * -1 DNS 失败, -2 TCP open 失败, -3 握手超时, -4 send 失败, -5 无响应。
  * 内部已用 impl+wrapper 保存/恢复调用方 IF 状态。 */
 int net_http_get_selftest(const char *host, const char *path);
+
+/* M1.7 ring3 用户态 TCP：阻塞式封装，内部自带 net_poll pump 驱动握手/收发。
+ * 供 SYS_TCP_* 系统调用直通调用，复用 M1.6 已验证的握手/pump 逻辑。
+ * 均已用 impl+wrapper 保存/恢复调用方 IF 状态。 */
+int net_tcp_connect_blocking(uint32_t dst_ip, uint16_t dst_port);  /* 返回 conn_id>=0，<0 失败 */
+int net_tcp_send_blocking(int conn_id, const uint8_t *data, uint16_t len); /* 返回已发字节数，<0 失败 */
+int net_tcp_recv_blocking(int conn_id, uint8_t *buf, uint16_t len, uint32_t poll_loops); /* 返回收到字节数，0=暂无/对端关闭，<0 失败 */
+int net_tcp_close_blocking(int conn_id);
+
 int net_ping_self(void);
 int net_ping_ipv4(uint32_t dst_ip);
 int net_get_diag_stats(net_diag_stats_t *stats);

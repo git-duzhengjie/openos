@@ -915,6 +915,56 @@ static uint64_t do_netconfig(uint64_t mode, uint64_t ip, uint64_t netmask,
 }
 
 /* ---------------------------------------------------------------------------
+ * M1.7 ring3 用户态 TCP（直通真 netstack 的阻塞式封装）
+ * ------------------------------------------------------------------------- */
+
+/* SYS_TCP_CONNECT (400): a0 = dst_ip (host 序), a1 = dst_port. 返回 conn_id>=0 / (uint64_t)-1 */
+static uint64_t do_tcp_connect(uint64_t dst_ip, uint64_t dst_port) {
+    if (dst_ip == 0 || dst_port == 0 || dst_port > 0xFFFF) return (uint64_t)-1;
+    int conn = net_tcp_connect_blocking((uint32_t)dst_ip, (uint16_t)dst_port);
+    if (conn < 0) return (uint64_t)-1;
+    return (uint64_t)conn;
+}
+
+/* SYS_TCP_SEND (401): a0 = conn_id, a1 = user buf, a2 = len. 返回已发字节数 / -1 */
+static uint64_t do_tcp_send(uint64_t conn_id, uint64_t buf, uint64_t len) {
+    if (len == 0 || len > 8192) return (uint64_t)-1;
+    if (!validate_user_buf(buf, len)) return (uint64_t)-1;
+    int r = net_tcp_send_blocking((int)conn_id, (const uint8_t *)(uintptr_t)buf, (uint16_t)len);
+    if (r < 0) return (uint64_t)-1;
+    return (uint64_t)r;
+}
+
+/* SYS_TCP_RECV (402): a0 = conn_id, a1 = user buf, a2 = len, a3 = poll_loops. 返回收字节数/0/-1 */
+static uint64_t do_tcp_recv(uint64_t conn_id, uint64_t buf, uint64_t len, uint64_t poll_loops) {
+    if (len == 0 || len > 8192) return (uint64_t)-1;
+    if (!validate_user_buf(buf, len)) return (uint64_t)-1;
+    int r = net_tcp_recv_blocking((int)conn_id, (uint8_t *)(uintptr_t)buf, (uint16_t)len, (uint32_t)poll_loops);
+    if (r < 0) return (uint64_t)-1;
+    return (uint64_t)r;
+}
+
+/* SYS_TCP_CLOSE (403): a0 = conn_id */
+static uint64_t do_tcp_close(uint64_t conn_id) {
+    int r = net_tcp_close_blocking((int)conn_id);
+    return (r == 0) ? 0 : (uint64_t)-1;
+}
+
+/* SYS_HTTP_GET (404): a0 = host str, a1 = path str, a2 = user buf, a3 = buflen.
+ * 辇便封装：运行一次完整 HTTP GET 自测（DNS+握手+GET+收），返回 0/-1。
+ * 当前复用 M1.6 selftest，响应写串口日志（写回 user buf 待后续升级）。 */
+static uint64_t do_http_get(uint64_t host_ptr, uint64_t path_ptr, uint64_t buf, uint64_t buflen) {
+    (void)buf; (void)buflen;
+    if (!validate_user_buf(host_ptr, 1)) return (uint64_t)-1;
+    if (!validate_user_buf(path_ptr, 1)) return (uint64_t)-1;
+    const char *host = (const char *)(uintptr_t)host_ptr;
+    const char *path = (const char *)(uintptr_t)path_ptr;
+    if (k_strlen(host) == 0 || k_strlen(host) > 253) return (uint64_t)-1;
+    int r = net_http_get_selftest(host, path);
+    return (r == 0) ? 0 : (uint64_t)-1;
+}
+
+/* ---------------------------------------------------------------------------
  * Common dispatch table.
  * ------------------------------------------------------------------------- */
 
@@ -971,6 +1021,13 @@ uint64_t arch_x86_64_syscall_dispatch_common(uint64_t num,
     case SYS_PING:        return do_ping(a0, a1);
     case SYS_NETCONFIG:   return do_netconfig(a0, a1, a2, a3, a4);
     case SYS_DNSLOOKUP:   return do_dnslookup(a0, a1);
+
+    /* -------- M1.7 ring3 TCP -------- */
+    case SYS_TCP_CONNECT: return do_tcp_connect(a0, a1);
+    case SYS_TCP_SEND:    return do_tcp_send(a0, a1, a2);
+    case SYS_TCP_RECV:    return do_tcp_recv(a0, a1, a2, a3);
+    case SYS_TCP_CLOSE:   return do_tcp_close(a0);
+    case SYS_HTTP_GET:    return do_http_get(a0, a1, a2, a3);
 
     default:
         ++dispatch_enosys_count;

@@ -16,6 +16,7 @@
 #include "../include/embed_ifconfig64.h"   /* M1.5.3: /bin/ifconfig net tool */
 #include "../include/embed_ping64.h"       /* M1.5.3: /bin/ping net tool */
 #include "../include/embed_nslookup64.h"   /* M1.5.3: /bin/nslookup net tool */
+#include "../include/embed_wget64.h"       /* M1.7: /bin/wget ring3 TCP tool */
 
 static const uint8_t init_script[] =
     "echo OpenOS x86_64 initrd mounted\n"
@@ -55,6 +56,7 @@ static const x86_64_initrd_file_t initrd_files[] = {
     { .name = "/bin/ifconfig", .data = ifconfig64_elf, .size = (x86_64_size_t)ifconfig64_elf_size, .mode = 0755u },
     { .name = "/bin/ping",     .data = ping64_elf,     .size = (x86_64_size_t)ping64_elf_size,     .mode = 0755u },
     { .name = "/bin/nslookup", .data = nslookup64_elf, .size = (x86_64_size_t)nslookup64_elf_size, .mode = 0755u },
+    { .name = "/bin/wget", .data = wget64_elf, .size = (x86_64_size_t)wget64_elf_size, .mode = 0755u },
 };
 
 static const x86_64_initrd_image_t builtin_initrd = {
