@@ -62,23 +62,23 @@ static int  gui_ctxmenu_handle_click(int x, int y);
 static void gui_ctxmenu_draw(void);
 static int  gui_ctxmenu_is_open(void);
 static void gui_ctxmenu_invalidate_hover_changes(int old_x, int old_y, int new_x, int new_y);
-static void gui_file_preview_open(void);
+void gui_file_preview_open(void);
 static void gui_file_preview_render_list(void);
 static void gui_file_preview_render_view(void);
 static void gui_file_preview_render_edit(void);
 static void gui_file_preview_rebuild(void);
-static void gui_about_open(void);
-static void gui_recycle_open(void);
+void gui_about_open(void);
+void gui_recycle_open(void);
 static void gui_stickynote_open(void);
-static void gui_settings_open(void);
-static void gui_network_open(void);
-static void gui_wifi_open(void);
-static int  gui_tray_network_is_wireless(void);
+void gui_settings_open(void);
+void gui_network_open(void);
+void gui_wifi_open(void);
+int  gui_tray_network_is_wireless(void);
 static void gui_notif_open(void);
 static void gui_launcher_scan_bin(uint32_t start_index);
 void gui_notify(const char *text);
 int  fp_str_append(char *dst, int pos, int cap, const char *src);
-static void fp_itoa(int n, char *buf);
+void fp_itoa(int n, char *buf);
 int gui_append_uint(char *dst, int pos, int cap, uint32_t v);
 static void gui_format_ipv4_inline(uint32_t ip, char *buf, int cap);
 static void gui_format_mac_inline(const uint8_t mac[6], char *buf, int cap);
@@ -165,7 +165,7 @@ int gui_launcher_launch(uint32_t index) {
     return 0;
 }
 
-static int gui_rect_contains(const gui_rect_t *r, int x, int y);
+int gui_rect_contains(const gui_rect_t *r, int x, int y);
 static int gui_rect_intersect(const gui_rect_t *a, const gui_rect_t *b, gui_rect_t *out);
 static gui_window_t *gui_top_window(void);
 static void gui_set_hovered_widget(gui_widget_t *wg);
@@ -263,7 +263,7 @@ static void gui_font_put_pixel_alpha(void *ctx, int x, int y, uint32_t color, ui
     gui_raw_put_pixel_alpha(x, y, color, alpha);
 }
 
-static void gui_raw_fill_rect_alpha(int x, int y, int w, int h, uint32_t color, uint8_t alpha) {
+void gui_raw_fill_rect_alpha(int x, int y, int w, int h, uint32_t color, uint8_t alpha) {
     int yy;
     int xx;
     if (w <= 0 || h <= 0 || alpha == 0u) return;
@@ -311,7 +311,7 @@ void gui_raw_fill_rect(int x, int y, int w, int h, uint32_t color) {
     g_gui_accel.framebuffer_fast_fills++;
 }
 
-static void gui_raw_line(int x0, int y0, int x1, int y1, uint32_t color) {
+void gui_raw_line(int x0, int y0, int x1, int y1, uint32_t color) {
     int dx = x1 > x0 ? x1 - x0 : x0 - x1;
     int sx = x0 < x1 ? 1 : -1;
     int dy = y1 > y0 ? y0 - y1 : y1 - y0;
@@ -426,7 +426,7 @@ void gui_draw_text(int x, int y, const char *text, uint32_t color) {
 
 static void gui_title_rect_px(int x, int y, int w, int h, uint32_t color, const gui_rect_t *clip);
 static void gui_menu_draw_item_fill(int x, int y, int w, int h, int selected, uint32_t bg, uint32_t selected_bg);
-static void gui_update_start_menu_layout(void);
+void gui_update_start_menu_layout(void);
 static void gui_start_menu_scroll_by(int delta_items);
 static void gui_start_menu_clamp_scroll(void);
 static int gui_start_menu_scrollbar_rects(gui_rect_t *track, gui_rect_t *thumb);
@@ -567,12 +567,12 @@ static void gui_draw_text_clipped_direct(int x, int y, const char *text, uint32_
 }
 
 static void gui_draw_window_title_text(int x, int y, const char *text, uint32_t color, const gui_rect_t *clip);
-static int gui_text_line_height_px(void);
+int gui_text_line_height_px(void);
 static int gui_text_center_y(int top, int height);
 static void gui_draw_file_icon(gui_icon_id_t id, int x, int y);
 static void gui_draw_icon_button_face(const gui_rect_t *rect, int selected,
                                       int highlighted);
-static void gui_draw_icon_button_frame(const gui_rect_t *rect, const char *label,
+void gui_draw_icon_button_frame(const gui_rect_t *rect, const char *label,
                                        int icon_w, int icon_h, int gap,
                                        int selected, int highlighted,
                                        uint32_t text_color,
@@ -581,14 +581,14 @@ static void gui_draw_file_icon_cell(const gui_rect_t *rect, const char *label,
                                     gui_icon_id_t icon, int selected,
                                     int highlighted, uint32_t text_color);
 
-static uint32_t gui_text_len_until_break(const char *text) {
+uint32_t gui_text_len_until_break(const char *text) {
     uint32_t n = 0;
     if (!text) return 0;
     while (text[n] && text[n] != '\n') n++;
     return n;
 }
 
-static uint32_t gui_utf8_step_bytes(const char *s) {
+uint32_t gui_utf8_step_bytes(const char *s) {
     unsigned char c;
     if (!s || !s[0]) return 0;
     c = (unsigned char)s[0];
@@ -600,7 +600,7 @@ static uint32_t gui_utf8_step_bytes(const char *s) {
     return 1;
 }
 
-static uint32_t gui_utf8_prefix_for_width(const char *src, uint32_t max_bytes, int max_width_px) {
+uint32_t gui_utf8_prefix_for_width(const char *src, uint32_t max_bytes, int max_width_px) {
     uint32_t used = 0;
     if (!src || max_width_px <= 0) return 0;
     while (src[used] && src[used] != '\n' && used < max_bytes) {
@@ -616,7 +616,7 @@ static uint32_t gui_utf8_prefix_for_width(const char *src, uint32_t max_bytes, i
     return used;
 }
 
-static void gui_make_ellipsis_line_px(char *dst, uint32_t dst_size, const char *src,
+void gui_make_ellipsis_line_px(char *dst, uint32_t dst_size, const char *src,
                                       uint32_t max_src_bytes, int max_width_px,
                                       int use_ellipsis) {
     uint32_t n;
@@ -727,7 +727,7 @@ static void gui_title_rect_px(int x, int y, int w, int h, uint32_t color, const 
     gui_raw_fill_rect(x, y, w, h, color);
 }
 
-static int gui_text_line_height_px(void) {
+int gui_text_line_height_px(void) {
     int h = (int)font_get_line_height(font_get_default());
     return h > 0 ? h : GUI_CHAR_H;
 }
@@ -938,7 +938,7 @@ static void gui_network_build(int show_notice) {
     gui_render();
 }
 
-static void gui_network_open(void) {
+void gui_network_open(void) {
     gui_network_build(0);
 }
 
@@ -951,7 +951,7 @@ static void settings_open_network(gui_widget_t *w, void *ud) {
 static void gui_settings_build(int show_notice);
 static void gui_network_build(int show_notice);
 
-static int gui_rect_contains(const gui_rect_t *r, int x, int y) {
+int gui_rect_contains(const gui_rect_t *r, int x, int y) {
     return r && x >= r->x && y >= r->y && x < r->x + r->w && y < r->y + r->h;
 }
 
@@ -1022,7 +1022,7 @@ static gui_window_t *gui_top_window(void) {
     return 0;
 }
 
-static gui_window_t *gui_window_at(int x, int y) {
+gui_window_t *gui_window_at(int x, int y) {
     int i;
     for (i = (int)g_gui.window_count - 1; i >= 0; i--) {
         uint32_t idx = g_gui.z_order[i];
@@ -3332,7 +3332,7 @@ int gui_menubar_get_active(gui_widget_t *widget, int *out_active_index) {
 }
 
 
-static int gui_contextmenu_row_height(void) { return gui_text_line_height_px() + 8; }
+int gui_contextmenu_row_height(void) { return gui_text_line_height_px() + 8; }
 
 static int gui_contextmenu_index_at(gui_widget_t *wg, int sx, int sy) {
     int ax, ay, row;
@@ -6725,7 +6725,7 @@ int gui_start(uint32_t width, uint32_t height) {
     return 0;
 }
 
-static void gui_copy_cached_text(char *dst, uint32_t dst_size, const char *src) {
+void gui_copy_cached_text(char *dst, uint32_t dst_size, const char *src) {
     uint32_t i;
 
     if (!dst || dst_size == 0) return;
@@ -6761,7 +6761,7 @@ static void gui_launcher_add_with_path(uint32_t index, const char *name, const c
     entry->path[i] = 0;
 }
 
-static int gui_string_equals(const char *a, const char *b) {
+int gui_string_equals(const char *a, const char *b) {
     uint32_t i = 0;
 
     if (!a || !b) return 0;
@@ -6910,7 +6910,7 @@ static void gui_desktop_init(void) {
     g_gui.desktop_icon_count = 3;
 }
 
-static void gui_draw_folder_icon_art(int x, int y, uint32_t color) {
+void gui_draw_folder_icon_art(int x, int y, uint32_t color) {
     gui_raw_fill_rect(x + 2, y + 6, 11, 6, gui_rgb(255, 220, 105));
     gui_raw_fill_rect(x, y + 11, 28, 20, color);
     gui_raw_fill_rect(x + 2, y + 15, 24, 14, gui_rgb(255, 211, 86));
@@ -6920,7 +6920,7 @@ static void gui_draw_folder_icon_art(int x, int y, uint32_t color) {
     gui_raw_line(x, y + 30, x + 27, y + 30, gui_rgb(130, 90, 24));
 }
 
-static void gui_draw_browser_icon_art(int x, int y, uint32_t color) {
+void gui_draw_browser_icon_art(int x, int y, uint32_t color) {
     uint32_t dark = gui_rgb(22, 72, 118);
     uint32_t light = gui_rgb(176, 226, 255);
     uint32_t green = gui_rgb(72, 220, 166);
@@ -6964,7 +6964,7 @@ static void gui_draw_icon_button_face(const gui_rect_t *rect, int selected,
     }
 }
 
-static void gui_draw_icon_button_frame(const gui_rect_t *rect, const char *label,
+void gui_draw_icon_button_frame(const gui_rect_t *rect, const char *label,
                                        int icon_w, int icon_h, int gap,
                                        int selected, int highlighted,
                                        uint32_t text_color,
@@ -7247,7 +7247,7 @@ static void gui_start_menu_clamp_scroll(void) {
     if (g_gui.desktop_start_menu_scroll > max) g_gui.desktop_start_menu_scroll = max;
 }
 
-static void gui_update_start_menu_layout(void) {
+void gui_update_start_menu_layout(void) {
     int line_h = font_get_line_height(font_get_default());
     int item_h = gui_start_menu_item_height();
     int header_h = gui_start_menu_header_height();
@@ -7416,7 +7416,7 @@ static void gui_draw_launcher_icon(const gui_launcher_entry_t *entry, int x, int
     g_gui_accel.icon_quality_passes++;
 }
 
-static void gui_draw_launcher_item(const gui_launcher_entry_t *entry,
+void gui_draw_launcher_item(const gui_launcher_entry_t *entry,
                                    const gui_rect_t *rect,
                                    int selected, int highlighted) {
     int icon_y;
@@ -7809,7 +7809,7 @@ static int gui_ascii_case_equal_prefix(const char *text, const char *query) {
     return 1;
 }
 
-static int gui_ascii_case_contains(const char *text, const char *query) {
+int gui_ascii_case_contains(const char *text, const char *query) {
     const char *p;
     if (!query || !query[0]) return 1;
     if (!text) return 0;
@@ -7819,7 +7819,7 @@ static int gui_ascii_case_contains(const char *text, const char *query) {
     return 0;
 }
 
-static int gui_ascii_case_ends_with(const char *text, const char *suffix) {
+int gui_ascii_case_ends_with(const char *text, const char *suffix) {
     uint32_t text_len = 0;
     uint32_t suffix_len = 0;
     const char *start;
@@ -7831,7 +7831,7 @@ static int gui_ascii_case_ends_with(const char *text, const char *suffix) {
     return gui_ascii_case_equal_prefix(start, suffix);
 }
 
-static int gui_path_starts_with(const char *path, const char *prefix) {
+int gui_path_starts_with(const char *path, const char *prefix) {
     uint32_t i = 0;
     if (!path || !prefix) return 0;
     while (prefix[i]) {
@@ -7947,8 +7947,8 @@ static void gui_taskbar_search_refresh_results(void) {
     gui_taskbar_search_scan_dir("/", 0);
 }
 
-static void gui_file_preview_open_path(const char *path);
-static void gui_file_preview_open_file(const char *path);
+void gui_file_preview_open_path(const char *path);
+void gui_file_preview_open_file(const char *path);
 
 static void gui_taskbar_search_finish_open(void) {
     gui_taskbar_search_clear();
@@ -8077,7 +8077,7 @@ static int gui_taskbar_search_handle_key(int key) {
     return 1;
 }
 
-static void gui_set_wallpaper_theme(uint32_t theme) {
+void gui_set_wallpaper_theme(uint32_t theme) {
     g_gui.wallpaper_theme = theme % 3u;
     gui_invalidate_all();
 }
@@ -10293,7 +10293,7 @@ static gui_tray_network_kind_t gui_get_tray_network_state(int *ok) {
     return GUI_TRAY_NETWORK_WIRED;
 }
 
-static int gui_tray_network_is_wireless(void) {
+int gui_tray_network_is_wireless(void) {
     int ok;
     return gui_get_tray_network_state(&ok) == GUI_TRAY_NETWORK_WIRELESS;
 }
@@ -10965,7 +10965,7 @@ static void about_on_ok(gui_widget_t *w, void *ud) {
     }
 }
 
-static void gui_about_open(void) {
+void gui_about_open(void) {
     gui_widget_t *btn;
     if (g_about_win) {
         gui_window_set_on_close(g_about_win, 0, 0);
@@ -10989,7 +10989,7 @@ static void recycle_on_close(gui_window_t *win, void *ud) {
     g_recycle_win = 0;
 }
 
-static void gui_recycle_open(void) {
+void gui_recycle_open(void) {
     int win_w = 420;
     int win_h = 240;
 
@@ -11530,7 +11530,7 @@ static void gui_settings_build(int show_notice) {
     gui_render();
 }
 
-static void gui_settings_open(void) {
+void gui_settings_open(void) {
     gui_settings_build(0);
 }
 
@@ -11559,7 +11559,7 @@ static void wifi_on_close(gui_window_t *win, void *ud) {
     g_wifi_win = 0;
 }
 
-static void gui_wifi_open(void) {
+void gui_wifi_open(void) {
     net_wifi_network_info_t nets[NET_WIFI_MAX_RESULTS];
     uint32_t count;
     uint32_t i;
@@ -11817,7 +11817,7 @@ static void fp_path_join(const char *dir, const char *name, char *out, int cap) 
     out[i] = 0;
 }
 
-static void fp_itoa(int n, char *buf) {
+void fp_itoa(int n, char *buf) {
     char tmp[12];
     int i = 0, j = 0;
     if (n < 0) { buf[j++] = '-'; n = -n; }
@@ -13478,7 +13478,7 @@ static void gui_file_preview_rebuild(void) {
     gui_render();
 }
 
-static void gui_file_preview_open_file(const char *path) {
+void gui_file_preview_open_file(const char *path) {
     char parent[GUI_FP_MAX_PATH];
     char name[GUI_FP_MAX_NAME];
     uint32_t i;
@@ -13514,7 +13514,7 @@ static void gui_file_preview_open_file(const char *path) {
     gui_file_preview_rebuild();
 }
 
-static void gui_file_preview_open_path(const char *path) {
+void gui_file_preview_open_path(const char *path) {
     char parent[GUI_FP_MAX_PATH];
     char name[GUI_FP_MAX_NAME];
     dentry_t *entry = 0;
@@ -13583,7 +13583,7 @@ static void gui_file_preview_open_path(const char *path) {
     gui_file_preview_rebuild();
 }
 
-static void gui_file_preview_open(void) {
+void gui_file_preview_open(void) {
     if (fp_path[0] == 0) fp_path_set_root();
     fp_mode = 0;
     fp_page = 0;

@@ -72,4 +72,37 @@ void gui_terminal_set_input_focus(int focused);
 int  gui_terminal_set_clipboard_text(const char *text);
 const char *gui_terminal_get_clipboard_text(void);
 
+
+/* ---- Step1: gui.c 框架/工具 API 提升为共享（桌面 Shell 抽离前置）---- */
+void fp_itoa(int n, char *buf);
+void gui_about_open(void);
+int gui_ascii_case_contains(const char *text, const char *query);
+int gui_ascii_case_ends_with(const char *text, const char *suffix);
+void gui_copy_cached_text(char *dst, uint32_t dst_size, const char *src);
+void gui_draw_browser_icon_art(int x, int y, uint32_t color);
+void gui_draw_folder_icon_art(int x, int y, uint32_t color);
+void gui_draw_icon_button_frame(const gui_rect_t *rect, const char *label, int icon_w, int icon_h, int gap, int selected, int highlighted, uint32_t text_color, int *icon_x, int *icon_y);
+void gui_draw_launcher_item(const gui_launcher_entry_t *entry, const gui_rect_t *rect, int selected, int highlighted);
+void gui_file_preview_open(void);
+void gui_file_preview_open_file(const char *path);
+void gui_file_preview_open_path(const char *path);
+void gui_make_ellipsis_line_px(char *dst, uint32_t dst_size, const char *src, uint32_t max_src_bytes, int max_width_px, int use_ellipsis);
+void gui_network_open(void);
+int gui_path_starts_with(const char *path, const char *prefix);
+void gui_raw_fill_rect_alpha(int x, int y, int w, int h, uint32_t color, uint8_t alpha);
+void gui_raw_line(int x0, int y0, int x1, int y1, uint32_t color);
+int gui_rect_contains(const gui_rect_t *r, int x, int y);
+void gui_recycle_open(void);
+void gui_set_wallpaper_theme(uint32_t theme);
+void gui_settings_open(void);
+int gui_string_equals(const char *a, const char *b);
+uint32_t gui_text_len_until_break(const char *text);
+int gui_text_line_height_px(void);
+int gui_tray_network_is_wireless(void);
+void gui_update_start_menu_layout(void);
+uint32_t gui_utf8_prefix_for_width(const char *src, uint32_t max_bytes, int max_width_px);
+uint32_t gui_utf8_step_bytes(const char *s);
+void gui_wifi_open(void);
+gui_window_t *gui_window_at(int x, int y);
+
 #endif /* OPENOS_GUI_INTERNAL_H */
