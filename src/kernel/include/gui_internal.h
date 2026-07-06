@@ -19,6 +19,8 @@ extern gui_system_t g_gui;
 /* ---- gui.c 导出给子模块的共享辅助函数 ---- */
 uint32_t gui_rgb(uint8_t r, uint8_t g, uint8_t b);
 void     gui_notify(const char *text);
+void     gui_notif_open(void);              /* gui_applets.c - notification center window */
+uint32_t gui_applets_notif_count(void);     /* gui_applets.c - unread badge for taskbar */
 int      gui_is_enter_key(int key);
 int      gui_append_uint(char *dst, int pos, int cap, uint32_t v);
 int      gui_append_hex_byte(char *dst, int pos, int cap, uint8_t v);
