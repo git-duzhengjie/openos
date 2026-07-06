@@ -918,7 +918,7 @@ static uint64_t do_netconfig(uint64_t mode, uint64_t ip, uint64_t netmask,
  * M1.7 ring3 用户态 TCP（直通真 netstack 的阻塞式封装）
  * ------------------------------------------------------------------------- */
 
-/* SYS_TCP_CONNECT (400): a0 = dst_ip (host 序), a1 = dst_port. 返回 conn_id>=0 / (uint64_t)-1 */
+/* SYS_TCP_CONNECT (460): a0 = dst_ip (host 序), a1 = dst_port. 返回 conn_id>=0 / (uint64_t)-1 */
 static uint64_t do_tcp_connect(uint64_t dst_ip, uint64_t dst_port) {
     if (dst_ip == 0 || dst_port == 0 || dst_port > 0xFFFF) return (uint64_t)-1;
     int conn = net_tcp_connect_blocking((uint32_t)dst_ip, (uint16_t)dst_port);
@@ -926,7 +926,7 @@ static uint64_t do_tcp_connect(uint64_t dst_ip, uint64_t dst_port) {
     return (uint64_t)conn;
 }
 
-/* SYS_TCP_SEND (401): a0 = conn_id, a1 = user buf, a2 = len. 返回已发字节数 / -1 */
+/* SYS_TCP_SEND (461): a0 = conn_id, a1 = user buf, a2 = len. 返回已发字节数 / -1 */
 static uint64_t do_tcp_send(uint64_t conn_id, uint64_t buf, uint64_t len) {
     if (len == 0 || len > 8192) return (uint64_t)-1;
     if (!validate_user_buf(buf, len)) return (uint64_t)-1;
@@ -935,7 +935,7 @@ static uint64_t do_tcp_send(uint64_t conn_id, uint64_t buf, uint64_t len) {
     return (uint64_t)r;
 }
 
-/* SYS_TCP_RECV (402): a0 = conn_id, a1 = user buf, a2 = len, a3 = poll_loops. 返回收字节数/0/-1 */
+/* SYS_TCP_RECV (462): a0 = conn_id, a1 = user buf, a2 = len, a3 = poll_loops. 返回收字节数/0/-1 */
 static uint64_t do_tcp_recv(uint64_t conn_id, uint64_t buf, uint64_t len, uint64_t poll_loops) {
     if (len == 0 || len > 8192) return (uint64_t)-1;
     if (!validate_user_buf(buf, len)) return (uint64_t)-1;
@@ -944,13 +944,13 @@ static uint64_t do_tcp_recv(uint64_t conn_id, uint64_t buf, uint64_t len, uint64
     return (uint64_t)r;
 }
 
-/* SYS_TCP_CLOSE (403): a0 = conn_id */
+/* SYS_TCP_CLOSE (463): a0 = conn_id */
 static uint64_t do_tcp_close(uint64_t conn_id) {
     int r = net_tcp_close_blocking((int)conn_id);
     return (r == 0) ? 0 : (uint64_t)-1;
 }
 
-/* SYS_HTTP_GET (404): a0 = host str, a1 = path str, a2 = user buf, a3 = buflen.
+/* SYS_HTTP_GET (464): a0 = host str, a1 = path str, a2 = user buf, a3 = buflen.
  * M1.9: 完整 HTTP GET，将响应正文写回用户缓冲 buf[0..buflen)，
  * 返回实际写入字节数 (>=0)；参数非法/失败返回 (uint64_t)-1。
  * buf 可为 0（仅触发下载、返回响应总长）。 */

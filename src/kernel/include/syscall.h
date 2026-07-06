@@ -198,12 +198,14 @@
 #define SYS_GUI_GET_LISTVIEW_INDEX 398
 #define SYS_GUI_SET_LISTVIEW_ITEMS 399
 
-/* M1.7 ring3 用户态 TCP（直通真 netstack，阻塞式） */
-#define SYS_TCP_CONNECT   400  /* a0=dst_ip(host序) a1=dst_port -> conn_id>=0 / <0失败 */
-#define SYS_TCP_SEND      401  /* a0=conn_id a1=user buf a2=len -> 已发字节数 */
-#define SYS_TCP_RECV      402  /* a0=conn_id a1=user buf a2=len a3=poll_loops -> 收字节数/0/<0 */
-#define SYS_TCP_CLOSE     403  /* a0=conn_id */
-#define SYS_HTTP_GET      404  /* a0=host str a1=path str a2=user buf a3=buflen -> 写入字节数/<0 */
+/* M1.7 ring3 用户态 TCP（直通真 netstack，阻塞式）
+ * ⚠️ 历史注意：早期版本误用 400-404，与 SYS_GUI_ADD_TABLEVIEW/TREEVIEW 等擞号，
+ * M2.1 统一下移到 460-464 干净号段。用户态 openos64.h 同步修改。 */
+#define SYS_TCP_CONNECT   460  /* a0=dst_ip(host序) a1=dst_port -> conn_id>=0 / <0失败 */
+#define SYS_TCP_SEND      461  /* a0=conn_id a1=user buf a2=len -> 已发字节数 */
+#define SYS_TCP_RECV      462  /* a0=conn_id a1=user buf a2=len a3=poll_loops -> 收字节数/0/<0 */
+#define SYS_TCP_CLOSE     463  /* a0=conn_id */
+#define SYS_HTTP_GET      464  /* a0=host str a1=path str a2=user buf a3=buflen -> 写入字节数/<0 */
 #define SYS_GUI_ADD_TABLEVIEW 400
 #define SYS_GUI_SET_TABLEVIEW_ROW 401
 #define SYS_GUI_GET_TABLEVIEW_ROW 402

@@ -14,6 +14,9 @@
 extern void early_serial64_write(const char *s);
 extern void *arch_x86_64_kmalloc(uint64_t size);
 extern void arch_x86_64_kfree(void *ptr);
+/* 协作式让出 CPU：http_pump busy-loop 期间周期调用，避免独占内核
+ * 导致 GUI 主线程冻结/系统卡死。无其他 READY kthread 时为安全 no-op。 */
+extern int arch_x86_64_proc_yield(void);
 
 /* ============================================================
  * 基础工具：内存 / 字节序 / 打印
@@ -1578,6 +1581,11 @@ static int http_pump(int conn_id, int *done_flag, uint32_t loops) {
         net_poll();
         /* 每约 6.5 万轮推一次 tick（含 poll + TCP 重传/TIME_WAIT 扫描） */
         if ((i & 0xFFFF) == 0) net_tick(1);
+        /* ⭐ 关键修复：每 4096 轮协作式让出一次 CPU。
+         * http_pump 是纯 busy-loop，若全程不 yield 会长时间霸占内核，
+         * 导致 GUI 主线程无法刷新、鼠键无响应，表现为“系统卡死”。
+         * 无其他 READY kthread 时 yield 为安全 no-op，不影响收包。 */
+        if ((i & 0x0FFF) == 0) arch_x86_64_proc_yield();
         if (done_flag && *done_flag) return 1;
         (void)conn_id;
     }
