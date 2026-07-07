@@ -1585,7 +1585,12 @@
 
 ### M2：现代存储与设备（🟠 第二优先级）
 
-- [ ] M2.1：AHCI/SATA 驱动（替代/补充 ATA PIO，支持现代 SATA 盘 + DMA）
+- [√] M2.1：AHCI/SATA 驱动（替代/补充 ATA PIO，支持现代 SATA 盘 + DMA）
+  - [√] AHCI 控制器/端口探测（ich9-ahci，PCI class 0x0106）+ HBA 复位 + 端口启停
+  - [√] IDENTIFY DEVICE + READ/WRITE DMA（command list/FIS/PRDT 构建，轮询 CI 完成）
+  - [√] 接入 blockdev 抽象层（sda 注册为 blockdev_ops）+ selftest write/read/verify
+  - [√] QEMU 实测：`[ahci] selftest: write/read/verify PASS @ lba=131062` → `SATA disk selftest PASS`
+  - [ ] 中断驱动（现为轮询，MSI 待接）
 - [ ] M2.2：NVMe 驱动（现代 SSD 主流接口）
   - [√] PCI 枚举识别 NVMe(class 0x0108) + BAR0 MMIO 映射 + CAP/版本读取
   - [√] 控制器初始化：复位、Admin SQ/CQ 创建、CC.EN 使能、CSTS.RDY 等待
