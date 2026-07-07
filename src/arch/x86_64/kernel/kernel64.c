@@ -36,6 +36,7 @@ extern void net_print_info(void);
 #include "../include/net_selftest64.h"
 #include "../include/ahci64.h"
 #include "../include/nvme64.h"
+#include "../include/xhci64.h"
 #include "../include/tsc64.h"
 #include "../include/tsc_selftest64.h"
 #include "../include/irq_selftest64.h"
@@ -359,6 +360,13 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
         early_console64_write("[x86_64][nvme] NVMe disk selftest skipped/FAIL\n");
     }
 
+    /* M2.3：xHCI USB 主机控制器自测（探测 + 命令环 NOOP + 端口枚举） */
+    if (xhci_init() == 0 && xhci_selftest() == 0) {
+        early_console64_write("[x86_64][xhci] xHCI selftest PASS\n");
+    } else {
+        early_console64_write("[x86_64][xhci] xHCI selftest skipped/FAIL\n");
+    }
+
     /* M2.2：硬件探测完成后，将各就绪驱动注册进块设备抽象层（nvme0/sda/hda/hdb）。
      * 上层（未来 VFS/工具）可经 blockdev_find(name) 做设备无关的读写。 */
     blockdev_init();
@@ -606,6 +614,19 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
                 early_console64_write("[x86_64][msi] NVMe interrupts DID fire (MSI-X path live)\n");
             else
                 early_console64_write("[x86_64][msi] NVMe no interrupt fired (polling fallback)\n");
+        }
+        /* M2.3：xHCI MSI 晚期挂载 + IRQ 路径复测 */
+        xhci_irq_install_late();
+        if (xhci_selftest() == 0)
+            early_console64_write("[x86_64][msi] xHCI IRQ-path selftest PASS\n");
+        else
+            early_console64_write("[x86_64][msi] xHCI IRQ-path selftest FAIL\n");
+        {
+            uint32_t xirq = xhci_irq_count();
+            if (xirq > 0)
+                early_console64_write("[x86_64][msi] xHCI interrupts DID fire (MSI path live)\n");
+            else
+                early_console64_write("[x86_64][msi] xHCI no interrupt fired (polling fallback)\n");
         }
         __asm__ __volatile__("cli");
     }

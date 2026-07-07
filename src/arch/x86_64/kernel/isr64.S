@@ -319,6 +319,35 @@ x86_64_irq_nvme:
     SWAPGS_IF_FROM_USER 8
     iretq
 
+/* xHCI MSI stub (routed to vector 0x32). External interrupt: no error code.
+ * Same caller-saved + EOI-in-C contract as x86_64_irq_nvme. The C handler
+ * clears USBSTS.EINT / IMAN.IP, bumps the irq counter, and sends LAPIC EOI. */
+.global x86_64_irq_xhci
+x86_64_irq_xhci:
+    SWAPGS_IF_FROM_USER 8
+    pushq %rax
+    pushq %rcx
+    pushq %rdx
+    pushq %rsi
+    pushq %rdi
+    pushq %r8
+    pushq %r9
+    pushq %r10
+    pushq %r11
+    cld
+    call arch_x86_64_xhci_irq_trampoline
+    popq %r11
+    popq %r10
+    popq %r9
+    popq %r8
+    popq %rdi
+    popq %rsi
+    popq %rdx
+    popq %rcx
+    popq %rax
+    SWAPGS_IF_FROM_USER 8
+    iretq
+
 .global x86_64_isr_common
 x86_64_isr_common:
     /* G.7b: at this point the stack has err_code(0)/vector(8)/RIP(16)/CS(24).
