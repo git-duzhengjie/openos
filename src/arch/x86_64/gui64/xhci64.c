@@ -16,6 +16,7 @@
 #include "../include/pmm64.h"
 #include "../include/vmm64.h"
 #include "../../../kernel/include/pci.h"
+#include "../../../kernel/include/usb.h"
 
 /* ---- 外部依赖（对齐 nvme64.c 的真实接口名）---- */
 extern uint64_t arch_x86_64_pmm_alloc_pages(uint64_t count);
@@ -60,6 +61,7 @@ static void klog_dec(uint64_t v) {
 #define XLOG_NN(s)   early_serial64_write("[xhci] " s)
 #define XHEX(v)      klog_hex((uint64_t)(v))
 #define XDEC(v)      klog_dec((uint64_t)(v))
+#define XNL()        early_serial64_write("\n")
 #define serial_write early_serial64_write
 
 /* ============================================================
@@ -151,9 +153,14 @@ typedef struct {
 /* TRB Type（control[10:15]） */
 #define TRB_TYPE_SHIFT     10
 #define TRB_NORMAL         1
+#define TRB_SETUP_STAGE    2
+#define TRB_DATA_STAGE     3
+#define TRB_STATUS_STAGE   4
 #define TRB_LINK           6
 #define TRB_ENABLE_SLOT    9
 #define TRB_ADDRESS_DEV    11
+#define TRB_CONFIG_EP      12
+#define TRB_EVAL_CONTEXT   13
 #define TRB_NOOP_CMD       23
 /* Event TRB Type */
 #define TRB_TRANSFER_EVT   32
@@ -164,6 +171,15 @@ typedef struct {
 #define TRB_CYCLE          (1u << 0)
 #define TRB_LINK_TC        (1u << 1)  /* Link TRB Toggle Cycle */
 #define TRB_IOC            (1u << 5)  /* Interrupt On Completion */
+#define TRB_IDT            (1u << 6)  /* Immediate Data（Setup Stage 用） */
+#define TRB_ISP            (1u << 2)  /* Interrupt on Short Packet */
+#define TRB_CHAIN          (1u << 4)  /* Chain bit */
+/* Setup Stage TRB：TRT（Transfer Type，control[16:17]） */
+#define TRB_TRT_NO_DATA    0
+#define TRB_TRT_OUT        2
+#define TRB_TRT_IN         3
+/* Data/Status Stage：DIR bit（control[16]，1=IN） */
+#define TRB_DIR_IN         (1u << 16)
 /* Event TRB status 中 completion code（[24:31]） */
 #define TRB_CC_SHIFT       24
 #define TRB_CC_SUCCESS     1
@@ -200,6 +216,7 @@ typedef struct {
     uint32_t     max_ports;   /* HCSPARAMS1 MaxPorts */
     uint32_t     max_slots;   /* HCSPARAMS1 MaxSlots */
     uint32_t     ac64;        /* 64-bit 寻址支持 */
+    uint32_t     ctx_size;    /* Context 结构大小：CSZ=1 时 64，否则 32 字节 */
 
     /* DCBAA（Device Context Base Addr Array）— (max_slots+1) 个 64-bit 条目 */
     volatile uint64_t *dcbaa;
@@ -274,15 +291,15 @@ static void xhci_ring_cmd_doorbell(void) {
 
 /* 向命令环入队一个 TRB（自动处理 Link TRB 绕回 + cycle 翻转）。
  * 返回该命令 TRB 的物理地址（供匹配完成事件）。 */
-static uint64_t xhci_cmd_enqueue(uint64_t param, uint32_t status, uint32_t ctrl_type) {
+static uint64_t xhci_cmd_enqueue_ex(uint64_t param, uint32_t status, uint32_t ctrl_type, uint32_t extra_ctrl) {
     xhci_ctrl_t *x = &g_xhci;
     volatile xhci_trb_t *trb = &x->cmd_ring[x->cmd_enqueue];
     uint64_t trb_phys = x->cmd_ring_phys + x->cmd_enqueue * sizeof(xhci_trb_t);
 
     trb->parameter = param;
     trb->status    = status;
-    /* 组装 control：type + 当前 cycle（+ IOC 以便产生完成事件）*/
-    uint32_t ctrl = (ctrl_type << TRB_TYPE_SHIFT) | TRB_IOC;
+    /* 组装 control：type + 当前 cycle（+ IOC 以便产生完成事件）+ 额外字段（如 slot_id）*/
+    uint32_t ctrl = (ctrl_type << TRB_TYPE_SHIFT) | TRB_IOC | extra_ctrl;
     if (x->cmd_cycle) ctrl |= TRB_CYCLE;
     trb->control = ctrl;
 
@@ -302,31 +319,29 @@ static uint64_t xhci_cmd_enqueue(uint64_t param, uint32_t status, uint32_t ctrl_
     return trb_phys;
 }
 
-/* 轮询事件环，等待与 cmd_trb_phys 匹配的命令完成事件。
- * 成功时通过 out_cc/out_slot 回传。返回 0 命中，-1 超时。 */
-static int xhci_wait_cmd_complete(uint64_t cmd_trb_phys, uint32_t *out_cc, uint32_t *out_slot) {
+static uint64_t xhci_cmd_enqueue(uint64_t param, uint32_t status, uint32_t ctrl_type) {
+    return xhci_cmd_enqueue_ex(param, status, ctrl_type, 0);
+}
+
+/* 通用事件等待器：轮询事件环，等待匹配 want_type 且 parameter==trb_phys 的事件。
+ * 命中回传 cc/slot/残余长度（transfer event 的 status[23:0]）。返回 0 命中，-1 超时。
+ * 途中遇到的其它事件（端口状态等）一律消费跳过。 */
+static int xhci_wait_event(uint32_t want_type, uint64_t trb_phys,
+                           uint32_t *out_cc, uint32_t *out_slot, uint32_t *out_resid) {
     xhci_ctrl_t *x = &g_xhci;
     for (uint32_t spin = 0; spin < 200000; spin++) {
         volatile xhci_trb_t *evt = &x->evt_ring[x->evt_dequeue];
         uint32_t c = evt->control;
         int cyc = (c & TRB_CYCLE) ? 1 : 0;
         if (cyc == (int)x->evt_cycle) {
-            /* 有新事件 */
             uint32_t type = (c >> TRB_TYPE_SHIFT) & 0x3F;
-            if (type == TRB_CMD_COMPL_EVT && evt->parameter == cmd_trb_phys) {
-                if (out_cc)   *out_cc   = TRB_GET_CC(evt);
-                if (out_slot) *out_slot = TRB_GET_SLOT(evt);
-                /* 推进 dequeue + 更新 ERDP */
-                x->evt_dequeue++;
-                if (x->evt_dequeue >= EVT_RING_TRBS) {
-                    x->evt_dequeue = 0;
-                    x->evt_cycle ^= 1;
-                }
-                uint64_t erdp = x->evt_ring_phys + x->evt_dequeue * sizeof(xhci_trb_t);
-                mmio_w64(x->rt, XRT_ERDP(0), erdp | ERDP_EHB);
-                return 0;
+            int hit = (type == want_type && evt->parameter == trb_phys);
+            if (hit) {
+                if (out_cc)    *out_cc    = TRB_GET_CC(evt);
+                if (out_slot)  *out_slot  = TRB_GET_SLOT(evt);
+                if (out_resid) *out_resid = evt->status & 0xFFFFFF;
             }
-            /* 其他事件（端口状态等）：消费并继续 */
+            /* 推进 dequeue + 更新 ERDP（命中与否都要消费）*/
             x->evt_dequeue++;
             if (x->evt_dequeue >= EVT_RING_TRBS) {
                 x->evt_dequeue = 0;
@@ -334,11 +349,18 @@ static int xhci_wait_cmd_complete(uint64_t cmd_trb_phys, uint32_t *out_cc, uint3
             }
             uint64_t erdp = x->evt_ring_phys + x->evt_dequeue * sizeof(xhci_trb_t);
             mmio_w64(x->rt, XRT_ERDP(0), erdp | ERDP_EHB);
+            if (hit) return 0;
         } else {
             xhci_delay(2000);
         }
     }
     return -1;
+}
+
+/* 轮询事件环，等待与 cmd_trb_phys 匹配的命令完成事件（薄封装）。
+ * 成功时通过 out_cc/out_slot 回传。返回 0 命中，-1 超时。 */
+static int xhci_wait_cmd_complete(uint64_t cmd_trb_phys, uint32_t *out_cc, uint32_t *out_slot) {
+    return xhci_wait_event(TRB_CMD_COMPL_EVT, cmd_trb_phys, out_cc, out_slot, 0);
 }
 
 /* ============================================================
@@ -403,6 +425,7 @@ static int xhci_map_regs(void) {
     x->max_ports = (hcs1 >> 24) & 0xFF;
     uint32_t hcc1 = mmio_r32(x->mmio, XCAP_HCCPARAMS1);
     x->ac64 = hcc1 & 0x1;
+    x->ctx_size = (hcc1 & (1u << 2)) ? 64 : 32;  /* CSZ: HCCPARAMS1 bit2 */
 
     XLOG_NN("caplen="); XHEX(caplen);
     serial_write(" rtsoff="); XHEX(rtsoff);
@@ -410,6 +433,7 @@ static int xhci_map_regs(void) {
     serial_write(" slots="); XDEC(x->max_slots);
     serial_write(" ports="); XDEC(x->max_ports);
     serial_write(" ac64="); XDEC(x->ac64);
+    serial_write(" ctxsz="); XDEC(x->ctx_size);
     serial_write("\n");
     return 0;
 }
@@ -549,6 +573,346 @@ static int xhci_reset_port(uint32_t port) {
     return -1;
 }
 
+/* ============================================================
+ * USB 设备栈（M2.3 Step1-2）——Slot 分配 / Address Device /
+ * EP0 控制传输 / GET_DESCRIPTOR / SET_CONFIGURATION
+ * ============================================================ */
+
+/* ---- USB 标准请求（bmRequestType / bRequest）---- */
+#define USB_REQTYPE_D2H    0x80  /* Device-to-Host */
+#define USB_REQTYPE_H2D    0x00  /* Host-to-Device */
+#define USB_REQTYPE_STD    0x00
+#define USB_REQTYPE_CLASS  0x20
+#define USB_REQTYPE_IFACE  0x01
+#define USB_REQ_GET_DESCRIPTOR   6
+#define USB_REQ_SET_ADDRESS      5
+#define USB_REQ_SET_CONFIG       9
+#define USB_REQ_SET_IFACE        11
+/* HID 类请求 */
+#define HID_REQ_SET_PROTOCOL     0x0B
+#define HID_REQ_SET_IDLE         0x0A
+#define HID_PROTO_BOOT           0
+#define HID_SUB_BOOT             1
+#define HID_PROTO_KEYBOARD       1
+#define HID_PROTO_MOUSE          2
+
+#define XHCI_MAX_DEVS   4
+
+/* 单个 USB 设备的运行时状态 */
+typedef struct xhci_dev {
+    int      used;
+    uint32_t slot_id;
+    uint32_t port;        /* root hub 端口号（1-based）*/
+    uint32_t speed;       /* PORTSC speed 字段 */
+    uint8_t  dev_class;   /* bInterfaceClass */
+    uint8_t  proto;       /* bInterfaceProtocol（1=键盘 2=鼠标）*/
+    uint8_t  config_val;  /* bConfigurationValue */
+    uint8_t  iface_num;   /* bInterfaceNumber */
+    uint8_t  ep_in_addr;  /* Interrupt IN 端点地址（含方向位）*/
+    uint16_t ep_in_mps;   /* Interrupt IN 端点 MaxPacketSize */
+    uint8_t  ep_in_interval; /* bInterval */
+    uint16_t vid, pid;
+
+    /* 每设备 xHCI 上下文（物理连续，页对齐）*/
+    uint64_t in_ctx_phys;    /* Input Context（含 Input Control + Slot + EP）*/
+    uint8_t *in_ctx;
+    uint64_t dev_ctx_phys;   /* Device Context（写入 DCBAA[slot]）*/
+    uint8_t *dev_ctx;
+    /* EP0 Transfer Ring */
+    xhci_trb_t *ep0_ring;
+    uint64_t    ep0_ring_phys;
+    uint32_t    ep0_enqueue;
+    uint32_t    ep0_cycle;
+    /* Interrupt IN Transfer Ring（HID 用，Step3）*/
+    xhci_trb_t *ep_in_ring;
+    uint64_t    ep_in_ring_phys;
+    uint32_t    ep_in_enqueue;
+    uint32_t    ep_in_cycle;
+    uint8_t    *hid_buf;      /* HID report DMA 缓冲 */
+    uint64_t    hid_buf_phys;
+} xhci_dev_t;
+
+static xhci_dev_t g_devs[XHCI_MAX_DEVS];
+
+#define EP0_RING_TRBS   16
+#define EPIN_RING_TRBS  16
+#define CTX_BYTES(x)    ((x)->ctx_size)  /* 32 或 64 */
+
+/* 敲设备 Doorbell：slot 号 → doorbell[slot]，target=DCI */
+static void xhci_ring_dev_doorbell(uint32_t slot, uint32_t dci) {
+    xhci_ctrl_t *x = &g_xhci;
+    mmio_w32(x->db, slot * 4, dci);
+    (void)mmio_r32(x->db, slot * 4);
+}
+
+/* Slot Context / Endpoint Context 字段偏移基于 ctx_size 动态计算。
+ * Input Context 布局：[Input Control Ctx][Slot Ctx][EP0 Ctx][EP1 OUT][EP1 IN]...
+ * DCI（Device Context Index）：EP0=1，EPn 方向 IN=2n+1 / OUT=2n。 */
+static inline uint32_t *xhci_ctx_at(uint8_t *base, uint32_t idx, uint32_t ctx_size) {
+    return (uint32_t *)(base + idx * ctx_size);
+}
+
+/* 分配一个设备槽位；返回 xhci_dev_t* 或 NULL */
+static xhci_dev_t *xhci_dev_alloc(void) {
+    for (int i = 0; i < XHCI_MAX_DEVS; i++)
+        if (!g_devs[i].used) { 
+            for (uint32_t b = 0; b < sizeof(xhci_dev_t); b++) ((uint8_t*)&g_devs[i])[b] = 0;
+            g_devs[i].used = 1; 
+            return &g_devs[i]; 
+        }
+    return 0;
+}
+
+/* Enable Slot 命令 → 返回 slot_id（0 表示失败）*/
+static uint32_t xhci_enable_slot(void) {
+    uint64_t trb_phys = xhci_cmd_enqueue(0, 0, TRB_ENABLE_SLOT);
+    xhci_ring_cmd_doorbell();
+    uint32_t cc = 0, slot = 0;
+    if (xhci_wait_cmd_complete(trb_phys, &cc, &slot) != 0) {
+        XLOG("enable_slot: TIMEOUT");
+        return 0;
+    }
+    if (cc != 1) { XLOG_NN("enable_slot: cc="); XDEC(cc); XNL(); return 0; }
+    return slot;
+}
+
+/* 根据 PORTSC speed 字段推断 EP0 默认 MaxPacketSize（xHCI 4.3）*/
+static uint32_t xhci_speed_to_mps0(uint32_t speed) {
+    switch (speed) {
+        case 1: return 64;   /* Full-Speed（暂以 64，少数设备为 8）*/
+        case 2: return 8;    /* Low-Speed */
+        case 3: return 64;   /* High-Speed */
+        case 4: return 512;  /* SuperSpeed */
+        default: return 64;
+    }
+}
+
+/* 为设备分配 Input Context / Device Context / EP0 Ring，并初始化
+ * Input Control Ctx（A0|A1）+ Slot Ctx + EP0 Ctx。返回 0 成功。 */
+static int xhci_dev_init_context(xhci_dev_t *d) {
+    xhci_ctrl_t *x = &g_xhci;
+    uint32_t cs = x->ctx_size;
+
+    /* Input Context = (2 + max_ep) 个 ctx；MVP 需 Input Control + Slot + EP0 + EP_IN，预留 8 个 */
+    d->in_ctx_phys  = xhci_zalloc_pages(1);
+    d->dev_ctx_phys = xhci_zalloc_pages(1);
+    d->ep0_ring_phys = xhci_zalloc_pages(1);
+    if (!d->in_ctx_phys || !d->dev_ctx_phys || !d->ep0_ring_phys) {
+        XLOG("dev_ctx alloc FAIL");
+        return -1;
+    }
+    /* 物理=虚拟恒等映射，直接当指针用 */
+    d->in_ctx    = (uint8_t *)d->in_ctx_phys;
+    d->dev_ctx   = (uint8_t *)d->dev_ctx_phys;
+    d->ep0_ring  = (xhci_trb_t *)d->ep0_ring_phys;
+    d->ep0_enqueue = 0;
+    d->ep0_cycle   = 1;
+
+    /* ---- Input Control Context（idx 0）：添加 A0(Slot)+A1(EP0) ---- */
+    uint32_t *icc = xhci_ctx_at(d->in_ctx, 0, cs);
+    icc[1] = (1u << 0) | (1u << 1);   /* Add Context flags: Slot + EP0 */
+
+    /* ---- Slot Context（idx 1）---- */
+    uint32_t *slot = xhci_ctx_at(d->in_ctx, 1, cs);
+    /* Route String=0; Speed[23:20]; Context Entries[31:27]=1（仅 EP0）*/
+    slot[0] = (d->speed << 20) | (1u << 27);
+    /* Root Hub Port Number[23:16] */
+    slot[1] = (d->port << 16);
+
+    /* ---- EP0 Context（idx 2）---- */
+    uint32_t *ep0 = xhci_ctx_at(d->in_ctx, 2, cs);
+    uint32_t mps0 = xhci_speed_to_mps0(d->speed);
+    /* EP Type[5:3]=4(Control); CErr[2:1]=3 */
+    ep0[1] = (4u << 3) | (3u << 1);
+    /* Max Packet Size[31:16] */
+    ep0[1] |= (mps0 << 16);
+    /* TR Dequeue Pointer + DCS(bit0)=1 */
+    ep0[2] = (uint32_t)(d->ep0_ring_phys | 1);
+    ep0[3] = (uint32_t)(d->ep0_ring_phys >> 32);
+    /* Average TRB Length */
+    ep0[4] = 8;
+
+    /* 写入 DCBAA[slot] = Device Context 物理地址 */
+    x->dcbaa[d->slot_id] = d->dev_ctx_phys;
+    return 0;
+}
+
+/* Address Device 命令：把 Input Context 交给控制器，分配 USB 地址。返回 0 成功。 */
+static int xhci_address_device(xhci_dev_t *d) {
+    uint64_t trb_phys = xhci_cmd_enqueue_ex(d->in_ctx_phys, 0, TRB_ADDRESS_DEV, d->slot_id << 24);
+    xhci_ring_cmd_doorbell();
+    uint32_t cc = 0, slot = 0;
+    if (xhci_wait_cmd_complete(trb_phys, &cc, &slot) != 0) {
+        XLOG("address_device: TIMEOUT"); return -1;
+    }
+    if (cc != 1) { XLOG_NN("address_device: cc="); XDEC(cc); XNL(); return -1; }
+    return 0;
+}
+
+/* ---- EP0 控制传输：Setup [+ Data] + Status 三阶段 ----
+ * bmRequestType/bRequest/wValue/wIndex/wLength 为标准 setup 字段；
+ * buf/buf_phys 为数据阶段缓冲（可为 NULL）。返回实际传输字节数（>=0）或 -1。 */
+static int xhci_ep0_transfer(xhci_dev_t *d, uint8_t bmReqType, uint8_t bReq,
+                             uint16_t wValue, uint16_t wIndex, uint16_t wLength,
+                             uint64_t buf_phys) {
+    xhci_ctrl_t *x = &g_xhci;
+    int is_in = (bmReqType & USB_REQTYPE_D2H) ? 1 : 0;
+    int has_data = (wLength > 0);
+
+    /* --- Setup Stage TRB --- */
+    xhci_trb_t *t = &d->ep0_ring[d->ep0_enqueue];
+    uint64_t setup_data = ((uint64_t)bmReqType)
+                        | ((uint64_t)bReq    << 8)
+                        | ((uint64_t)wValue  << 16)
+                        | ((uint64_t)wIndex  << 32)
+                        | ((uint64_t)wLength << 48);
+    t->parameter = setup_data;
+    t->status    = 8;   /* TRB Transfer Length = 8 */
+    uint32_t trt = has_data ? (is_in ? TRB_TRT_IN : TRB_TRT_OUT) : TRB_TRT_NO_DATA;
+    t->control   = (TRB_SETUP_STAGE << TRB_TYPE_SHIFT) | TRB_IDT
+                 | (trt << 16) | d->ep0_cycle;
+    d->ep0_enqueue++;
+
+    /* --- Data Stage TRB（可选）--- */
+    if (has_data) {
+        xhci_trb_t *dt = &d->ep0_ring[d->ep0_enqueue];
+        dt->parameter = buf_phys;
+        dt->status    = wLength;
+        dt->control   = (TRB_DATA_STAGE << TRB_TYPE_SHIFT)
+                      | (is_in ? TRB_DIR_IN : 0) | TRB_ISP
+                      | d->ep0_cycle;
+        d->ep0_enqueue++;
+    }
+
+    /* --- Status Stage TRB（方向与 Data 相反，IOC）--- */
+    xhci_trb_t *st = &d->ep0_ring[d->ep0_enqueue];
+    uint64_t status_trb_phys = d->ep0_ring_phys + d->ep0_enqueue * sizeof(xhci_trb_t);
+    st->parameter = 0;
+    st->status    = 0;
+    /* Status 方向：无数据阶段 → IN；有数据阶段 → 与 Data 反 */
+    int status_in = has_data ? (is_in ? 0 : 1) : 1;
+    st->control   = (TRB_STATUS_STAGE << TRB_TYPE_SHIFT)
+                  | (status_in ? TRB_DIR_IN : 0) | TRB_IOC
+                  | d->ep0_cycle;
+    d->ep0_enqueue++;
+
+    /* 敲 EP0 doorbell（DCI=1）*/
+    xhci_ring_dev_doorbell(d->slot_id, 1);
+
+    /* 等待 Status Stage 的 Transfer Event */
+    uint32_t cc = 0, resid = 0;
+    if (xhci_wait_event(TRB_TRANSFER_EVT, status_trb_phys, &cc, 0, &resid) != 0) {
+        XLOG("ep0_transfer: TIMEOUT"); return -1;
+    }
+    if (cc != 1 && cc != 13 /* Short Packet */) {
+        XLOG_NN("ep0_transfer: cc="); XDEC(cc); XNL();
+        return -1;
+    }
+    (void)x;
+    return (int)wLength;
+}
+
+/* 解析 Configuration Descriptor，寻找第一个 HID interface 及其 Interrupt IN 端点。
+ * 成功填充 d->dev_class/proto/iface_num/ep_in_* 并返回 0。 */
+static int xhci_parse_config(xhci_dev_t *d, uint8_t *buf, uint32_t total) {
+    uint32_t i = 0;
+    int found_hid = 0;
+    while (i + 2 <= total) {
+        uint8_t len  = buf[i];
+        uint8_t type = buf[i + 1];
+        if (len == 0) break;
+        if (type == USB_DESC_INTERFACE && i + 9 <= total) {
+            uint8_t if_class = buf[i + 5];
+            uint8_t if_proto = buf[i + 7];
+            if (if_class == USB_CLASS_HID) {
+                d->dev_class  = if_class;
+                d->proto      = if_proto;
+                d->iface_num  = buf[i + 2];
+                found_hid = 1;
+            } else {
+                found_hid = 0;  /* 非 HID 接口，后续端点忽略 */
+            }
+        } else if (type == USB_DESC_ENDPOINT && found_hid && i + 7 <= total) {
+            uint8_t ep_addr = buf[i + 2];
+            uint8_t ep_attr = buf[i + 3];
+            uint16_t mps    = buf[i + 4] | (buf[i + 5] << 8);
+            uint8_t interval = buf[i + 6];
+            /* Interrupt(0x03) + IN(0x80) */
+            if ((ep_attr & 0x03) == 0x03 && (ep_addr & 0x80)) {
+                d->ep_in_addr     = ep_addr;
+                d->ep_in_mps      = mps & 0x7FF;
+                d->ep_in_interval = interval;
+                return 0;  /* 找到 HID Interrupt IN 端点 */
+            }
+        }
+        i += len;
+    }
+    return -1;
+}
+
+/* 完整枚举一个已复位、已 enabled 的端口上的设备。返回 xhci_dev_t*或 NULL。 */
+static xhci_dev_t *xhci_enumerate_device(uint32_t port, uint32_t speed) {
+    XLOG_NN("  enumerate: port="); XDEC(port); serial_write(" speed="); XDEC(speed); serial_write("\n");
+    /* 1. Enable Slot */
+    uint32_t slot = xhci_enable_slot();
+    if (!slot) { XLOG("  enable_slot FAIL"); return 0; }
+    XLOG_NN("  enable_slot OK slot="); XDEC(slot); serial_write("\n");
+
+    xhci_dev_t *d = xhci_dev_alloc();
+    if (!d) { XLOG("  dev table full"); return 0; }
+    d->slot_id = slot;
+    d->port    = port;
+    d->speed   = speed;
+
+    /* 2. 分配上下文 + Address Device */
+    if (xhci_dev_init_context(d) != 0) { d->used = 0; return 0; }
+    if (xhci_address_device(d)   != 0) { XLOG("  address_device FAIL"); d->used = 0; return 0; }
+    XLOG_NN("  slot="); XDEC(slot); serial_write(" addressed OK\n");
+
+    /* 3. GET_DESCRIPTOR(Device) — 前 18 字节 */
+    uint64_t dma_phys = xhci_zalloc_pages(1);
+    if (!dma_phys) { d->used = 0; return 0; }
+    uint8_t *dma = (uint8_t *)dma_phys;
+
+    int r = xhci_ep0_transfer(d, USB_REQTYPE_D2H | USB_REQTYPE_STD, USB_REQ_GET_DESCRIPTOR,
+                              (USB_DESC_DEVICE << 8) | 0, 0, 18, dma_phys);
+    if (r < 0) { XLOG("  GET device desc FAIL"); d->used = 0; return 0; }
+    usb_device_descriptor_t *dd = (usb_device_descriptor_t *)dma;
+    d->vid = dd->idVendor;
+    d->pid = dd->idProduct;
+    XLOG_NN("  device desc: VID="); XHEX(d->vid);
+    serial_write(" PID="); XHEX(d->pid); serial_write("\n");
+
+    /* 4. GET_DESCRIPTOR(Config) — 先取 9 字节 header 得 wTotalLength */
+    r = xhci_ep0_transfer(d, USB_REQTYPE_D2H | USB_REQTYPE_STD, USB_REQ_GET_DESCRIPTOR,
+                          (USB_DESC_CONFIG << 8) | 0, 0, 9, dma_phys);
+    if (r < 0) { XLOG("  GET config hdr FAIL"); d->used = 0; return 0; }
+    uint16_t total = dma[2] | (dma[3] << 8);
+    d->config_val  = dma[5];
+    if (total > 4096) total = 4096;
+
+    /* 再取完整 config 描述符集合 */
+    r = xhci_ep0_transfer(d, USB_REQTYPE_D2H | USB_REQTYPE_STD, USB_REQ_GET_DESCRIPTOR,
+                          (USB_DESC_CONFIG << 8) | 0, 0, total, dma_phys);
+    if (r < 0) { XLOG("  GET config full FAIL"); d->used = 0; return 0; }
+
+    if (xhci_parse_config(d, dma, total) != 0) {
+        XLOG("  no HID interrupt-IN endpoint (skip)"); d->used = 0; return 0;
+    }
+    XLOG_NN("  HID iface="); XDEC(d->iface_num);
+    serial_write(" proto="); XDEC(d->proto);
+    serial_write(" ep_in="); XHEX(d->ep_in_addr);
+    serial_write(" mps="); XDEC(d->ep_in_mps); serial_write("\n");
+
+    /* 5. SET_CONFIGURATION */
+    r = xhci_ep0_transfer(d, USB_REQTYPE_H2D | USB_REQTYPE_STD, USB_REQ_SET_CONFIG,
+                          d->config_val, 0, 0, 0);
+    if (r < 0) { XLOG("  SET_CONFIG FAIL"); d->used = 0; return 0; }
+    XLOG("  SET_CONFIG OK");
+
+    return d;
+}
+
 /* 遍历 root hub 端口，统计已连接设备并复位。 */
 static void xhci_enum_ports(void) {
     xhci_ctrl_t *x = &g_xhci;
@@ -565,13 +929,31 @@ static void xhci_enum_ports(void) {
         serial_write(" portsc="); XHEX(sc);
         serial_write("\n");
         /* 尝试复位端口（USB3 端口连接后通常已自动 enabled）*/
+        int enabled = 0;
         if (!(sc & PORTSC_PED)) {
-            if (xhci_reset_port(p) == 0)
+            if (xhci_reset_port(p) == 0) {
                 XLOG("  port reset + enabled OK");
-            else
+                enabled = 1;
+            } else {
                 XLOG("  port reset done (not enabled)");
+            }
         } else {
             XLOG("  port already enabled");
+            enabled = 1;
+        }
+
+        /* 端口已 enabled → 枚举设备（重读 speed，复位后可能变化）*/
+        if (enabled) {
+            uint32_t sc2 = mmio_r32(x->op, off);
+            uint32_t sp  = (sc2 >> PORTSC_SPEED_SHIFT) & PORTSC_SPEED_MASK;
+            xhci_dev_t *dev = xhci_enumerate_device(p, sp);
+            if (dev) {
+                XLOG_NN("  ENUM OK: slot="); XDEC(dev->slot_id);
+                serial_write(" class="); XDEC(dev->dev_class);
+                serial_write(" proto="); XDEC(dev->proto); serial_write("\n");
+            } else {
+                XLOG("  ENUM skipped/failed");
+            }
         }
     }
     XLOG_NN("enumerated ports: connected="); XDEC(x->connected);
