@@ -363,6 +363,8 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
     /* M2.3：xHCI USB 主机控制器自测（探测 + 命令环 NOOP + 端口枚举） */
     if (xhci_init() == 0 && xhci_selftest() == 0) {
         early_console64_write("[x86_64][xhci] xHCI selftest PASS\n");
+        /* M2.3 Step3-4：枚举 HID 键鼠，配置 Interrupt-IN 端点并注册 input 设备 */
+        usb_hid_init();
     } else {
         early_console64_write("[x86_64][xhci] xHCI selftest skipped/FAIL\n");
     }
@@ -950,6 +952,7 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
             early_console64_write("[x86_64][gui] desktop up, entering poll loop\n");
             for (;;) {
                 window_manager_poll();
+                usb_hid_poll();   /* M2.3 Step3-4：USB HID 键鼠 report 轮询上报 */
                 net_tick(0);   /* 驱动 TCP 重传定时器 + 收包轮询 */
                 __asm__ __volatile__("hlt");
             }

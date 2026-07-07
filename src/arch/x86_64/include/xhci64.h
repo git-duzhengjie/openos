@@ -40,7 +40,51 @@ int xhci_selftest(void);
  * Event Ring 已配置 interrupter 0 的 IMAN.IE；此处补装 PCI MSI enable。幂等。 */
 void xhci_irq_install_late(void);
 
+/* MVP 阶段支持的最大 USB 设备数（与 xhci64.c 保持一致） */
+#ifndef XHCI_MAX_DEVS
+#define XHCI_MAX_DEVS   4
+#endif
+
 /* 返回中断触发次数（调试验证：>0 证明 MSI/MSI-X 中断路径真实生效） */
 uint32_t xhci_irq_count(void);
+
+/* ============================================================
+ * M2.3 Step3-4: HID 层对接口（供 usb_hid64.c 调用）
+ *
+ * 设备栈内部结构（xhci_dev_t / g_devs）保持 static 封装，
+ * HID 层通过"设备索引"不透明句柄 + 访问器函数间接操作，
+ * 避免暴露 slot/context/ring 等硬件细节。
+ * ============================================================ */
+
+/* 已成功枚举的 HID 设备数量（proto=1 键盘 / proto=2 鼠标）。 */
+uint32_t xhci_hid_device_count(void);
+
+/* 取第 idx 个 HID 设备的 boot protocol：1=键盘 2=鼠标 0=非法/其它。 */
+uint32_t xhci_hid_device_proto(uint32_t idx);
+
+/* 取第 idx 个 HID 设备的 Interrupt-IN 端点 report 长度（字节）。 */
+uint32_t xhci_hid_device_report_len(uint32_t idx);
+
+/* 为第 idx 个 HID 设备配置 Interrupt-IN 端点：
+ *   建 Transfer Ring → Configure Endpoint 命令 → SET_PROTOCOL(boot)
+ *   → 投递首个 Normal TRB 等待 report。
+ * 返回 0 成功，负数失败。幂等（重复调用直接返回 0）。 */
+int xhci_hid_configure(uint32_t idx);
+
+/* 非阻塞探测第 idx 个 HID 设备的 Interrupt-IN 传输事件：
+ *   命中一个 report → 拷贝到 out_buf（最多 out_cap 字节）并重新投递
+ *   下一个 Normal TRB，返回实际 report 字节数（>0）。
+ *   无新事件 → 返回 0。出错 → 返回负数。 */
+int xhci_hid_poll(uint32_t idx, uint8_t *out_buf, uint32_t out_cap);
+
+/* ============================================================
+ * HID 平台层（usb_hid64.c）——报文解析 + input 上报
+ * ============================================================ */
+
+/* 枚举 xHCI 已识别的 HID 设备，配置端点并注册 input 设备。 */
+void usb_hid_init(void);
+
+/* polling：由内核主循环周期调用，非阻塞取 report 并上报。 */
+void usb_hid_poll(void);
 
 #endif /* OPENOS_XHCI64_H */

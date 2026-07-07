@@ -142,6 +142,28 @@ void arch_x86_64_mouse_irq12_handler(void) {
     g_mouse.packet_count++;
 }
 
+/* ---- USB HID 鼠标相对移动注入（供 usb_hid64.c 调用）----
+ * 复用与 PS/2 相同的 g_mouse 累积通路：相对 dx/dy 累加、
+ * 按钮位图替换、滚轮累加、绝对坐标积分。
+ * dx/dy/wheel 均为本帧相对量，buttons 为 HID bit0左/bit1右/bit2中。 */
+void mouse_inject_relative(int dx, int dy, uint8_t buttons, int wheel) {
+    g_mouse.present = 1;
+    g_mouse.dx += dx;
+    g_mouse.dy += dy;
+    if (wheel) g_mouse.wheel += wheel;
+    g_mouse.buttons = buttons & 0x07;
+
+    g_mouse.x += dx;
+    g_mouse.y += dy;
+    if (g_mouse.x < 0) g_mouse.x = 0;
+    if (g_mouse.x > g_mouse.max_x) g_mouse.x = g_mouse.max_x;
+    if (g_mouse.y < 0) g_mouse.y = 0;
+    if (g_mouse.y > g_mouse.max_y) g_mouse.y = g_mouse.max_y;
+
+    g_mouse.absolute_mode = 0;
+    g_mouse.packet_count++;
+}
+
 /* ---- mouse_init: PS/2 controller + mouse enable sequence ---- */
 void mouse_init(void) {
     /* zero the state */

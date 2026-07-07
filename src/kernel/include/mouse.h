@@ -46,6 +46,9 @@ void mouse_set_position(int x, int y);
 void mouse_set_absolute_position(int x, int y, uint8_t buttons);
 void mouse_set_absolute_position_with_wheel(int x, int y, uint8_t buttons, int wheel);
 
+/* 注入相对移动，供 USB HID boot 鼠标使用（复用 PS/2 累积通路）*/
+void mouse_inject_relative(int dx, int dy, uint8_t buttons, int wheel);
+
 void mouse_print_info(void);
 
 /* IRQ 处理 – 由中断处理函数调用 */

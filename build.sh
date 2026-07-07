@@ -565,6 +565,7 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         src/arch/x86_64/gui64/ahci64.c \
         src/arch/x86_64/gui64/nvme64.c \
         src/arch/x86_64/gui64/xhci64.c \
+        src/arch/x86_64/gui64/usb_hid64.c \
         src/kernel/drivers/blockdev.c \
         src/arch/x86_64/gui64/blockdev_hw.c \
         src/kernel/net/netstack.c \
@@ -680,6 +681,7 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         "$ARCH64_BUILD/ahci64.o" \
         "$ARCH64_BUILD/nvme64.o" \
         "$ARCH64_BUILD/xhci64.o" \
+        "$ARCH64_BUILD/usb_hid64.o" \
         "$ARCH64_BUILD/blockdev.o" \
         "$ARCH64_BUILD/blockdev_hw.o" \
         "$ARCH64_BUILD/netstack.o" \

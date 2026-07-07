@@ -596,7 +596,9 @@ static int xhci_reset_port(uint32_t port) {
 #define HID_PROTO_KEYBOARD       1
 #define HID_PROTO_MOUSE          2
 
+#ifndef XHCI_MAX_DEVS
 #define XHCI_MAX_DEVS   4
+#endif
 
 /* 单个 USB 设备的运行时状态 */
 typedef struct xhci_dev {
@@ -958,6 +960,204 @@ static void xhci_enum_ports(void) {
     }
     XLOG_NN("enumerated ports: connected="); XDEC(x->connected);
     serial_write("/"); XDEC(x->max_ports); serial_write("\n");
+}
+
+/* ============================================================
+ * M2.3 Step3-4: HID 层 xHCI 传输原语（供 usb_hid64.c 调用）
+ * ============================================================ */
+
+#define XHCI_HID_IS(d)  ((d)->used && (d)->dev_class == 3 && \
+                         ((d)->proto == 1 || (d)->proto == 2))
+
+/* 把第 idx 个 HID 设备映射到 g_devs 下标；返回 -1 表示越界。 */
+static int xhci_hid_index(uint32_t idx) {
+    uint32_t n = 0;
+    for (int i = 0; i < XHCI_MAX_DEVS; i++) {
+        xhci_dev_t *d = &g_devs[i];
+        if (XHCI_HID_IS(d)) {
+            if (n == idx) return i;
+            n++;
+        }
+    }
+    return -1;
+}
+
+uint32_t xhci_hid_device_count(void) {
+    uint32_t n = 0;
+    for (int i = 0; i < XHCI_MAX_DEVS; i++)
+        if (XHCI_HID_IS(&g_devs[i])) n++;
+    return n;
+}
+
+uint32_t xhci_hid_device_proto(uint32_t idx) {
+    int i = xhci_hid_index(idx);
+    return (i < 0) ? 0 : g_devs[i].proto;
+}
+
+uint32_t xhci_hid_device_report_len(uint32_t idx) {
+    int i = xhci_hid_index(idx);
+    if (i < 0) return 0;
+    uint32_t mps = g_devs[i].ep_in_mps;
+    return (mps && mps <= 64) ? mps : 8;
+}
+
+/* 前向声明：configure 需要先于 arm 定义位置被引用 */
+static void xhci_hid_arm(xhci_dev_t *d);
+
+/* 投递一个 Normal TRB 到 Interrupt-IN 环并敲门铃，等待下一个 report。 */
+static void xhci_hid_arm(xhci_dev_t *d) {
+    uint32_t rlen = d->ep_in_mps ? d->ep_in_mps : 8;
+    if (rlen > 64) rlen = 64;
+
+    xhci_trb_t *trb = &d->ep_in_ring[d->ep_in_enqueue];
+    trb->parameter = d->hid_buf_phys;
+    trb->status    = rlen;                 /* TRB Transfer Length */
+    /* Normal TRB：IOC=1（完成上报事件），ISP=1（短包也上报） */
+    trb->control = (TRB_NORMAL << TRB_TYPE_SHIFT) | TRB_IOC | TRB_ISP | d->ep_in_cycle;
+
+    /* 推进 enqueue（末槽为 Link，绕过） */
+    d->ep_in_enqueue++;
+    if (d->ep_in_enqueue >= EPIN_RING_TRBS - 1) {
+        /* 翻转 Link TRB 的 cycle，使其对消费者可见 */
+        xhci_trb_t *link = &d->ep_in_ring[EPIN_RING_TRBS - 1];
+        link->control = (link->control & ~1u) | d->ep_in_cycle;
+        d->ep_in_enqueue = 0;
+        d->ep_in_cycle  ^= 1;
+    }
+
+    /* 敲设备 doorbell：target = DCI = 2*ep_num + 1 */
+    uint32_t ep_num = d->ep_in_addr & 0x0F;
+    xhci_ring_dev_doorbell(d->slot_id, ep_num * 2 + 1);
+}
+
+/* 为第 idx 个 HID 设备配置 Interrupt-IN 端点：
+ *   建 Transfer Ring → 构建 Input Context（EP_IN Context）
+ *   → Configure Endpoint 命令 → SET_PROTOCOL(boot) → 投递首个 Normal TRB。
+ * 返回 0 成功，负数失败。幂等（已配置直接返回 0）。 */
+int xhci_hid_configure(uint32_t idx) {
+    int di = xhci_hid_index(idx);
+    if (di < 0) return -1;
+    xhci_dev_t *d = &g_devs[di];
+    if (d->ep_in_ring) return 0;           /* 已配置，幂等 */
+    if (!d->ep_in_addr) return -2;         /* 无 Interrupt IN 端点 */
+
+    xhci_ctrl_t *x = &g_xhci;
+    uint32_t cs = x->ctx_size;
+
+    /* 1) 分配 Interrupt-IN Transfer Ring + HID DMA 缓冲（恒等映射） */
+    uint64_t ring_phys = xhci_zalloc_pages(1);
+    uint64_t buf_phys  = xhci_zalloc_pages(1);
+    if (!ring_phys || !buf_phys) return -3;
+    d->ep_in_ring      = (xhci_trb_t *)ring_phys;
+    d->ep_in_ring_phys = ring_phys;
+    d->ep_in_enqueue   = 0;
+    d->ep_in_cycle     = 1;
+    d->hid_buf         = (uint8_t *)buf_phys;
+    d->hid_buf_phys    = buf_phys;
+
+    /* Transfer Ring 末尾放 Link TRB 回绕到环首（TC=1） */
+    xhci_trb_t *link = &d->ep_in_ring[EPIN_RING_TRBS - 1];
+    link->parameter = d->ep_in_ring_phys;
+    link->status    = 0;
+    link->control   = (TRB_LINK << TRB_TYPE_SHIFT) | TRB_LINK_TC | 1u;
+
+    /* 2) DCI = 2*ep_num + 1（IN 方向） */
+    uint32_t ep_num = d->ep_in_addr & 0x0F;
+    uint32_t dci    = ep_num * 2 + 1;
+
+    /* 3) 构建 Input Context：清零 → A0(slot)+A[dci] */
+    uint8_t *ic = d->in_ctx;
+    for (uint32_t i = 0; i < (dci + 1) * cs; i++) ic[i] = 0;
+    uint32_t *icc = xhci_ctx_at(ic, 0, cs);
+    icc[1] = (1u << 0) | (1u << dci);      /* Add: Slot Context + EP_IN */
+
+    /* Slot Context：更新 Context Entries = dci */
+    uint32_t *slot  = xhci_ctx_at(ic, 1, cs);
+    uint32_t *dslot = (uint32_t *)d->dev_ctx;
+    slot[0] = (dslot[0] & ~(0x1Fu << 27)) | (dci << 27);
+    slot[1] = dslot[1];
+
+    /* EP_IN Context：Interrupt IN（EPType=7），CErr=3 */
+    uint32_t *ep  = xhci_ctx_at(ic, dci, cs);
+    uint32_t mps  = d->ep_in_mps ? d->ep_in_mps : 8;
+    uint32_t itv  = d->ep_in_interval ? d->ep_in_interval : 7;
+    ep[0] = (itv << 16);
+    ep[1] = (3u << 1) | (7u << 3) | (mps << 16);
+    ep[2] = (uint32_t)(d->ep_in_ring_phys | 1u);   /* TR Dequeue + DCS=1 */
+    ep[3] = (uint32_t)(d->ep_in_ring_phys >> 32);
+    ep[4] = mps;                                   /* Average TRB Length */
+
+    /* 4) Configure Endpoint 命令 */
+    uint32_t cc = 0, cslot = 0;
+    uint64_t cmd = xhci_cmd_enqueue_ex(d->in_ctx_phys, 0,
+                                       TRB_CONFIG_EP, d->slot_id << 24);
+    xhci_ring_cmd_doorbell();
+    if (xhci_wait_cmd_complete(cmd, &cc, &cslot) != 0) return -4;
+
+    /* 5) SET_PROTOCOL(boot=0)：bmReqType=0x21 Class|Interface，bReq=0x0B */
+    (void)xhci_ep0_transfer(d, 0x21, 0x0B, 0, d->iface_num, 0, 0);
+
+    /* 6) 投递首个 Normal TRB 等待 report */
+    xhci_hid_arm(d);
+    return 0;
+}
+
+/* 非阻塞消费一个事件：仅命中属于 (slot_id, ep_dci) 的 Transfer Event。
+ * 命中返回 residual(>=0)；无匹配事件（或事件环空）返回 -1。
+ * 途中遇到的其它类型事件一律消费跳过（避免事件环阻塞）。 */
+static int xhci_poll_transfer_event(uint32_t slot_id, uint32_t ep_dci) {
+    xhci_ctrl_t *x = &g_xhci;
+    /* 单次扫描：最多消费本轮已产生的连续事件 */
+    for (uint32_t guard = 0; guard < EVT_RING_TRBS; guard++) {
+        volatile xhci_trb_t *evt = &x->evt_ring[x->evt_dequeue];
+        uint32_t c = evt->control;
+        int cyc = (c & TRB_CYCLE) ? 1 : 0;
+        if (cyc != (int)x->evt_cycle) return -1;   /* 无新事件 */
+
+        uint32_t type = (c >> TRB_TYPE_SHIFT) & 0x3F;
+        uint32_t eslot = TRB_GET_SLOT(evt);
+        uint32_t eep   = (c >> 16) & 0x1F;         /* Endpoint ID = DCI */
+        int resid = (int)(evt->status & 0xFFFFFF);
+        int hit = (type == TRB_TRANSFER_EVT && eslot == slot_id && eep == ep_dci);
+
+        /* 消费事件 + 更新 ERDP */
+        x->evt_dequeue++;
+        if (x->evt_dequeue >= EVT_RING_TRBS) {
+            x->evt_dequeue = 0;
+            x->evt_cycle ^= 1;
+        }
+        uint64_t erdp = x->evt_ring_phys + x->evt_dequeue * sizeof(xhci_trb_t);
+        mmio_w64(x->rt, XRT_ERDP(0), erdp | ERDP_EHB);
+
+        if (hit) return resid;
+    }
+    return -1;
+}
+
+/* 非阻塞探测第 idx 个 HID 设备的 Interrupt-IN 传输：
+ *   命中一个 report → 拷贝到 out_buf 并重新投递 → 返回字节数(>0)
+ *   无事件 → 0；出错 → 负数。 */
+int xhci_hid_poll(uint32_t idx, uint8_t *out_buf, uint32_t out_cap) {
+    int di = xhci_hid_index(idx);
+    if (di < 0) return -1;
+    xhci_dev_t *d = &g_devs[di];
+    if (!d->ep_in_ring) return -2;         /* 未配置 */
+
+    uint32_t ep_num = d->ep_in_addr & 0x0F;
+    uint32_t want_dci = ep_num * 2 + 1;
+
+    int resid = xhci_poll_transfer_event(d->slot_id, want_dci);
+    if (resid < 0) return 0;               /* 无匹配事件 */
+
+    /* 实际长度 = 期望长度 - residual */
+    uint32_t rlen = d->ep_in_mps ? d->ep_in_mps : 8;
+    if (rlen > 64) rlen = 64;
+    uint32_t n = (rlen > (uint32_t)resid) ? (rlen - (uint32_t)resid) : 0;
+    if (n > out_cap) n = out_cap;
+    for (uint32_t i = 0; i < n; i++) out_buf[i] = d->hid_buf[i];
+
+    xhci_hid_arm(d);                       /* 重新武装下一个传输 */
+    return (int)n;
 }
 
 /* 发一个 No-Op 命令验证命令环/事件环通路。返回 0 PASS。 */
