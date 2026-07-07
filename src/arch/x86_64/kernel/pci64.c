@@ -238,6 +238,61 @@ void pci_enable_bus_master(pci_device_t *d) { if (d) set_command_bits(d, PCI_CMD
 void pci_enable_mmio(pci_device_t *d)       { if (d) set_command_bits(d, PCI_CMD_MEM_SPACE); }
 void pci_enable_io(pci_device_t *d)         { if (d) set_command_bits(d, PCI_CMD_IO_SPACE); }
 
+/* ---- Capability 链遍历 ---- */
+uint8_t pci_find_capability(pci_device_t *d, uint8_t cap_id) {
+    if (!d) return 0;
+    /* 先确认设备声明支持 Capabilities List */
+    uint16_t status = pci_read16(d->bus, d->dev, d->func, PCI_OFFSET_STATUS);
+    if (!(status & PCI_STATUS_CAP_LIST)) return 0;
+
+    uint8_t ptr = pci_read8(d->bus, d->dev, d->func, PCI_OFFSET_CAP_PTR) & 0xFCu;
+    /* 防死循环：最多遍历 48 个节点（配置空间 256B / 4B） */
+    for (int guard = 0; ptr >= 0x40u && guard < 48; guard++) {
+        uint8_t id   = pci_read8(d->bus, d->dev, d->func, ptr + 0);
+        uint8_t next = pci_read8(d->bus, d->dev, d->func, ptr + 1) & 0xFCu;
+        if (id == cap_id) return ptr;
+        if (next == 0) break;
+        ptr = next;
+    }
+    return 0;
+}
+
+/* ---- MSI 使能 ---- */
+int pci_msi_enable(pci_device_t *d, uint8_t vector, uint8_t apic_id) {
+    if (!d) return 0;
+    uint8_t cap = pci_find_capability(d, PCI_CAP_ID_MSI);
+    if (!cap) {
+        pci_log("[pci] MSI cap not found\r\n");
+        return 0;
+    }
+
+    uint16_t ctrl = pci_read16(d->bus, d->dev, d->func, cap + PCI_MSI_CTRL);
+
+    /* Message Address：bits[19:12]=dest APIC ID，fixed base 0xFEE00000 */
+    uint32_t addr = PCI_MSI_ADDR_BASE | ((uint32_t)apic_id << 12);
+    pci_write32(d->bus, d->dev, d->func, cap + PCI_MSI_ADDR_LO, addr);
+
+    /* Message Data 偏移取决于是否 64-bit capable */
+    uint8_t data_off = (ctrl & PCI_MSI_CTRL_64BIT) ? PCI_MSI_DATA_64 : PCI_MSI_DATA_32;
+    if (ctrl & PCI_MSI_CTRL_64BIT)
+        pci_write32(d->bus, d->dev, d->func, cap + PCI_MSI_ADDR_HI, 0);
+    /* Message Data = 中断向量（边沿触发、固定交付、物理目标） */
+    pci_write16(d->bus, d->dev, d->func, cap + data_off, (uint16_t)vector);
+
+    /* 使能 MSI（保留 Multiple Message Enable=0，即单向量） */
+    ctrl &= ~0x0070u;             /* MME[6:4]=0 -> 1 个向量 */
+    ctrl |= PCI_MSI_CTRL_ENABLE;
+    pci_write16(d->bus, d->dev, d->func, cap + PCI_MSI_CTRL, ctrl);
+
+    /* 屏蔽 legacy INTx，避免重复中断 */
+    set_command_bits(d, PCI_CMD_INTX_DISABLE);
+
+    log_hex("[pci] MSI enabled cap@", cap, 2);
+    log_hex(" vec=", vector, 2);
+    pci_log("\r\n");
+    return 1;
+}
+
 void pci_dump_devices(void) {
     log_hex("[pci] devices=", g_pci_count, 2); pci_log("\r\n");
     for (uint32_t i = 0; i < g_pci_count; i++) {

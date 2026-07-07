@@ -23,6 +23,13 @@ extern void     arch_x86_64_proc_yield(void);
 extern int      arch_x86_64_vmm_map_range(uint64_t virt, uint64_t phys,
                                           uint64_t length, uint64_t flags);
 
+/* ---- 中断依赖（M2.x MSI）---- */
+extern int  arch_x86_64_idt_register_irq(unsigned char cpu_vector, void (*handler)(void));
+extern int  arch_x86_64_lapic_is_ready(void);
+extern void arch_x86_64_lapic_send_eoi(void);
+extern unsigned char arch_x86_64_lapic_id(void);
+extern void x86_64_irq_nvme(void);   /* isr64.S 汇编 stub */
+
 /* ---- 日志 ---- */
 static void klog(const char *s) { early_serial64_write(s); }
 static void klog_hex(uint64_t v) {
@@ -123,6 +130,12 @@ static nvme_queue_t      g_io;
 static uint16_t          g_cid    = 1;   /* 命令 ID 计数 */
 
 static int      g_present = 0;
+
+/* ---- 中断状态（M2.x MSI）---- */
+#define OPENOS_X86_64_NVME_VECTOR 0x31u
+static const pci_device_t *g_pci_dev = 0;   /* 保存控制器 PCI 设备，供 MSI 配置 */
+static volatile int g_nvme_irq_ready = 0;   /* MSI 已成功挂载 */
+static volatile int g_nvme_done = 0;        /* 完成标志：中断 handler 置 1 */
 static uint32_t g_nsid    = 1;
 static uint64_t g_nsze    = 0;   /* namespace 逻辑块数 */
 static uint32_t g_blksz   = 512; /* 每逻辑块字节数 */
@@ -144,6 +157,39 @@ static inline void reg_wr64(uint32_t off, uint64_t v) {
     *(volatile uint64_t *)(g_regs + off) = v;
 }
 
+/* ---- 中断 C 处理程序（M2.x MSI）---- */
+/* isr64.S 的 x86_64_irq_nvme stub 调用。职责：置完成标志 + 发 LAPIC EOI。
+ * CQ head 推进与 phase 判断由发射侧统一处理，避免与轮询竞争。 */
+void arch_x86_64_nvme_irq_trampoline(void)
+{
+    g_nvme_done = 1;
+    arch_x86_64_lapic_send_eoi();
+}
+
+/* 挂载 MSI：IDT gate + PCI MSI 配置。需 LAPIC 就绪（故为延迟挂载）。成功置 g_nvme_irq_ready。
+ * IO CQ 创建时已置 IEN + vector 0，此处仅补装 PCI MSI enable。 */
+void nvme_irq_install_late(void)
+{
+    if (g_nvme_irq_ready) return;   /* 幂等 */
+    if (!g_pci_dev) return;
+    if (!arch_x86_64_lapic_is_ready()) {
+        klog("[nvme] LAPIC not ready, MSI skipped (polling only)\n");
+        return;
+    }
+    if (arch_x86_64_idt_register_irq(OPENOS_X86_64_NVME_VECTOR, x86_64_irq_nvme) != 0) {
+        klog("[nvme] IDT register FAILED (polling only)\n");
+        return;
+    }
+    if (!pci_msi_enable((pci_device_t *)g_pci_dev,
+                        OPENOS_X86_64_NVME_VECTOR, arch_x86_64_lapic_id())) {
+        klog("[nvme] MSI enable FAILED (polling only)\n");
+        return;
+    }
+    g_nvme_irq_ready = 1;
+    klog("[nvme] MSI installed (vector 0x31)\n");
+}
+
+
 /* ==================== 命令发射（polling） ====================
  * 把一条已填好的 SQE 放入队列 q，敲门铃，轮询 CQ 等完成。
  * 返回 status field（0 = 成功），负数为超时/错误。 */
@@ -162,10 +208,13 @@ static int nvme_submit(nvme_queue_t *q, nvme_sqe_t *cmd) {
     __asm__ volatile("sfence" ::: "memory");
 
     /* 推进 SQ tail，敲提交门铃 */
+    g_nvme_done = 0;
     q->sq_tail = (uint16_t)((q->sq_tail + 1) % QDEPTH);
     *q->sq_db = q->sq_tail;
 
-    /* 轮询完成队列当前 head，等待 phase tag 翻转 */
+    /* 等待完成：中断优先，phase tag 轮询回退。
+     * 即使 MSI 已挂载，仍以 phase tag 作为权威判据（中断只是唤醒），
+     * 若中断未触发（QEMU 配置差异），phase 轮询仍能完成，不会挂死。 */
     volatile nvme_cqe_t *cqe = &q->cq[q->cq_head];
     uint64_t spin = 0;
     for (;;) {
@@ -257,8 +306,11 @@ static int nvme_create_io_queues(void) {
     cmd.prp1 = cq_pa;
     /* cdw10: 高16=queue size-1, 低16=qid */
     cmd.cdw10 = ((QDEPTH - 1) << 16) | 1;
-    /* cdw11: bit0=PC(物理连续), bit1=IEN(中断使能,polling不用) */
-    cmd.cdw11 = 0x1;
+    /* cdw11: bit0=PC(物理连续), bit1=IEN(中断使能), 高16=Interrupt Vector
+     * 无条件置 IEN + vector 0：此时 PCI MSI 尚未 enable（LAPIC 未就绪），
+     * QEMU 不会真发中断，仍走 polling；待 nvme_irq_install_late() 补装 MSI 后中断生效，
+     * 无需重建 IO 队列。 */
+    cmd.cdw11 = 0x1u | 0x2u | (0u << 16);
     int st = nvme_submit(&g_admin, &cmd);
     if (st != 0) { klog("[nvme] create CQ fail st="); klog_hex((uint64_t)st); klog("\n"); return -2; }
 
@@ -344,6 +396,7 @@ int nvme_init(void) {
     /* --- 3. 使能 bus master + MMIO --- */
     pci_enable_bus_master((pci_device_t *)dev);
     pci_enable_mmio((pci_device_t *)dev);
+    g_pci_dev = dev;   /* 保存供 MSI 配置 */
 
     /* --- 4. 读 CAP，取 doorbell stride 与最大队列深度 --- */
     uint64_t cap = reg_rd64(NVME_REG_CAP);
@@ -405,6 +458,7 @@ int nvme_init(void) {
     }
 
     /* --- 9. 创建 IO 队列对 --- */
+    /* --- 9b. 创建 IO 队列（CQ 已带 IEN + vector 0）；MSI enable 由 nvme_irq_install_late() 延迟补装 --- */
     if (nvme_create_io_queues() != 0) return -7;
 
     /* --- 10. 探测 namespace 1 --- */

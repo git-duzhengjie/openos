@@ -20,6 +20,13 @@ extern void     arch_x86_64_proc_yield(void);
 extern int      arch_x86_64_vmm_map_range(uint64_t virt, uint64_t phys,
                                           uint64_t length, uint64_t flags);
 
+/* ---- 中断依赖（M2.1 MSI）---- */
+extern int  arch_x86_64_idt_register_irq(unsigned char cpu_vector, void (*handler)(void));
+extern int  arch_x86_64_lapic_is_ready(void);
+extern void arch_x86_64_lapic_send_eoi(void);
+extern unsigned char arch_x86_64_lapic_id(void);
+extern void x86_64_irq_ahci(void);   /* isr64.S 汇编 stub */
+
 /* ---- 串口日志辅助 ---- */
 static void klog(const char *s) { early_serial64_write(s); }
 static void klog_hex(uint64_t v)
@@ -166,6 +173,15 @@ static volatile uint8_t          *g_fb  = 0;   /* FIS 接收区（256B） */
 static volatile hba_cmd_table_t  *g_ctb = 0;   /* 命令表（用 slot 0） */
 static volatile uint8_t          *g_dma = 0;   /* 数据 DMA 缓冲（一页 4KB=8扇区） */
 
+/* ---- 中断状态（M2.1 MSI）---- */
+#define OPENOS_X86_64_AHCI_VECTOR 0x30u
+static const pci_device_t *g_pci_dev = 0;   /* 保存控制器 PCI 设备，供 MSI 配置 */
+static volatile int g_ahci_irq_ready = 0;   /* MSI 已成功挂载 */
+static volatile int g_ahci_done = 0;        /* 完成标志：中断 handler 置 1 */
+static volatile uint32_t g_ahci_last_is = 0;/* 最近一次中断的 PxIS 快照（调试） */
+static volatile uint32_t g_ahci_irq_count = 0;/* 中断触发次数（证明中断路径生效） */
+
+
 /* ================= MMIO 读写辅助 ================= */
 static inline uint32_t mmio_r(uint32_t off)
 {
@@ -183,6 +199,47 @@ static inline void port_w(int p, uint32_t off, uint32_t val)
 {
     mmio_w(PORT_BASE(p) + off, val);
 }
+
+/* ---- 中断 C 处理程序（M2.1 MSI）---- */
+/* isr64.S 的 x86_64_irq_ahci stub 调用。职责：清 PxIS/IS、置完成标志、发 LAPIC EOI。 */
+void arch_x86_64_ahci_irq_trampoline(void)
+{
+    if (g_abar && g_port >= 0) {
+        uint32_t is = port_r(g_port, PxIS);
+        g_ahci_last_is = is;
+        port_w(g_port, PxIS, is);            /* W1C 清端口中断状态 */
+        mmio_w(HBA_IS, mmio_r(HBA_IS));      /* W1C 清 HBA 全局中断状态 */
+        g_ahci_irq_count++;
+        g_ahci_done = 1;
+    }
+    arch_x86_64_lapic_send_eoi();
+}
+
+/* 挂载 MSI：IDT gate + PCI MSI 配置。需 LAPIC 就绪（故为延迟挂载）。成功置 g_ahci_irq_ready。 */
+void ahci_irq_install_late(void)
+{
+    if (g_ahci_irq_ready) return;   /* 幂等：已装则跳过 */
+    if (!g_pci_dev) return;
+    if (!arch_x86_64_lapic_is_ready()) {
+        klog("[ahci] LAPIC not ready, MSI skipped (polling only)\n");
+        return;
+    }
+    if (arch_x86_64_idt_register_irq(OPENOS_X86_64_AHCI_VECTOR, x86_64_irq_ahci) != 0) {
+        klog("[ahci] IDT register FAILED (polling only)\n");
+        return;
+    }
+    if (!pci_msi_enable((pci_device_t *)g_pci_dev,
+                        OPENOS_X86_64_AHCI_VECTOR, arch_x86_64_lapic_id())) {
+        klog("[ahci] MSI enable FAILED (polling only)\n");
+        return;
+    }
+    g_ahci_irq_ready = 1;
+    klog("[ahci] MSI installed (vector 0x30)\n");
+}
+
+/* 返回中断触发次数（调试：证明中断路径真实生效，非 polling 兼底） */
+uint32_t ahci_irq_count(void) { return g_ahci_irq_count; }
+
 
 /* ================= 端口引擎停/启 ================= */
 
@@ -288,10 +345,14 @@ static int ahci_issue(uint8_t cmd, uint64_t lba, uint32_t count,
     fis->rsv1[0] = fis->rsv1[1] = fis->rsv1[2] = fis->rsv1[3] = 0;
 
     /* --- 发射：置 CI bit0 --- */
+    g_ahci_done = 0;
     port_w(p, PxCI, 1u);
 
-    /* --- 轮询完成：CI bit0 清零 --- */
+    /* --- 等待完成：中断优先，polling 回退 --- */
+    /* 即使 MSI 已挂载，仍同时检查 CI 位与 g_ahci_done：若中断未触发
+     * （QEMU 配置差异等），CI 清零仍能作为兼底判据，不会挂死。 */
     for (int i = 0; i < 3000000; i++) {
+        if (g_ahci_irq_ready && g_ahci_done) break;
         if ((port_r(p, PxCI) & 1u) == 0) break;
         /* 检查任务文件错误 */
         if (port_r(p, PxTFD) & PxTFD_ERR) {
@@ -332,6 +393,7 @@ int ahci_init(void)
     /* --- 1. PCI 探测 AHCI 控制器 (class 0x01, subclass 0x06) --- */
     const pci_device_t *dev = pci_find_by_class(PCI_CLASS_STORAGE, PCI_SUBCLASS_SATA);
     if (!dev) { klog("[ahci] no AHCI controller found\n"); return -1; }
+    g_pci_dev = dev;
     klog("[ahci] controller @ ");
     klog_hex(dev->vendor_id); klog(":"); klog_hex(dev->device_id); klog("\n");
 
@@ -402,6 +464,14 @@ int ahci_init(void)
     port_w(g_port, PxIS, port_r(g_port, PxIS));
     port_w(g_port, PxSERR, port_r(g_port, PxSERR));
     port_start(g_port);
+
+    /* --- 7b. 使能中断 + 挂载 MSI（失败不致命，退回 polling）--- */
+    /* 先清 HBA 全局中断状态，使能端口中断（D2H FIS 完成中断 DHRE）*/
+    mmio_w(HBA_IS, mmio_r(HBA_IS));
+    /* PxIE：DHRE(bit0)=D2H Register FIS, PSE(bit1)=PIO Setup, DSE(bit2)=DMA Setup */
+    port_w(g_port, PxIE, (1u << 0) | (1u << 1) | (1u << 2));
+    /* 使能 HBA 全局中断（GHC.IE = bit1）；MSI 在 LAPIC 就绪后由 ahci_irq_install_late() 补装 */
+    mmio_w(HBA_GHC, mmio_r(HBA_GHC) | GHC_IE);
 
     /* --- 8. IDENTIFY --- */
     uint64_t idbuf = (uint64_t)g_dma;

@@ -38,4 +38,11 @@ int ahci_flush(void);
 /* headless 自测：IDENTIFY 出容量 + 写一扇区读回校验。返回 0 全 PASS。 */
 int ahci_selftest(void);
 
+/* M2.1 MSI：延迟挂载中断。需在 LAPIC 就绪后调用（storage init 早于 LAPIC）。
+ * 成功后驱动由 polling 切换为中断驱动（仍保留 polling 回退）。幂等。 */
+void ahci_irq_install_late(void);
+
+/* 返回中断触发次数（调试验证：>0 证明 MSI 中断路径真实生效） */
+uint32_t ahci_irq_count(void);
+
 #endif /* OPENOS_AHCI64_H */

@@ -573,6 +573,36 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
      * apic_selftest so LAPIC is initialized and BSP apic_id is readable. */
     arch_x86_64_smp_selftest_run();
 
+    /* Step G.4.2 (M2.x): install storage MSI now that LAPIC is ready.
+     * Storage init ran far earlier (before LAPIC), so drivers came up in
+     * polling mode. Here we attach MSI vectors 0x30/0x31 and re-run the
+     * selftest to exercise the interrupt-driven completion path. Both
+     * install/selftest are non-fatal: polling fallback keeps working. */
+    ahci_irq_install_late();
+    nvme_irq_install_late();
+    {
+        early_console64_write("[x86_64][msi] re-verify storage via IRQ path...\n");
+        /* 临时开中断：本阶段仍在主初始化流程（正式 sti 在后面），
+         * 为验证 MSI 中断路径需临时允许外部中断递交。自测后恢复 cli。 */
+        __asm__ __volatile__("sti");
+        if (ahci_selftest() == 0)
+            early_console64_write("[x86_64][msi] AHCI IRQ-path selftest PASS\n");
+        else
+            early_console64_write("[x86_64][msi] AHCI IRQ-path selftest FAIL\n");
+        {
+            uint32_t irqn = ahci_irq_count();
+            if (irqn > 0)
+                early_console64_write("[x86_64][msi] AHCI interrupts DID fire (MSI path live)\n");
+            else
+                early_console64_write("[x86_64][msi] AHCI no interrupt fired (polling fallback)\n");
+        }
+        if (nvme_selftest() == 0)
+            early_console64_write("[x86_64][msi] NVMe IRQ-path selftest PASS\n");
+        else
+            early_console64_write("[x86_64][msi] NVMe IRQ-path selftest FAIL\n");
+        __asm__ __volatile__("cli");
+    }
+
     /* Step G.2: priority-weighted scheduling self-test. Spawns three
      * spin kthreads at HIGH / NORMAL / LOW priorities and asserts the
      * canonical CPU-share ordering H > N > L. Runs through the

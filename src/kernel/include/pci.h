@@ -32,6 +32,28 @@
 #define PCI_CMD_IO_SPACE     0x0001u
 #define PCI_CMD_MEM_SPACE    0x0002u
 #define PCI_CMD_BUS_MASTER   0x0004u
+#define PCI_CMD_INTX_DISABLE 0x0400u  /* 屏蔽 legacy INTx（使用 MSI 时置位） */
+
+/* Status register bits */
+#define PCI_STATUS_CAP_LIST  0x0010u  /* bit4: 支持 Capabilities List */
+
+/* Capability IDs */
+#define PCI_CAP_ID_MSI       0x05u
+#define PCI_CAP_ID_MSIX      0x11u
+
+/* MSI Capability register offsets（相对 cap 起始） */
+#define PCI_MSI_CTRL         0x02u  /* Message Control (16-bit) */
+#define PCI_MSI_ADDR_LO      0x04u  /* Message Address (low 32) */
+#define PCI_MSI_ADDR_HI      0x08u  /* Message Address high（仅 64-bit capable） */
+#define PCI_MSI_DATA_32      0x08u  /* Message Data（32-bit capable 时） */
+#define PCI_MSI_DATA_64      0x0Cu  /* Message Data（64-bit capable 时） */
+
+/* MSI Message Control bits */
+#define PCI_MSI_CTRL_ENABLE  0x0001u  /* bit0: MSI Enable */
+#define PCI_MSI_CTRL_64BIT   0x0080u  /* bit7: 64-bit Address capable */
+
+/* MSI Message Address 固定基址（x86 LAPIC，bits[19:12]=dest APIC ID） */
+#define PCI_MSI_ADDR_BASE    0xFEE00000u
 
 /* Header type */
 #define PCI_HEADER_MULTIFUNC 0x80u
@@ -94,6 +116,13 @@ void pci_write8(uint8_t bus, uint8_t dev, uint8_t func, uint8_t off, uint8_t val
 void pci_enable_bus_master(pci_device_t *d);
 void pci_enable_mmio(pci_device_t *d);
 void pci_enable_io(pci_device_t *d);
+
+/* 在 capability 链中查找指定 cap_id，返回其在配置空间的偏移（0=未找到） */
+uint8_t pci_find_capability(pci_device_t *d, uint8_t cap_id);
+
+/* 为设备配置 MSI，路由到指定中断向量（apic_id=目标 LAPIC ID，一般为 0）。
+ * 成功返回 1（已使能 MSI 并屏蔽 INTx），设备不支持 MSI 返回 0。 */
+int pci_msi_enable(pci_device_t *d, uint8_t vector, uint8_t apic_id);
 
 void pci_scan_all(void);
 int pci_rescan_hotplug(void);

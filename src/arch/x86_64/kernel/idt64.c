@@ -401,6 +401,8 @@ int arch_x86_64_idt_register_irq(uint8_t cpu_vector, void (*handler)(void)) {
     if (handler == 0) return -1;
     bool ok = false;
     if (cpu_vector >= 0x20u && cpu_vector < 0x30u) ok = true;
+    /* M2.x: MSI vectors 0x30..0x3F 供 PCI 设备（AHCI/NVMe 等）使用 */
+    if (cpu_vector >= 0x30u && cpu_vector < 0x40u) ok = true;
     if (cpu_vector == 0x40u) ok = true;
     if (cpu_vector == 0x41u) ok = true;
     if (!ok) return -1;

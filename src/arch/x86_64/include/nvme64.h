@@ -47,4 +47,8 @@ int nvme_fat_write(uint32_t lba, uint32_t count, const void *buf);
 /* headless 自测：IDENTIFY 出容量 + 写一块读回校验。返回 0 全 PASS。 */
 int nvme_selftest(void);
 
+/* M2.2 MSI：延迟挂载中断。需在 LAPIC 就绪后调用（storage init 早于 LAPIC）。
+ * IO CQ 创建时已置 IEN，此处仅补装 PCI MSI enable 即中断生效，无需重建队列。幂等。 */
+void nvme_irq_install_late(void);
+
 #endif /* OPENOS_NVME64_H */
