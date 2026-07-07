@@ -1,6 +1,6 @@
 # openos 待开发功能清单
 
-> 更新时间：2026-06-24
+> 更新时间：2026-07-07
 >
 > 当前状态：openos 已具备 32 位 √86 原型内核能力，能够启动、显示、输入、调度、运行基础用户程序，并具备基础 syscall、VFS、ramfs/tmpfs、shell、GUI Terminal 等模块。浏览器路线已切换为 OpenOS 自研轻量浏览器，Chromium 官方内核迁移冻结为历史备选。
 >
@@ -1600,7 +1600,7 @@
   - [√] 接入 blockdev 抽象层 + 与 FAT32/VFS 挂接（新增 `src/kernel/drivers/blockdev.c` 统一注册表/分发层 + `src/arch/x86_64/gui64/blockdev_hw.c` 硬件适配层，把 nvme0/sda/hda/hdb 包装为 blockdev_ops 注册；kernel64 启动时序：驱动 selftest→`blockdev_register_hw_devices()`→FAT32 mount；QEMU 实测 `[x86_64][blockdev] registered hw block devices` PASS，FAT32 读写 HELLO.TXT 正常）
   - [√] 中断驱动（MSI-X）—— PCI MSI-X cap 解析(cap@0x40,bir=0) + BAR 映射 + table entry0 编程 + enable；IDT NVME=0x31；延迟安装 `nvme_irq_install_late()`；QEMU 实测 `MSI-X enabled`；运行时**优选轮询**（教训：曾试 hlt 强等中断，因早期无 LAPIC timer 唤醒致挂起，回退轮询优先——与 Linux nvme polling queue 思路一致，NVMe 完成比 MSI-X 消息经 PCI 写事务投递还快）；全程保留 polling 安全网
 - [ ] M2.3：USB 栈（`usb.h` 补实现）
-  - [ ] xHCI 控制器驱动（USB 3.x，现代机型主流）
+  - [√] xHCI 控制器驱动（USB 3.x，现代机型主流）—— 新增 `src/arch/x86_64/gui64/xhci64.{c,h}`：CAP/OP/Runtime/Doorbell 寄存器映射 + DCBAA + Command Ring + Event Ring(ERST) + 端口枚举 + Slot/EP Context；MSI-X 中断路径(XHCI_VECTOR) + polling 安全网；isr64.S 新增汇编 stub + kernel64.c init 接线；QEMU headless 实测 xHCI selftest PASS + IRQ 路径 PASS，AHCI/NVMe 无回归，i18n 157 译文正常，无 panic（commit `3850d48`）
   - [ ] USB HID（键盘/鼠标）
   - [ ] USB 大容量存储（U 盘）
 - [ ] M2.4：声卡/音频（`sound.h` 补实现，AC97 或 Intel HDA + PCM 播放）
