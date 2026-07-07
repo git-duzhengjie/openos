@@ -600,6 +600,13 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
             early_console64_write("[x86_64][msi] NVMe IRQ-path selftest PASS\n");
         else
             early_console64_write("[x86_64][msi] NVMe IRQ-path selftest FAIL\n");
+        {
+            uint32_t nirq = nvme_irq_count();
+            if (nirq > 0)
+                early_console64_write("[x86_64][msi] NVMe interrupts DID fire (MSI-X path live)\n");
+            else
+                early_console64_write("[x86_64][msi] NVMe no interrupt fired (polling fallback)\n");
+        }
         __asm__ __volatile__("cli");
     }
 

@@ -12,6 +12,10 @@
 /* 日志由内核提供 */
 extern void early_serial64_write(const char *s);
 
+/* MSI-X table 需将其 MMIO BAR 映射为可访问虚拟地址（采用 identity map） */
+extern int arch_x86_64_vmm_map_range(uint64_t virt, uint64_t phys,
+                                     uint64_t length, uint64_t flags);
+
 /* ---- 简易十六进制日志 ---- */
 static void pci_log(const char *s) { early_serial64_write(s); }
 
@@ -288,6 +292,52 @@ int pci_msi_enable(pci_device_t *d, uint8_t vector, uint8_t apic_id) {
     set_command_bits(d, PCI_CMD_INTX_DISABLE);
 
     log_hex("[pci] MSI enabled cap@", cap, 2);
+    log_hex(" vec=", vector, 2);
+    pci_log("\r\n");
+    return 1;
+}
+
+/* ---- MSI-X 使能 ---- */
+int pci_msix_enable(pci_device_t *d, uint8_t vector, uint8_t apic_id) {
+    if (!d) return 0;
+    uint8_t cap = pci_find_capability(d, PCI_CAP_ID_MSIX);
+    if (!cap) { pci_log("[pci] MSI-X cap not found\r\n"); return 0; }
+
+    uint16_t ctrl  = pci_read16(d->bus, d->dev, d->func, cap + PCI_MSIX_CTRL);
+    uint32_t toff  = pci_read32(d->bus, d->dev, d->func, cap + PCI_MSIX_TABLE);
+    uint8_t  bir   = (uint8_t)(toff & PCI_MSIX_BIR_MASK);
+    uint32_t off   = toff & ~PCI_MSIX_BIR_MASK;
+    if (bir >= 6) { pci_log("[pci] MSI-X bad BIR\r\n"); return 0; }
+
+    uint64_t bar_base = d->bars[bir].base;
+    if (!bar_base) { pci_log("[pci] MSI-X BAR not mapped\r\n"); return 0; }
+    uint64_t table_pa = bar_base + off;
+
+    /* identity-map 一页足够容纳 table entry 0（首个 16B）*/
+    arch_x86_64_vmm_map_range(table_pa & ~0xFFFull, table_pa & ~0xFFFull, 0x1000, 0x13);
+    volatile uint32_t *ent = (volatile uint32_t *)table_pa;  /* entry 0 */
+
+    /* 先置 Function Mask + 未使能，安全写 table */
+    pci_write16(d->bus, d->dev, d->func, cap + PCI_MSIX_CTRL,
+                (uint16_t)((ctrl | PCI_MSIX_CTRL_MASK) & ~PCI_MSIX_CTRL_ENABLE));
+
+    /* 填 entry 0：Addr=LAPIC base|apic_id<<12, Data=vector, 解除 Vector Mask */
+    ent[PCI_MSIX_ENT_ADDR_LO / 4] = PCI_MSI_ADDR_BASE | ((uint32_t)apic_id << 12);
+    ent[PCI_MSIX_ENT_ADDR_HI / 4] = 0;
+    ent[PCI_MSIX_ENT_DATA    / 4] = (uint32_t)vector;
+    ent[PCI_MSIX_ENT_VCTRL   / 4] = 0;   /* bit0=0 解除向量屏蔽 */
+
+    /* 使能 MSI-X，解除 Function Mask */
+    uint16_t nctrl = pci_read16(d->bus, d->dev, d->func, cap + PCI_MSIX_CTRL);
+    nctrl |= PCI_MSIX_CTRL_ENABLE;
+    nctrl &= ~PCI_MSIX_CTRL_MASK;
+    pci_write16(d->bus, d->dev, d->func, cap + PCI_MSIX_CTRL, nctrl);
+
+    /* 屏蔽 legacy INTx */
+    set_command_bits(d, PCI_CMD_INTX_DISABLE);
+
+    log_hex("[pci] MSI-X enabled cap@", cap, 2);
+    log_hex(" bir=", bir, 1);
     log_hex(" vec=", vector, 2);
     pci_log("\r\n");
     return 1;

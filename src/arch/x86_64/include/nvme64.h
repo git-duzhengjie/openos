@@ -51,4 +51,7 @@ int nvme_selftest(void);
  * IO CQ 创建时已置 IEN，此处仅补装 PCI MSI enable 即中断生效，无需重建队列。幂等。 */
 void nvme_irq_install_late(void);
 
+/* 返回中断触发次数（调试验证：>0 证明 MSI/MSI-X 中断路径真实生效） */
+uint32_t nvme_irq_count(void);
+
 #endif /* OPENOS_NVME64_H */

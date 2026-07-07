@@ -55,6 +55,20 @@
 /* MSI Message Address 固定基址（x86 LAPIC，bits[19:12]=dest APIC ID） */
 #define PCI_MSI_ADDR_BASE    0xFEE00000u
 
+/* ---- MSI-X Capability ---- */
+#define PCI_MSIX_CTRL        0x02u  /* Message Control (16-bit) */
+#define PCI_MSIX_TABLE       0x04u  /* Table Offset / BIR (32-bit) */
+#define PCI_MSIX_PBA         0x08u  /* PBA Offset / BIR (32-bit) */
+#define PCI_MSIX_CTRL_ENABLE 0x8000u/* bit15: MSI-X Enable */
+#define PCI_MSIX_CTRL_MASK   0x4000u/* bit14: Function Mask */
+#define PCI_MSIX_CTRL_TSIZE  0x07FFu/* bits[10:0]: Table Size minus 1 */
+#define PCI_MSIX_BIR_MASK    0x7u   /* Table/PBA 低 3 bit = BAR index (BIR) */
+/* MSI-X table entry（16B）字段偏移 */
+#define PCI_MSIX_ENT_ADDR_LO 0x0u
+#define PCI_MSIX_ENT_ADDR_HI 0x4u
+#define PCI_MSIX_ENT_DATA    0x8u
+#define PCI_MSIX_ENT_VCTRL   0xCu   /* Vector Control: bit0 = Mask */
+
 /* Header type */
 #define PCI_HEADER_MULTIFUNC 0x80u
 #define PCI_HEADER_TYPE_MASK 0x7Fu
@@ -123,6 +137,12 @@ uint8_t pci_find_capability(pci_device_t *d, uint8_t cap_id);
 /* 为设备配置 MSI，路由到指定中断向量（apic_id=目标 LAPIC ID，一般为 0）。
  * 成功返回 1（已使能 MSI 并屏蔽 INTx），设备不支持 MSI 返回 0。 */
 int pci_msi_enable(pci_device_t *d, uint8_t vector, uint8_t apic_id);
+
+/* 为设备配置 MSI-X，将 table entry 0 路由到指定中断向量。
+ * 需设备 BAR 已解析（bars[BIR].base 为有效 MMIO 物理地址）。
+ * 成功返回 1（已使能 MSI-X、解除 entry0/Function 屏蔽、屏蔽 INTx），否则 0。
+ * mmio_map: 将 MSI-X table 物理地址映射为可访问虚拟地址的回调（可传 0 表示直映射）。 */
+int pci_msix_enable(pci_device_t *d, uint8_t vector, uint8_t apic_id);
 
 void pci_scan_all(void);
 int pci_rescan_hotplug(void);

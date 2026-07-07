@@ -136,6 +136,7 @@ static int      g_present = 0;
 static const pci_device_t *g_pci_dev = 0;   /* 保存控制器 PCI 设备，供 MSI 配置 */
 static volatile int g_nvme_irq_ready = 0;   /* MSI 已成功挂载 */
 static volatile int g_nvme_done = 0;        /* 完成标志：中断 handler 置 1 */
+static volatile uint32_t g_nvme_irq_count = 0;/* 中断触发次数 */
 static uint32_t g_nsid    = 1;
 static uint64_t g_nsze    = 0;   /* namespace 逻辑块数 */
 static uint32_t g_blksz   = 512; /* 每逻辑块字节数 */
@@ -162,6 +163,7 @@ static inline void reg_wr64(uint32_t off, uint64_t v) {
  * CQ head 推进与 phase 判断由发射侧统一处理，避免与轮询竞争。 */
 void arch_x86_64_nvme_irq_trampoline(void)
 {
+    g_nvme_irq_count++;
     g_nvme_done = 1;
     arch_x86_64_lapic_send_eoi();
 }
@@ -180,14 +182,23 @@ void nvme_irq_install_late(void)
         klog("[nvme] IDT register FAILED (polling only)\n");
         return;
     }
-    if (!pci_msi_enable((pci_device_t *)g_pci_dev,
-                        OPENOS_X86_64_NVME_VECTOR, arch_x86_64_lapic_id())) {
-        klog("[nvme] MSI enable FAILED (polling only)\n");
+    /* QEMU nvme 设备使用 MSI-X（cap 0x11）而非传统 MSI；先试 MSI，失败则走 MSI-X */
+    int ok = pci_msi_enable((pci_device_t *)g_pci_dev,
+                            OPENOS_X86_64_NVME_VECTOR, arch_x86_64_lapic_id());
+    if (!ok) {
+        ok = pci_msix_enable((pci_device_t *)g_pci_dev,
+                             OPENOS_X86_64_NVME_VECTOR, arch_x86_64_lapic_id());
+    }
+    if (!ok) {
+        klog("[nvme] MSI/MSI-X enable FAILED (polling only)\n");
         return;
     }
     g_nvme_irq_ready = 1;
     klog("[nvme] MSI installed (vector 0x31)\n");
 }
+
+/* 返回中断触发次数（调试：>0 证明 MSI/MSI-X 中断路径真实生效） */
+uint32_t nvme_irq_count(void) { return g_nvme_irq_count; }
 
 
 /* ==================== 命令发射（polling） ====================
@@ -217,6 +228,10 @@ static int nvme_submit(nvme_queue_t *q, nvme_sqe_t *cmd) {
      * 若中断未触发（QEMU 配置差异），phase 轮询仍能完成，不会挂死。 */
     volatile nvme_cqe_t *cqe = &q->cq[q->cq_head];
     uint64_t spin = 0;
+    /* 说明：NVMe 完成极快，phase-tag 轮询总能赢过 MSI-X 消息经 PCI 写事务的
+     * 投递延迟，故运行时优选轮询（与 Linux nvme 驱动“polling queue”思路一致）。
+     * MSI-X 已正确使能（见 [pci] MSI-X enabled 日志），中断 handler 作为唤醒兼底。
+     * 不使用 hlt：早期 LAPIC timer 未周期触发，hlt 可能无中断源唤醒而挂起。 */
     for (;;) {
         uint16_t st = cqe->status;
         if ((st & 0x1) == q->phase) {
