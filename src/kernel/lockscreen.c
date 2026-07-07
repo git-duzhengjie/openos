@@ -23,6 +23,9 @@ extern void early_console64_write(const char *s);
 extern int gui_event_pop(gui_event_t *out);
 /* gui_set_lockscreen_capture：锁屏门闸，置 1 时强制捕获所有按键进事件队列 */
 extern void gui_set_lockscreen_capture(int on);
+/* usb_hid_poll：轮询 USB HID 设备（键盘/鼠标）的中断环，把 report 注入事件队列。
+ * 锁屏阻塞了主循环，必须在此手动驱动，否则 QEMU usb-kbd 环境下收不到任何按键。 */
+extern void usb_hid_poll(void);
 
 /* ------------------------------------------------------------------
  * 密码契约（编译期硬编码）
@@ -180,6 +183,12 @@ void lockscreen_run(void)
             need_redraw = 0;
         }
 
+        /* 关键：锁屏阻塞了内核主循环，主循环里的 usb_hid_poll() 不会再跑。
+         * QEMU GUI 模式挂 usb-kbd 后，键盘走 USB 轮询而非 PS/2 中断，
+         * 必须在此手动轮询，否则 USB 键盘的 report 永远无人消费，事件队列恒空，
+         * 表现为“锁屏界面完全无法输入密码”。 */
+        usb_hid_poll();
+
         /* 消费所有排队事件 */
         while (gui_event_pop(&ev)) {
             if (ev.type != GUI_EVENT_KEY_DOWN) {
@@ -224,6 +233,9 @@ void lockscreen_run(void)
             }
         }
 
-        __asm__ __volatile__("hlt");
+        /* 不能用 hlt 睡死：USB HID 是轮询式（无中断唤醒），hlt 后 CPU 停机会
+         * 导致 usb_hid_poll() 无法及时轮询，按键丢失或极度迟钝。
+         * 改用 pause 保持忙轮询，既降低总线功耗又不阻断 USB 轮询。 */
+        __asm__ __volatile__("pause");
     }
 }
