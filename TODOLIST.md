@@ -1590,7 +1590,7 @@
   - [√] IDENTIFY DEVICE + READ/WRITE DMA（command list/FIS/PRDT 构建，轮询 CI 完成）
   - [√] 接入 blockdev 抽象层（sda 注册为 blockdev_ops）+ selftest write/read/verify
   - [√] QEMU 实测：`[ahci] selftest: write/read/verify PASS @ lba=131062` → `SATA disk selftest PASS`
-  - [ ] 中断驱动（现为轮询，MSI 待接）
+  - [√] 中断驱动（MSI）—— PCI MSI cap 解析(cap@0x80) + Message Addr/Data 编程 + INTx 屏蔽；IDT 放行 MSI 向量段 0x30-0x3F(AHCI=0x30)；isr64.S 仿 mouse 模板加 stub + LAPIC EOI；延迟安装 `ahci_irq_install_late()`(storage init 早于 LAPIC，故拆出在 apic_selftest 后调用) + sti/cli 包裹自测窗口；QEMU 实测 `AHCI interrupts DID fire (MSI path live)` 中断真实触发；全程保留 polling 超时回退安全网
 - [ ] M2.2：NVMe 驱动（现代 SSD 主流接口）
   - [√] PCI 枚举识别 NVMe(class 0x0108) + BAR0 MMIO 映射 + CAP/版本读取
   - [√] 控制器初始化：复位、Admin SQ/CQ 创建、CC.EN 使能、CSTS.RDY 等待
@@ -1598,7 +1598,7 @@
   - [√] IO 命令：阻塞式 READ/WRITE(nvme_submit 轮询 phase tag) + 自测 write/read/verify PASS
   - [√] 根治“IDENTIFY 成功但数据全零”：`nvme_submit` 完成判定后读 DMA 前加 `mfence`，敲门铃前加 `sfence`（“加 klog 就好”的时序陷阱，同 headless 假 PASS）
   - [√] 接入 blockdev 抽象层 + 与 FAT32/VFS 挂接（新增 `src/kernel/drivers/blockdev.c` 统一注册表/分发层 + `src/arch/x86_64/gui64/blockdev_hw.c` 硬件适配层，把 nvme0/sda/hda/hdb 包装为 blockdev_ops 注册；kernel64 启动时序：驱动 selftest→`blockdev_register_hw_devices()`→FAT32 mount；QEMU 实测 `[x86_64][blockdev] registered hw block devices` PASS，FAT32 读写 HELLO.TXT 正常）
-  - [ ] 中断驱动（现为轮询，MSI-X 待接）
+  - [√] 中断驱动（MSI-X）—— PCI MSI-X cap 解析(cap@0x40,bir=0) + BAR 映射 + table entry0 编程 + enable；IDT NVME=0x31；延迟安装 `nvme_irq_install_late()`；QEMU 实测 `MSI-X enabled`；运行时**优选轮询**（教训：曾试 hlt 强等中断，因早期无 LAPIC timer 唤醒致挂起，回退轮询优先——与 Linux nvme polling queue 思路一致，NVMe 完成比 MSI-X 消息经 PCI 写事务投递还快）；全程保留 polling 安全网
 - [ ] M2.3：USB 栈（`usb.h` 补实现）
   - [ ] xHCI 控制器驱动（USB 3.x，现代机型主流）
   - [ ] USB HID（键盘/鼠标）
