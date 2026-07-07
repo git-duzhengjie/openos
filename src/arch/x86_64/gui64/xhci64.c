@@ -632,6 +632,10 @@ typedef struct xhci_dev {
     uint32_t    ep_in_cycle;
     uint8_t    *hid_buf;      /* HID report DMA 缓冲 */
     uint64_t    hid_buf_phys;
+    /* 全局事件泵分发的待取 report（每设备一个待取槽）*/
+    uint8_t     rpt_data[64];
+    uint32_t    rpt_len;      /* 待取 report 字节数 */
+    volatile int rpt_ready;   /* 1=有新 report 待 poll 取走 */
 } xhci_dev_t;
 
 static xhci_dev_t g_devs[XHCI_MAX_DEVS];
@@ -1102,23 +1106,29 @@ int xhci_hid_configure(uint32_t idx) {
     return 0;
 }
 
-/* 非阻塞消费一个事件：仅命中属于 (slot_id, ep_dci) 的 Transfer Event。
- * 命中返回 residual(>=0)；无匹配事件（或事件环空）返回 -1。
- * 途中遇到的其它类型事件一律消费跳过（避免事件环阻塞）。 */
-static int xhci_poll_transfer_event(uint32_t slot_id, uint32_t ep_dci) {
+/* 通过 slot_id 查设备索引；未找到返回 -1 */
+static int xhci_dev_by_slot(uint32_t slot_id) {
+    for (int i = 0; i < XHCI_MAX_DEVS; i++)
+        if (g_devs[i].used && g_devs[i].slot_id == slot_id) return i;
+    return -1;
+}
+
+/* 全局事件泵：一次性排空事件环，将每个 HID Transfer Event 按
+ * (slot_id, ep) 分发到对应设备的 report 缓冲并立即重新武装。
+ * 绝不丢弃/偷走其它设备的事件。非 Transfer 事件消费跳过。
+ * 由 xhci_hid_poll 触发（幂等，环空则立即返回）。 */
+static void xhci_pump_events(void) {
     xhci_ctrl_t *x = &g_xhci;
-    /* 单次扫描：最多消费本轮已产生的连续事件 */
-    for (uint32_t guard = 0; guard < EVT_RING_TRBS; guard++) {
+    for (uint32_t guard = 0; guard < EVT_RING_TRBS * 2; guard++) {
         volatile xhci_trb_t *evt = &x->evt_ring[x->evt_dequeue];
         uint32_t c = evt->control;
         int cyc = (c & TRB_CYCLE) ? 1 : 0;
-        if (cyc != (int)x->evt_cycle) return -1;   /* 无新事件 */
+        if (cyc != (int)x->evt_cycle) return;      /* 无新事件 */
 
-        uint32_t type = (c >> TRB_TYPE_SHIFT) & 0x3F;
+        uint32_t type  = (c >> TRB_TYPE_SHIFT) & 0x3F;
         uint32_t eslot = TRB_GET_SLOT(evt);
         uint32_t eep   = (c >> 16) & 0x1F;         /* Endpoint ID = DCI */
-        int resid = (int)(evt->status & 0xFFFFFF);
-        int hit = (type == TRB_TRANSFER_EVT && eslot == slot_id && eep == ep_dci);
+        int      resid = (int)(evt->status & 0xFFFFFF);
 
         /* 消费事件 + 更新 ERDP */
         x->evt_dequeue++;
@@ -1129,10 +1139,28 @@ static int xhci_poll_transfer_event(uint32_t slot_id, uint32_t ep_dci) {
         uint64_t erdp = x->evt_ring_phys + x->evt_dequeue * sizeof(xhci_trb_t);
         mmio_w64(x->rt, XRT_ERDP(0), erdp | ERDP_EHB);
 
-        if (hit) return resid;
+        if (type != TRB_TRANSFER_EVT) continue;    /* 非传输事件跳过 */
+
+        int di = xhci_dev_by_slot(eslot);
+        if (di < 0) continue;
+        xhci_dev_t *d = &g_devs[di];
+        if (!d->ep_in_ring) continue;
+        uint32_t want_dci = (d->ep_in_addr & 0x0F) * 2 + 1;
+        if (eep != want_dci) continue;             /* 非该设备 Interrupt-IN */
+
+        /* 实际长度 = 期望长度 - residual，拷入设备 report 缓冲 */
+        uint32_t rlen = d->ep_in_mps ? d->ep_in_mps : 8;
+        if (rlen > sizeof(d->rpt_data)) rlen = sizeof(d->rpt_data);
+        uint32_t n = (rlen > (uint32_t)resid) ? (rlen - (uint32_t)resid) : 0;
+        if (n > sizeof(d->rpt_data)) n = sizeof(d->rpt_data);
+        for (uint32_t i = 0; i < n; i++) d->rpt_data[i] = d->hid_buf[i];
+        d->rpt_len   = n;
+        d->rpt_ready = 1;
+
+        xhci_hid_arm(d);                           /* 立即重新武装下一个传输 */
     }
-    return -1;
 }
+
 
 /* 非阻塞探测第 idx 个 HID 设备的 Interrupt-IN 传输：
  *   命中一个 report → 拷贝到 out_buf 并重新投递 → 返回字节数(>0)
@@ -1143,20 +1171,14 @@ int xhci_hid_poll(uint32_t idx, uint8_t *out_buf, uint32_t out_cap) {
     xhci_dev_t *d = &g_devs[di];
     if (!d->ep_in_ring) return -2;         /* 未配置 */
 
-    uint32_t ep_num = d->ep_in_addr & 0x0F;
-    uint32_t want_dci = ep_num * 2 + 1;
+    /* 先排空事件环，按 slot 分发到各设备缓冲（不偷其它设备事件）*/
+    xhci_pump_events();
 
-    int resid = xhci_poll_transfer_event(d->slot_id, want_dci);
-    if (resid < 0) return 0;               /* 无匹配事件 */
-
-    /* 实际长度 = 期望长度 - residual */
-    uint32_t rlen = d->ep_in_mps ? d->ep_in_mps : 8;
-    if (rlen > 64) rlen = 64;
-    uint32_t n = (rlen > (uint32_t)resid) ? (rlen - (uint32_t)resid) : 0;
+    if (!d->rpt_ready) return 0;           /* 本设备无新 report */
+    uint32_t n = d->rpt_len;
     if (n > out_cap) n = out_cap;
-    for (uint32_t i = 0; i < n; i++) out_buf[i] = d->hid_buf[i];
-
-    xhci_hid_arm(d);                       /* 重新武装下一个传输 */
+    for (uint32_t i = 0; i < n; i++) out_buf[i] = d->rpt_data[i];
+    d->rpt_ready = 0;
     return (int)n;
 }
 
