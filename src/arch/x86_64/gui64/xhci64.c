@@ -340,6 +340,11 @@ static int xhci_wait_event(uint32_t want_type, uint64_t trb_phys,
                 if (out_cc)    *out_cc    = TRB_GET_CC(evt);
                 if (out_slot)  *out_slot  = TRB_GET_SLOT(evt);
                 if (out_resid) *out_resid = evt->status & 0xFFFFFF;
+            } else if (type == TRB_TRANSFER_EVT) {
+                /* 非目标的 Transfer Event（HID Interrupt-IN 完成）：
+                 * 不能当作"杂项"消费丢弃，否则 HID report 永久丢失。
+                 * 交给 xhci_pump_events 分发。这里遇到即停，保留在环上。 */
+                return -1;
             }
             /* 推进 dequeue + 更新 ERDP（命中与否都要消费）*/
             x->evt_dequeue++;
@@ -902,6 +907,14 @@ static xhci_dev_t *xhci_enumerate_device(uint32_t port, uint32_t speed) {
                           (USB_DESC_CONFIG << 8) | 0, 0, total, dma_phys);
     if (r < 0) { XLOG("  GET config full FAIL"); d->used = 0; return 0; }
 
+    /* [dbg] dump raw config descriptor bytes */
+    XLOG_NN("  cfg raw total="); XDEC(total); early_serial64_write(" :");
+    {
+        uint32_t _n = total; if (_n > 60) _n = 60;
+        for (uint32_t _k = 0; _k < _n; _k++) { early_serial64_write(" "); XHEX(dma[_k]); }
+        early_serial64_write("\n");
+    }
+
     if (xhci_parse_config(d, dma, total) != 0) {
         XLOG("  no HID interrupt-IN endpoint (skip)"); d->used = 0; return 0;
     }
@@ -1016,6 +1029,12 @@ static void xhci_hid_arm(xhci_dev_t *d) {
     xhci_trb_t *trb = &d->ep_in_ring[d->ep_in_enqueue];
     trb->parameter = d->hid_buf_phys;
     trb->status    = rlen;                 /* TRB Transfer Length */
+    { extern void early_console64_write_hex64(unsigned long long);
+      extern void early_console64_write(const char*);
+      early_console64_write("[arm] slot="); early_console64_write_hex64(d->slot_id);
+      early_console64_write(" enq="); early_console64_write_hex64(d->ep_in_enqueue);
+      early_console64_write(" cyc="); early_console64_write_hex64(d->ep_in_cycle);
+      early_console64_write("\n"); }
     /* Normal TRB：IOC=1（完成上报事件），ISP=1（短包也上报） */
     trb->control = (TRB_NORMAL << TRB_TYPE_SHIFT) | TRB_IOC | TRB_ISP | d->ep_in_cycle;
 
@@ -1087,8 +1106,8 @@ int xhci_hid_configure(uint32_t idx) {
     uint32_t itv  = d->ep_in_interval ? d->ep_in_interval : 7;
     ep[0] = (itv << 16);
     ep[1] = (3u << 1) | (7u << 3) | (mps << 16);
-    ep[2] = (uint32_t)(d->ep_in_ring_phys | 1u);   /* TR Dequeue + DCS=1 */
-    ep[3] = (uint32_t)(d->ep_in_ring_phys >> 32);
+    ep[2] = (uint32_t)((d->ep_in_ring_phys & 0xFFFFFFF0u) | 1u);   /* TR Dequeue Ptr Lo (bit0=DCS) */
+    ep[3] = (uint32_t)(d->ep_in_ring_phys >> 32);                 /* TR Dequeue Ptr Hi */
     ep[4] = mps;                                   /* Average TRB Length */
 
     /* 4) Configure Endpoint 命令 */
@@ -1130,6 +1149,13 @@ static void xhci_pump_events(void) {
         uint32_t eep   = (c >> 16) & 0x1F;         /* Endpoint ID = DCI */
         int      resid = (int)(evt->status & 0xFFFFFF);
 
+        { extern void early_console64_write_hex64(unsigned long long);
+          extern void early_console64_write(const char*);
+          early_console64_write("[evt-raw] type="); early_console64_write_hex64(type);
+          early_console64_write(" slot="); early_console64_write_hex64(eslot);
+          early_console64_write(" ep="); early_console64_write_hex64(eep);
+          early_console64_write("\n"); }
+
         /* 消费事件 + 更新 ERDP */
         x->evt_dequeue++;
         if (x->evt_dequeue >= EVT_RING_TRBS) {
@@ -1140,6 +1166,12 @@ static void xhci_pump_events(void) {
         mmio_w64(x->rt, XRT_ERDP(0), erdp | ERDP_EHB);
 
         if (type != TRB_TRANSFER_EVT) continue;    /* 非传输事件跳过 */
+
+        { extern void early_console64_write_hex64(unsigned long long);
+          extern void early_console64_write(const char*);
+          early_console64_write("[xevt] xfer slot="); early_console64_write_hex64(eslot);
+          early_console64_write(" ep="); early_console64_write_hex64(eep);
+          early_console64_write("\n"); }
 
         int di = xhci_dev_by_slot(eslot);
         if (di < 0) continue;
@@ -1171,7 +1203,28 @@ int xhci_hid_poll(uint32_t idx, uint8_t *out_buf, uint32_t out_cap) {
     xhci_dev_t *d = &g_devs[di];
     if (!d->ep_in_ring) return -2;         /* 未配置 */
 
-    /* 先排空事件环，按 slot 分发到各设备缓冲（不偷其它设备事件）*/
+    /* 【修复】不再每轮空敲门铃：此前每轮敲门铃（412 万次）会不断 reset
+     * QEMU 端点的 retry 定时器，导致端点永远停在 retry、真实输入进不来。
+     *
+     * 但完全不敲又矫枉过正：开机首次 arm 投 1 个 TRB → 无按键 QEMU 返回 NAK →
+     * 端点停在 retry；此后若 QEMU 的 usb_wakeup 时机没对上（trace 实测 epid3
+     * 开机后零 ep_kick），端点就永久停摆、真实输入再也进不来。
+     *
+     * 折中方案：低频兜底门铃——每隔 XHCI_HID_KICK_INTERVAL 轮敲一次已配置端点的
+     * 门铃，把可能停在 retry 的端点周期性踢活。频率远低于忙等阈值，不会 reset
+     * retry 定时器造成 412 万次风暴，又能保证停摆端点在毫秒级内被重新推进。 */
+    {
+        static uint32_t s_kick_tick = 0;
+        #define XHCI_HID_KICK_INTERVAL 512u
+        if (++s_kick_tick >= XHCI_HID_KICK_INTERVAL) {
+            s_kick_tick = 0;
+            uint32_t ep_num = d->ep_in_addr & 0x0F;
+            xhci_ring_dev_doorbell(d->slot_id, ep_num * 2 + 1);
+        }
+    }
+
+    /* 排空事件环，按 slot 分发到各设备缓冲（不偷其它设备事件）；
+     * pump 内部会对消费掉的 TRB 位置补投新 TRB 并敲门铃。 */
     xhci_pump_events();
 
     if (!d->rpt_ready) return 0;           /* 本设备无新 report */

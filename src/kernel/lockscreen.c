@@ -26,6 +26,10 @@ extern void gui_set_lockscreen_capture(int on);
 /* usb_hid_poll：轮询 USB HID 设备（键盘/鼠标）的中断环，把 report 注入事件队列。
  * 锁屏阻塞了主循环，必须在此手动驱动，否则 QEMU usb-kbd 环境下收不到任何按键。 */
 extern void usb_hid_poll(void);
+/* arch_x86_64_delay_ms：TSC 校准的毫秒级延时，用于锁屏轮询节流。
+ * 见根因说明：本系统无 PIT 100Hz 周期中断，hlt 会一睡不醒，
+ * 故改用 sti + 短延时的限速轮询替代 sti;hlt。 */
+extern void arch_x86_64_delay_ms(unsigned int ms);
 
 /* ------------------------------------------------------------------
  * 密码契约（编译期硬编码）
@@ -184,9 +188,11 @@ void lockscreen_run(void)
         }
 
         /* 关键：锁屏阻塞了内核主循环，主循环里的 usb_hid_poll() 不会再跑。
-         * QEMU GUI 模式挂 usb-kbd 后，键盘走 USB 轮询而非 PS/2 中断，
+         * 纯 USB HID 环境下键盘/鼠标走 USB 中断端点轮询，
          * 必须在此手动轮询，否则 USB 键盘的 report 永远无人消费，事件队列恒空，
-         * 表现为“锁屏界面完全无法输入密码”。 */
+         * 表现为“锁屏界面完全无法输入密码”。
+         * 注意：此循环每 5ms 跑一次，切勿在此无限流地写串口日志，
+         * 否则串口 I/O 会吃满时间片、饿死 usb_hid_poll，反而导致输入进不来。 */
         usb_hid_poll();
 
         /* 消费所有排队事件 */
@@ -233,9 +239,14 @@ void lockscreen_run(void)
             }
         }
 
-        /* 不能用 hlt 睡死：USB HID 是轮询式（无中断唤醒），hlt 后 CPU 停机会
-         * 导致 usb_hid_poll() 无法及时轮询，按键丢失或极度迟钝。
-         * 改用 pause 保持忙轮询，既降低总线功耗又不阻断 USB 轮询。 */
-        __asm__ __volatile__("pause");
+        /* 限速轮询：本系统没有 PIT 100Hz 周期中断（只有 SMP 调度用的
+         * LAPIC timer，锁屏阻塞 BSP 后不保证周期性唤醒 hlt），
+         * 若用 `sti; hlt` 睡到中断，会一睡不醒 —— 表现为 poll# 卡在 1、
+         * 指针不动、点击无效、密码无法输入。
+         * 故改为 `sti`（保持 IF=1 让 USB/键盘/鼠标中断能进）+ 短延时节流：
+         * 每轮 delay_ms(5) 约 200Hz 轮询，既不满载 CPU 饿死 QEMU UI 线程，
+         * 又能持续驱动 usb_hid_poll() 与消费事件队列。 */
+        __asm__ __volatile__("sti");
+        arch_x86_64_delay_ms(5);
     }
 }

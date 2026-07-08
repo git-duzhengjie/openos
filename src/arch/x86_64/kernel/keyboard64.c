@@ -175,11 +175,14 @@ static void kbd_handle_extended(uint8_t sc, int release) {
 }
 
 /* Core scancode processor, called from the IRQ trampoline. */
+extern void serial_write(const char *s);
+extern void serial_write_hex(unsigned int v);
 static void kbd_process_scancode(uint8_t sc) {
     int release;
     char c;
 
     kb.irq_count++;
+    serial_write("[kbd-irq] sc="); serial_write_hex(sc); serial_write("\n");
 
     if (sc == 0xE0) { kb.extended = 1; return; }
     if (sc == 0xE1) { kb.extended = 2; return; }

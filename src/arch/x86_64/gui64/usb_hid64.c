@@ -193,6 +193,13 @@ void usb_hid_init(void) {
 void usb_hid_poll(void) {
     if (!g_hid_inited) return;
     static int logged_kbd = 0, logged_mouse = 0;
+    static unsigned long hb = 0;
+    if ((hb++ & 0x3FF) == 0) {
+        extern void early_console64_write_hex64(unsigned long long);
+        extern void early_console64_write(const char*);
+        early_console64_write("[hid-hb] poll#"); early_console64_write_hex64(hb);
+        early_console64_write("\n");
+    }
     uint8_t buf[8];
     for (int i = 0; i < USB_HID_MAX; i++) {
         usb_hid_dev_t *h = &g_hid[i];
