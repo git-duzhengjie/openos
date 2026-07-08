@@ -1605,7 +1605,7 @@
     - [√] 多设备枚举验证 —— headless 实测 slot1(kbd)+slot2(mouse) 双设备完整枚举，`ep_enable epid 3`(中断 IN) 双设备均成功
     - [√] 中断 IN 端点数据传输链路打通 —— 新增 `tools/qmp_inject.py` + `run_inject_test.bat`(QMP `input-send-event` 注入)，**首次在 headless 下让中断 IN 端点产生真实数据传输**：trace 坐实 `ep_kick epid 3`→`xfer_start`→`packet ep1 setup→complete`→`xfer_success len 8`(鼠标报文穿过中断端点)。之前几轮 `xfer_success` 全是 EP0 枚举流量、epid 3 恒为 0 的困境已破
     - [√] 根因确认：驱动代码无 bug，此前“卡死”纯粹是 headless 缺真实输入源(相对鼠标不动即 NAK 无中断数据)；`build+run.bat` GUI 段去掉 `usb-kbd` 消除与 PS/2 键盘的锁屏输入抢占冲突
-    - [ ] GUI 模式真机人工验收(移动鼠标看光标/锁屏敲密码)留作最终确认
+    - [√] GUI 模式真机人工验收 —— 用户在 GUI 窗口实测鼠标光标跟随移动、锁屏界面敲密码字符正常输入，USB HID 输入闭环最终确认通过
   - [ ] USB 大容量存储（U 盘）
 - [ ] M2.4：声卡/音频（`sound.h` 补实现，AC97 或 Intel HDA + PCM 播放）
 
