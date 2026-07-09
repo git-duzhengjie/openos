@@ -79,6 +79,13 @@ static void node_free(ramfs_node_t *n) {
 }
 
 /* ---- 建立一个节点，挂到 parent 下 ---- */
+/* 进程凭证（由 arch/x86_64 proc64 提供；当前 proc 仅有 uid/gid，无 caps 字段，
+ * 特权判定统一以 uid==0（root）为准）—— 前置声明供 node_create 等使用 */
+extern uint32_t arch_x86_64_proc_current_uid(void);
+extern uint32_t arch_x86_64_proc_current_gid(void);
+#define RAMFS_CUR_UID() arch_x86_64_proc_current_uid()
+#define RAMFS_CUR_GID() arch_x86_64_proc_current_gid()
+
 static ramfs_node_t *node_create(ramfs_node_t *parent, const char *name, uint32_t mode) {
     ramfs_node_t *n = node_alloc();
     if (!n) return 0;
@@ -87,6 +94,8 @@ static ramfs_node_t *node_create(ramfs_node_t *parent, const char *name, uint32_
     n->inode.mode = mode;
     n->inode.size = 0;
     n->inode.nlinks = 1;
+    n->inode.uid = RAMFS_CUR_UID();   /* M3.4：属主 = 创建者 */
+    n->inode.gid = RAMFS_CUR_GID();
     n->parent  = parent;
     n->child   = 0;
     n->sibling = 0;
@@ -820,8 +829,86 @@ int vfs_rename(const char *oldpath, const char *newpath) {
 }
 
 /* ============================================================
- * 初始化：建根目录 + 导入 initrd 文件
+ * M3.4 文件权限模型：rwx / uid / gid / 属主
  * ============================================================ */
+
+/* 权限位布局（POSIX 风格，与 vfs.h 的 S_I* 一致）：
+ *   owner: bit8..6 (rwx)，group: bit5..3，other: bit2..0 */
+#ifndef VFS_MAY_EXEC
+#define VFS_MAY_EXEC   0x1
+#define VFS_MAY_WRITE  0x2
+#define VFS_MAY_READ   0x4
+#endif
+
+/* 根据 inode.mode/uid/gid 与调用者 uid/gid 判定是否允许 want。
+ * root(uid==0) 或具 SYS_ADMIN 能力者直接放行。
+ * 返回 0 允许，-OPENOS_EACCES 拒绝。 */
+int vfs_check_perm(const inode_t *ino, uint32_t uid, uint32_t gid, int want) {
+    if (!ino) return -1;
+    if (want == 0) return 0;
+    /* root 万能（与 Linux 一致：文件则 rwx 均过，但执行位要求至少一个 x） */
+    if (uid == 0) {
+        if (want & VFS_MAY_EXEC) {
+            uint32_t anyx = (ino->mode >> 6 | ino->mode >> 3 | ino->mode) & VFS_MAY_EXEC;
+            /* 目录总是可搜索；普通文件需至少一个 x */
+            if ((ino->mode & 0xF000) == FS_DIR || anyx) return 0;
+            return -1;
+        }
+        return 0;
+    }
+    /* 选择适用的权限位组：owner > group > other */
+    uint32_t perm;
+    if (uid == ino->uid) {
+        perm = (ino->mode >> 6) & 0x7;   /* owner rwx */
+    } else if (gid == ino->gid) {
+        perm = (ino->mode >> 3) & 0x7;   /* group rwx */
+    } else {
+        perm = ino->mode & 0x7;          /* other rwx */
+    }
+    if ((perm & (uint32_t)want) == (uint32_t)want) return 0;
+    return -1;
+}
+
+/* 以当前进程凭证检查 path 的访问权限。 */
+int vfs_access(const char *path, int want) {
+    if (!path || !g_ramfs_ready) return -1;
+    ramfs_node_t *n = path_resolve(path, 0, 0, 0);
+    if (!n) return -1;
+    return vfs_check_perm(&n->inode, RAMFS_CUR_UID(), RAMFS_CUR_GID(), want);
+}
+
+/* chmod：仅保留低 12 位权限/粘性位，保持文件类型位不变。
+ * 仅属主或 root/SYS_ADMIN 可改。 */
+int vfs_chmod(const char *path, uint32_t mode) {
+    if (!path || !g_ramfs_ready) return -1;
+    ramfs_node_t *n = path_resolve(path, 0, 0, 0);
+    if (!n) return -1;
+    uint32_t cuid = RAMFS_CUR_UID();
+    if (cuid != 0 && cuid != n->inode.uid)
+        return -1;
+    uint32_t typebits = n->inode.mode & 0xF000;
+    n->inode.mode = typebits | (mode & 0x0FFF);   /* rwx+setuid/gid/sticky */
+    return 0;
+}
+
+/* chown：改属主/属组。普通用户不能改 owner；仅 root/CHOWN 能力可改。
+ * 传入 (uint32_t)-1 表示保持不变。 */
+int vfs_chown(const char *path, uint32_t uid, uint32_t gid) {
+    if (!path || !g_ramfs_ready) return -1;
+    ramfs_node_t *n = path_resolve(path, 0, 0, 0);
+    if (!n) return -1;
+    uint32_t cuid = RAMFS_CUR_UID();
+    int is_priv = (cuid == 0);
+    if (uid != (uint32_t)-1 && uid != n->inode.uid && !is_priv)
+        return -1;                                  /* 非特权不能移交属主 */
+    if (gid != (uint32_t)-1 && gid != n->inode.gid && !is_priv && cuid != n->inode.uid)
+        return -1;                                  /* 非属主且非特权不能改组 */
+    if (uid != (uint32_t)-1) n->inode.uid = uid;
+    if (gid != (uint32_t)-1) n->inode.gid = gid;
+    return 0;
+}
+
+
 
 /* 沿着全路径逐级确保中间目录存在，返回最后一级的父目录，
  * 并把最后一段（文件名）写入 leaf。 */

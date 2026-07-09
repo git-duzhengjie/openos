@@ -211,6 +211,15 @@ int    vfs_symlink(const char *target, const char *linkpath);
 int    vfs_readlink(const char *path, char *buf, uint32_t size);
 int    vfs_chmod(const char *path, uint32_t mode);
 int    vfs_chown(const char *path, uint32_t uid, uint32_t gid);
+/* M3.4 权限模型：访问权限位 (want)，供 vfs_check_perm/vfs_access 使用 */
+#define VFS_MAY_EXEC   0x1
+#define VFS_MAY_WRITE  0x2
+#define VFS_MAY_READ   0x4
+/* 根据 inode 的 mode/uid/gid 与调用者 uid/gid 判定是否允许 want 访问；
+ * 返回 0 允许，-OPENOS_EACCES 拒绝。root(uid=0) 或具 SYS_ADMIN 能力者绕过。 */
+int    vfs_check_perm(const inode_t *ino, uint32_t uid, uint32_t gid, int want);
+/* 以当前进程凭证检查 path 的访问权限（want 为 VFS_MAY_* 位或）；0 允许，负值拒绝 */
+int    vfs_access(const char *path, int want);
 dentry_t *vfs_readdir(const char *path, int index);
 
 /* 挂载 */

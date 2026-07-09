@@ -4,7 +4,7 @@
 >
 > 当前状态：openos 已具备 32 位 √86 原型内核能力，能够启动、显示、输入、调度、运行基础用户程序，并具备基础 syscall、VFS、ramfs/tmpfs、shell、GUI Terminal 等模块。浏览器路线已切换为 OpenOS 自研轻量浏览器，Chromium 官方内核迁移冻结为历史备选。
 >
-> 最近完成：**M3.3 统一 VFS 多类型挂载** —— 将 ext2/ext4 只读驱动对称接入 ramfs64.c 的统一 VFS 分发层：新增 /mnt/ext 挂载点（ext_match/ext_fd 独立编号区>=8192），与 /mnt/fat 走同一套 vfs_open/read/close/seek/readdir/stat int-fd 接口；headless 实测两个挂载点均可通过 VFS 统一接口 readdir/stat/open/read（含嵌套子目录路径解析）全绿。
+> 最近完成：**M3.4 文件权限模型** —— 在统一 VFS(ramfs64.c) 上实现 POSIX 风格 rwx/uid/gid/属主权限：vfs_check_perm(owner>group>other 三级判定、root 绕过)、vfs_access、vfs_chmod/vfs_chown；node_create 自动填充创建者凭证；headless 实测 check_perm 9/9 + CHMOD/CHOWN VERIFY OK。
 >
 > 当前推荐下一步：在继续保持自研浏览器回归门禁的同时，优先推进 OPENOS 作为真正操作系统的 PC/Mobile 跨设备架构路线：冻结 i386 稳定基线，将 √86_64 升级为 PC 主线，抽象 BootInfo / HAL / Device Model，并新增 aarch64 作为 Mobile 主线基础。
 
@@ -1628,8 +1628,20 @@
   - [√] **公共 API**：`ext4_mount`（依赖注入扇区读回调）/`ext4_list`（目录遍历+回调）/`ext4_read_file`（多级路径+间接块）/`ext4_stat`/`ext4_version`（ext2/3/4 判定）
   - [√] **接线**：kernel64.c 挂在 AHCI/SATA 盘（openos-ahci.img 整盘 ext2），`ext4_ahci_read_adapter` 适配 32→64bit LBA；build+run.bat 用 `tools/mkfs_ext_ahci.sh`（mkfs.ext2 + debugfs 免 root）植入测试数据
   - [√] **selftest 全绿（headless QEMU 实测）**：ext2 挂载(block=1024/inode=256/8组)、根目录列 7 项、`/hello.txt` READ VERIFY OK、`/subdir` SUBDIR VERIFY OK、`/subdir/inside.txt` NESTED READ VERIFY OK、`/big.dat`(40000B) INDIRECT-BLOCK VERIFY OK
-- [ ] M3.3：统一 VFS 多类型挂载（mount/umount 任意 FS 到任意挂载点）
-- [ ] M3.4：文件权限模型（rwx / uid / gid / 属主）
+- [√] M3.3：统一 VFS 多类型挂载（mount/umount 任意 FS 到任意挂载点）
+  - [√] **发现真正的 VFS 分发层**：`vfs64.c`(106行) 仅 initrd 内存映射（废壳），真正的统一 VFS 是 `ramfs64.c`，内含 `/mnt/fat`→FAT32 硬编码分发；M3.3 照此模式对称补齐 ext 分支
+  - [√] **新挂载点 /mnt/ext**：`ext_match()` 路径匹配 → ext4_64 只读驱动
+  - [√] **独立 fd 区间隔离**：ramfs(<4096) / fat([4096,8192)) / ext(≥8192) 三段互不串号
+  - [√] **六个 VFS 接口全接 ext 分支**：`vfs_open`/`vfs_read`/`vfs_close`/`vfs_seek`/`vfs_readdir`/`vfs_stat`；open 整文件缓冲到内核堆（只读，`O_CREAT`/`O_TRUNC`/写模式拒绝）
+  - [√] **dirent 归一化**：ext4_dirent_t → 统一 `dentry_t`/`inode_t`（FS_DIR/FS_FILE + mode 位）
+  - [√] **selftest 全绿（headless QEMU）**：`/mnt/fat` readdir/stat/open/read（HELLO.TXT+长名）、`/mnt/ext` readdir 列 7 项(含<DIR>)、`/mnt/ext/hello.txt` stat size=0x19+read OK、`/mnt/ext/subdir/inside.txt` 嵌套路径解析读取成功
+- [√] M3.4：文件权限模型（rwx / uid / gid / 属主）
+  - [√] **inode 权限元数据已就绪**：统一 inode_t 本就含 mode(rwxrwxrwx+类型)/uid/gid/nlinks；node_create 补充 uid/gid = 创建者凭证
+  - [√] **权限检查核心 vfs_check_perm(ino,uid,gid,want)**：owner>group>other 三级 rwx 判定，root(uid=0) 绕过（文件 rwx 均过、执行位需至少一个 x、目录总可搜索）；VFS_MAY_READ/WRITE/EXEC 位定义
+  - [√] **vfs_access(path,want)**：以当前进程凭证（arch_x86_64_proc_current_uid/gid）检查路径访问权限
+  - [√] **chmod/chown 实现**：vfs_chmod 仅保留低12位权限/粘性位保类型不变（仅属主/root可改）；vfs_chown 非特权不能移交属主、非属主且非特权不能改组（(uint32_t)-1 保持不变）
+  - [√] **凭证来源**：发现 proc 实际凭证接口为 arch_x86_64_proc_current_uid/gid（无 caps 字段/has_cap），特权统一以 uid==0 为准
+  - [√] **selftest 全绿（headless QEMU）**：check_perm pass=9 fail=0（owner/group/other三级 + root万能 + 目录搜索位）、CHMOD VERIFY OK(0600)、CHOWN VERIFY OK(1234:5678)
 - [ ] M3.5：软链接 / 硬链接支持
 
 ### M4：内核接口与进程模型补齐（🟠 第二优先级）

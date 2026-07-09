@@ -562,6 +562,61 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
         early_console64_write("[x86_64][ext-vfs] === selftest done ===\n");
     }
 
+    /* ---- M3.4 文件权限模型 selftest ----
+     * 直接验证 vfs_check_perm() 纯函数（构造 inode + 模拟不同 uid/gid），
+     * 以及 vfs_chmod/vfs_chown 在 ramfs 上的实际生效。 */
+    {
+        early_console64_write("[x86_64][perm] === M3.4 permission model selftest ===\n");
+        int pass = 0, fail = 0;
+        /* 构造一个属主 uid=1000 gid=1000、mode=0640 的普通文件 inode */
+        inode_t ino; for (unsigned i=0;i<sizeof(ino);i++) ((char*)&ino)[i]=0;
+        ino.mode = FS_FILE | 0640;   /* rw-r----- */
+        ino.uid = 1000; ino.gid = 1000;
+        /* owner(1000,1000) 可读可写不可执行 */
+        if (vfs_check_perm(&ino,1000,1000,VFS_MAY_READ)==0) pass++; else fail++;
+        if (vfs_check_perm(&ino,1000,1000,VFS_MAY_WRITE)==0) pass++; else fail++;
+        if (vfs_check_perm(&ino,1000,1000,VFS_MAY_EXEC)!=0) pass++; else fail++;
+        /* group(2000,1000) 只读 */
+        if (vfs_check_perm(&ino,2000,1000,VFS_MAY_READ)==0) pass++; else fail++;
+        if (vfs_check_perm(&ino,2000,1000,VFS_MAY_WRITE)!=0) pass++; else fail++;
+        /* other(2000,2000) 无任何权限 */
+        if (vfs_check_perm(&ino,2000,2000,VFS_MAY_READ)!=0) pass++; else fail++;
+        /* root(uid=0) 读写均过，但无 x 位时执行被拒 */
+        if (vfs_check_perm(&ino,0,0,VFS_MAY_READ|VFS_MAY_WRITE)==0) pass++; else fail++;
+        if (vfs_check_perm(&ino,0,0,VFS_MAY_EXEC)!=0) pass++; else fail++;
+        /* 目录对 root 总可搜索（即使 mode 无 x） */
+        inode_t dino=ino; dino.mode=FS_DIR|0600;
+        if (vfs_check_perm(&dino,0,0,VFS_MAY_EXEC)==0) pass++; else fail++;
+        early_console64_write("[x86_64][perm] check_perm pass=");
+        early_console64_write_hex64((uint64_t)(uint32_t)pass);
+        early_console64_write(" fail=");
+        early_console64_write_hex64((uint64_t)(uint32_t)fail);
+        early_console64_write("\n");
+        /* 在 ramfs 实体上验证 chmod/chown 生效（当前为 root） */
+        {
+            int fd = vfs_open("/perm_test.txt", O_WRONLY|O_CREAT, 0644);
+            if (fd >= 0) {
+                vfs_write(fd, "hi", 2);
+                vfs_close(fd);
+                inode_t st;
+                if (vfs_chmod("/perm_test.txt", 0600)==0 &&
+                    vfs_stat("/perm_test.txt",&st)==0 && (st.mode & 0xFFF)==0600) {
+                    early_console64_write("[x86_64][perm] CHMOD VERIFY OK (0600)\n");
+                } else {
+                    early_console64_write("[x86_64][perm] CHMOD VERIFY FAIL\n");
+                }
+                if (vfs_chown("/perm_test.txt", 1234, 5678)==0 &&
+                    vfs_stat("/perm_test.txt",&st)==0 && st.uid==1234 && st.gid==5678) {
+                    early_console64_write("[x86_64][perm] CHOWN VERIFY OK (1234:5678)\n");
+                } else {
+                    early_console64_write("[x86_64][perm] CHOWN VERIFY FAIL\n");
+                }
+                vfs_unlink("/perm_test.txt");
+            }
+        }
+        early_console64_write("[x86_64][perm] === selftest done ===\n");
+    }
+
     /* Step F.1 IDT registration selftest — runs as the very first selftest
      * because every later subsystem (syscall, sched, net, tsc, ring3 drop)
      * needs the IDT to route #PF/#GP/#UD/etc. to our C handlers. A
