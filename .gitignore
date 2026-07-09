@@ -51,3 +51,4 @@ logs/
 *.ppm
 *.ser
 *.pcap
+.git_commit_msg.tmp
