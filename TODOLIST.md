@@ -4,7 +4,7 @@
 >
 > 当前状态：openos 已具备 32 位 √86 原型内核能力，能够启动、显示、输入、调度、运行基础用户程序，并具备基础 syscall、VFS、ramfs/tmpfs、shell、GUI Terminal 等模块。浏览器路线已切换为 OpenOS 自研轻量浏览器，Chromium 官方内核迁移冻结为历史备选。
 >
-> 最近完成：M2 现代存储与设备子系统整体收官 —— AHCI/SATA、NVMe、USB（xHCI + HID 键鼠 + U 盘大容量存储）全部完工，M2.4 声卡/音频（AC97 PCM 播放 + PC Speaker beep）DMA 播放实测 PASS。至此 M2.1~M2.4 全线通关。
+> 最近完成：**M3.1 FAT32 完整读写收尾** —— 在 M2 存储/设备子系统整体收官（AHCI/SATA、NVMe、USB、AC97 音频全线通关）基础上，将 FAT32 从只读+8.3 短名写升级为完整可写文件系统：LFN 长文件名写入、mkdir、delete/rmdir 全部实现并 headless 实测全绿（LFN/MKDIR+WRITE/DELETE/RMDIR VERIFY OK）。
 >
 > 当前推荐下一步：在继续保持自研浏览器回归门禁的同时，优先推进 OPENOS 作为真正操作系统的 PC/Mobile 跨设备架构路线：冻结 i386 稳定基线，将 √86_64 升级为 PC 主线，抽象 BootInfo / HAL / Device Model，并新增 aarch64 作为 Mobile 主线基础。
 
@@ -1615,7 +1615,12 @@
 
 ### M3：文件系统完善（🟠 第二优先级）
 
-- [ ] M3.1：FAT32 完整读写（LFN 长文件名 / mkdir / rm 收尾，见阶段4-4）
+- [√] M3.1：FAT32 完整读写（LFN 长文件名 / mkdir / rm 收尾，见阶段4-4）
+  - [√] **LFN 长文件名写入**：`lfn_checksum()`（8.3 短名校验和绑定）+ `name_is_pure_83()`（判纯 8.3，含小写/空格/多点则走 LFN）+ `gen_short_name()`（生成唯一 `NAME~N` 短名，探测冲突 ~1..~99）+ `place_dir_entry()`（连续 N×LFN + 1×8.3 多槽写入，跨簇则扩展目录簇，倒序序号 seq n..1 首项带 0x40，每项 13×UCS-2）
+  - [√] **fat32_write_file 改造**：支持长名自动 LFN；覆盖同名先 `remove_dir_entry_by_name()` 清旧项（含所有 LFN 项，可跨簇标记 0xE5）并释放旧簇链
+  - [√] **fat32_mkdir**：分配目录内容簇+清零，写 `.`(首簇=自身)/`..`(首簇=父，根约定 0) 两项，父目录挂 LFN+8.3（attr=0x10），同名拒绝
+  - [√] **fat32_delete**：文件/空目录删除，标记所有目录项（LFN+8.3）0xE5 + 释放簇链；非空目录（除 `.`/`..`）拒绝
+  - [√] **selftest 验证（headless QEMU 全绿）**：8.3 写 `WRITE VERIFY OK`、长名 `/My Long File Name.txt` `LFN VERIFY OK`(25B)、`mkdir /NEWDIR`+`/NEWDIR/inside.txt` `MKDIR+WRITE VERIFY OK`、`delete /OSWRITE.TXT` `DELETE VERIFY OK(gone)`、`rmdir /NEWDIR` `RMDIR VERIFY OK`
 - [ ] M3.2：ext2/ext4 只读（对接 Linux 生态镜像）
 - [ ] M3.3：统一 VFS 多类型挂载（mount/umount 任意 FS 到任意挂载点）
 - [ ] M3.4：文件权限模型（rwx / uid / gid / 属主）
