@@ -1,10 +1,10 @@
 # openos 待开发功能清单
 
-> 更新时间：2026-07-07
+> 更新时间：2026-07-09
 >
 > 当前状态：openos 已具备 32 位 √86 原型内核能力，能够启动、显示、输入、调度、运行基础用户程序，并具备基础 syscall、VFS、ramfs/tmpfs、shell、GUI Terminal 等模块。浏览器路线已切换为 OpenOS 自研轻量浏览器，Chromium 官方内核迁移冻结为历史备选。
 >
-> 最近完成：自研浏览器 P0/P1/P2 已收口；P3 已完成表单控件文本化渲染、HTML 注释与 doctype 容错、基础内联 CSS display/font-weight 解析、相对 URL `./` / `../` 规范化与 query/hash 保留。
+> 最近完成：M2 现代存储与设备子系统整体收官 —— AHCI/SATA、NVMe、USB（xHCI + HID 键鼠 + U 盘大容量存储）全部完工，M2.4 声卡/音频（AC97 PCM 播放 + PC Speaker beep）DMA 播放实测 PASS。至此 M2.1~M2.4 全线通关。
 >
 > 当前推荐下一步：在继续保持自研浏览器回归门禁的同时，优先推进 OPENOS 作为真正操作系统的 PC/Mobile 跨设备架构路线：冻结 i386 稳定基线，将 √86_64 升级为 PC 主线，抽象 BootInfo / HAL / Device Model，并新增 aarch64 作为 Mobile 主线基础。
 
@@ -1607,7 +1607,11 @@
     - [√] 根因确认：驱动代码无 bug，此前“卡死”纯粹是 headless 缺真实输入源(相对鼠标不动即 NAK 无中断数据)；`build+run.bat` GUI 段去掉 `usb-kbd` 消除与 PS/2 键盘的锁屏输入抢占冲突
     - [√] GUI 模式真机人工验收 —— 用户在 GUI 窗口实测鼠标光标跟随移动、锁屏界面敲密码字符正常输入，USB HID 输入闭环最终确认通过
   - [√] USB 大容量存储（U 盘）—— BOT(Bulk-Only Transport)+SCSI 命令集实现：bulk IN/OUT 端点配置、CBW/CSW 传输、INQUIRY/READ CAPACITY/READ(10)/WRITE(10)。**关键 bug 修复**：Input Context 里 bulk EP 槽位 off-by-one（ICC 占 idx0，故 EP dci=N 须写 idx=N+1，原代码误用 idx=dci），devctx 回读验证 dequeue 指针精确对齐(OUT[2]=0x0D7B9001/IN[2]=0x0D7BA001)；QEMU headless 实测 16MB U 盘全链路 enumerate→INQUIRY→CAPACITY(32768 blocks)→attach OK，读写自检采用安全策略(备份→写图案→读回逐字节比对→原样恢复)，WRITE/READ/VERIFY PASS @lba=32760（commit `3dd7dc6`）
-- [ ] M2.4：声卡/音频（`sound.h` 补实现，AC97 或 Intel HDA + PCM 播放）
+- [√] M2.4：声卡/音频（`sound.h` 补实现，AC97 + PCM 播放 + PC Speaker beep）—— 完整读写闭环打通、DMA 播放实测 PASS（commit `feat(M2.4)`）
+  - [√] 音频管理层 `src/arch/x86_64/gui64/sound.c`：PCI 探测 Multimedia(class 0x04) → AC97(0x01)/HDA(0x03) 分类登记；PC Speaker 蜂鸣器（PIT ch2 端口 0x42 + 8255 门控端口 0x61）；设备表/统计/lspci 风格打印
+  - [√] AC97 驱动 `src/arch/x86_64/gui64/ac97.c`：Intel 82801AA(8086:2415) codec —— NAM/NABM 双 BAR 解析 + codec 复位 + 音量设置 + VRA 可变采样率(48000Hz) + BDL(Buffer Descriptor List) DMA + 方波 PCM 播放自检
+  - [√] `kernel64.c` 接线 `sound_init()`（挂在 xHCI 之后）；`build.sh` 加编译项；`build+run.bat` 加 `-device AC97`
+  - [√] QEMU headless 实测：探测 AC97 8086:2415 io=0xC000 irq=10、NAM=0xC000/NABM=0xC400、VRA on rate=0xBB80(48kHz)、PCM Out DMA 启动 civ 0→1 + sr=0x08(BCIS) + picb 0x2000→0x1D2A（DMA 真实消费样本），`playback VERIFIED` + 汇总 2 设备 ac97=1
 
 ### M3：文件系统完善（🟠 第二优先级）
 
