@@ -37,6 +37,7 @@ extern void net_print_info(void);
 #include "../include/ahci64.h"
 #include "../include/nvme64.h"
 #include "../include/xhci64.h"
+#include "../../../kernel/include/sound.h"
 #include "../include/tsc64.h"
 #include "../include/tsc_selftest64.h"
 #include "../include/irq_selftest64.h"
@@ -370,6 +371,9 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
     } else {
         early_console64_write("[x86_64][xhci] xHCI selftest skipped/FAIL\n");
     }
+
+    /* M2.4：声卡 / 音频子系统（PCI 探测 AC97/HDA + PC Speaker + AC97 PCM 播放自检） */
+    sound_init();
 
     /* M2.2：硬件探测完成后，将各就绪驱动注册进块设备抽象层（nvme0/sda/hda/hdb）。
      * 上层（未来 VFS/工具）可经 blockdev_find(name) 做设备无关的读写。 */

@@ -164,7 +164,7 @@ echo [build+run] GUI mode; serial mirrored to %SERLOG%
   -drive file="%FATDISK%",format=raw,media=disk,if=ide,index=3 ^
   -device ich9-ahci,id=ahci0 -drive file="%AHCIDISK%",format=raw,if=none,id=sata0 -device ide-hd,drive=sata0,bus=ahci0.0 ^
   -drive file="%NVMEDISK%",format=raw,if=none,id=nvm0 -device nvme,serial=openos-nvme0,id=nvme0 -device nvme-ns,drive=nvm0,bus=nvme0 ^
-  -device qemu-xhci,id=xhci0 -device usb-mouse,bus=xhci0.0 ^
+  -device qemu-xhci,id=xhci0 -device usb-mouse,bus=xhci0.0 -device AC97,id=snd0 ^
   -boot c ^
   -serial file:"%SERLOG%" -vga std -netdev user,id=n0 -device virtio-net-pci,netdev=n0 -object filter-dump,id=f0,netdev=n0,file=%CD%\logs\net.pcap
 set "QRC=%ERRORLEVEL%"
@@ -187,7 +187,7 @@ start "" /B "%QEMU%" -machine pc -cpu qemu64 -smp 4 -m 256M ^
   -drive "file=%FATDISK%,format=raw,media=disk,if=ide,index=3" ^
   -device ich9-ahci,id=ahci0 -drive "file=%AHCIDISK%,format=raw,if=none,id=sata0" -device ide-hd,drive=sata0,bus=ahci0.0 ^
   -drive "file=%NVMEDISK%,format=raw,if=none,id=nvm0" -device nvme,serial=openos-nvme0,id=nvme0 -device nvme-ns,drive=nvm0,bus=nvme0 ^
-  -device qemu-xhci,id=xhci0 -device usb-kbd,bus=xhci0.0 -device usb-mouse,bus=xhci0.0 ^
+  -device qemu-xhci,id=xhci0 -device usb-kbd,bus=xhci0.0 -device usb-mouse,bus=xhci0.0 -device AC97,id=snd0 ^
   -boot c -serial "file:%SERLOG%" -netdev user,id=n0,hostfwd=udp::15353-:53 -device virtio-net-pci,netdev=n0 -object filter-dump,id=f0,netdev=n0,file=%CD%\logs\net.pcap -display none -no-reboot -no-shutdown 2>"%QEMU_STDERR%"
 timeout /T %HEADLESS_TIMEOUT_S% /NOBREAK >nul 2>&1
 rem  Fallback: 'timeout' bails on non-interactive stdin; use ping as a portable sleep.
