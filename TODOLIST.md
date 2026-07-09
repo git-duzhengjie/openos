@@ -1591,7 +1591,7 @@
   - [√] 接入 blockdev 抽象层（sda 注册为 blockdev_ops）+ selftest write/read/verify
   - [√] QEMU 实测：`[ahci] selftest: write/read/verify PASS @ lba=131062` → `SATA disk selftest PASS`
   - [√] 中断驱动（MSI）—— PCI MSI cap 解析(cap@0x80) + Message Addr/Data 编程 + INTx 屏蔽；IDT 放行 MSI 向量段 0x30-0x3F(AHCI=0x30)；isr64.S 仿 mouse 模板加 stub + LAPIC EOI；延迟安装 `ahci_irq_install_late()`(storage init 早于 LAPIC，故拆出在 apic_selftest 后调用) + sti/cli 包裹自测窗口；QEMU 实测 `AHCI interrupts DID fire (MSI path live)` 中断真实触发；全程保留 polling 超时回退安全网
-- [ ] M2.2：NVMe 驱动（现代 SSD 主流接口）
+- [√] M2.2：NVMe 驱动（现代 SSD 主流接口）—— PCI 枚举/控制器初始化/Admin 命令/IO 读写自检/时序陷阱根治/blockdev 接入/MSI-X 中断 7 项子任务全部完成；QEMU headless 复测无回归：selftest PASS @lba=131068、FAT32 挂载读 HELLO.TXT 正常、MSI-X IRQ-path PASS（运行时优选轮询）
   - [√] PCI 枚举识别 NVMe(class 0x0108) + BAR0 MMIO 映射 + CAP/版本读取
   - [√] 控制器初始化：复位、Admin SQ/CQ 创建、CC.EN 使能、CSTS.RDY 等待
   - [√] Admin 命令：CREATE IO CQ/SQ + IDENTIFY controller/namespace
