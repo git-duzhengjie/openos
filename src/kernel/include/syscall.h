@@ -206,6 +206,18 @@
 #define SYS_TCP_RECV      462  /* a0=conn_id a1=user buf a2=len a3=poll_loops -> 收字节数/0/<0 */
 #define SYS_TCP_CLOSE     463  /* a0=conn_id */
 #define SYS_HTTP_GET      464  /* a0=host str a1=path str a2=user buf a3=buflen -> 写入字节数/<0 */
+#define SYS_RENAME        465  /* M4.1a: a0=oldpath str a1=newpath str -> 0/<0 */
+#define SYS_GETTIMEOFDAY  466  /* M4.1d: a0=struct openos_timeval* a1=tz(ignored) -> 0/<0 */
+#define SYS_IOCTL         467  /* M4.1d: a0=fd a1=request a2=arg -> 0/<0 (stub, TTY/dev later) */
+#define SYS_RT_SIGACTION  468  /* M4.2: a0=sig a1=const openos_sigaction* a2=openos_sigaction* old -> 0/<0 */
+#define SYS_RT_SIGPROCMASK 469 /* M4.2: a0=how a1=const uint64* set a2=uint64* oldset -> 0/<0 */
+#define SYS_MKFIFO        470  /* M4.3b: a0=path str a1=mode -> 0/<0 (named pipe / FIFO) */
+#define SYS_SHM_DETACH    471  /* M4.3c: a0=shm_id -> 0/<0 (detach from segment) */
+#define SYS_SETPGID       472  /* M4.4b: a0=pid(0=self) a1=pgid(0=pid) -> 0/<0 */
+#define SYS_GETPGID       473  /* M4.4b: a0=pid(0=self) -> pgid/<0 */
+#define SYS_SETSID        474  /* M4.4b: (no args) -> new sid/<0 */
+#define SYS_GETSID        475  /* M4.4b: a0=pid(0=self) -> sid/<0 */
+#define SYS_RT_SIGRETURN  476  /* M4.2b: (no args) restore ring3 ctx from sigframe -> ret via iretq */
 #define SYS_GUI_ADD_TABLEVIEW 400
 #define SYS_GUI_SET_TABLEVIEW_ROW 401
 #define SYS_GUI_GET_TABLEVIEW_ROW 402

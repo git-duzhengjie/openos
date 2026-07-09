@@ -33,6 +33,7 @@
 #include "arch64_types.h"
 #include "usermode64.h"  /* for x86_64_user_iretq_frame_t (saved_user_frame) */
 #include "syscall64.h"   /* A2.P3-B: x86_64_int80_frame_t / x86_64_syscall_frame_t */
+#include "signal64.h"    /* M4.2: per-process signal state (x86_64_sigstate_t) */
 
 /* Forward decl: H.5b.1 wiring. The full definition lives in
  * address_space64.h; PCBs only need a pointer field today (NULL on every
@@ -177,6 +178,33 @@ typedef struct x86_64_proc {
 
     x86_64_int80_frame_t      saved_fork_frame_int80;
     x86_64_syscall_frame_t    saved_fork_frame_sysc;
+
+    /* ------------------------------------------------------------------
+     * M4.2 — per-process signal state.
+     *
+     * Holds the pending / blocked bitmaps and the disposition table for
+     * this PCB. Initialised by arch_x86_64_proc_init() (slot 0) and
+     * arch_x86_64_proc_spawn_user() (ring3 slots) via
+     * x86_64_signal_state_init(). SYS_KILL / SYS_SIGACTION /
+     * SYS_SIGPROCMASK operate on this block through the signal64 API.
+     * The scheduler consults next_pending() to enact default actions;
+     * the ring3 handler trampoline (M4.2b) will read actions[] here. */
+    x86_64_sigstate_t         sig;
+
+    /* ------------------------------------------------------------------
+     * M4.4b — job control: POSIX process group + session ids.
+     *
+     * pgid : process-group id this PCB belongs to. A new ring3 proc starts
+     *        in its own group (pgid == pid) unless setpgid() moves it.
+     * sid  : session id. setsid() makes the caller a session+group leader
+     *        (sid = pgid = pid) and detaches it from any controlling tty.
+     *
+     * The TTY layer's foreground pgrp (tty64_get/set_pgrp) is matched
+     * against pgid to decide who receives ^C/^Z generated signals: only
+     * PCBs whose pgid == tty foreground pgrp get the signal. Both fields
+     * default to the pid at spawn and are inherited across fork. */
+    uint32_t                  pgid;
+    uint32_t                  sid;
 } x86_64_proc_t;
 
 /* Lifecycle ---------------------------------------------------------- */
@@ -250,5 +278,89 @@ uint64_t arch_x86_64_proc_yield_count(void);
 uint64_t arch_x86_64_proc_spawn_count(void);
 uint64_t arch_x86_64_proc_exit_count(void);
 void     arch_x86_64_proc_print_status(void);
+
+/* M4.2: signal delivery + disposition management, layered on the
+ * per-PCB x86_64_sigstate_t. arch_x86_64_proc_signal() is the work behind
+ * SYS_KILL: it locates the PCB whose pid matches, raises the pending bit
+ * through x86_64_signal_send(), then immediately enacts the default action
+ * for uncatchable/terminating signals (SIGKILL/SIGTERM -> EXITED with
+ * 128+sig) so the scheduler reaps it. sig==0 is an existence probe.
+ * Returns 0 on success, -1 if no such pid exists. */
+int      arch_x86_64_proc_signal(uint32_t pid, int sig);
+
+/* M4.2: sigaction / sigprocmask acting on the CURRENT process. Thin
+ * wrappers that forward to the signal64 API against
+ * arch_x86_64_proc_current()->sig, so the syscall dispatcher need not
+ * reach into the PCB layout. Return 0 on success, -1 on error (invalid
+ * signal, immutable disposition, bad `how`, or no current PCB). */
+int      arch_x86_64_proc_sigaction(int sig,
+                                    const openos_sigaction_t *act,
+                                    openos_sigaction_t *old);
+int      arch_x86_64_proc_sigprocmask(int how, uint64_t set, uint64_t *oldset);
+
+/* M4.2: pump pending signals for the CURRENT process, enacting default
+ * actions (TERM/CORE -> proc_exit(128+sig)). Called on the syscall return
+ * path. Returns the signal whose default action was taken (>0), or 0 if
+ * nothing was pending/deliverable. Signals with a registered user handler
+ * are left pending for the M4.2b ring3 trampoline. */
+int      arch_x86_64_proc_signal_pump(void);
+
+/* M4.2b: user-mode signal handler trampoline.
+ *
+ * deliver_user() takes the interrupted ring3 register set (as captured on
+ * the syscall/interrupt entry), builds a signal frame on the user stack for
+ * the CURRENT process's next deliverable handler-registered signal, and
+ * reroutes `regs` so that the eventual return to ring3 lands in the handler
+ * (rdi=signo, rsp pointing just below a sigcontext, a `restorer` return
+ * address on top so the handler's `ret` re-enters the kernel via sigreturn).
+ * The sigcontext body is copied to the user stack via the supplied
+ * user-memory writer, so this stays free of any specific paging layout.
+ *
+ *   regs      - in/out: interrupted context, rerouted to the handler on hit.
+ *   uwrite    - callback: copy `n` bytes from `src` to user VA `dst`.
+ *   uctx      - opaque cookie forwarded to uwrite (e.g. target PCB/CR3).
+ *
+ * Returns the signal delivered (>0) if a handler frame was set up, 0 if no
+ * handler-registered signal was pending, or -1 on error (bad frame build /
+ * user-stack write failure).
+ *
+ * sigreturn() undoes one deliver_user(): it reads the sigcontext back from
+ * the user stack (top of `regs->rsp`, per the layout deliver_user built) via
+ * the supplied reader, restores the interrupted register set into `regs`,
+ * and reinstates the pre-delivery signal mask. Returns 0 on success, -1 if
+ * no handler was active or the user read failed. */
+int      arch_x86_64_proc_signal_deliver_user(
+             x86_64_sigregs_t *regs,
+             int (*uwrite)(void *uctx, uint64_t dst, const void *src,
+                           uint64_t n),
+             void *uctx);
+int      arch_x86_64_proc_sigreturn(
+             x86_64_sigregs_t *regs,
+             int (*uread)(void *uctx, void *dst, uint64_t src, uint64_t n),
+             void *uctx);
+
+/* M4.4b: job control — process group / session management on the CURRENT
+ * process (or an explicit pid for setpgid). All operate on the proc_table.
+ *
+ *   getpgid(pid)         -> pgid of `pid` (0 means "caller"). -1 if no such
+ *                           pid. getpgid alias for the current proc when
+ *                           pid==0.
+ *   setpgid(pid, pgid)   -> put process `pid` (0=caller) into group `pgid`
+ *                           (0 means "use pid as the new group"). Returns 0
+ *                           / -1. Cannot move a session leader.
+ *   getsid(pid)          -> session id of `pid` (0=caller). -1 if none.
+ *   setsid()             -> caller becomes session+group leader: sid=pgid=
+ *                           pid, controlling tty detached. Returns the new
+ *                           sid (>0), or -1 if the caller is already a
+ *                           group leader.
+ *   signal_group(pgid,s) -> deliver signal `s` to every PCB whose pgid ==
+ *                           `pgid` (the work behind kill(-pgid, s) and the
+ *                           TTY ^C -> foreground-group broadcast). Returns
+ *                           the number of processes signalled (>=0). */
+uint32_t arch_x86_64_proc_getpgid(uint32_t pid);
+int      arch_x86_64_proc_setpgid(uint32_t pid, uint32_t pgid);
+uint32_t arch_x86_64_proc_getsid(uint32_t pid);
+int      arch_x86_64_proc_setsid(void);
+int      arch_x86_64_proc_signal_group(uint32_t pgid, int sig);
 
 #endif /* OPENOS_ARCH_X86_64_PROC64_H */

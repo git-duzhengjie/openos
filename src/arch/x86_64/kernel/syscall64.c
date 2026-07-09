@@ -19,6 +19,7 @@
 #include "../include/percpu64.h"
 #include "../include/proc64.h"
 #include "../include/sched64.h"        /* gamma.3b-alpha: PARKED child slot */
+#include "../include/signal64.h"       /* M4.2b: user-mode signal trampoline */
 #include "../include/smp64.h"          /* gamma.3b-S2a Seg-5: cpu_count for target CPU */
 #include "../include/syscall_dispatch64.h"
 #include "../include/usermode64.h"
@@ -292,6 +293,103 @@ static uint64_t arch_x86_64_syscall_fork_capture(
     return child->pid;
 }
 
+/* ---- M4.2b: user-mode signal trampoline glue --------------------------- *
+ *
+ * After a syscall's work is done but before we return to ring3, check the
+ * current process for a pending signal that has a user handler installed.
+ * If so, rewrite the outgoing register context so control lands in the
+ * handler instead of resuming the interrupted instruction. The reverse
+ * (SYS_RT_SIGRETURN) unwinds one such delivery.
+ *
+ * Both entry paths (int80 / native syscall) funnel through here via a pair
+ * of tiny pack/unpack shims because they carry the user rip/rsp/rflags in
+ * different places (int80: explicit frame fields; syscall: rcx/r11 + the
+ * per-CPU saved user rsp).
+ */
+
+/* identity-mapped user memory: validated elsewhere; here we just memcpy. */
+static int syscall64_uwrite(void *uctx, uint64_t dst, const void *src,
+                            uint64_t n) {
+    (void)uctx;
+    if (dst == 0) {
+        return -1;
+    }
+    __builtin_memcpy((void *)(uintptr_t)dst, src, (size_t)n);
+    return 0;
+}
+
+static int syscall64_uread(void *uctx, void *dst, uint64_t src, uint64_t n) {
+    (void)uctx;
+    if (src == 0) {
+        return -1;
+    }
+    __builtin_memcpy(dst, (const void *)(uintptr_t)src, (size_t)n);
+    return 0;
+}
+
+/* int80 path: full user rip/rsp/rflags live in the trap frame. */
+static void syscall64_trampoline_int80(x86_64_int80_frame_t *frame,
+                                       uint64_t retval) {
+    x86_64_sigregs_t r;
+    __builtin_memset(&r, 0, sizeof(r));
+    r.rax = retval; r.rbx = frame->rbx; r.rcx = frame->rcx;
+    r.rdx = frame->rdx; r.rsi = frame->rsi; r.rdi = frame->rdi;
+    r.rbp = frame->rbp; r.rsp = frame->rsp;
+    r.r8 = frame->r8; r.r9 = frame->r9; r.r10 = frame->r10;
+    r.r11 = frame->r11; r.r12 = frame->r12; r.r13 = frame->r13;
+    r.r14 = frame->r14; r.r15 = frame->r15;
+    r.rip = frame->rip; r.rflags = frame->rflags;
+
+    int sig = arch_x86_64_proc_signal_deliver_user(&r, syscall64_uwrite, NULL);
+    if (sig <= 0) {
+        return;   /* nothing delivered (0) or error (-1): leave frame as-is */
+    }
+    /* Reroute into the handler. */
+    frame->rip = r.rip; frame->rsp = r.rsp; frame->rflags = r.rflags;
+    frame->rdi = r.rdi;                 /* signo argument */
+    frame->rax = r.rax; frame->rbx = r.rbx; frame->rcx = r.rcx;
+    frame->rdx = r.rdx; frame->rsi = r.rsi; frame->rbp = r.rbp;
+    frame->r8 = r.r8; frame->r9 = r.r9; frame->r10 = r.r10;
+    frame->r11 = r.r11; frame->r12 = r.r12; frame->r13 = r.r13;
+    frame->r14 = r.r14; frame->r15 = r.r15;
+}
+
+/* native syscall path: user rip=rcx, rflags=r11, rsp in per-CPU slot. */
+static void syscall64_trampoline_syscall(x86_64_syscall_frame_t *frame,
+                                         uint64_t retval) {
+    arch_x86_64_percpu_t *pc = arch_x86_64_this_cpu_ptr();
+    if (pc == NULL) {
+        return;
+    }
+    x86_64_sigregs_t r;
+    __builtin_memset(&r, 0, sizeof(r));
+    r.rax = retval; r.rbx = frame->rbx; r.rcx = frame->rcx;
+    r.rdx = frame->rdx; r.rsi = frame->rsi; r.rdi = frame->rdi;
+    r.rbp = frame->rbp;
+    r.r8 = frame->r8; r.r9 = frame->r9; r.r10 = frame->r10;
+    r.r11 = frame->r11; r.r12 = frame->r12; r.r13 = frame->r13;
+    r.r14 = frame->r14; r.r15 = frame->r15;
+    r.rip = frame->rcx;                 /* sysret: user RIP <- rcx */
+    r.rflags = frame->r11;              /* sysret: RFLAGS <- r11   */
+    r.rsp = pc->syscall_user_rsp;       /* user RSP restored from per-CPU */
+
+    int sig = arch_x86_64_proc_signal_deliver_user(&r, syscall64_uwrite, NULL);
+    if (sig <= 0) {
+        return;
+    }
+    /* Reroute into the handler: sysretq consumes rcx(rip)/r11(rflags) and the
+     * per-CPU user rsp, so write all three back through those channels. */
+    frame->rcx = r.rip;                 /* user RIP */
+    frame->r11 = r.rflags;              /* RFLAGS   */
+    pc->syscall_user_rsp = r.rsp;       /* user RSP */
+    frame->rdi = r.rdi;                 /* signo argument */
+    frame->rbx = r.rbx; frame->rdx = r.rdx; frame->rsi = r.rsi;
+    frame->rbp = r.rbp;
+    frame->r8 = r.r8; frame->r9 = r.r9; frame->r10 = r.r10;
+    frame->r12 = r.r12; frame->r13 = r.r13;
+    frame->r14 = r.r14; frame->r15 = r.r15;
+}
+
 /*
  * int 0x80 compat path.
  *
@@ -315,7 +413,28 @@ uint64_t arch_x86_64_int80_dispatch(x86_64_int80_frame_t *frame) {
         return arch_x86_64_syscall_fork_capture(frame, /*via_syscall=*/0);
     }
 
-    return arch_x86_64_syscall_dispatch_common(
+    /* M4.2b: SYS_RT_SIGRETURN unwinds a signal delivery -- it rewrites the
+     * whole trap frame from the sigcontext the handler was standing on, so
+     * it needs frame access and must not itself be wrapped by the outgoing
+     * signal-delivery check below. */
+    if (frame->rax == SYS_RT_SIGRETURN) {
+        x86_64_sigregs_t r;
+        __builtin_memset(&r, 0, sizeof(r));
+        r.rsp = frame->rsp;
+        if (arch_x86_64_proc_sigreturn(&r, syscall64_uread, NULL) == 0) {
+            frame->rip = r.rip; frame->rsp = r.rsp; frame->rflags = r.rflags;
+            frame->rax = r.rax; frame->rbx = r.rbx; frame->rcx = r.rcx;
+            frame->rdx = r.rdx; frame->rsi = r.rsi; frame->rdi = r.rdi;
+            frame->rbp = r.rbp;
+            frame->r8 = r.r8; frame->r9 = r.r9; frame->r10 = r.r10;
+            frame->r11 = r.r11; frame->r12 = r.r12; frame->r13 = r.r13;
+            frame->r14 = r.r14; frame->r15 = r.r15;
+            return frame->rax;
+        }
+        return (uint64_t)-1;
+    }
+
+    uint64_t r80 = arch_x86_64_syscall_dispatch_common(
         frame->rax,
         frame->rbx,
         frame->rcx,
@@ -323,6 +442,10 @@ uint64_t arch_x86_64_int80_dispatch(x86_64_int80_frame_t *frame) {
         frame->rsi,
         frame->rdi,
         frame->rbp);
+
+    /* M4.2b: before returning to ring3, reroute into a pending user handler. */
+    syscall64_trampoline_int80(frame, r80);
+    return r80;
 }
 
 /*
@@ -353,6 +476,30 @@ uint64_t arch_x86_64_syscall_dispatch(x86_64_syscall_frame_t *frame) {
     /* A2.P3-B: short-circuit SYS_FORK before dispatch_common (needs frame). */
     if (frame->rax == SYS_FORK) {
         return arch_x86_64_syscall_fork_capture(frame, /*via_syscall=*/1);
+    }
+
+    /* M4.2b: SYS_RT_SIGRETURN unwinds a signal delivery. On the native path
+     * the user RIP/RFLAGS ride in rcx/r11 and the user RSP lives in the
+     * per-CPU slot, so rebuild all three from the restored sigcontext. */
+    if (frame->rax == SYS_RT_SIGRETURN) {
+        arch_x86_64_percpu_t *pc = arch_x86_64_this_cpu_ptr();
+        x86_64_sigregs_t r;
+        __builtin_memset(&r, 0, sizeof(r));
+        r.rsp = (pc != NULL) ? pc->syscall_user_rsp : 0;
+        if (arch_x86_64_proc_sigreturn(&r, syscall64_uread, NULL) == 0) {
+            frame->rcx = r.rip;         /* user RIP */
+            frame->r11 = r.rflags;      /* RFLAGS   */
+            if (pc != NULL) {
+                pc->syscall_user_rsp = r.rsp;   /* user RSP */
+            }
+            frame->rbx = r.rbx; frame->rdx = r.rdx; frame->rsi = r.rsi;
+            frame->rdi = r.rdi; frame->rbp = r.rbp;
+            frame->r8 = r.r8; frame->r9 = r.r9; frame->r10 = r.r10;
+            frame->r12 = r.r12; frame->r13 = r.r13;
+            frame->r14 = r.r14; frame->r15 = r.r15;
+            return r.rax;
+        }
+        return (uint64_t)-1;
     }
 
     result = arch_x86_64_syscall_dispatch_common(
@@ -386,6 +533,8 @@ uint64_t arch_x86_64_syscall_dispatch(x86_64_syscall_frame_t *frame) {
         }
     }
 
+    /* M4.2b: before returning to ring3, reroute into a pending user handler. */
+    syscall64_trampoline_syscall(frame, result);
     return result;
 }
 

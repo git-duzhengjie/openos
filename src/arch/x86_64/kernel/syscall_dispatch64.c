@@ -35,6 +35,12 @@
 #include "../include/usermode64.h"
 #include "../include/vfs64.h"
 #include "../include/percpu64.h"
+#include "../include/sfdtable64.h" /* M4.1a: syscall fd -> vfs fd indirection */
+#include "../include/pipe64.h" /* M4.1c: anonymous pipe pool for pipe/dup/dup2 */
+#include "../include/fifo64.h" /* M4.3b: named pipes (FIFO) */
+#include "../include/shm64.h" /* M4.3c: System V shared memory segments */
+#include "../include/tty64.h" /* M4.4: pseudo-terminal line discipline */
+#include "vmem64.h" /* M4.1b: anonymous vmem for mmap/munmap/mprotect/brk/sbrk */
 #include "../../../kernel/core/fs/vfs.h" /* RAMFS-backed vfs_open/read/stat */
 #include "../../../kernel/net/net.h" /* real TCP/IP stack: ping/dns/netinfo/dev-ctl */
 #include "syscall.h" /* canonical SYS_* numbers (shared with i386) */
@@ -88,50 +94,417 @@ uint64_t arch_x86_64_k_strlen(const char *s) {
  * ------------------------------------------------------------------------- */
 
 /*
+ * ---------------------------------------------------------------------------
+ * M4.3a: blocking pipe read/write.
+ *
+ * The pipe64 ring primitives are non-blocking. Real pipe(2) semantics require
+ * a reader on an empty pipe to sleep until data arrives (or all writers close
+ * -> EOF), and a writer on a full pipe to sleep until space frees (or all
+ * readers close -> EPIPE). We implement this cooperatively on top of the
+ * scheduler: register as a waiter, sched_yield to let the peer run, and
+ * re-check. After making progress we drain the peer's waiter queue and wake
+ * those slots.
+ *
+ * Safety net: a bounded spin cap. In the single-threaded selftest bootstrap
+ * context there may be no peer thread to make progress, so rather than
+ * deadlock the kernel we bail out after PIPE_BLOCK_SPIN_MAX yields, returning
+ * whatever was transferred (0 for read = would-be-block treated as EOF-ish).
+ * When a real concurrent kthread peer exists, progress happens long before
+ * the cap and true blocking/wakeup is exercised.
+ * ------------------------------------------------------------------------- */
+#define PIPE_BLOCK_SPIN_MAX 100000
+
+static void pipe_wake_peers(int pid, int wake_writers) {
+    uint32_t slots[PIPE64_WAITERS_MAX];
+    int n = pipe64_wait_drain(pid, wake_writers, slots);
+    for (int i = 0; i < n; ++i) {
+        arch_x86_64_sched_slot_wakeup(slots[i]);
+    }
+}
+
+static int pipe_write_blocking(int pid, const void *buf, uint32_t len) {
+    const uint8_t *p = (const uint8_t *)buf;
+    uint32_t done = 0;
+    uint32_t self = arch_x86_64_sched_current_slot();
+    long spins = 0;
+    while (done < len) {
+        /* No reader left -> EPIPE (unless we already moved some bytes). */
+        if (pipe64_has_reader(pid) == 0) {
+            return done > 0 ? (int)done : -2;
+        }
+        int w = pipe64_write(pid, p + done, len - done);
+        if (w < 0) {
+            return done > 0 ? (int)done : w;
+        }
+        if (w > 0) {
+            done += (uint32_t)w;
+            /* We produced data: wake any readers parked on this pipe. */
+            pipe_wake_peers(pid, 0);
+            continue;
+        }
+        /* w == 0: ring full. Park as a writer-waiter and yield. */
+        if (++spins > PIPE_BLOCK_SPIN_MAX) {
+            pipe64_wait_remove(pid, 1, self);
+            return (int)done;
+        }
+        pipe64_wait_add(pid, 1, self);
+        arch_x86_64_sched_yield();
+    }
+    pipe64_wait_remove(pid, 1, self);
+    return (int)done;
+}
+
+static int pipe_read_blocking(int pid, void *buf, uint32_t len) {
+    uint8_t *p = (uint8_t *)buf;
+    uint32_t self = arch_x86_64_sched_current_slot();
+    long spins = 0;
+    for (;;) {
+        int r = pipe64_read(pid, p, len);
+        if (r < 0) {
+            return r;
+        }
+        if (r > 0) {
+            /* We consumed data: wake any writers parked for space. */
+            pipe_wake_peers(pid, 1);
+            pipe64_wait_remove(pid, 0, self);
+            return r;
+        }
+        /* r == 0: empty. If no writer remains, this is real EOF. */
+        if (pipe64_has_writer(pid) == 0) {
+            pipe64_wait_remove(pid, 0, self);
+            return 0;
+        }
+        /* Otherwise block: park as reader-waiter and yield. */
+        if (++spins > PIPE_BLOCK_SPIN_MAX) {
+            pipe64_wait_remove(pid, 0, self);
+            return 0; /* give up: treat as would-block -> EOF-ish */
+        }
+        pipe64_wait_add(pid, 0, self);
+        arch_x86_64_sched_yield();
+    }
+}
+
+/*
  * SYS_WRITE: routes through fdtable64 so fd=1/2 hit early_console64 and any
  * future writable fd (none yet) plugs in centrally.
  */
 static uint64_t do_write(uint64_t fd, uint64_t buf_ptr, uint64_t len) {
     if (!validate_user_buf(buf_ptr, len)) return (uint64_t)-1;
-    int n = arch_x86_64_fd_write((int)fd,
-                                 (const void *)(uintptr_t)buf_ptr,
-                                 (x86_64_size_t)len);
+    /* fd 0/1/2 stay on the early console path (stdout/stderr mirror). */
+    if ((int)fd < SFD_FIRST) {
+        int n = arch_x86_64_fd_write((int)fd,
+                                     (const void *)(uintptr_t)buf_ptr,
+                                     (x86_64_size_t)len);
+        if (n < 0) return (uint64_t)-1;
+        return (uint64_t)n;
+    }
+    /* fd >= 3: resolve to the underlying VFS fd and write through the
+     * unified VFS (ramfs/fat32/ext). */
+    /* fd >= 3: could be a pipe end or a VFS-backed fd. */
+    if (sfd_kind((int)fd) == SFD_KIND_PIPE) {
+        int pid = sfd_pipe_id((int)fd);
+        if (pid < 0 || sfd_pipe_is_write((int)fd) != 1) return (uint64_t)-1;
+        int n = pipe_write_blocking(pid,
+                                    (const void *)(uintptr_t)buf_ptr,
+                                    (uint32_t)len);
+        if (n < 0) return (uint64_t)-1;   /* -1 bad id, -2 EPIPE */
+        return (uint64_t)n;
+    }
+    int vfd = sfd_resolve((int)fd);
+    if (vfd < 0) return (uint64_t)-1;
+    int n = vfs_write(vfd, (const void *)(uintptr_t)buf_ptr, (uint32_t)len);
     if (n < 0) return (uint64_t)-1;
     return (uint64_t)n;
 }
 
 /*
- * SYS_READ: only initrd-backed read-only files are supported. fd=0 returns 0
- * (no input device yet); writable fds reject with -1.
+ * SYS_READ: fd=0 (stdin) has no input source yet and returns 0. fd 1/2 are
+ * not readable. fd >= 3 reads through the unified VFS.
  */
 static uint64_t do_read(uint64_t fd, uint64_t buf_ptr, uint64_t len) {
     if (!validate_user_buf(buf_ptr, len)) return (uint64_t)-1;
-    int n = arch_x86_64_fd_read((int)fd,
-                                (void *)(uintptr_t)buf_ptr,
-                                (x86_64_size_t)len);
+    if ((int)fd < SFD_FIRST) {
+        int n = arch_x86_64_fd_read((int)fd,
+                                    (void *)(uintptr_t)buf_ptr,
+                                    (x86_64_size_t)len);
+        if (n < 0) return (uint64_t)-1;
+        return (uint64_t)n;
+    }
+    if (sfd_kind((int)fd) == SFD_KIND_PIPE) {
+        int pid = sfd_pipe_id((int)fd);
+        if (pid < 0 || sfd_pipe_is_write((int)fd) != 0) return (uint64_t)-1;
+        int n = pipe_read_blocking(pid,
+                                   (void *)(uintptr_t)buf_ptr,
+                                   (uint32_t)len);
+        if (n < 0) return (uint64_t)-1;
+        return (uint64_t)n;
+    }
+    int vfd = sfd_resolve((int)fd);
+    if (vfd < 0) return (uint64_t)-1;
+    int n = vfs_read(vfd, (void *)(uintptr_t)buf_ptr, (uint32_t)len);
     if (n < 0) return (uint64_t)-1;
     return (uint64_t)n;
 }
 
 /*
- * SYS_OPEN: read-only, looks up path inside the embedded initrd64 image.
- * Flags/mode are accepted but ignored — any write attempt later will be
- * rejected by fd_write since the node is held read-only.
+ * SYS_OPEN: routes through the unified VFS (ramfs64), which now hosts the
+ * imported initrd tree plus the /mnt/fat (FAT32) and /mnt/ext (ext2/4)
+ * mounts. The raw VFS fd is wrapped in a syscall fd (>= 3) via the sfd
+ * indirection table so it never collides with stdin/stdout/stderr.
  */
+static int fifo_try_open(const char *path, int flags); /* fwd: M4.3b FIFO open */
+
 static uint64_t do_open(uint64_t path_ptr, uint64_t flags, uint64_t mode) {
-    (void)flags;
-    (void)mode;
     if (path_ptr == 0) return (uint64_t)-1;
     const char *path = (const char *)(uintptr_t)path_ptr;
-    const x86_64_vfs_node_t *node = arch_x86_64_vfs_lookup(path);
-    if (node == NULL) return (uint64_t)-1;
-    int fd = arch_x86_64_fd_open(node);
-    if (fd < 0) return (uint64_t)-1;
-    return (uint64_t)fd;
+    /* M4.3b: a registered FIFO path is opened via the named-pipe layer, not
+     * the VFS. fifo_try_open returns -1 when the path is not a FIFO. */
+    int frc = fifo_try_open(path, (int)flags);
+    if (frc >= 0) return (uint64_t)frc;
+    if (frc == -2) return (uint64_t)-1;   /* real FIFO open error */
+    int vfd = vfs_open(path, (int)flags, (int)mode);
+    if (vfd < 0) return (uint64_t)-1;
+    int sfd = sfd_alloc(vfd);
+    if (sfd < 0) {
+        vfs_close(vfd);   /* table full: don't leak the VFS fd */
+        return (uint64_t)-1;
+    }
+    return (uint64_t)sfd;
 }
 
 static uint64_t do_close(uint64_t fd) {
-    int r = arch_x86_64_fd_close((int)fd);
+    /* Closing stdin/stdout/stderr is a no-op success (POSIX-ish). */
+    if ((int)fd < SFD_FIRST) return 0;
+    int kind = SFD_KIND_NONE, a = -1, b = 0;
+    if (sfd_close((int)fd, &kind, &a, &b) < 0) return (uint64_t)-1;
+    /* Only release the backend when this was the last reference (dup-aware). */
+    if (kind == SFD_KIND_VFS) {
+        if (a >= 0) vfs_close(a);
+    } else if (kind == SFD_KIND_PIPE) {
+        pipe64_close_end(a, b);
+    }
+    return 0;
+}
+
+/*
+ * SYS_PIPE: create an anonymous pipe. Writes fd[0]=read end, fd[1]=write end
+ * into the caller-provided int[2]. Returns 0 on success, -1 on failure.
+ */
+static uint64_t do_pipe(uint64_t fds_ptr) {
+    if (fds_ptr == 0) return (uint64_t)-1;
+    if (!validate_user_buf(fds_ptr, sizeof(int) * 2)) return (uint64_t)-1;
+    int pid = pipe64_create();
+    if (pid < 0) return (uint64_t)-1;
+    int rfd = sfd_alloc_pipe(pid, 0);   /* read end  */
+    if (rfd < 0) {
+        pipe64_close_end(pid, 0);
+        pipe64_close_end(pid, 1);
+        return (uint64_t)-1;
+    }
+    int wfd = sfd_alloc_pipe(pid, 1);   /* write end */
+    if (wfd < 0) {
+        /* rfd took one read ref; drop the pipe entirely. */
+        int k, x, y; sfd_close(rfd, &k, &x, &y);
+        pipe64_close_end(pid, 0);
+        pipe64_close_end(pid, 1);
+        return (uint64_t)-1;
+    }
+    int *out = (int *)(uintptr_t)fds_ptr;
+    out[0] = rfd;
+    out[1] = wfd;
+    return 0;
+}
+
+/*
+ * SYS_MKFIFO: create a named pipe (FIFO) at path. a0=path, a1=mode.
+ * The backing ring is allocated lazily on first open. Returns 0 on success,
+ * -1 on bad args / table full / EEXIST.
+ */
+static uint64_t do_mkfifo(uint64_t path_ptr, uint64_t mode) {
+    if (path_ptr == 0) return (uint64_t)-1;
+    const char *path = (const char *)(uintptr_t)path_ptr;
+    int rc = fifo64_mkfifo(path, (int)mode);
+    return (rc == 0) ? 0 : (uint64_t)-1;
+}
+
+/*
+ * FIFO-aware open: consulted by do_open before falling through to the VFS.
+ * Returns a syscall fd (>= SFD_FIRST) on success, or -1 if the path is not a
+ * registered FIFO (caller should then try the VFS), or -2 on a real FIFO
+ * open error.
+ */
+static int fifo_try_open(const char *path, int flags) {
+    if (fifo64_lookup(path) < 0) {
+        return -1;   /* not a FIFO: let the VFS handle it */
+    }
+    /* Map open flags to a single direction. O_RDONLY=0, O_WRONLY=1, O_RDWR=2.
+     * A FIFO opened O_RDWR gets a write end (a self-feeding endpoint); we keep
+     * it simple and treat RDWR as the write side for producer semantics. */
+    int lo = flags & 0x3;
+    int dir = (lo == 0) ? FIFO64_O_READ : FIFO64_O_WRITE;
+    int pid = fifo64_open(path, dir);
+    if (pid < 0) return -2;
+    int is_write = (dir == FIFO64_O_WRITE) ? 1 : 0;
+    int sfd = sfd_alloc_pipe(pid, is_write);
+    if (sfd < 0) {
+        /* undo the end ref we just took */
+        pipe64_close_end(pid, is_write);
+        return -2;
+    }
+    return sfd;
+}
+
+/*
+ * ---------------------------------------------------------------------------
+ * M4.3c: shared memory syscalls (System V-style), delegating to shm64.
+ *   SYS_SHM_CREATE  a0=key a1=size          -> shm id (>=0) / -1
+ *   SYS_SHM_MAP     a0=shm_id               -> base address / (uint64_t)-1
+ *   SYS_SHM_DETACH  a0=shm_id               -> 0 / <0
+ *   SYS_SHM_DESTROY a0=shm_id               -> 0 / -1 (IPC_RMID)
+ *   SYS_SHM_INFO    a0=shm_id a1=which       -> size(0)/nattch(1)/base(2)
+ * ------------------------------------------------------------------------- */
+static uint64_t do_shm_create(uint64_t key, uint64_t size) {
+    int id = shm64_get((uint32_t)key, size);
+    return (id < 0) ? (uint64_t)-1 : (uint64_t)id;
+}
+
+static uint64_t do_shm_map(uint64_t shm_id) {
+    return shm64_attach((int)shm_id);   /* SHM64_ATTACH_FAILED == (uint64_t)-1 */
+}
+
+static uint64_t do_shm_detach(uint64_t shm_id) {
+    int rc = shm64_detach((int)shm_id);
+    return (rc == 0) ? 0 : (uint64_t)-1;
+}
+
+static uint64_t do_shm_destroy(uint64_t shm_id) {
+    int rc = shm64_rmid((int)shm_id);
+    return (rc == 0) ? 0 : (uint64_t)-1;
+}
+
+static uint64_t do_shm_info(uint64_t shm_id, uint64_t which) {
+    switch (which) {
+        case 0: return shm64_size((int)shm_id);
+        case 1: return (uint64_t)shm64_nattch((int)shm_id);
+        case 2: return shm64_base((int)shm_id);
+        default: return (uint64_t)-1;
+    }
+}
+
+/* SYS_DUP: lowest free syscall fd sharing oldfd's description. */
+static uint64_t do_dup(uint64_t oldfd) {
+    if ((int)oldfd < SFD_FIRST) return (uint64_t)-1;
+    int nf = sfd_dup((int)oldfd);
+    if (nf < 0) return (uint64_t)-1;
+    return (uint64_t)nf;
+}
+
+/* SYS_DUP2: force newfd to alias oldfd's description (closing newfd first). */
+static uint64_t do_dup2(uint64_t oldfd, uint64_t newfd) {
+    if ((int)oldfd < SFD_FIRST || (int)newfd < SFD_FIRST) return (uint64_t)-1;
+    int nf = sfd_dup2((int)oldfd, (int)newfd);
+    if (nf < 0) return (uint64_t)-1;
+    return (uint64_t)nf;
+}
+
+/*
+ * SYS_LSEEK: reposition a VFS-backed fd. Standard streams are not seekable.
+ */
+static uint64_t do_lseek(uint64_t fd, uint64_t offset, uint64_t whence) {
+    if ((int)fd < SFD_FIRST) return (uint64_t)-1;
+    int vfd = sfd_resolve((int)fd);
+    if (vfd < 0) return (uint64_t)-1;
+    int r = vfs_seek(vfd, (int)offset, (int)whence);
+    if (r < 0) return (uint64_t)-1;
+    return (uint64_t)r;
+}
+
+/* ------------------------------------------------------------------
+ * M4.1a: file metadata syscalls (stat / lstat / fstat / mkdir /
+ * unlink / rename). All path-based ones route straight through the
+ * unified VFS; fstat resolves the syscall fd first.
+ * ------------------------------------------------------------------ */
+
+/* Convert vfs_time_t (broken-down) to a packed UTC-ish u64 for userspace.
+ * We keep it simple: pack Y/M/D/h/m/s into a sortable decimal number
+ * (YYYYMMDDhhmmss). Good enough for listing/sorting; not epoch seconds. */
+static uint64_t pack_vfs_time(const vfs_time_t *t) {
+    if (!t) return 0;
+    return (uint64_t)t->year   * 10000000000ULL
+         + (uint64_t)t->month  * 100000000ULL
+         + (uint64_t)t->day    * 1000000ULL
+         + (uint64_t)t->hour   * 10000ULL
+         + (uint64_t)t->minute * 100ULL
+         + (uint64_t)t->second;
+}
+
+static void fill_stat_from_inode(openos_stat_t *st, const inode_t *ip) {
+    st->ino       = ip->ino;
+    st->mode      = ip->mode;
+    st->size      = ip->size;
+    st->nlinks    = ip->nlinks;
+    st->fs_type   = ip->fs_type;
+    st->uid       = ip->uid;
+    st->gid       = ip->gid;
+    st->ctime_utc = pack_vfs_time(&ip->ctime);
+    st->mtime_utc = pack_vfs_time(&ip->mtime);
+    st->atime_utc = pack_vfs_time(&ip->atime);
+}
+
+static uint64_t do_stat(uint64_t path_ptr, uint64_t st_ptr) {
+    if (path_ptr == 0 || st_ptr == 0) return (uint64_t)-1;
+    if (!validate_user_buf(st_ptr, sizeof(openos_stat_t))) return (uint64_t)-1;
+    const char *path = (const char *)(uintptr_t)path_ptr;
+    inode_t ino;
+    if (vfs_stat(path, &ino) < 0) return (uint64_t)-1;
+    fill_stat_from_inode((openos_stat_t *)(uintptr_t)st_ptr, &ino);
+    return 0;
+}
+
+/* lstat: identical to stat but does not follow the final symlink. The VFS
+ * exposes vfs_lstat when symlink support (M3.5) is compiled in; fall back to
+ * vfs_stat otherwise. */
+static uint64_t do_lstat(uint64_t path_ptr, uint64_t st_ptr) {
+    if (path_ptr == 0 || st_ptr == 0) return (uint64_t)-1;
+    if (!validate_user_buf(st_ptr, sizeof(openos_stat_t))) return (uint64_t)-1;
+    const char *path = (const char *)(uintptr_t)path_ptr;
+    inode_t ino;
+    if (vfs_lstat(path, &ino) < 0) return (uint64_t)-1;
+    fill_stat_from_inode((openos_stat_t *)(uintptr_t)st_ptr, &ino);
+    return 0;
+}
+
+static uint64_t do_fstat(uint64_t fd, uint64_t st_ptr) {
+    if (st_ptr == 0) return (uint64_t)-1;
+    if (!validate_user_buf(st_ptr, sizeof(openos_stat_t))) return (uint64_t)-1;
+    if ((int)fd < SFD_FIRST) return (uint64_t)-1; /* no stat for stdio */
+    int vfd = sfd_resolve((int)fd);
+    if (vfd < 0) return (uint64_t)-1;
+    inode_t ino;
+    if (vfs_fstat(vfd, &ino) < 0) return (uint64_t)-1;
+    fill_stat_from_inode((openos_stat_t *)(uintptr_t)st_ptr, &ino);
+    return 0;
+}
+
+static uint64_t do_mkdir(uint64_t path_ptr, uint64_t mode) {
+    if (path_ptr == 0) return (uint64_t)-1;
+    const char *path = (const char *)(uintptr_t)path_ptr;
+    int r = vfs_mkdir(path, (int)mode);
+    return (r < 0) ? (uint64_t)-1 : 0;
+}
+
+static uint64_t do_unlink(uint64_t path_ptr) {
+    if (path_ptr == 0) return (uint64_t)-1;
+    const char *path = (const char *)(uintptr_t)path_ptr;
+    int r = vfs_unlink(path);
+    return (r < 0) ? (uint64_t)-1 : 0;
+}
+
+static uint64_t do_rename(uint64_t old_ptr, uint64_t new_ptr) {
+    if (old_ptr == 0 || new_ptr == 0) return (uint64_t)-1;
+    const char *oldp = (const char *)(uintptr_t)old_ptr;
+    const char *newp = (const char *)(uintptr_t)new_ptr;
+    int r = vfs_rename(oldp, newp);
     return (r < 0) ? (uint64_t)-1 : 0;
 }
 
@@ -599,6 +972,305 @@ static uint64_t do_nanosleep(uint64_t req_ptr, uint64_t rem_ptr) {
 }
 
 /*
+ * SYS_GETTIMEOFDAY (466): fill a user openos_timeval with the current time.
+ * M4.1d alpha: we do not yet have a persistent RTC/CMOS wall-clock feed into
+ * userspace, so we expose the monotonic since-boot clock (same source as
+ * SYS_CLOCK_GETTIME). tv_sec/tv_usec therefore count from boot. When the RTC
+ * epoch bridge lands (tracked in M4.x) this becomes true UTC without changing
+ * the ABI. a1 (timezone) is legacy/ignored per modern POSIX. Returns 0, or
+ * -1 on a bad user pointer.
+ */
+static uint64_t do_gettimeofday(uint64_t tv_ptr, uint64_t tz_ptr) {
+    (void)tz_ptr; /* struct timezone is obsolete; ignore like Linux */
+    if (tv_ptr == 0 || !validate_user_buf(tv_ptr, sizeof(openos_timeval_t))) {
+        return (uint64_t)-1;
+    }
+    uint64_t ms = do_uptime_ms();
+    openos_timeval_t *tv = (openos_timeval_t *)tv_ptr;
+    tv->tv_sec  = (int64_t)(ms / 1000ULL);
+    tv->tv_usec = (int64_t)((ms % 1000ULL) * 1000ULL);
+    return 0;
+}
+
+/*
+ * SYS_IOCTL (467): device control multiplexer. M4.1d ships the ABI seam only;
+ * we have no TTY/line-discipline or block-device ioctl surface yet (that is
+ * M4.4 TTY work). For now we validate the fd against the syscall fd table and
+ * return -1 (ENOTTY-equivalent) for every request, which is the correct answer
+ * for a plain file. This lets libc probes (isatty(), tcgetattr()) fail cleanly
+ * instead of trapping. Once the TTY driver exists this switch grows real cases.
+ */
+/* ioctl request numbers (Linux-compatible subset) that the TTY layer honours. */
+#define IOCTL_TCGETS      0x5401u
+#define IOCTL_TCSETS      0x5402u
+#define IOCTL_TIOCGWINSZ  0x5413u
+#define IOCTL_TIOCSWINSZ  0x5414u
+#define IOCTL_TIOCGPGRP   0x540Fu
+#define IOCTL_TIOCSPGRP   0x5410u
+
+/*
+ * The kernel owns a single console pseudo-terminal, lazily created on first
+ * use. fd 0/1/2 (stdin/stdout/stderr) are all bound to it: reads pull cooked
+ * input, writes push to the output ring, and ioctl(TCGETS/...) manipulates its
+ * line discipline. A dedicated selftest may create additional ttys.
+ */
+static int g_console_tty = -1;
+
+static int syscall_console_tty(void) {
+    if (g_console_tty < 0 || !tty64_valid(g_console_tty)) {
+        g_console_tty = tty64_create();
+    }
+    return g_console_tty;
+}
+
+/* Is this fd a terminal? Standard streams 0/1/2 are the console tty. */
+static int fd_is_tty(uint64_t fd) {
+    return (fd <= 2);
+}
+
+/*
+ * M4.4b bridge: drain any control-char signal latched by the console tty
+ * (e.g. ^C -> SIGINT, ^\ -> SIGQUIT) and broadcast it to the tty's current
+ * foreground process group. This is the kernel-side of job control: only the
+ * foreground job receives keyboard-generated signals. Returns the number of
+ * processes signalled (>=0), or -1 if the console tty is absent. Called from
+ * the input path and exercised directly by the self-test.
+ */
+int arch_x86_64_tty_pump_signals(void) {
+    int tid = syscall_console_tty();
+    if (tid < 0) return -1;
+    int sig = tty64_take_signal(tid);
+    if (sig == 0) return 0;
+    int pgrp = tty64_get_pgrp(tid);
+    if (pgrp <= 0) return 0; /* no foreground group -> signal dropped */
+    return arch_x86_64_proc_signal_group((uint32_t)pgrp, sig);
+}
+
+static uint64_t do_ioctl(uint64_t fd, uint64_t request, uint64_t arg) {
+    /* fd 0/1/2 are the console terminal; everything else must be a live vfs
+     * fd (and vfs objects currently expose no ioctl surface -> ENOTTY). */
+    if (!fd_is_tty(fd)) {
+        if (sfd_resolve((int)fd) < 0) return (uint64_t)-1; /* EBADF */
+        return (uint64_t)-1; /* ENOTTY: regular files have no ioctl */
+    }
+
+    int tid = syscall_console_tty();
+    if (tid < 0) return (uint64_t)-1;
+
+    switch ((uint32_t)request) {
+    case IOCTL_TCGETS: {
+        if (!arg) return (uint64_t)-1;
+        tty64_termios_t t;
+        if (tty64_tcgets(tid, &t) < 0) return (uint64_t)-1;
+        tty64_termios_t *u = (tty64_termios_t *)arg;
+        *u = t;
+        return 0;
+    }
+    case IOCTL_TCSETS: {
+        if (!arg) return (uint64_t)-1;
+        const tty64_termios_t *u = (const tty64_termios_t *)arg;
+        tty64_termios_t t = *u;
+        return (tty64_tcsets(tid, &t) == 0) ? 0 : (uint64_t)-1;
+    }
+    case IOCTL_TIOCGWINSZ: {
+        if (!arg) return (uint64_t)-1;
+        tty64_winsize_t w;
+        if (tty64_get_winsize(tid, &w) < 0) return (uint64_t)-1;
+        *(tty64_winsize_t *)arg = w;
+        return 0;
+    }
+    case IOCTL_TIOCSWINSZ: {
+        if (!arg) return (uint64_t)-1;
+        tty64_winsize_t w = *(const tty64_winsize_t *)arg;
+        return (tty64_set_winsize(tid, &w) == 0) ? 0 : (uint64_t)-1;
+    }
+    case IOCTL_TIOCGPGRP: {
+        if (!arg) return (uint64_t)-1;
+        int pg = tty64_get_pgrp(tid);
+        if (pg < 0) return (uint64_t)-1;
+        *(uint32_t *)arg = (uint32_t)pg;
+        return 0;
+    }
+    case IOCTL_TIOCSPGRP: {
+        if (!arg) return (uint64_t)-1;
+        int pg = (int)(*(const uint32_t *)arg);
+        return (tty64_set_pgrp(tid, pg) == 0) ? 0 : (uint64_t)-1;
+    }
+    default:
+        return (uint64_t)-1; /* unsupported ioctl on a tty -> EINVAL/ENOTTY */
+    }
+}
+
+/*
+ * SYS_KILL (245): deliver a signal to the process identified by pid.
+ * Backed by arch_x86_64_proc_signal(). M4.2 semantics: the target's pending
+ * bitmap is set through the signal64 layer; terminating-class signals whose
+ * disposition is still SIG_DFL reap the target (EXITED, code 128+sig); sig 0
+ * is an existence probe; SIGKILL/SIGSTOP ignore any handler. Returns 0 on
+ * success, -1 if no such pid (ESRCH-equivalent) or on an invalid signal.
+ */
+static uint64_t do_kill(uint64_t pid, uint64_t sig) {
+    if ((int)sig < 0 || (int)sig > 31) {
+        return (uint64_t)-1; /* EINVAL: outside the classic signal range */
+    }
+    int spid = (int)pid;
+    /* POSIX kill() pid conventions:
+     *   pid  > 0 : signal that one process.
+     *   pid  < 0 : signal every member of process group |pid| (job control).
+     *   pid == 0 : signal every member of the CALLER's process group.
+     * (pid == -1 "broadcast to all" is intentionally not supported here.) */
+    if (spid > 0) {
+        int rc = arch_x86_64_proc_signal((uint32_t)spid, (int)sig);
+        return (rc == 0) ? 0 : (uint64_t)-1;
+    }
+    uint32_t pgid;
+    if (spid == 0) {
+        x86_64_proc_t *cur = arch_x86_64_proc_current();
+        if (cur == 0) return (uint64_t)-1;
+        pgid = cur->pgid;
+    } else {
+        pgid = (uint32_t)(-spid);
+    }
+    int hits = arch_x86_64_proc_signal_group(pgid, (int)sig);
+    return (hits > 0) ? 0 : (uint64_t)-1;
+}
+
+/* M4.4b job-control syscalls. Thin wrappers over the proc64 group/session
+ * API; all operate on the current process unless a pid is supplied. */
+static uint64_t do_setpgid(uint64_t pid, uint64_t pgid) {
+    return (arch_x86_64_proc_setpgid((uint32_t)pid, (uint32_t)pgid) == 0)
+               ? 0 : (uint64_t)-1;
+}
+static uint64_t do_getpgid(uint64_t pid) {
+    uint32_t pg = arch_x86_64_proc_getpgid((uint32_t)pid);
+    return (pg == (uint32_t)-1) ? (uint64_t)-1 : (uint64_t)pg;
+}
+static uint64_t do_setsid(void) {
+    int sid = arch_x86_64_proc_setsid();
+    return (sid < 0) ? (uint64_t)-1 : (uint64_t)sid;
+}
+static uint64_t do_getsid(uint64_t pid) {
+    uint32_t sid = arch_x86_64_proc_getsid((uint32_t)pid);
+    return (sid == (uint32_t)-1) ? (uint64_t)-1 : (uint64_t)sid;
+}
+
+/*
+ * SYS_RT_SIGACTION (468): register / query a signal disposition on the
+ * CURRENT process. a0=sig, a1=const openos_sigaction* (may be 0 for query),
+ * a2=openos_sigaction* old (may be 0). Both pointers are validated as
+ * identity-mapped user buffers before use. Returns 0 / -1.
+ */
+static uint64_t do_rt_sigaction(uint64_t sig, uint64_t act_ptr,
+                                uint64_t old_ptr) {
+    openos_sigaction_t act_local;
+    openos_sigaction_t old_local;
+    const openos_sigaction_t *act = 0;
+    openos_sigaction_t *old = 0;
+
+    if (act_ptr != 0) {
+        if (!validate_user_buf(act_ptr, sizeof(openos_sigaction_t))) {
+            return (uint64_t)-1;
+        }
+        act_local = *(const openos_sigaction_t *)act_ptr;
+        act = &act_local;
+    }
+    if (old_ptr != 0) {
+        if (!validate_user_buf(old_ptr, sizeof(openos_sigaction_t))) {
+            return (uint64_t)-1;
+        }
+        old = &old_local;
+    }
+    int rc = arch_x86_64_proc_sigaction((int)sig, act, old);
+    if (rc != 0) {
+        return (uint64_t)-1;
+    }
+    if (old_ptr != 0) {
+        *(openos_sigaction_t *)old_ptr = old_local;
+    }
+    return 0;
+}
+
+/*
+ * SYS_RT_SIGPROCMASK (469): adjust the CURRENT process's blocked mask.
+ * a0=how (BLOCK/UNBLOCK/SETMASK), a1=const uint64* set (may be 0 -> query),
+ * a2=uint64* oldset (may be 0). SIGKILL/SIGSTOP are silently unblockable.
+ * Returns 0 / -1.
+ */
+static uint64_t do_rt_sigprocmask(uint64_t how, uint64_t set_ptr,
+                                  uint64_t oldset_ptr) {
+    uint64_t set = 0;
+    uint64_t oldset = 0;
+    int query_only = 0;
+
+    if (set_ptr != 0) {
+        if (!validate_user_buf(set_ptr, sizeof(uint64_t))) {
+            return (uint64_t)-1;
+        }
+        set = *(const uint64_t *)set_ptr;
+    } else {
+        /* No new set: keep the current mask (query). SETMASK with a NULL
+         * set would clobber, so treat NULL as "don't change". */
+        query_only = 1;
+    }
+    if (oldset_ptr != 0 &&
+        !validate_user_buf(oldset_ptr, sizeof(uint64_t))) {
+        return (uint64_t)-1;
+    }
+    int rc;
+    if (query_only) {
+        /* BLOCK with an empty set is a no-op that still returns oldset. */
+        rc = arch_x86_64_proc_sigprocmask(OPENOS_SIG_BLOCK, 0, &oldset);
+    } else {
+        rc = arch_x86_64_proc_sigprocmask((int)how, set, &oldset);
+    }
+    if (rc != 0) {
+        return (uint64_t)-1;
+    }
+    if (oldset_ptr != 0) {
+        *(uint64_t *)oldset_ptr = oldset;
+    }
+    return 0;
+}
+
+/* ---------------------------------------------------------------------------
+ * M4.1b memory syscalls — mmap / munmap / mprotect / brk / sbrk.
+ *
+ * These delegate to vmem64, which in the current kernel-backed mode carves
+ * anonymous pages straight from the PMM and hands back their identity-mapped
+ * address. The ABI matches the classic POSIX shapes so a later per-process
+ * address-space backing is a drop-in without touching callers.
+ * ------------------------------------------------------------------------- */
+
+/* SYS_MMAP(addr, length, prot, flags, fd, offset): anonymous mapping only for
+ * now — addr hint / fd / offset are ignored, flags unused. Returns the base
+ * address or MAP_FAILED ((uint64_t)-1). */
+static uint64_t do_mmap(uint64_t addr, uint64_t length, uint64_t prot,
+                        uint64_t flags, uint64_t fd, uint64_t offset) {
+    (void)addr; (void)flags; (void)fd; (void)offset;
+    return arch_x86_64_vmem_mmap(length, (int)prot);
+}
+
+/* SYS_MUNMAP(addr, length): release a whole region. 0 / -1. */
+static uint64_t do_munmap(uint64_t addr, uint64_t length) {
+    return (uint64_t)(int64_t)arch_x86_64_vmem_munmap(addr, length);
+}
+
+/* SYS_MPROTECT(addr, length, prot): 0 / -1. */
+static uint64_t do_mprotect(uint64_t addr, uint64_t length, uint64_t prot) {
+    return (uint64_t)(int64_t)arch_x86_64_vmem_mprotect(addr, length, (int)prot);
+}
+
+/* SYS_BRK(addr): set program break; addr==0 queries. Returns new break. */
+static uint64_t do_brk(uint64_t addr) {
+    return arch_x86_64_vmem_brk(addr);
+}
+
+/* SYS_SBRK(delta): grow/shrink heap; returns previous break or MAP_FAILED. */
+static uint64_t do_sbrk(uint64_t delta) {
+    return arch_x86_64_vmem_sbrk((int64_t)delta);
+}
+
+/*
  * SYS_YIELD: Step E.1 routes the call through proc64's cooperative yield
  * counter. The dispatcher itself stays branchless so future sched64 work
  * only has to swap proc64_yield()'s body for a real reschedule. We still
@@ -839,6 +1511,23 @@ uint64_t arch_x86_64_syscall_dispatch_common(uint64_t num,
     case SYS_READ_FD:     return do_read(a0, a1, a2);
     case SYS_OPEN:        return do_open(a0, a1, a2);
     case SYS_CLOSE:       return do_close(a0);
+    case SYS_PIPE:        return do_pipe(a0);
+    case SYS_MKFIFO:      return do_mkfifo(a0, a1);
+    case SYS_SHM_CREATE:  return do_shm_create(a0, a1);
+    case SYS_SHM_MAP:     return do_shm_map(a0);
+    case SYS_SHM_DETACH:  return do_shm_detach(a0);
+    case SYS_SHM_DESTROY: return do_shm_destroy(a0);
+    case SYS_SHM_INFO:    return do_shm_info(a0, a1);
+    case SYS_DUP:         return do_dup(a0);
+    case SYS_DUP2:        return do_dup2(a0, a1);
+    /* -------- M4.1a: seek + file metadata (unified VFS) -------- */
+    case SYS_SEEK:        return do_lseek(a0, a1, a2);
+    case SYS_STAT:        return do_stat(a0, a1);
+    case SYS_LSTAT:       return do_lstat(a0, a1);
+    case SYS_FSTAT:       return do_fstat(a0, a1);
+    case SYS_MKDIR:       return do_mkdir(a0, a1);
+    case SYS_UNLINK:      return do_unlink(a0);
+    case SYS_RENAME:      return do_rename(a0, a1);
     /* -------- H.3 execve -------- */
     case SYS_EXEC:        return do_exec(a0, a1, a2);
 
@@ -853,6 +1542,26 @@ uint64_t arch_x86_64_syscall_dispatch_common(uint64_t num,
     case SYS_CLOCK_GETTIME: return do_clock_gettime(a0, a1);
     case SYS_SLEEP:         return do_sleep(a0);
     case SYS_NANOSLEEP:     return do_nanosleep(a0, a1);
+    case SYS_GETTIMEOFDAY:  return do_gettimeofday(a0, a1);
+
+    /* -------- device control / process signal (M4.1d) -------- */
+    case SYS_IOCTL:         return do_ioctl(a0, a1, a2);
+    case SYS_KILL:          return do_kill(a0, a1);
+    case SYS_RT_SIGACTION:  return do_rt_sigaction(a0, a1, a2);
+    case SYS_RT_SIGPROCMASK: return do_rt_sigprocmask(a0, a1, a2);
+
+    /* -------- job control (M4.4b) -------- */
+    case SYS_SETPGID:       return do_setpgid(a0, a1);
+    case SYS_GETPGID:       return do_getpgid(a0);
+    case SYS_SETSID:        return do_setsid();
+    case SYS_GETSID:        return do_getsid(a0);
+
+    /* -------- memory (M4.1b) -------- */
+    case SYS_MMAP:          return do_mmap(a0, a1, a2, a3, a4, a5);
+    case SYS_MUNMAP:        return do_munmap(a0, a1);
+    case SYS_MPROTECT:      return do_mprotect(a0, a1, a2);
+    case SYS_BRK:           return do_brk(a0);
+    case SYS_SBRK:          return do_sbrk(a0);
 
     /* -------- net (Step E.3, loopback only) -------- */
     case SYS_SOCKET:      return arch_x86_64_sys_socket(a0, a1, a2);

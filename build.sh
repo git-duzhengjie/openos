@@ -478,6 +478,7 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         kernel/idt_selftest64.c \
         kernel/sched64.c \
         kernel/proc64.c \
+        kernel/signal64.c \
         kernel/syscall64.c \
         kernel/syscall_dispatch64.c \
         kernel/syscall_net64.c \
@@ -505,6 +506,12 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         kernel/ap_trampoline64.c \
         kernel/delay64.c \
         kernel/fdtable64.c \
+        kernel/sfdtable64.c \
+        kernel/pipe64.c \
+        kernel/fifo64.c \
+        kernel/shm64.c \
+        kernel/tty64.c \
+        kernel/vmem64.c \
         kernel/initrd64.c \
         kernel/vfs64.c \
         kernel/shell64.c \
@@ -609,6 +616,7 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         "$ARCH64_BUILD/isr64.o" \
         "$ARCH64_BUILD/sched64.o" \
         "$ARCH64_BUILD/proc64.o" \
+        "$ARCH64_BUILD/signal64.o" \
         "$ARCH64_BUILD/context_switch64.o" \
         "$ARCH64_BUILD/syscall64.o" \
         "$ARCH64_BUILD/syscall_dispatch64.o" \
@@ -638,6 +646,12 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         "$ARCH64_BUILD/ap_trampoline64_asm.o" \
         "$ARCH64_BUILD/delay64.o" \
         "$ARCH64_BUILD/fdtable64.o" \
+        "$ARCH64_BUILD/sfdtable64.o" \
+        "$ARCH64_BUILD/pipe64.o" \
+        "$ARCH64_BUILD/fifo64.o" \
+        "$ARCH64_BUILD/shm64.o" \
+        "$ARCH64_BUILD/tty64.o" \
+        "$ARCH64_BUILD/vmem64.o" \
         "$ARCH64_BUILD/initrd64.o" \
         "$ARCH64_BUILD/vfs64.o" \
         "$ARCH64_BUILD/shell64.o" \
@@ -2208,3 +2222,4 @@ echo "========================================="
 echo "  openos Phase 3 Build Successful!"
 echo "  Output: target/openos.img"
 echo "========================================="
+======="

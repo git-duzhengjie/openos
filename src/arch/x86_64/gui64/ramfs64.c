@@ -943,6 +943,58 @@ int vfs_stat(const char *path, inode_t *st) {
     return 0;
 }
 
+/*
+ * vfs_lstat — like vfs_stat but does NOT follow a trailing symlink.
+ * For the FAT/ext mount points (read-only, no symlinks) this is identical
+ * to vfs_stat. For ramfs we resolve without expanding the final component's
+ * symlink so callers can inspect the link node itself.
+ */
+int vfs_lstat(const char *path, inode_t *st) {
+    if (!path || !st || !g_ramfs_ready) return -1;
+
+    /* FAT/ext mount points have no symlinks -> delegate to vfs_stat. */
+    {
+        const char *sub = 0;
+        if (fat_match(path, &sub) || ext_match(path, &sub)) {
+            return vfs_stat(path, st);
+        }
+    }
+
+    /* Resolve parent, then find the final component WITHOUT following it. */
+    char name[MAX_NAME];
+    ramfs_node_t *parent = path_resolve(path, 1, name, sizeof(name));
+    if (!parent) {
+        /* Possibly the root itself or a single-component path. */
+        ramfs_node_t *n = path_resolve(path, 0, 0, 0);
+        if (!n) return -1;
+        *st = n->inode;
+        return 0;
+    }
+    if (name[0] == 0) {
+        /* Path was a directory like "/" — just stat the parent. */
+        *st = parent->inode;
+        return 0;
+    }
+    if (!node_is_dir(parent)) return -1;
+    ramfs_node_t *c = dir_lookup(parent, name, rstrlen(name));
+    if (!c) return -1;
+    *st = c->inode;   /* the link node itself, not its target */
+    return 0;
+}
+
+/*
+ * vfs_fstat — stat an open fd. Only ramfs-backed fds (< RAMFS_MAX_FD) carry
+ * a node pointer here; FAT/ext fds are managed in their own tables and are
+ * not fstat-able through this path yet (returns -1).
+ */
+int vfs_fstat(int fd, inode_t *st) {
+    if (!st || !g_ramfs_ready) return -1;
+    if (fd < 0 || fd >= RAMFS_MAX_FD) return -1;
+    if (!g_fds[fd].used || !g_fds[fd].node) return -1;
+    *st = g_fds[fd].node->inode;
+    return 0;
+}
+
 int vfs_rename(const char *oldpath, const char *newpath) {
     if (!oldpath || !newpath || !g_ramfs_ready) return -1;
     ramfs_node_t *n = path_resolve(oldpath, 0, 0, 0);

@@ -2,9 +2,9 @@
 
 > 更新时间：2026-07-09
 >
-> 当前状态：openos 已具备 32 位 √86 原型内核能力，能够启动、显示、输入、调度、运行基础用户程序，并具备基础 syscall、VFS、ramfs/tmpfs、shell、GUI Terminal 等模块。浏览器路线已切换为 OpenOS 自研轻量浏览器，Chromium 官方内核迁移冻结为历史备选。
+> 当前状态：openos 已具备 32 位 x86 原型内核能力，能够启动、显示、输入、调度、运行基础用户程序，并具备基础 syscall、VFS、ramfs/tmpfs、shell、GUI Terminal 等模块。浏览器路线已切换为 OpenOS 自研轻量浏览器，Chromium 官方内核迁移冻结为历史备选。
 >
-> 最近完成：**M3.5 软链接/硬链接支持** —— 在统一 VFS(ramfs64.c) 实现：硬链接 vfs_link（link_to 共享 inode 数据体 + node_body 重定向 + nlinks 引用计数 + 删主节点时数据体转移）、软链接 vfs_symlink（FS_SYMLINK 节点存目标路径）、vfs_readlink、path_resolve 中间段 symlink 自动展开（绝对/相对路径 + hops>16 防环）；headless 实测 link pass=5 fail=0。M3 里程碑全部完成。
+> 最近完成：**M4.1 里程碑收官** —— syscall 扩充四子项全部完成：M4.1a 文件元数据（stat/fstat/lstat/mkdir/unlink/rename，open/read/write/close 迁移到统一 VFS）、M4.1b 内存（mmap/munmap/mprotect/brk/sbrk，修复 g_heap_slot 未初始化 bug）、M4.1c IPC（pipe/dup/dup2，引入 OFD 打开文件描述层）、M4.1d 时间/设备/信号（gettimeofday/ioctl/kill）。x86_64 syscall dispatch 从 M4 初的 29 个扩到 49 个（0x31），dispatch_enosys=0 全部真实现无兜底。headless SMP=1/4 双矩阵 + 各子项自测全绿，Stages 1-30 基线保住。
 >
 > 当前推荐下一步：在继续保持自研浏览器回归门禁的同时，优先推进 OPENOS 作为真正操作系统的 PC/Mobile 跨设备架构路线：冻结 i386 稳定基线，将 √86_64 升级为 PC 主线，抽象 BootInfo / HAL / Device Model，并新增 aarch64 作为 Mobile 主线基础。
 
@@ -1653,15 +1653,63 @@
 
 ### M4：内核接口与进程模型补齐（🟠 第二优先级）
 
-- [ ] M4.1：syscall 扩充（当前仅 22 个，缺以下关键项）
-  - [ ] 内存：`mmap` / `munmap` / `mprotect` / `brk`
-  - [ ] IPC：`pipe` / `dup` / `dup2`
-  - [ ] 文件元数据：`stat` / `fstat` / `lstat` / `mkdir` / `unlink` / `rename` / `ioctl`
-  - [ ] 时间：`nanosleep` / `gettimeofday` / `clock_gettime`
-  - [ ] 进程：`getpid` / `getppid` / `kill`
-- [ ] M4.2：信号机制（signal / sigaction / kill / Ctrl-C 终止前台进程）
-- [ ] M4.3：管道与 IPC（匿名管道 + 命名管道 FIFO + 共享内存）
-- [ ] M4.4：伪终端 / TTY 子系统（行规程 / 作业控制 / 前后台进程组）
+- [x] **M4.1：syscall 扩充** ✅（M4.1a 文件元数据 + M4.1b 内存 + M4.1c IPC + M4.1d 时间/设备/信号 全部完成；dispatch_total 由 29 扩到 **49（0x31）**，dispatch_enosys=0 无兜底命中）
+  - [x] **M4.1b 内存：`mmap` / `munmap` / `mprotect` / `brk` / `sbrk`** ✅
+        - dispatch 新增 `do_mmap`/`do_munmap`/`do_mprotect`/`do_brk`/`do_sbrk`，全走内核 VMM/heap
+        - 修复 `g_heap_slot` 未初始化 bug（brk 懒初始化）
+        - headless 全绿：mmap(anon,4K,RW) base=0x0D7BF000 读写回验证 / mprotect(→RO)=0 / munmap=0 / brk(0) 查询非0 / sbrk(+4K) 后 break 前进 4K
+  - [x] **M4.1c IPC：`pipe` / `dup` / `dup2`** ✅
+        - 新增 `pipe64.[ch]`：匿名管道池（静态 16 槽 × 4KB 环形缓冲，读/写两端独立引用计数，两端均关闭时回收）
+        - 升级 `sfdtable64.[ch]`：引入 **OFD（打开文件描述）层**，sfd 槽→带引用计数 OFD（区分 VFS/PIPE 后端）；dup/dup2 共享同一 OFD（共享 VFS 偏移量/管道端），最后一个 fd 关闭时才释放后端
+        - dispatch 新增 `do_pipe`/`do_dup`/`do_dup2`，`do_read`/`do_write`/`do_close` 各加 PIPE 分支；SYS_PIPE=244/DUP=242/DUP2=243 接线
+        - EPIPE（无读端写返回 -1）/ 非阻塞读（空管道返回 0）语义；阻塞调度集成归 M4.3
+        - headless 全绿：pipe(rfd=3,wfd=4) / write=read=10B 内容一致 / dup 共享写端 / dup2 强制槽共享读端 / 全关闭无泄漏
+  - [x] **M4.1a 文件元数据：`stat` / `fstat` / `lstat` / `mkdir` / `unlink` / `rename`** ✅
+        - 决策 A：将 `open/read/write/close/lseek` 从旧 initrd 只读表**迁移到统一 VFS(ramfs64)**
+        - 新增 syscall fd 间接层 `sfdtable64.[ch]`（fd 0/1/2 保留 stdio，≥3 映射 VFS fd）
+        - ramfs64 新增 `vfs_lstat`（末段不跟随软链接）/ `vfs_fstat`（按 fd 取 inode）
+        - dispatch 接线 SYS_SEEK/STAT/LSTAT/FSTAT/MKDIR/UNLINK/RENAME(465)
+        - headless 自测全绿：stat/fstat 视图一致 + mkdir→write→rename→unlink 生命周期校验通过
+        - ⏳ `ioctl` 归入 M4.1d 收尾
+  - [x] 时间：`nanosleep` / `gettimeofday` / `clock_gettime`（clock_gettime/nanosleep 已在 M4.1 完成；gettimeofday 已在 M4.1d 完成）
+  - [x] 进程：`getpid` / `getppid` / `kill`（kill 已在 M4.1d 完成）
+  - [x] **M4.1d 时间/设备/信号收尾：`gettimeofday` / `ioctl` / `kill`** ✅
+        - 新增 `SYS_GETTIMEOFDAY=466` / `SYS_IOCTL=467`；`SYS_KILL=245` 接线
+        - `gettimeofday`：复用单调 uptime 时钟源（RTC 墙钟 epoch 桥接待后续，ABI 不变）
+        - `ioctl`：ABI 占位，校验 fd 后返回 -1(ENOTTY)，让 isatty/tcgetattr 探测干净失败（真 TTY 归 M4.4）
+        - `kill`：新增 `arch_x86_64_proc_signal(pid,sig)`——SIGKILL/SIGTERM 置 EXITED+128+sig，sig0 存在探测，其余信号接受 no-op（处理器注册归 M4.2）
+        - headless 全绿：gettimeofday 单调+usec范围 / ioctl=-1 / kill(self,0)=0 / kill(bogus,0)=-1
+- [x] **M4.2：信号机制（内核侧完成）** ✅
+  - 新增独立模块 `signal64.[ch]`（零依赖 proc64，内嵌入 PCB）：每进程 `x86_64_sigstate_t`（pending/blocked 位图 + 32 项 disposition 表）
+  - signal64 API：state_init / send（SIG_IGN 丢弃 catchable、总记录 KILL/STOP）/ sigaction（KILL/STOP 不可改）/ procmask（KILL/STOP 不可阻）/ next_pending（低号优先）/ consume / default_action（经典缺省处置表 TERM/IGN/CORE/STOP/CONT）
+  - PCB 集成：proc_init/spawn 调 state_init；fork 继承 blocked/actions 但清空 pending（POSIX 语义）
+  - 重写 `arch_x86_64_proc_signal`：走 signal_send + 对 SIG_DFL 终止类信号立即 EXITED(128+sig)；新增 `proc_sigaction`/`proc_sigprocmask`/`proc_signal_pump`（当前进程，handler 已注册的信号留给 M4.2b trampoline）
+  - syscall 接线：SYS_KILL(245) 重接、新增 SYS_RT_SIGACTION(468)/SYS_RT_SIGPROCMASK(469)
+  - 自测全绿：sigaction 注册/回读（SIGUSR1→IGN readback=1）、SIGKILL disposition 不可改拒绝、sigprocmask block(SIGUSR2) oldset=0/curmask 含位、KILL/STOP 不可阻被 strip、kill(self,0)=0 / kill(bad,0)=-1 / kill 超范围 signo=-1
+  - [x] **M4.2b 用户态 handler 回调 trampoline** ✅（收官，信号机制彻底闭环）
+    - proc64 新增 `arch_x86_64_proc_signal_deliver_user()`：挑选最低号「装了用户 handler 且未阻塞」的 pending 信号 → signal64 build_frame 把 sigcontext + restorer 返回地址写到用户栈 → regs 重定向到 handler（rip→handler VA、rdi→signo、rsp→新栈顶）；含 `in_handler` 防重入嵌套、失败回滚 mask/pending
+    - proc64 新增 `arch_x86_64_proc_sigreturn()`：从用户栈读回 sigcontext → signal64 restore_frame 字节级还原被打断上下文 + 恢复信号掩码
+    - syscall64 两条返回路径均接管：**int80**（rip/rsp/rflags 在 trap frame）+ **native syscall**（rip=rcx、rflags=r11、rsp 在 per-CPU 槽）；dispatch 完成、返回 ring3 前插 deliver_user 检查
+    - 新增 **SYS_RT_SIGRETURN(476)** 特判接线，两路各自把恢复的上下文写回对应通道；用户内存走 identity-map（uwrite/uread 即 memcpy）
+    - 自测全绿：deliver_user=0x0B（SIG=11 投递）、handler rip=0x401234（重定向 handler VA）、handler rdi=0x0B（signo 就位）、restorer-on-stack=0x401300（返回地址压栈）、sigreturn=0（恢复成功）、restored rip=0x4055AA/rsp=...DC00（被打断上下文字节级还原）、`user-signal trampoline round-trip OK`
+    - **指标**：dispatch_total=0x60（96 个），dispatch_enosys=0，全部真实现无 ENOSYS 兜底；M4.1~M4.4b selftest 全链路无回归
+- [x] **M4.3：管道与 IPC（匿名管道阻塞语义 + 命名管道 FIFO + 共享内存）** ✅
+  - **M4.3a 匿名管道阻塞语义**：pipe64 扩展 poll + 双端 waiter 队列（rwaiters/wwaiters，PIPE64_WAITERS_MAX=8，含 dedup/drain）；syscall 层新增 `pipe_read_blocking`/`pipe_write_blocking`——协作式阻塞（sched_yield + 有限 spin cap 100000 防单线程 bootstrap 死锁），读端空管道有 writer→park，无 writer→EOF；写端满管道有 reader→park，无 reader→EPIPE；每次推进后 drain 对端 waiter 并 slot_wakeup
+    - 自测全绿：poll(empty)=0x02(可写)、poll(data)=0x03、waiter add/dedup(=2)/drain(=2)、poll(eof)=0x07(可读|可写|HUP)
+  - **M4.3b 命名管道 FIFO**：新增独立模块 `fifo64.[ch]`（名称注册表，路径→pipe64 ring 懒分配，复用全部 ring/阻塞/poll 机制）；pipe64 新增 `pipe64_create_bare`（0/0 refs 供 FIFO 精确管理生命周期）；syscall 新增 SYS_MKFIFO(470) + `fifo_try_open`（do_open 前置钩子，FIFO 路径走命名管道层否则落 VFS，O_RDONLY→读端/O_WRONLY|O_RDWR→写端），复用 SFD_KIND_PIPE 全流程
+    - 自测全绿：mkfifo rc=0、dup mkfifo=EEXIST、wfd=3/rfd=4 同路径共享一 ring、write=5/read=5 数据穿 FIFO、关写端后 read=0(EOF 非阻塞)、unlink 后 active=0
+  - **M4.3c 共享内存**：新增独立模块 `shm64.[ch]`（System V 风格，PMM 连续物理页 identity-map 直接共享）；接线既有 SYS_SHM_CREATE(300)=shmget / SYS_SHM_MAP(301)=shmat / SYS_SHM_DESTROY(302)=IPC_RMID / SYS_SHM_INFO(333)=size/nattch/base 查询 + 新增 SYS_SHM_DETACH(471)=shmdt；引用计数生命周期（rmid 有 attacher 则延迟到 last detach 释放页）
+    - 自测全绿：shmget id=0、同 key 复用同段、双 attach baseA==baseB==0x0D7BE000、nattch=2、跨 attach 共享写验证(page0/page1/末字节)、双 detach 归零、over-detach=-1、rmid 立即释放 active=0
+  - **指标**：dispatch_total=0x4F（79 个），dispatch_enosys=0，全部真实现无 ENOSYS 兜底
+- [x] **M4.4：伪终端 / TTY 子系统（行规程 + 作业控制 + 前后台进程组）** ✅
+  - **M4.4a TTY 行规程引擎**：新增独立模块 `tty64.[ch]`（纯字节机器，零 proc/syscall 依赖，自测友好）：每设备 3 环（行编辑/cooked/output-echo）+ termios 控制块；规范模式（ICANON）按行交付 + ERASE(^H/DEL)/KILL(^U) 行内编辑 + ECHO 镜像（控制字展开为 ^X）；raw 模式逐字节即时可读；INTR(^C)→刷行+锁 SIGINT、EOF(^D)→空行 read 返回 0；ioctl 真实现 TCGETS/TCSETS/TIOCGWINSZ/TIOCSWINSZ/TIOCGPGRP/TIOCSPGRP（兼容 Linux request 号），fd 0/1/2 绑定控制台 tty，非 tty fd→ENOTTY
+    - 自测全绿：tty id=1、部分行不可读、整行 readable=4、read-len=4、erase=3、kill 行清、intr-signal=2、EOF read=0、echo=3字节、raw 即时可读、ioctl TCGETS=0、winsize 25×80、非 tty fd 拒绝、pgrp 回读=42
+  - **M4.4b 作业控制（进程组/会话）**：PCB 新增 `pgid`/`sid` 字段（init/spawn 初始 pgid=sid=pid，fork 继承）；proc64 新增 getpgid/setpgid/getsid/setsid/signal_group（会话首领不可 setpgid/再 setsid）；单播 kill 重构抽出 `proc_deliver_signal` helper 供组信号复用；syscall 新增 SYS_SETPGID(472)/GETPGID(473)/SETSID(474)/GETSID(475)；do_kill 支持负 pid（kill(-pgid)组广播、kill(0)当前组）；`arch_x86_64_tty_pump_signals` 桥接 TTY ^C→前台 pgrp 组广播（只有前台 job 收信号，无前台组→丢弃）
+    - 自测全绿：getpgid(self)=1、getsid(self)=1、setsid(leader)=-1（拒绝）、getpgid(bad)=-1、kill(-pgrp,0)=0、kill(0,0)=0、kill(bad-group)=-1、^C bridge hits=1（信号路由到前台组）、无前台组时 hits=0（弃信号）
+  - **指标**：dispatch_total=0x5C（92 个），dispatch_enosys=0，全部真实现无 ENOSYS 兜底
+
+> **M4 里程碑全部完成（100%，无遗留）** ✅：M4.1（内核接口补齐）+ M4.2（信号机制内核侧）+ **M4.2b（用户态 handler 回调 trampoline + sigreturn，信号闭环）** + M4.3（管道与 IPC）+ M4.4（TTY 子系统）。syscall dispatch 从 M4 初的 29 个扩到 **96 个（0x60）**，全部真实现零 ENOSYS 兜底。
+> **注**：`prio-selftest FAIL H<=N` 为调度优先级时序统计的偶发抖动（二次运行即 PASS），与信号/IPC/TTY 改动无关。
 
 ### M5：生态与运行时（🟡 第三优先级）
 

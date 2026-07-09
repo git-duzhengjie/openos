@@ -198,6 +198,8 @@ int    vfs_write(int fd, const void *buf, uint32_t count);
 int    vfs_seek(int fd, int offset, int whence);
 int    vfs_fsync(int fd);
 int    vfs_stat(const char *path, inode_t *st);
+int    vfs_lstat(const char *path, inode_t *st); /* M4.1a: no symlink follow */
+int    vfs_fstat(int fd, inode_t *st);           /* M4.1a: stat an open fd */
 int    vfs_truncate(const char *path, uint32_t size);
 
 /* 目录/节点操作 */

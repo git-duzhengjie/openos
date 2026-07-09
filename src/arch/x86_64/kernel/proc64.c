@@ -128,6 +128,9 @@ void arch_x86_64_proc_init(void) {
     proc_table[0].sibling_next  = OPENOS_X86_64_PROC_INVALID_INDEX;
     proc_table[0].zombie_next   = OPENOS_X86_64_PROC_INVALID_INDEX;
     proc_table[0].fork_child_sched_slot = 0u; /* gamma.3b-alpha: invalid */
+    /* M4.4b: the kernel/init process is its own session + group leader. */
+    proc_table[0].pgid = proc_table[0].pid;
+    proc_table[0].sid  = proc_table[0].pid;
     /* BSS zero-init already leaves every percpu.current_proc_slot at 0,
      * so this store is redundant but explicit for BSP clarity. */
     current_index_set(0);
@@ -151,6 +154,14 @@ uint32_t arch_x86_64_proc_spawn_user(const char *name) {
     p->exit_code = 0;
     p->state = OPENOS_X86_64_PROC_RUNNING;
     proc_copy_name(p->name, name);
+    /* M4.2: fresh signal state — no pending, nothing blocked, all
+     * dispositions default. Prevents inheriting stale bits from a
+     * previously-freed slot. */
+    x86_64_signal_state_init(&p->sig);
+    /* M4.4b: a freshly spawned process leads its own group + session
+     * (pgid == sid == pid) until setpgid()/setsid() move it. */
+    p->pgid = p->pid;
+    p->sid  = p->pid;
     /* H.5b.1: AS slot reserved; CR3 still points at the shared
      * boot-time PML4 until H.5b.3 wires up per-process AS. */
     p->as = (struct x86_64_address_space *)0;
@@ -307,6 +318,17 @@ x86_64_proc_t *arch_x86_64_proc_fork_alloc_child(x86_64_proc_t *parent_pcb) {
     c->exit_code = 0;
     c->state = OPENOS_X86_64_PROC_RUNNING;
     proc_copy_name(c->name, parent_pcb->name);
+    /* M4.2: POSIX fork() signal inheritance — the child keeps the
+     * parent's blocked mask and disposition table but starts with an
+     * EMPTY pending set (pending signals are NOT inherited). */
+    c->sig = parent_pcb->sig;
+    c->sig.pending = 0;
+
+    /* M4.4b: POSIX fork() inherits the parent's process group and session
+     * (the child joins the same job). setpgid()/setsid() may relocate it
+     * afterwards. */
+    c->pgid = parent_pcb->pgid;
+    c->sid  = parent_pcb->sid;
 
     /* γ.2.b: deep-clone the parent AS so the child has its own PML4[1]
      * subtree (user pages eagerly copied). Kernel-half PML4[0] stays
@@ -472,5 +494,309 @@ void arch_x86_64_proc_print_status(void) {
     early_console64_write(" yields=");
     early_console64_write_hex64(yield_count);
     early_console64_write("\n");
+}
+
+/* --------------------------------------------------------------------------
+ * M4.1d: SYS_KILL backing. Minimal signal delivery.
+ *
+ * Signal numbers we honour in this alpha:
+ *   SIGKILL = 9, SIGTERM = 15  -> force target into EXITED with code 128+sig,
+ *                                 so the scheduler/waitpid path can reap it.
+ *   any other sig              -> accepted (return 0) but treated as a no-op
+ *                                 (no handler registry yet; that is M4.2).
+ * sig == 0                     -> "existence probe": return 0 iff pid exists.
+ *
+ * Returns 0 on success, -1 if no live process carries that pid.
+ * ------------------------------------------------------------------------ */
+/* Apply one already-validated signal to a specific live PCB. Records the
+ * pending bit (respecting SIG_IGN for catchable signals; SIGKILL/SIGSTOP are
+ * always recorded) and, for signals whose disposition is SIG_DFL with a
+ * terminating default action, forces the PCB into EXITED(128+sig) right away
+ * so the scheduler/waitpid path can reap it. Handler-registered signals stay
+ * pending for the M4.2b user-mode trampoline. Returns 0 (always succeeds for
+ * a valid sig on a live PCB). */
+static int proc_deliver_signal(x86_64_proc_t *p, int sig) {
+    if (x86_64_signal_send(&p->sig, sig) != 0) {
+        return -1;
+    }
+    uint64_t disp = p->sig.actions[sig].handler;
+    bool default_disp = (disp == OPENOS_SIG_DFL);
+    if (x86_64_signal_uncatchable(sig)) {
+        default_disp = true; /* SIGKILL/SIGSTOP ignore any handler */
+    }
+    if (default_disp) {
+        x86_64_sig_default_t act = x86_64_signal_default_action(sig);
+        if (act == OPENOS_SIG_ACT_TERM || act == OPENOS_SIG_ACT_CORE) {
+            if (p->state != OPENOS_X86_64_PROC_EXITED) {
+                p->state = OPENOS_X86_64_PROC_EXITED;
+                p->exit_code = 128 + sig;
+                exit_count++;
+            }
+            x86_64_signal_consume(&p->sig, sig);
+        }
+        /* STOP/CONT/IGN default actions: recorded, no reap here. */
+    }
+    return 0;
+}
+
+int arch_x86_64_proc_signal(uint32_t pid, int sig) {
+    if (pid == 0u) {
+        return -1; /* pid 0 (idle/kernel) is not a valid kill target here */
+    }
+    for (uint32_t i = 0; i < OPENOS_X86_64_PROC_MAX; i++) {
+        x86_64_proc_t *p = &proc_table[i];
+        if (p->state == OPENOS_X86_64_PROC_FREE) {
+            continue;
+        }
+        if (p->pid != pid) {
+            continue;
+        }
+        /* sig 0: existence probe only. */
+        if (sig == 0) {
+            return 0;
+        }
+        if (!x86_64_signal_valid(sig)) {
+            return -1;
+        }
+        return proc_deliver_signal(p, sig);
+    }
+    return -1; /* no such pid */
+}
+
+/* M4.2: sigaction on the CURRENT process. Forwards to the signal64 API
+ * against arch_x86_64_proc_current()->sig. */
+int arch_x86_64_proc_sigaction(int sig,
+                               const openos_sigaction_t *act,
+                               openos_sigaction_t *old) {
+    x86_64_proc_t *p = arch_x86_64_proc_current();
+    if (p == 0) {
+        return -1;
+    }
+    return x86_64_signal_sigaction(&p->sig, sig, act, old);
+}
+
+/* M4.2: sigprocmask on the CURRENT process. */
+int arch_x86_64_proc_sigprocmask(int how, uint64_t set, uint64_t *oldset) {
+    x86_64_proc_t *p = arch_x86_64_proc_current();
+    if (p == 0) {
+        return -1;
+    }
+    return x86_64_signal_procmask(&p->sig, how, set, oldset);
+}
+
+/* M4.2: pump pending signals for the CURRENT process. Enacts default
+ * actions for terminating/core signals (marking the PCB EXITED with
+ * 128+sig); leaves handler-registered signals pending for M4.2b. Returns
+ * the signal acted upon (>0) or 0 if nothing was deliverable. */
+/* ---- M4.2b: user-mode signal handler trampoline glue ------------------ *
+ *
+ * These two functions bridge signal64's pure frame builder/restorer to the
+ * live ring3 context and user stack. They do NOT touch the trap frame or
+ * paging directly: the caller (syscall glue) supplies the interrupted
+ * register set in `regs` and callbacks to read/write the target process's
+ * user memory, keeping this layer independent of any specific entry path.
+ */
+int arch_x86_64_proc_signal_deliver_user(
+        x86_64_sigregs_t *regs,
+        int (*uwrite)(void *uctx, uint64_t dst, const void *src, uint64_t n),
+        void *uctx)
+{
+    x86_64_proc_t *p = arch_x86_64_proc_current();
+    if (p == 0 || regs == 0 || uwrite == 0) {
+        return -1;
+    }
+    /* A handler is already in flight: don't nest a second delivery until the
+     * running one returns via sigreturn (classic non-SA_NODEFER behaviour). */
+    if (p->sig.in_handler != 0) {
+        return 0;
+    }
+
+    /* Pick the lowest-numbered deliverable signal that has a USER handler
+     * installed (not DFL/IGN) and is not currently blocked. Default-action
+     * signals are handled elsewhere (signal_pump / immediate terminate). */
+    int sig = 0;
+    for (int s = 1; s < OPENOS_NSIG; ++s) {
+        uint64_t bit = (uint64_t)1 << s;
+        if (!(p->sig.pending & bit)) {
+            continue;
+        }
+        if (p->sig.blocked & bit) {
+            continue;
+        }
+        uint64_t disp = p->sig.actions[s].handler;
+        if (disp == OPENOS_SIG_DFL || disp == OPENOS_SIG_IGN) {
+            continue;
+        }
+        sig = s;
+        break;
+    }
+    if (sig == 0) {
+        return 0;   /* nothing with a user handler to deliver */
+    }
+
+    uint64_t handler  = p->sig.actions[sig].handler;
+    /* SA_RESTORER convention: the restorer trampoline VA rides in `flags`.
+     * A userland that registers a handler must supply a restorer that
+     * issues SYS_RT_SIGRETURN; without one the handler's `ret` would fault. */
+    uint64_t restorer = p->sig.actions[sig].flags;
+
+    x86_64_sigcontext_t frame;
+    uint64_t sp_out = 0;
+    int rc = x86_64_signal_build_frame(&p->sig, sig, handler, restorer,
+                                       regs, &frame, &sp_out);
+    if (rc != 0) {
+        return -1;
+    }
+
+    /* build_frame laid out: [sigcontext] at ctx_addr, [restorer] at sp_out,
+     * with sp_out = ctx_addr - 8. Materialise both on the user stack. */
+    uint64_t ctx_addr = sp_out + 8;
+    if (uwrite(uctx, ctx_addr, &frame, sizeof(frame)) != 0) {
+        /* Roll back the mask/in_handler bookkeeping build_frame applied so a
+         * failed delivery leaves the process observably unchanged. */
+        p->sig.blocked    = frame.saved_mask;
+        p->sig.saved_mask = 0;
+        p->sig.in_handler = 0;
+        p->sig.pending   |= ((uint64_t)1 << sig);   /* still pending */
+        return -1;
+    }
+    if (uwrite(uctx, sp_out, &restorer, sizeof(restorer)) != 0) {
+        p->sig.blocked    = frame.saved_mask;
+        p->sig.saved_mask = 0;
+        p->sig.in_handler = 0;
+        p->sig.pending   |= ((uint64_t)1 << sig);
+        return -1;
+    }
+
+    /* regs now points rip->handler, rsp->sp_out, rdi->signo (per build_frame).
+     * The caller writes these back into the trap frame before returning to
+     * ring3, so execution resumes inside the handler. */
+    return sig;
+}
+
+int arch_x86_64_proc_sigreturn(
+        x86_64_sigregs_t *regs,
+        int (*uread)(void *uctx, void *dst, uint64_t src, uint64_t n),
+        void *uctx)
+{
+    x86_64_proc_t *p = arch_x86_64_proc_current();
+    if (p == 0 || regs == 0 || uread == 0) {
+        return -1;
+    }
+    if (p->sig.in_handler == 0) {
+        return -1;   /* sigreturn with no handler in flight */
+    }
+
+    /* At handler entry %rsp pointed at the restorer return address; the
+     * handler's `ret` popped it, so on the sigreturn syscall %rsp points
+     * just above the sigcontext build_frame stored (ctx_addr). */
+    uint64_t ctx_addr = regs->rsp;
+    x86_64_sigcontext_t frame;
+    if (uread(uctx, &frame, ctx_addr, sizeof(frame)) != 0) {
+        return -1;
+    }
+
+    int rc = x86_64_signal_restore_frame(&p->sig, &frame, regs);
+    if (rc != 0) {
+        return -1;
+    }
+    /* regs is now the fully-restored pre-signal context; the caller writes
+     * it back to the trap frame and returns to ring3 at the interrupted
+     * instruction. */
+    return 0;
+}
+
+int arch_x86_64_proc_signal_pump(void) {
+    x86_64_proc_t *p = arch_x86_64_proc_current();
+    if (p == 0) {
+        return 0;
+    }
+    int sig = x86_64_signal_next_pending(&p->sig);
+    if (sig == 0) {
+        return 0;
+    }
+    uint64_t disp = p->sig.actions[sig].handler;
+    if (disp > OPENOS_SIG_IGN && !x86_64_signal_uncatchable(sig)) {
+        return 0; /* user handler registered: defer to M4.2b trampoline */
+    }
+    if (disp == OPENOS_SIG_IGN && !x86_64_signal_uncatchable(sig)) {
+        x86_64_signal_consume(&p->sig, sig);
+        return 0;
+    }
+    x86_64_sig_default_t act = x86_64_signal_default_action(sig);
+    x86_64_signal_consume(&p->sig, sig);
+    if (act == OPENOS_SIG_ACT_TERM || act == OPENOS_SIG_ACT_CORE) {
+        if (p->state != OPENOS_X86_64_PROC_EXITED) {
+            p->state = OPENOS_X86_64_PROC_EXITED;
+            p->exit_code = 128 + sig;
+            exit_count++;
+        }
+    }
+    return sig;
+}
+
+/* ------------------------------------------------------------------ */
+/* M4.4b: job control — process groups & sessions.                     */
+
+/* Locate a live PCB by pid (returns NULL if free/absent). */
+static x86_64_proc_t *proc_find_live(uint32_t pid) {
+    for (uint32_t i = 0; i < OPENOS_X86_64_PROC_MAX; i++) {
+        x86_64_proc_t *p = &proc_table[i];
+        if (p->state == OPENOS_X86_64_PROC_FREE) continue;
+        if (p->pid == pid) return p;
+    }
+    return 0;
+}
+
+/* Resolve pid==0 to the current process; else find the named live PCB. */
+static x86_64_proc_t *proc_resolve(uint32_t pid) {
+    if (pid == 0u) return arch_x86_64_proc_current();
+    return proc_find_live(pid);
+}
+
+uint32_t arch_x86_64_proc_getpgid(uint32_t pid) {
+    x86_64_proc_t *p = proc_resolve(pid);
+    if (p == 0) return (uint32_t)-1;
+    return p->pgid;
+}
+
+int arch_x86_64_proc_setpgid(uint32_t pid, uint32_t pgid) {
+    x86_64_proc_t *p = proc_resolve(pid);
+    if (p == 0) return -1;
+    /* A session leader (sid == pid) cannot change its process group. */
+    if (p->sid == p->pid) return -1;
+    /* pgid == 0 means "start a new group whose id is the target's pid". */
+    p->pgid = (pgid == 0u) ? p->pid : pgid;
+    return 0;
+}
+
+uint32_t arch_x86_64_proc_getsid(uint32_t pid) {
+    x86_64_proc_t *p = proc_resolve(pid);
+    if (p == 0) return (uint32_t)-1;
+    return p->sid;
+}
+
+int arch_x86_64_proc_setsid(void) {
+    x86_64_proc_t *p = arch_x86_64_proc_current();
+    if (p == 0) return -1;
+    /* Already a group leader -> cannot create a new session (POSIX EPERM). */
+    if (p->pgid == p->pid) return -1;
+    p->sid  = p->pid;
+    p->pgid = p->pid;
+    return (int)p->sid;
+}
+
+int arch_x86_64_proc_signal_group(uint32_t pgid, int sig) {
+    if (pgid == 0u) return -1;
+    if (sig != 0 && !x86_64_signal_valid(sig)) return -1;
+    int hits = 0;
+    for (uint32_t i = 0; i < OPENOS_X86_64_PROC_MAX; i++) {
+        x86_64_proc_t *p = &proc_table[i];
+        if (p->state == OPENOS_X86_64_PROC_FREE) continue;
+        if (p->pgid != pgid) continue;
+        if (sig == 0) { ++hits; continue; } /* existence probe */
+        if (proc_deliver_signal(p, sig) == 0) ++hits;
+    }
+    return hits;
 }
 
