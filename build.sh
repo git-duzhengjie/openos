@@ -572,7 +572,8 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         src/kernel/drivers/blockdev.c \
         src/arch/x86_64/gui64/blockdev_hw.c \
         src/kernel/net/netstack.c \
-        src/arch/x86_64/gui64/fat32_64.c; do
+        src/arch/x86_64/gui64/fat32_64.c \
+        src/arch/x86_64/gui64/ext4_64.c; do
         obj="$ARCH64_BUILD/$(basename "${cfile%.c}").o"
         gcc $GUI64_CFLAGS -c "$cfile" -o "$obj"
     done
@@ -691,7 +692,8 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         "$ARCH64_BUILD/blockdev.o" \
         "$ARCH64_BUILD/blockdev_hw.o" \
         "$ARCH64_BUILD/netstack.o" \
-        "$ARCH64_BUILD/fat32_64.o"
+        "$ARCH64_BUILD/fat32_64.o" \
+        "$ARCH64_BUILD/ext4_64.o"
     echo "[5/5] x86_64 kernel and hello64 user ELF linked."
 
     echo "[UEFI] Building x86_64 BOOTX64.EFI via mingw-w64 (native PE)..."

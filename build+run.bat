@@ -67,13 +67,16 @@ if not exist "%FATDISK%" (
   )
 )
 
-rem --- AHCI/SATA test disk (64MB) for M2 AHCI driver dev ---
+rem --- AHCI/SATA test disk (64MB, ext2) for M3.2 ext driver dev ---
 if not exist "%AHCIDISK%" (
-  echo [build+run] creating AHCI/SATA disk %AHCIDISK% ^(64MB^)
+  echo [build+run] creating AHCI/SATA disk %AHCIDISK% ^(64MB, ext2^)
   "%QEMU:qemu-system-x86_64.exe=qemu-img.exe%" create -f raw "%AHCIDISK%" 64M >nul 2>&1
   if not exist "%AHCIDISK%" (
     fsutil file createnew "%AHCIDISK%" 67108864 >nul 2>&1
   )
+  rem 格式化为 ext2（无 journal，整盘无分区表），并植入 hello.txt + 子目录，供内核 ext4_mount 只读挂载
+  wsl -d %WSL_DISTRO% bash -c "cd /mnt/e/openos && bash tools/mkfs_ext_ahci.sh" >nul 2>&1
+  echo [build+run] AHCI disk formatted ext2 + seeded hello.txt/subdir
 )
 
 rem --- NVMe test disk (64MB, FAT32) for M2.2 NVMe driver + VFS ---

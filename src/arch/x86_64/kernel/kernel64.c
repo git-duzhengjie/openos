@@ -35,6 +35,7 @@ extern void net_print_info(void);
 #include "../include/net64.h"
 #include "../include/net_selftest64.h"
 #include "../include/ahci64.h"
+#include "../include/ext4_64.h"
 #include "../include/nvme64.h"
 #include "../include/xhci64.h"
 #include "../../../kernel/include/sound.h"
@@ -83,6 +84,11 @@ static const char x86_64_elf64_log[] = "[x86_64] ELF64 loader ready\n";
 static const char x86_64_usermode_log[] = "[x86_64] usermode iretq return ready\n";
 static const char x86_64_initrd_log[] = "[x86_64] initrd/VFS/shell bootstrap ready\n";
 static const char x86_64_compat32_log[] = "[x86_64] compat32 evaluation ready\n";
+
+/* ext4_read_fn 适配器：将 ext 驱动的 32 位 LBA 回调转发到 AHCI 的 64 位读接口 */
+static int ext4_ahci_read_adapter(uint32_t lba, uint32_t count, void *buf) {
+    return ahci_read_sectors((uint64_t)lba, count, buf);
+}
 
 void arch_x86_64_early_init(const openos_bootinfo_t *bootinfo) {
     openos_x86_64_arch_ops_init();
@@ -420,6 +426,20 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
         } else {
             early_console64_write("[x86_64][ata] no FAT32 disk\n");
         }
+    }
+
+    /* 阶段 M3.2：挂载 AHCI/SATA 盘上的 ext2/ext4 只读文件系统。
+     * AHCI 盘（openos-ahci.img）整盘格式化为 ext2，含 hello.txt/subdir 等测试数据。 */
+    if (ahci_present()) {
+        int er = ext4_mount(ext4_ahci_read_adapter, 0);
+        if (er == 0) {
+            early_console64_write("[x86_64][ext] mounted ext fs on AHCI disk\n");
+            ext4_selftest();
+        } else {
+            early_console64_write("[x86_64][ext] ext mount failed\n");
+        }
+    } else {
+        early_console64_write("[x86_64][ext] no AHCI disk, skip ext mount\n");
     }
 
     /* 阶段一：初始化 RAMFS 内存树文件系统（将 initrd 导入为可读写树）。

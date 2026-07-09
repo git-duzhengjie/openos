@@ -4,7 +4,7 @@
 >
 > 当前状态：openos 已具备 32 位 √86 原型内核能力，能够启动、显示、输入、调度、运行基础用户程序，并具备基础 syscall、VFS、ramfs/tmpfs、shell、GUI Terminal 等模块。浏览器路线已切换为 OpenOS 自研轻量浏览器，Chromium 官方内核迁移冻结为历史备选。
 >
-> 最近完成：**M3.1 FAT32 完整读写收尾** —— 在 M2 存储/设备子系统整体收官（AHCI/SATA、NVMe、USB、AC97 音频全线通关）基础上，将 FAT32 从只读+8.3 短名写升级为完整可写文件系统：LFN 长文件名写入、mkdir、delete/rmdir 全部实现并 headless 实测全绿（LFN/MKDIR+WRITE/DELETE/RMDIR VERIFY OK）。
+> 最近完成：**M3.2 ext2/ext4 只读驱动** —— 在 M3.1 FAT32 完整读写收尾后，新增 ext2/ext3/ext4 只读文件系统（src/arch/x86_64/gui64/ext4_64.c）：superblock/块组描述符/inode/目录项解析，传统直接+三级间接块与 ext4 extent 树双路径块映射，MBR 分区自动探测，挂在 AHCI/SATA 盘；headless 实测全绿（READ/SUBDIR/NESTED/INDIRECT-BLOCK VERIFY OK）。
 >
 > 当前推荐下一步：在继续保持自研浏览器回归门禁的同时，优先推进 OPENOS 作为真正操作系统的 PC/Mobile 跨设备架构路线：冻结 i386 稳定基线，将 √86_64 升级为 PC 主线，抽象 BootInfo / HAL / Device Model，并新增 aarch64 作为 Mobile 主线基础。
 
@@ -1621,7 +1621,13 @@
   - [√] **fat32_mkdir**：分配目录内容簇+清零，写 `.`(首簇=自身)/`..`(首簇=父，根约定 0) 两项，父目录挂 LFN+8.3（attr=0x10），同名拒绝
   - [√] **fat32_delete**：文件/空目录删除，标记所有目录项（LFN+8.3）0xE5 + 释放簇链；非空目录（除 `.`/`..`）拒绝
   - [√] **selftest 验证（headless QEMU 全绿）**：8.3 写 `WRITE VERIFY OK`、长名 `/My Long File Name.txt` `LFN VERIFY OK`(25B)、`mkdir /NEWDIR`+`/NEWDIR/inside.txt` `MKDIR+WRITE VERIFY OK`、`delete /OSWRITE.TXT` `DELETE VERIFY OK(gone)`、`rmdir /NEWDIR` `RMDIR VERIFY OK`
-- [ ] M3.2：ext2/ext4 只读（对接 Linux 生态镜像）
+- [√] M3.2：ext2/ext4 只读（对接 Linux 生态镜像）
+  - [√] **磁盘结构解析**：superblock（rev1 动态特性 + 大 inode 256B）、块组描述符（32B 传统 + 64B ext4 64bit 扩展）、inode、目录项（含 file_type）
+  - [√] **块映射双路径**：传统直接块(0-11) + 一/二/三级间接块；ext4 extent 树（叶子/索引节点递归下钻，未初始化 extent 处理）
+  - [√] **MBR 分区自动探测**：LBA0 扫描 0x83 Linux 分区，无分区表则整盘解析
+  - [√] **公共 API**：`ext4_mount`（依赖注入扇区读回调）/`ext4_list`（目录遍历+回调）/`ext4_read_file`（多级路径+间接块）/`ext4_stat`/`ext4_version`（ext2/3/4 判定）
+  - [√] **接线**：kernel64.c 挂在 AHCI/SATA 盘（openos-ahci.img 整盘 ext2），`ext4_ahci_read_adapter` 适配 32→64bit LBA；build+run.bat 用 `tools/mkfs_ext_ahci.sh`（mkfs.ext2 + debugfs 免 root）植入测试数据
+  - [√] **selftest 全绿（headless QEMU 实测）**：ext2 挂载(block=1024/inode=256/8组)、根目录列 7 项、`/hello.txt` READ VERIFY OK、`/subdir` SUBDIR VERIFY OK、`/subdir/inside.txt` NESTED READ VERIFY OK、`/big.dat`(40000B) INDIRECT-BLOCK VERIFY OK
 - [ ] M3.3：统一 VFS 多类型挂载（mount/umount 任意 FS 到任意挂载点）
 - [ ] M3.4：文件权限模型（rwx / uid / gid / 属主）
 - [ ] M3.5：软链接 / 硬链接支持
