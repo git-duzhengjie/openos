@@ -326,25 +326,39 @@ static uint64_t xhci_cmd_enqueue(uint64_t param, uint32_t status, uint32_t ctrl_
 /* 通用事件等待器：轮询事件环，等待匹配 want_type 且 parameter==trb_phys 的事件。
  * 命中回传 cc/slot/残余长度（transfer event 的 status[23:0]）。返回 0 命中，-1 超时。
  * 途中遇到的其它事件（端口状态等）一律消费跳过。 */
+
+static void xhci_dispatch_hid_event(volatile xhci_trb_t *evt);
+static int xhci_dev_by_slot(uint32_t slot_id);
 static int xhci_wait_event(uint32_t want_type, uint64_t trb_phys,
                            uint32_t *out_cc, uint32_t *out_slot, uint32_t *out_resid) {
     xhci_ctrl_t *x = &g_xhci;
-    for (uint32_t spin = 0; spin < 200000; spin++) {
+    for (uint32_t spin = 0; spin < 20000000; spin++) {
         volatile xhci_trb_t *evt = &x->evt_ring[x->evt_dequeue];
         uint32_t c = evt->control;
         int cyc = (c & TRB_CYCLE) ? 1 : 0;
         if (cyc == (int)x->evt_cycle) {
             uint32_t type = (c >> TRB_TYPE_SHIFT) & 0x3F;
             int hit = (type == want_type && evt->parameter == trb_phys);
+            if (type == TRB_TRANSFER_EVT) {
+                extern void early_console64_write(const char*);
+                extern void early_console64_write_hex64(unsigned long long);
+                early_console64_write("[wev] par="); early_console64_write_hex64(evt->parameter);
+                early_console64_write(" slot="); early_console64_write_hex64(TRB_GET_SLOT(evt));
+                early_console64_write(" ep="); early_console64_write_hex64((evt->control>>16)&0x1F);
+                early_console64_write(" cc="); early_console64_write_hex64(TRB_GET_CC(evt));
+                early_console64_write("\n");
+            }
             if (hit) {
                 if (out_cc)    *out_cc    = TRB_GET_CC(evt);
                 if (out_slot)  *out_slot  = TRB_GET_SLOT(evt);
                 if (out_resid) *out_resid = evt->status & 0xFFFFFF;
             } else if (type == TRB_TRANSFER_EVT) {
-                /* 非目标的 Transfer Event（HID Interrupt-IN 完成）：
-                 * 不能当作"杂项"消费丢弃，否则 HID report 永久丢失。
-                 * 交给 xhci_pump_events 分发。这里遇到即停，保留在环上。 */
-                return -1;
+                /* 非目标的 Transfer Event（通常是 HID Interrupt-IN 完成）：
+                 * 不能放弃返回(否则与本次等待的端点事件竞争会互相卡死)，
+                 * 也不能丢弃(否则 HID report 永久丢失)。
+                 * 就地分发给对应 HID 设备(拷 report + re-arm)，然后消费该 TRB
+                 * 继续 spin 等待本次真正的目标 event。 */
+                xhci_dispatch_hid_event(evt);
             }
             /* 推进 dequeue + 更新 ERDP（命中与否都要消费）*/
             x->evt_dequeue++;
@@ -356,8 +370,30 @@ static int xhci_wait_event(uint32_t want_type, uint64_t trb_phys,
             mmio_w64(x->rt, XRT_ERDP(0), erdp | ERDP_EHB);
             if (hit) return 0;
         } else {
-            xhci_delay(2000);
+            __asm__ volatile("pause");
         }
+    }
+    { extern void early_console64_write(const char*);
+      extern void early_console64_write_hex64(unsigned long long);
+      volatile xhci_trb_t *evt = &x->evt_ring[x->evt_dequeue];
+      early_console64_write("[wait-TO] deq="); early_console64_write_hex64(x->evt_dequeue);
+      early_console64_write(" ecyc="); early_console64_write_hex64(x->evt_cycle);
+      early_console64_write(" ctl="); early_console64_write_hex64(evt->control);
+      early_console64_write(" par="); early_console64_write_hex64(evt->parameter);
+      early_console64_write(" want="); early_console64_write_hex64(trb_phys);
+      early_console64_write("\n");
+      /* 扫描整个 event ring，打印所有 Transfer Event 的 parameter */
+      for (uint32_t s = 0; s < EVT_RING_TRBS; s++) {
+          volatile xhci_trb_t *e = &x->evt_ring[s];
+          uint32_t t = (e->control >> TRB_TYPE_SHIFT) & 0x3F;
+          if (t == TRB_TRANSFER_EVT) {
+              early_console64_write("[scan] idx="); early_console64_write_hex64(s);
+              early_console64_write(" par="); early_console64_write_hex64(e->parameter);
+              early_console64_write(" slot="); early_console64_write_hex64(TRB_GET_SLOT(e));
+              early_console64_write(" ep="); early_console64_write_hex64((e->control>>16)&0x1F);
+              early_console64_write("\n");
+          }
+      }
     }
     return -1;
 }
@@ -641,6 +677,32 @@ typedef struct xhci_dev {
     uint8_t     rpt_data[64];
     uint32_t    rpt_len;      /* 待取 report 字节数 */
     volatile int rpt_ready;   /* 1=有新 report 待 poll 取走 */
+
+    /* ---- M2.3 Mass Storage(BOT) 扩展：Bulk IN/OUT 端点 ---- */
+    uint8_t  is_msc;          /* 1=此接口为 USB Mass Storage(BOT) */
+    uint8_t  ep_bulk_in;      /* Bulk IN 端点地址（含方向位 0x80） */
+    uint8_t  ep_bulk_out;     /* Bulk OUT 端点地址 */
+    uint16_t ep_bulk_in_mps;  /* Bulk IN MaxPacketSize */
+    uint16_t ep_bulk_out_mps; /* Bulk OUT MaxPacketSize */
+    /* Bulk IN Transfer Ring */
+    xhci_trb_t *ep_bin_ring;
+    uint64_t    ep_bin_ring_phys;
+    uint32_t    ep_bin_enqueue;
+    uint32_t    ep_bin_cycle;
+    /* Bulk OUT Transfer Ring */
+    xhci_trb_t *ep_bout_ring;
+    uint64_t    ep_bout_ring_phys;
+    uint32_t    ep_bout_enqueue;
+    uint32_t    ep_bout_cycle;
+    /* ---- MSC 事件信箱：全局事件泵按 slot/dci 投递 bulk 完成事件 ----
+     * 修复双消费者竞争：HID poll 的 xhci_pump_events 会读走并丢弃
+     * bulk(epid4) transfer event，导致 MSC 的 wait_event 永远等不到。
+     * 现在 pump 遇到本设备的 bulk 事件时投递到此信箱，不再丢弃。*/
+    volatile int msc_evt_ready;   /* 1=有一个待取的 bulk 完成事件 */
+    uint32_t     msc_evt_dci;     /* 事件对应的端点 DCI（3=bulk in, 4=bulk out）*/
+    uint32_t     msc_evt_cc;      /* completion code */
+    uint32_t     msc_evt_resid;   /* 剩余字节数（EDTLA）*/
+    uint64_t     msc_evt_par;     /* 事件 parameter（完成的 TRB 物理地址）*/
 } xhci_dev_t;
 
 static xhci_dev_t g_devs[XHCI_MAX_DEVS];
@@ -823,41 +885,73 @@ static int xhci_ep0_transfer(xhci_dev_t *d, uint8_t bmReqType, uint8_t bReq,
     return (int)wLength;
 }
 
-/* 解析 Configuration Descriptor，寻找第一个 HID interface 及其 Interrupt IN 端点。
- * 成功填充 d->dev_class/proto/iface_num/ep_in_* 并返回 0。 */
+/* 解析 Configuration Descriptor：
+ *  - HID interface：填 d->proto/ep_in_*（Interrupt IN）
+ *  - Mass Storage(BOT) interface：填 d->is_msc/ep_bulk_in/ep_bulk_out
+ * 成功返回 0。 */
 static int xhci_parse_config(xhci_dev_t *d, uint8_t *buf, uint32_t total) {
     uint32_t i = 0;
     int found_hid = 0;
+    int in_msc = 0;   /* 当前处于 MSC 接口的端点扫描中 */
+    int msc_done = 0; /* MSC bulk in/out 均已集齐 */
     while (i + 2 <= total) {
         uint8_t len  = buf[i];
         uint8_t type = buf[i + 1];
         if (len == 0) break;
         if (type == USB_DESC_INTERFACE && i + 9 <= total) {
             uint8_t if_class = buf[i + 5];
+            uint8_t if_sub   = buf[i + 6];
             uint8_t if_proto = buf[i + 7];
             if (if_class == USB_CLASS_HID) {
                 d->dev_class  = if_class;
                 d->proto      = if_proto;
                 d->iface_num  = buf[i + 2];
                 found_hid = 1;
+                in_msc = 0;
+            } else if (if_class == 0x08 /* Mass Storage */ &&
+                       if_proto == 0x50 /* Bulk-Only Transport */) {
+                /* SubClass 0x06=SCSI transparent；部分 U 盘报 0x05/0x01，均按 SCSI 处理 */
+                d->dev_class = if_class;
+                d->proto     = if_proto;
+                d->iface_num = buf[i + 2];
+                d->is_msc    = 1;
+                (void)if_sub;
+                found_hid = 0;
+                in_msc = 1;
             } else {
-                found_hid = 0;  /* 非 HID 接口，后续端点忽略 */
+                found_hid = 0;
+                in_msc = 0;  /* 其他接口，后续端点忽略 */
             }
-        } else if (type == USB_DESC_ENDPOINT && found_hid && i + 7 <= total) {
+        } else if (type == USB_DESC_ENDPOINT && i + 7 <= total) {
             uint8_t ep_addr = buf[i + 2];
             uint8_t ep_attr = buf[i + 3];
             uint16_t mps    = buf[i + 4] | (buf[i + 5] << 8);
             uint8_t interval = buf[i + 6];
-            /* Interrupt(0x03) + IN(0x80) */
-            if ((ep_attr & 0x03) == 0x03 && (ep_addr & 0x80)) {
-                d->ep_in_addr     = ep_addr;
-                d->ep_in_mps      = mps & 0x7FF;
-                d->ep_in_interval = interval;
-                return 0;  /* 找到 HID Interrupt IN 端点 */
+            if (found_hid) {
+                /* Interrupt(0x03) + IN(0x80) */
+                if ((ep_attr & 0x03) == 0x03 && (ep_addr & 0x80)) {
+                    d->ep_in_addr     = ep_addr;
+                    d->ep_in_mps      = mps & 0x7FF;
+                    d->ep_in_interval = interval;
+                    return 0;  /* 找到 HID Interrupt IN 端点 */
+                }
+            } else if (in_msc) {
+                /* Bulk(0x02) 端点：按方向拆 IN/OUT */
+                if ((ep_attr & 0x03) == 0x02) {
+                    if (ep_addr & 0x80) {
+                        d->ep_bulk_in     = ep_addr;
+                        d->ep_bulk_in_mps = mps & 0x7FF;
+                    } else {
+                        d->ep_bulk_out     = ep_addr;
+                        d->ep_bulk_out_mps = mps & 0x7FF;
+                    }
+                    if (d->ep_bulk_in && d->ep_bulk_out) msc_done = 1;
+                }
             }
         }
         i += len;
     }
+    if (msc_done) return 0;
     return -1;
 }
 
@@ -916,12 +1010,20 @@ static xhci_dev_t *xhci_enumerate_device(uint32_t port, uint32_t speed) {
     }
 
     if (xhci_parse_config(d, dma, total) != 0) {
-        XLOG("  no HID interrupt-IN endpoint (skip)"); d->used = 0; return 0;
+        XLOG("  no HID/MSC endpoint (skip)"); d->used = 0; return 0;
     }
-    XLOG_NN("  HID iface="); XDEC(d->iface_num);
-    serial_write(" proto="); XDEC(d->proto);
-    serial_write(" ep_in="); XHEX(d->ep_in_addr);
-    serial_write(" mps="); XDEC(d->ep_in_mps); serial_write("\n");
+    if (d->is_msc) {
+        XLOG_NN("  MSC iface="); XDEC(d->iface_num);
+        serial_write(" ep_bulk_in="); XHEX(d->ep_bulk_in);
+        serial_write(" ep_bulk_out="); XHEX(d->ep_bulk_out);
+        serial_write(" in_mps="); XDEC(d->ep_bulk_in_mps);
+        serial_write(" out_mps="); XDEC(d->ep_bulk_out_mps); serial_write("\n");
+    } else {
+        XLOG_NN("  HID iface="); XDEC(d->iface_num);
+        serial_write(" proto="); XDEC(d->proto);
+        serial_write(" ep_in="); XHEX(d->ep_in_addr);
+        serial_write(" mps="); XDEC(d->ep_in_mps); serial_write("\n");
+    }
 
     /* 5. SET_CONFIGURATION */
     r = xhci_ep0_transfer(d, USB_REQTYPE_H2D | USB_REQTYPE_STD, USB_REQ_SET_CONFIG,
@@ -1053,6 +1155,32 @@ static void xhci_hid_arm(xhci_dev_t *d) {
     xhci_ring_dev_doorbell(d->slot_id, ep_num * 2 + 1);
 }
 
+/* 将一个已确认为 Transfer Event 的 TRB 分发给对应 HID 设备：
+ * 命中某设备的 Interrupt-IN 端点 → 拷贝 report 到 rpt 缓冲 + 置 ready + re-arm。
+ * 供 xhci_wait_event 在等待其它端点(如 MSC bulk)时顺带消费 HID 事件，避免丢报文。 */
+static void xhci_dispatch_hid_event(volatile xhci_trb_t *evt) {
+    uint32_t c     = evt->control;
+    uint32_t eslot = TRB_GET_SLOT(evt);
+    uint32_t eep   = (c >> 16) & 0x1F;
+    int      resid = (int)(evt->status & 0xFFFFFF);
+
+    int di = xhci_dev_by_slot(eslot);
+    if (di < 0) return;
+    xhci_dev_t *d = &g_devs[di];
+    if (!d->ep_in_ring) return;
+    uint32_t want_dci = (d->ep_in_addr & 0x0F) * 2 + 1;
+    if (eep != want_dci) return;               /* 非该设备 Interrupt-IN */
+
+    uint32_t rlen = d->ep_in_mps ? d->ep_in_mps : 8;
+    if (rlen > sizeof(d->rpt_data)) rlen = sizeof(d->rpt_data);
+    uint32_t n = (rlen > (uint32_t)resid) ? (rlen - (uint32_t)resid) : 0;
+    if (n > sizeof(d->rpt_data)) n = sizeof(d->rpt_data);
+    for (uint32_t i = 0; i < n; i++) d->rpt_data[i] = d->hid_buf[i];
+    d->rpt_len   = n;
+    d->rpt_ready = 1;
+    xhci_hid_arm(d);                           /* 重新武装下一个中断传输 */
+}
+
 /* 为第 idx 个 HID 设备配置 Interrupt-IN 端点：
  *   建 Transfer Ring → 构建 Input Context（EP_IN Context）
  *   → Configure Endpoint 命令 → SET_PROTOCOL(boot) → 投递首个 Normal TRB。
@@ -1125,6 +1253,210 @@ int xhci_hid_configure(uint32_t idx) {
     return 0;
 }
 
+/* 为第 idx 个 MSC 设备配置 Bulk IN + Bulk OUT 端点：
+ *   建两个 Transfer Ring → 一次 Configure Endpoint 命令加入两个 EP。
+ * 返回 0 成功，负数失败。幂等。 */
+static int xhci_msc_index(uint32_t idx);   /* 前向声明（定义在文件后半） */
+int xhci_msc_configure(uint32_t idx) {
+    int di = xhci_msc_index(idx);
+    if (di < 0) return -1;
+    xhci_dev_t *d = &g_devs[di];
+    if (d->ep_bin_ring) return 0;              /* 已配置，幂等 */
+    if (!d->ep_bulk_in || !d->ep_bulk_out) return -2;
+
+    xhci_ctrl_t *x = &g_xhci;
+    uint32_t cs = x->ctx_size;
+
+    /* 1) 分配两个 Bulk Transfer Ring（恒等映射） */
+    uint64_t rin  = xhci_zalloc_pages(1);
+    uint64_t rout = xhci_zalloc_pages(1);
+    if (!rin || !rout) return -3;
+    d->ep_bin_ring       = (xhci_trb_t *)rin;
+    d->ep_bin_ring_phys  = rin;
+    d->ep_bin_enqueue    = 0;
+    d->ep_bin_cycle      = 1;
+    d->ep_bout_ring      = (xhci_trb_t *)rout;
+    d->ep_bout_ring_phys = rout;
+    d->ep_bout_enqueue   = 0;
+    d->ep_bout_cycle     = 1;
+
+    /* Link TRB 回绕（TC=1） */
+    xhci_trb_t *lin = &d->ep_bin_ring[EPIN_RING_TRBS - 1];
+    lin->parameter = d->ep_bin_ring_phys;
+    lin->status = 0;
+    lin->control = (TRB_LINK << TRB_TYPE_SHIFT) | TRB_LINK_TC | 1u;
+    xhci_trb_t *lout = &d->ep_bout_ring[EPIN_RING_TRBS - 1];
+    lout->parameter = d->ep_bout_ring_phys;
+    lout->status = 0;
+    lout->control = (TRB_LINK << TRB_TYPE_SHIFT) | TRB_LINK_TC | 1u;
+
+    /* 2) DCI：IN=2*ep+1, OUT=2*ep */
+    uint32_t in_ep   = d->ep_bulk_in & 0x0F;
+    uint32_t out_ep  = d->ep_bulk_out & 0x0F;
+    uint32_t dci_in  = in_ep * 2 + 1;
+    uint32_t dci_out = out_ep * 2;
+    uint32_t dci_max = dci_in > dci_out ? dci_in : dci_out;
+
+    /* 3) Input Context：清零 → A0(slot)+A[dci_in]+A[dci_out] */
+    uint8_t *ic = d->in_ctx;
+    for (uint32_t i = 0; i < (dci_max + 1) * cs; i++) ic[i] = 0;
+    uint32_t *icc = xhci_ctx_at(ic, 0, cs);
+    icc[1] = (1u << 0) | (1u << dci_in) | (1u << dci_out);
+
+    /* Slot Context：Context Entries = dci_max */
+    uint32_t *slot  = xhci_ctx_at(ic, 1, cs);
+    uint32_t *dslot = (uint32_t *)d->dev_ctx;
+    slot[0] = (dslot[0] & ~(0x1Fu << 27)) | (dci_max << 27);
+    slot[1] = dslot[1];
+
+    /* Bulk IN Context：EPType=6(Bulk IN)，CErr=3 */
+    uint32_t mps_in = d->ep_bulk_in_mps ? d->ep_bulk_in_mps : 512;
+    uint32_t *epi = xhci_ctx_at(ic, dci_in + 1, cs);  /* Input Ctx: EP 槽位 = dci+1 (ICC占idx0) */
+    epi[0] = 0;
+    epi[1] = (3u << 1) | (6u << 3) | (mps_in << 16);
+    epi[2] = (uint32_t)((d->ep_bin_ring_phys & 0xFFFFFFF0u) | 1u);
+    epi[3] = (uint32_t)(d->ep_bin_ring_phys >> 32);
+    epi[4] = mps_in;
+
+    /* Bulk OUT Context：EPType=2(Bulk OUT)，CErr=3 */
+    uint32_t mps_out = d->ep_bulk_out_mps ? d->ep_bulk_out_mps : 512;
+    uint32_t *epo = xhci_ctx_at(ic, dci_out + 1, cs);  /* Input Ctx: EP 槽位 = dci+1 (ICC占idx0) */
+    epo[0] = 0;
+    epo[1] = (3u << 1) | (2u << 3) | (mps_out << 16);
+    epo[2] = (uint32_t)((d->ep_bout_ring_phys & 0xFFFFFFF0u) | 1u);
+    epo[3] = (uint32_t)(d->ep_bout_ring_phys >> 32);
+    epo[4] = mps_out;
+
+    /* 4) Configure Endpoint 命令 */
+    uint32_t cc = 0, cslot = 0;
+    uint64_t cmd = xhci_cmd_enqueue_ex(d->in_ctx_phys, 0,
+                                       TRB_CONFIG_EP, d->slot_id << 24);
+    xhci_ring_cmd_doorbell();
+    int wr = xhci_wait_cmd_complete(cmd, &cc, &cslot);
+    { extern void early_console64_write(const char*);
+      extern void early_console64_write_hex64(unsigned long long);
+      early_console64_write("[msc-cfg] wr="); early_console64_write_hex64((unsigned long long)(long long)wr);
+      early_console64_write(" cc="); early_console64_write_hex64(cc);
+      early_console64_write(" dci_in="); early_console64_write_hex64(dci_in);
+      early_console64_write(" dci_out="); early_console64_write_hex64(dci_out);
+      early_console64_write(" bin_phys="); early_console64_write_hex64(d->ep_bin_ring_phys);
+      early_console64_write(" bout_phys="); early_console64_write_hex64(d->ep_bout_ring_phys);
+      early_console64_write("\n"); }
+    if (wr != 0) return -4;
+    if (cc != 1) return -5;   /* 1=Success */
+
+    /* 回读 dev_ctx 里 QEMU 拷贝后的 EP OUT context：验证 dequeue pointer 是否 = 我们的 ring */
+    { extern void early_console64_write(const char*);
+      extern void early_console64_write_hex64(unsigned long long);
+      uint32_t *depo = xhci_ctx_at((uint8_t*)d->dev_ctx, dci_out, cs);
+      uint32_t *depi = xhci_ctx_at((uint8_t*)d->dev_ctx, dci_in, cs);
+      early_console64_write("[msc-devctx] OUT[0]="); early_console64_write_hex64(depo[0]);
+      early_console64_write(" OUT[1]="); early_console64_write_hex64(depo[1]);
+      early_console64_write(" OUT[2]="); early_console64_write_hex64(depo[2]);
+      early_console64_write(" OUT[3]="); early_console64_write_hex64(depo[3]);
+      early_console64_write(" IN[2]="); early_console64_write_hex64(depi[2]);
+      early_console64_write("\n"); }
+    return 0;
+}
+
+/* 同步 Bulk 传输：向第 idx 个 MSC 设备的 bulk 端点发/收数据。
+ *   dir_in=1 表示 Bulk IN（设备→主机），=0 表示 Bulk OUT。
+ * 返回实际传输字节数(>=0) 或负数错误。 */
+/* 前向声明：MSC bulk 传输需要主动泵事件（定义在文件后部的 HID 事件泵） */
+static void xhci_pump_events(void);
+
+int xhci_msc_bulk_transfer(uint32_t idx, int dir_in, uint64_t buf_phys, uint32_t len) {
+    int di = xhci_msc_index(idx);
+    if (di < 0) return -1;
+    xhci_dev_t *d = &g_devs[di];
+    if (!d->ep_bin_ring || !d->ep_bout_ring) return -2;
+
+    /* 选端点环与 DCI */
+    xhci_trb_t *ring;
+    uint32_t *enq_p, *cyc_p, ring_phys_dci, ep_addr;
+    uint64_t ring_phys;
+    if (dir_in) {
+        ring = d->ep_bin_ring; enq_p = &d->ep_bin_enqueue;
+        cyc_p = &d->ep_bin_cycle; ring_phys = d->ep_bin_ring_phys;
+        ep_addr = d->ep_bulk_in & 0x0F;
+        ring_phys_dci = ep_addr * 2 + 1;
+    } else {
+        ring = d->ep_bout_ring; enq_p = &d->ep_bout_enqueue;
+        cyc_p = &d->ep_bout_cycle; ring_phys = d->ep_bout_ring_phys;
+        ep_addr = d->ep_bulk_out & 0x0F;
+        ring_phys_dci = ep_addr * 2;
+    }
+
+    uint32_t enq = *enq_p;
+    uint32_t cyc = *cyc_p;
+    /* 避开末尾 Link TRB（索引 EPIN_RING_TRBS-1）；如到达则回绕到 0 并翻转 cycle */
+    if (enq >= EPIN_RING_TRBS - 1) { enq = 0; cyc ^= 1; }
+
+    /* 构建 Normal TRB */
+    xhci_trb_t *trb = &ring[enq];
+    trb->parameter = buf_phys;
+    trb->status    = len & 0x1FFFFu;           /* TRB Transfer Length */
+    trb->control   = (TRB_NORMAL << TRB_TYPE_SHIFT) | TRB_IOC | TRB_ISP |
+                     (cyc ? 1u : 0u);
+    uint64_t trb_phys = ring_phys + (uint64_t)enq * sizeof(xhci_trb_t);
+
+    /* 推进队列指针 */
+    enq++;
+    *enq_p = enq;
+    *cyc_p = cyc;
+
+    /* 敲端点门铃 */
+    { extern void early_console64_write(const char*);
+      extern void early_console64_write_hex64(unsigned long long);
+      early_console64_write("[msc-bulk] dir_in="); early_console64_write_hex64(dir_in);
+      early_console64_write(" dci="); early_console64_write_hex64(ring_phys_dci);
+      early_console64_write(" enq="); early_console64_write_hex64(enq - 1);
+      early_console64_write(" cyc="); early_console64_write_hex64(cyc);
+      early_console64_write(" trb_phys="); early_console64_write_hex64(trb_phys);
+      early_console64_write(" len="); early_console64_write_hex64(len);
+      early_console64_write("\n");
+      volatile uint32_t *tp = (volatile uint32_t *)trb;
+      early_console64_write("[trb-mem] w0="); early_console64_write_hex64(tp[0]);
+      early_console64_write(" w1="); early_console64_write_hex64(tp[1]);
+      early_console64_write(" w2="); early_console64_write_hex64(tp[2]);
+      early_console64_write(" w3="); early_console64_write_hex64(tp[3]);
+      early_console64_write(" ring_phys="); early_console64_write_hex64(d->ep_bout_ring_phys);
+      early_console64_write(" bin_phys="); early_console64_write_hex64(d->ep_bin_ring_phys);
+      early_console64_write("\n"); }
+    xhci_ring_dev_doorbell(d->slot_id, ring_phys_dci);
+
+    /* 等待 Transfer Event —— 【修复双消费者竞争】
+     * 不再用 xhci_wait_event 按 parameter 匹配（QEMU 报告的完成 TRB 地址
+     * 与内核 TRB 地址空间可能不一致，且 HID poll 的 xhci_pump_events 会抢先
+     * 读走并丢弃 bulk 事件）。改为主动泵事件，让 pump 把本设备 bulk 事件
+     * 投递到 d->msc_evt_* 信箱，再从信箱取结果。BOT 单设备严格串行，
+     * 同一时刻只有一个 bulk 传输在途，按 slot+dci 匹配即可。 */
+    d->msc_evt_ready = 0;                       /* 清旧事件 */
+    uint32_t cc = 0, resid = 0;
+    int got = 0;
+    for (uint32_t spin = 0; spin < 2000000u; spin++) {
+        xhci_pump_events();
+        if (d->msc_evt_ready && d->msc_evt_dci == ring_phys_dci) {
+            cc    = d->msc_evt_cc;
+            resid = d->msc_evt_resid;
+            d->msc_evt_ready = 0;
+            got = 1;
+            break;
+        }
+    }
+    { extern void early_console64_write(const char*);
+      extern void early_console64_write_hex64(unsigned long long);
+      early_console64_write("[msc-bulk] wait got="); early_console64_write_hex64((unsigned long long)got);
+      early_console64_write(" cc="); early_console64_write_hex64(cc);
+      early_console64_write(" resid="); early_console64_write_hex64(resid);
+      early_console64_write("\n"); }
+    if (!got) return -3;
+    if (cc != 1 && cc != 13) return -4;         /* 1=Success, 13=Short Packet */
+    /* resid = 未传字节，实际传输 = len - resid */
+    uint32_t transferred = (resid <= len) ? (len - resid) : len;
+    return (int)transferred;
+}
+
 /* 通过 slot_id 查设备索引；未找到返回 -1 */
 static int xhci_dev_by_slot(uint32_t slot_id) {
     for (int i = 0; i < XHCI_MAX_DEVS; i++)
@@ -1176,6 +1508,20 @@ static void xhci_pump_events(void) {
         int di = xhci_dev_by_slot(eslot);
         if (di < 0) continue;
         xhci_dev_t *d = &g_devs[di];
+
+        /* ---- MSC bulk 事件投递（修复双消费者竞争）----
+         * bulk IN = dci3, bulk OUT = dci4。若本设备是 MSC 且事件命中
+         * 其 bulk 端点，投递到设备信箱供 xhci_msc_wait_event 取走，
+         * 绝不能被下面的 HID 逻辑丢弃。 */
+        if (d->is_msc && (eep == 3 || eep == 4)) {
+            d->msc_evt_dci   = eep;
+            d->msc_evt_cc    = (evt->status >> 24) & 0xFF;
+            d->msc_evt_resid = (uint32_t)resid;
+            d->msc_evt_par   = evt->parameter;
+            d->msc_evt_ready = 1;
+            continue;
+        }
+
         if (!d->ep_in_ring) continue;
         uint32_t want_dci = (d->ep_in_addr & 0x0F) * 2 + 1;
         if (eep != want_dci) continue;             /* 非该设备 Interrupt-IN */
@@ -1315,6 +1661,51 @@ void xhci_irq_install_late(void) {
         XLOG("MSI/MSI-X enable failed; staying on polling");
     }
     x->irq_installed = 1;
+}
+
+/* ============================================================
+ * M2.3 Mass Storage(BOT) —— Bulk 端点底层实现
+ * ============================================================ */
+
+/* 取第 idx 个 MSC 设备在 g_devs 中的索引；未找到返回 -1 */
+static int xhci_msc_index(uint32_t idx) {
+    uint32_t n = 0;
+    for (int i = 0; i < XHCI_MAX_DEVS; i++) {
+        if (g_devs[i].used && g_devs[i].is_msc) {
+            if (n == idx) return i;
+            n++;
+        }
+    }
+    return -1;
+}
+
+uint32_t xhci_msc_device_count(void) {
+    uint32_t n = 0;
+    for (int i = 0; i < XHCI_MAX_DEVS; i++)
+        if (g_devs[i].used && g_devs[i].is_msc) n++;
+    return n;
+}
+
+int xhci_msc_device_info(uint32_t idx, uint32_t *slot_id, uint8_t *iface,
+                         uint8_t *ep_in, uint8_t *ep_out) {
+    int di = xhci_msc_index(idx);
+    if (di < 0) return -1;
+    xhci_dev_t *d = &g_devs[di];
+    if (slot_id) *slot_id = d->slot_id;
+    if (iface)   *iface   = d->iface_num;
+    if (ep_in)   *ep_in   = d->ep_bulk_in;
+    if (ep_out)  *ep_out  = d->ep_bulk_out;
+    return 0;
+}
+
+/* EP0 控制传输透传（BOT Reset / Get Max LUN）*/
+int xhci_msc_control(uint32_t idx, uint8_t bmReqType, uint8_t bReq,
+                     uint16_t wValue, uint16_t wIndex, uint16_t wLength,
+                     uint64_t buf_phys) {
+    int di = xhci_msc_index(idx);
+    if (di < 0) return -1;
+    return xhci_ep0_transfer(&g_devs[di], bmReqType, bReq, wValue, wIndex,
+                             wLength, buf_phys);
 }
 
 int xhci_selftest(void) {

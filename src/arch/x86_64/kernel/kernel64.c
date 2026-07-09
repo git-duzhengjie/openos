@@ -365,6 +365,8 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
         early_console64_write("[x86_64][xhci] xHCI selftest PASS\n");
         /* M2.3 Step3-4：枚举 HID 键鼠，配置 Interrupt-IN 端点并注册 input 设备 */
         usb_hid_init();
+        /* M2.3 Step5：枚举 USB 大容量存储(U 盘)，配置 Bulk 端点并初始化 SCSI */
+        usb_msc_init();
     } else {
         early_console64_write("[x86_64][xhci] xHCI selftest skipped/FAIL\n");
     }

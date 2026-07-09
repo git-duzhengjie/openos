@@ -87,4 +87,37 @@ void usb_hid_init(void);
 /* polling：由内核主循环周期调用，非阻塞取 report 并上报。 */
 void usb_hid_poll(void);
 
+/* ============================================================
+ * M2.3 Mass Storage(BOT) —— Bulk 端点原语（供 usb_msc.c 调用）
+ * ============================================================ */
+
+/* 已识别的 Mass Storage(BOT) 设备数量。 */
+uint32_t xhci_msc_device_count(void);
+
+/* 取第 idx 个 MSC 设备的 slot_id / 接口号 / bulk 端点地址。
+ * 返回 0 成功，负数表示 idx 非法。 */
+int xhci_msc_device_info(uint32_t idx, uint32_t *slot_id, uint8_t *iface,
+                         uint8_t *ep_in, uint8_t *ep_out);
+
+/* 为第 idx 个 MSC 设备配置 Bulk IN + Bulk OUT 端点：
+ *   建两个 Transfer Ring → 一次 Configure Endpoint 命令加入两个 EP。
+ * 返回 0 成功，负数失败。幂等。 */
+int xhci_msc_configure(uint32_t idx);
+
+/* 同步 Bulk 传输：向第 idx 个 MSC 设备的 bulk 端点发/收数据。
+ *   dir_in=1 表示 Bulk IN（设备→主机），=0 表示 Bulk OUT。
+ *   buf_phys 为数据缓冲物理地址（恒等映射），len 为字节数。
+ * 返回实际传输字节数(>=0) 或负数错误。 */
+int xhci_msc_bulk_transfer(uint32_t idx, int dir_in, uint64_t buf_phys, uint32_t len);
+
+/* EP0 控制传输透传：供 BOT Reset / Get Max LUN 等 class 请求使用。
+ * 语义同内部 xhci_ep0_transfer。返回实际字节数或负数。 */
+int xhci_msc_control(uint32_t idx, uint8_t bmReqType, uint8_t bReq,
+                     uint16_t wValue, uint16_t wIndex, uint16_t wLength,
+                     uint64_t buf_phys);
+
+/* USB Mass Storage 初始化：遍历 xHCI 已枚举的 MSC 接口，逐个 attach
+ * （配置 Bulk 端点 + INQUIRY/READ CAPACITY）。由内核初始化调用。 */
+void usb_msc_init(void);
+
 #endif /* OPENOS_XHCI64_H */
