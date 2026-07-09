@@ -228,6 +228,7 @@ static ramfs_file_t *fd_get(int fd) {
  *   - vfs_stat   ：fat32_stat
  * ============================================================ */
 #include "fat32_64.h"
+#include "ext4_64.h"
 
 #define FAT_MNT      "/mnt/fat"
 #define FAT_MNT_LEN  8
@@ -300,6 +301,79 @@ static void fat32_list_pick(const char *path, int index,
     fat32_list(path, fat_pick_cb, &c);
 }
 
+/* ============================================================
+ * ext2/ext4 挂载点分发（M3.3 统一 VFS 多类型挂载）
+ * 与 /mnt/fat 完全对称：/mnt/ext 路由到 ext4_64 只读驱动。
+ * ext fd 使用独立编号区间（>=8192），与 ramfs(<4096)、fat([4096,8192)) 区分。
+ * ============================================================ */
+#define EXT_MNT      "/mnt/ext"
+#define EXT_MNT_LEN  8
+#define RAMFS_EXT_FD_BASE 8192
+#define RAMFS_MAX_EXT_FD  16
+
+typedef struct {
+    int           used;
+    char         *data;    /* 整文件缓冲 */
+    unsigned long size;    /* 文件字节数 */
+    unsigned long pos;     /* 当前读偏移 */
+} ramfs_ext_fd_t;
+
+static ramfs_ext_fd_t g_ext_fds[RAMFS_MAX_EXT_FD];
+
+/* 判断 path 是否落在 /mnt/ext 挂载点下（语义同 fat_match）。 */
+static int ext_match(const char *path, const char **sub) {
+    if (!path) return 0;
+    for (int i = 0; i < EXT_MNT_LEN; i++) {
+        if (path[i] != EXT_MNT[i]) return 0;
+    }
+    char c = path[EXT_MNT_LEN];
+    if (c == 0) { if (sub) *sub = "/"; return 1; }
+    if (c == '/') { if (sub) *sub = path + EXT_MNT_LEN; return 2; }
+    return 0;
+}
+
+static int ext_fd_alloc(void) {
+    for (int i = 0; i < RAMFS_MAX_EXT_FD; i++) {
+        if (!g_ext_fds[i].used) { g_ext_fds[i].used = 1; return i; }
+    }
+    return -1;
+}
+
+static ramfs_ext_fd_t *ext_fd_get(int fd) {
+    if (fd < RAMFS_EXT_FD_BASE) return 0;
+    int i = fd - RAMFS_EXT_FD_BASE;
+    if (i < 0 || i >= RAMFS_MAX_EXT_FD) return 0;
+    if (!g_ext_fds[i].used) return 0;
+    return &g_ext_fds[i];
+}
+
+/* ext4_list 回调：抓取第 want 个条目。 */
+typedef struct {
+    int             want;
+    int             cur;
+    ext4_dirent_t  *out;
+    int            *found;
+} ext_pick_ctx_t;
+
+static int ext_pick_cb(const ext4_dirent_t *ent, void *ud) {
+    ext_pick_ctx_t *c = (ext_pick_ctx_t *)ud;
+    if (c->cur == c->want) {
+        *(c->out)   = *ent;
+        *(c->found) = 1;
+        return 1;
+    }
+    c->cur++;
+    return 0;
+}
+
+static void ext4_list_pick(const char *path, int index,
+                           ext4_dirent_t *out, int *found) {
+    ext_pick_ctx_t c;
+    c.want = index; c.cur = 0; c.out = out; c.found = found;
+    *found = 0;
+    ext4_list(path, ext_pick_cb, &c);
+}
+
 /* ---- 确保文件数据缓冲至少有 need 字节容量（按块扩容）---- */
 static int file_ensure_cap(ramfs_node_t *n, unsigned long need) {
     if (need <= n->cap) return 0;
@@ -355,6 +429,34 @@ int vfs_open(const char *path, int flags, int mode) {
         }
     }
 
+    /* ---- ext2/ext4 挂载点分发（只读）---- */
+    {
+        const char *sub = 0;
+        int m = ext_match(path, &sub);
+        if (m && ext4_mounted()) {
+            if (m == 1) return -1; /* /mnt/ext 本身是目录，不能当文件打开 */
+            if ((flags & O_CREAT) || (flags & O_TRUNC) || ((flags & 3) != O_RDONLY))
+                return -1; /* ext 驱动为只读 */
+            ext4_dirent_t st;
+            if (ext4_stat(sub, &st) != 0) return -1;
+            if (st.is_dir) return -1;
+            int slot = ext_fd_alloc();
+            if (slot < 0) return -1;
+            ramfs_ext_fd_t *ef = &g_ext_fds[slot];
+            ef->size = st.size;
+            ef->pos  = 0;
+            ef->data = 0;
+            if (st.size > 0) {
+                ef->data = (char *)RAMFS_KMALLOC(st.size);
+                if (!ef->data) { ef->used = 0; return -1; }
+                int rn = ext4_read_file(sub, ef->data, (uint32_t)st.size);
+                if (rn < 0) { RAMFS_KFREE(ef->data); ef->data = 0; ef->used = 0; return -1; }
+                ef->size = (unsigned long)rn;
+            }
+            return RAMFS_EXT_FD_BASE + slot;
+        }
+    }
+
     ramfs_node_t *n = (ramfs_node_t *)0;
     /* 先尝试直接解析 */
     {
@@ -393,6 +495,12 @@ int vfs_close(int fd) {
         ff->data = 0; ff->size = 0; ff->pos = 0; ff->used = 0;
         return 0;
     }
+    ramfs_ext_fd_t *ef = ext_fd_get(fd);
+    if (ef) {
+        if (ef->data) RAMFS_KFREE(ef->data);
+        ef->data = 0; ef->size = 0; ef->pos = 0; ef->used = 0;
+        return 0;
+    }
     ramfs_file_t *f = fd_get(fd);
     if (!f) return -1;
     f->used = 0;
@@ -411,6 +519,17 @@ int vfs_read(int fd, void *buf, uint32_t count) {
         if (want > avail) want = avail;
         if (want > 0 && ff->data) rmemcpy(buf, ff->data + ff->pos, want);
         ff->pos += want;
+        return (int)want;
+    }
+    ramfs_ext_fd_t *ef = ext_fd_get(fd);
+    if (ef) {
+        if (!buf) return -1;
+        if (ef->pos >= ef->size) return 0;
+        unsigned long avail = ef->size - ef->pos;
+        unsigned long want  = count;
+        if (want > avail) want = avail;
+        if (want > 0 && ef->data) rmemcpy(buf, ef->data + ef->pos, want);
+        ef->pos += want;
         return (int)want;
     }
     ramfs_file_t *f = fd_get(fd);
@@ -456,6 +575,18 @@ int vfs_seek(int fd, int offset, int whence) {
         if (np < 0) np = 0;
         ff->pos = (unsigned long)np;
         return (int)ff->pos;
+    }
+    ramfs_ext_fd_t *ef = ext_fd_get(fd);
+    if (ef) {
+        long base = 0;
+        if (whence == SEEK_SET)      base = 0;
+        else if (whence == SEEK_CUR) base = (long)ef->pos;
+        else if (whence == SEEK_END) base = (long)ef->size;
+        else return -1;
+        long np = base + offset;
+        if (np < 0) np = 0;
+        ef->pos = (unsigned long)np;
+        return (int)ef->pos;
     }
     ramfs_file_t *f = fd_get(fd);
     if (!f) return -1;
@@ -566,6 +697,38 @@ dentry_t *vfs_readdir(const char *path, int index) {
         }
     }
 
+    /* ---- ext2/ext4 挂载点分发（只读）---- */
+    {
+        const char *sub = 0;
+        int m = ext_match(path, &sub);
+        if (m && ext4_mounted()) {
+            static dentry_t ext_de;
+            static inode_t  ext_in;
+            const char *esub = (m == 1) ? "/" : sub;
+            ext4_dirent_t hit;
+            int found = 0;
+            ext4_list_pick(esub, index, &hit, &found);
+            if (!found) return 0;
+            ext4_dirent_t *e = &hit;
+            {
+                int i = 0;
+                for (; i + 1 < MAX_NAME && e->name[i]; i++) ext_de.name[i] = e->name[i];
+                ext_de.name[i] = 0;
+            }
+            ext_in.ino     = 0;
+            ext_in.mode    = e->is_dir ? (FS_DIR | 0555) : (FS_FILE | 0444);
+            ext_in.size    = e->size;
+            ext_in.nlinks  = 1;
+            ext_in.fs_type = 0;
+            ext_de.inode   = &ext_in;
+            ext_de.parent  = 0;
+            ext_de.child   = 0;
+            ext_de.sibling = 0;
+            ext_de.mount   = 0;
+            return &ext_de;
+        }
+    }
+
     ramfs_node_t *dir = path_resolve(path, 0, 0, 0);
     if (!dir || !node_is_dir(dir)) return 0;
     int i = 0;
@@ -591,6 +754,27 @@ int vfs_stat(const char *path, inode_t *st) {
             }
             fat32_dirent_t e;
             if (fat32_stat(sub, &e) != 0) return -1;
+            st->ino = 0;
+            st->mode = e.is_dir ? (FS_DIR | 0555) : (FS_FILE | 0444);
+            st->size = e.size;
+            st->nlinks = 1;
+            st->fs_type = 0;
+            return 0;
+        }
+    }
+
+    /* ---- ext2/ext4 挂载点分发（只读）---- */
+    {
+        const char *sub = 0;
+        int m = ext_match(path, &sub);
+        if (m && ext4_mounted()) {
+            if (m == 1) {
+                st->ino = 0; st->mode = FS_DIR | 0555; st->size = 0;
+                st->nlinks = 1; st->fs_type = 0;
+                return 0;
+            }
+            ext4_dirent_t e;
+            if (ext4_stat(sub, &e) != 0) return -1;
             st->ino = 0;
             st->mode = e.is_dir ? (FS_DIR | 0555) : (FS_FILE | 0444);
             st->size = e.size;

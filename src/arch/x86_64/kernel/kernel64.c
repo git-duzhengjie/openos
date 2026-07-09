@@ -506,6 +506,62 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
         early_console64_write("[x86_64][fat32-vfs] === selftest done ===\n");
     }
 
+    /* 阶段 4-3（M3.3）：验证 ext2/ext4 已接入统一 VFS 挂载点 /mnt/ext，
+     * 与 /mnt/fat 走同一套 vfs_* int-fd 接口（readdir/stat/open/read）。 */
+    if (ext4_mounted()) {
+        early_console64_write("[x86_64][ext-vfs] === /mnt/ext selftest ===\n");
+        /* 1) readdir 根目录 */
+        for (int i = 0; ; i++) {
+            dentry_t *de = vfs_readdir("/mnt/ext", i);
+            if (!de) break;
+            early_console64_write("[x86_64][ext-vfs] entry: ");
+            early_console64_write(de->name);
+            if (de->inode && (de->inode->mode & FS_DIR))
+                early_console64_write("  <DIR>");
+            early_console64_write("\n");
+            if (i > 32) break;
+        }
+        /* 2) stat + open + read /mnt/ext/hello.txt */
+        {
+            inode_t st;
+            if (vfs_stat("/mnt/ext/hello.txt", &st) == 0) {
+                early_console64_write("[x86_64][ext-vfs] stat hello.txt size=");
+                early_console64_write_hex64((uint64_t)(uint32_t)st.size);
+                early_console64_write("\n");
+            }
+            int fd = vfs_open("/mnt/ext/hello.txt", O_RDONLY, 0);
+            if (fd >= 0) {
+                char buf[128];
+                int rn = vfs_read(fd, buf, sizeof(buf) - 1);
+                if (rn > 0) {
+                    buf[rn] = 0;
+                    early_console64_write("[x86_64][ext-vfs] read hello.txt: ");
+                    early_console64_write(buf);
+                    early_console64_write("\n");
+                }
+                vfs_close(fd);
+            } else {
+                early_console64_write("[x86_64][ext-vfs] open hello.txt FAILED\n");
+            }
+        }
+        /* 3) 嵌套子目录路径解析 /mnt/ext/subdir/inside.txt */
+        {
+            int fd = vfs_open("/mnt/ext/subdir/inside.txt", O_RDONLY, 0);
+            if (fd >= 0) {
+                char buf[128];
+                int rn = vfs_read(fd, buf, sizeof(buf) - 1);
+                if (rn > 0) {
+                    buf[rn] = 0;
+                    early_console64_write("[x86_64][ext-vfs] read subdir/inside.txt: ");
+                    early_console64_write(buf);
+                    early_console64_write("\n");
+                }
+                vfs_close(fd);
+            }
+        }
+        early_console64_write("[x86_64][ext-vfs] === selftest done ===\n");
+    }
+
     /* Step F.1 IDT registration selftest — runs as the very first selftest
      * because every later subsystem (syscall, sched, net, tsc, ring3 drop)
      * needs the IDT to route #PF/#GP/#UD/etc. to our C handlers. A

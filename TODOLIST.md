@@ -4,7 +4,7 @@
 >
 > 当前状态：openos 已具备 32 位 √86 原型内核能力，能够启动、显示、输入、调度、运行基础用户程序，并具备基础 syscall、VFS、ramfs/tmpfs、shell、GUI Terminal 等模块。浏览器路线已切换为 OpenOS 自研轻量浏览器，Chromium 官方内核迁移冻结为历史备选。
 >
-> 最近完成：**M3.2 ext2/ext4 只读驱动** —— 在 M3.1 FAT32 完整读写收尾后，新增 ext2/ext3/ext4 只读文件系统（src/arch/x86_64/gui64/ext4_64.c）：superblock/块组描述符/inode/目录项解析，传统直接+三级间接块与 ext4 extent 树双路径块映射，MBR 分区自动探测，挂在 AHCI/SATA 盘；headless 实测全绿（READ/SUBDIR/NESTED/INDIRECT-BLOCK VERIFY OK）。
+> 最近完成：**M3.3 统一 VFS 多类型挂载** —— 将 ext2/ext4 只读驱动对称接入 ramfs64.c 的统一 VFS 分发层：新增 /mnt/ext 挂载点（ext_match/ext_fd 独立编号区>=8192），与 /mnt/fat 走同一套 vfs_open/read/close/seek/readdir/stat int-fd 接口；headless 实测两个挂载点均可通过 VFS 统一接口 readdir/stat/open/read（含嵌套子目录路径解析）全绿。
 >
 > 当前推荐下一步：在继续保持自研浏览器回归门禁的同时，优先推进 OPENOS 作为真正操作系统的 PC/Mobile 跨设备架构路线：冻结 i386 稳定基线，将 √86_64 升级为 PC 主线，抽象 BootInfo / HAL / Device Model，并新增 aarch64 作为 Mobile 主线基础。
 
