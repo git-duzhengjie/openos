@@ -1599,14 +1599,14 @@
   - [√] 根治“IDENTIFY 成功但数据全零”：`nvme_submit` 完成判定后读 DMA 前加 `mfence`，敲门铃前加 `sfence`（“加 klog 就好”的时序陷阱，同 headless 假 PASS）
   - [√] 接入 blockdev 抽象层 + 与 FAT32/VFS 挂接（新增 `src/kernel/drivers/blockdev.c` 统一注册表/分发层 + `src/arch/x86_64/gui64/blockdev_hw.c` 硬件适配层，把 nvme0/sda/hda/hdb 包装为 blockdev_ops 注册；kernel64 启动时序：驱动 selftest→`blockdev_register_hw_devices()`→FAT32 mount；QEMU 实测 `[x86_64][blockdev] registered hw block devices` PASS，FAT32 读写 HELLO.TXT 正常）
   - [√] 中断驱动（MSI-X）—— PCI MSI-X cap 解析(cap@0x40,bir=0) + BAR 映射 + table entry0 编程 + enable；IDT NVME=0x31；延迟安装 `nvme_irq_install_late()`；QEMU 实测 `MSI-X enabled`；运行时**优选轮询**（教训：曾试 hlt 强等中断，因早期无 LAPIC timer 唤醒致挂起，回退轮询优先——与 Linux nvme polling queue 思路一致，NVMe 完成比 MSI-X 消息经 PCI 写事务投递还快）；全程保留 polling 安全网
-- [ ] M2.3：USB 栈（`usb.h` 补实现）
+- [√] M2.3：USB 栈（`usb.h` 补实现）——xHCI 控制器 + HID 键鼠 + U 盘大容量存储全部完工
   - [√] xHCI 控制器驱动（USB 3.x，现代机型主流）—— 新增 `src/arch/x86_64/gui64/xhci64.{c,h}`：CAP/OP/Runtime/Doorbell 寄存器映射 + DCBAA + Command Ring + Event Ring(ERST) + 端口枚举 + Slot/EP Context；MSI-X 中断路径(XHCI_VECTOR) + polling 安全网；isr64.S 新增汇编 stub + kernel64.c init 接线；QEMU headless 实测 xHCI selftest PASS + IRQ 路径 PASS，AHCI/NVMe 无回归，i18n 157 译文正常，无 panic（commit `3850d48`）
   - [√] USB HID（键盘/鼠标）—— xHCI 挂 `usb-kbd`(proto=1)/`usb-mouse`(proto=2)，`xhci64.c` HID 层完整实现：枚举(GET_DESCRIPTOR/SET_CONFIG/Configure Endpoint/SET_PROTOCOL)、中断 IN 端点 arm、差分报文解析、shift/修饰键映射，按键上报走 `gui_post_key_code_with_modifiers`
     - [√] 多设备枚举验证 —— headless 实测 slot1(kbd)+slot2(mouse) 双设备完整枚举，`ep_enable epid 3`(中断 IN) 双设备均成功
     - [√] 中断 IN 端点数据传输链路打通 —— 新增 `tools/qmp_inject.py` + `run_inject_test.bat`(QMP `input-send-event` 注入)，**首次在 headless 下让中断 IN 端点产生真实数据传输**：trace 坐实 `ep_kick epid 3`→`xfer_start`→`packet ep1 setup→complete`→`xfer_success len 8`(鼠标报文穿过中断端点)。之前几轮 `xfer_success` 全是 EP0 枚举流量、epid 3 恒为 0 的困境已破
     - [√] 根因确认：驱动代码无 bug，此前“卡死”纯粹是 headless 缺真实输入源(相对鼠标不动即 NAK 无中断数据)；`build+run.bat` GUI 段去掉 `usb-kbd` 消除与 PS/2 键盘的锁屏输入抢占冲突
     - [√] GUI 模式真机人工验收 —— 用户在 GUI 窗口实测鼠标光标跟随移动、锁屏界面敲密码字符正常输入，USB HID 输入闭环最终确认通过
-  - [ ] USB 大容量存储（U 盘）
+  - [√] USB 大容量存储（U 盘）—— BOT(Bulk-Only Transport)+SCSI 命令集实现：bulk IN/OUT 端点配置、CBW/CSW 传输、INQUIRY/READ CAPACITY/READ(10)/WRITE(10)。**关键 bug 修复**：Input Context 里 bulk EP 槽位 off-by-one（ICC 占 idx0，故 EP dci=N 须写 idx=N+1，原代码误用 idx=dci），devctx 回读验证 dequeue 指针精确对齐(OUT[2]=0x0D7B9001/IN[2]=0x0D7BA001)；QEMU headless 实测 16MB U 盘全链路 enumerate→INQUIRY→CAPACITY(32768 blocks)→attach OK，读写自检采用安全策略(备份→写图案→读回逐字节比对→原样恢复)，WRITE/READ/VERIFY PASS @lba=32760（commit `3dd7dc6`）
 - [ ] M2.4：声卡/音频（`sound.h` 补实现，AC97 或 Intel HDA + PCM 播放）
 
 ### M3：文件系统完善（🟠 第二优先级）
