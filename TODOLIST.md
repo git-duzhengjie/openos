@@ -4,7 +4,7 @@
 >
 > 当前状态：openos 已具备 32 位 √86 原型内核能力，能够启动、显示、输入、调度、运行基础用户程序，并具备基础 syscall、VFS、ramfs/tmpfs、shell、GUI Terminal 等模块。浏览器路线已切换为 OpenOS 自研轻量浏览器，Chromium 官方内核迁移冻结为历史备选。
 >
-> 最近完成：**M3.4 文件权限模型** —— 在统一 VFS(ramfs64.c) 上实现 POSIX 风格 rwx/uid/gid/属主权限：vfs_check_perm(owner>group>other 三级判定、root 绕过)、vfs_access、vfs_chmod/vfs_chown；node_create 自动填充创建者凭证；headless 实测 check_perm 9/9 + CHMOD/CHOWN VERIFY OK。
+> 最近完成：**M3.5 软链接/硬链接支持** —— 在统一 VFS(ramfs64.c) 实现：硬链接 vfs_link（link_to 共享 inode 数据体 + node_body 重定向 + nlinks 引用计数 + 删主节点时数据体转移）、软链接 vfs_symlink（FS_SYMLINK 节点存目标路径）、vfs_readlink、path_resolve 中间段 symlink 自动展开（绝对/相对路径 + hops>16 防环）；headless 实测 link pass=5 fail=0。M3 里程碑全部完成。
 >
 > 当前推荐下一步：在继续保持自研浏览器回归门禁的同时，优先推进 OPENOS 作为真正操作系统的 PC/Mobile 跨设备架构路线：冻结 i386 稳定基线，将 √86_64 升级为 PC 主线，抽象 BootInfo / HAL / Device Model，并新增 aarch64 作为 Mobile 主线基础。
 
@@ -1642,7 +1642,14 @@
   - [√] **chmod/chown 实现**：vfs_chmod 仅保留低12位权限/粘性位保类型不变（仅属主/root可改）；vfs_chown 非特权不能移交属主、非属主且非特权不能改组（(uint32_t)-1 保持不变）
   - [√] **凭证来源**：发现 proc 实际凭证接口为 arch_x86_64_proc_current_uid/gid（无 caps 字段/has_cap），特权统一以 uid==0 为准
   - [√] **selftest 全绿（headless QEMU）**：check_perm pass=9 fail=0（owner/group/other三级 + root万能 + 目录搜索位）、CHMOD VERIFY OK(0600)、CHOWN VERIFY OK(1234:5678)
-- [ ] M3.5：软链接 / 硬链接支持
+- [√] M3.5：软链接 / 硬链接支持
+  - [√] **硬链接 vfs_link(old,new)**：新建目录项共享同一 inode 数据体（link_to 指向主节点），nlinks++；不允许硬链目录/目标已存在拒绝
+  - [√] **node_body() 重定向**：read/write/truncate/stat 均经 node_body() 找到数据承载节点，硬链接任一名字读写同步
+  - [√] **node_free 引用计数 + 数据体转移**：删链接仅递减 nlinks；删主节点但仍有链接时把数据体转移给存活链接并提升为新主，其余 link_to 改指
+  - [√] **软链接 vfs_symlink(target,new)**：新建 FS_SYMLINK 节点，data 存目标路径字符串
+  - [√] **vfs_readlink(path,buf,size)**：以 want_parent 定位不展开末段，读回目标路径
+  - [√] **path_resolve 中间段 symlink 展开**：遇软链接自动跳转目标（绝对/相对路径均支持，hops>16 防死循环）；resolve_relative 辅助相对跳转
+  - [√] **selftest 全绿（headless QEMU）**：link pass=5 fail=0（硬链接读/写同步/删源名后链接存活 + 软链接 readlink/目录软链接穿透访问）
 
 ### M4：内核接口与进程模型补齐（🟠 第二优先级）
 

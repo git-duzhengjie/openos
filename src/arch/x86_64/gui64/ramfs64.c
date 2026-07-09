@@ -30,10 +30,17 @@ typedef struct ramfs_node {
     struct ramfs_node *parent;  /* 父目录节点，根节点为 NULL */
     struct ramfs_node *child;   /* 第一个子节点（仅目录有效）*/
     struct ramfs_node *sibling; /* 下一个兄弟节点 */
-    char     *data;             /* 文件数据缓冲（kmalloc），目录为 NULL */
+    char     *data;             /* 文件数据缓冲（kmalloc），目录为 NULL；软链接存目标路径 */
     unsigned long cap;          /* data 缓冲容量 */
     int       used;             /* 该槽是否被占用 */
+    /* ---- M3.5 硬链接：共享 inode 数据体 ---- */
+    struct ramfs_node *link_to; /* !=NULL 表示本节点为硬链接，指向承载数据的主节点 */
 } ramfs_node_t;
+
+/* 取硬链接的数据承载节点：普通节点返回自身，硬链接返回其主节点 */
+static struct ramfs_node *node_body(struct ramfs_node *n) {
+    return (n && n->link_to) ? n->link_to : n;
+}
 
 static ramfs_node_t g_nodes[RAMFS_MAX_NODES];
 static ramfs_node_t *g_root = 0;   /* 根目录 "/" */
@@ -73,6 +80,38 @@ static ramfs_node_t *node_alloc(void) {
 
 static void node_free(ramfs_node_t *n) {
     if (!n) return;
+    /* M3.5：硬链接节点——不释放共享数据，仅递减主节点 nlinks，回收自身槽 */
+    if (n->link_to) {
+        ramfs_node_t *body = n->link_to;
+        if (body->inode.nlinks > 0) body->inode.nlinks--;
+        n->link_to = 0;
+        n->data = 0; n->cap = 0; n->used = 0;
+        return;
+    }
+    /* 主节点且仍有其他硬链接：把数据体转移给一个存活的链接，将其提升为新主 */
+    if (n->inode.nlinks > 1) {
+        ramfs_node_t *heir = 0;
+        for (int i = 0; i < RAMFS_MAX_NODES; i++) {
+            if (g_nodes[i].used && g_nodes[i].link_to == n) { heir = &g_nodes[i]; break; }
+        }
+        if (heir) {
+            heir->data = n->data;
+            heir->cap  = n->cap;
+            heir->link_to = 0;
+            heir->inode.mode = n->inode.mode;
+            heir->inode.size = n->inode.size;
+            heir->inode.uid  = n->inode.uid;
+            heir->inode.gid  = n->inode.gid;
+            heir->inode.nlinks = n->inode.nlinks - 1;
+            /* 其余指向旧主的链接改指新主 */
+            for (int i = 0; i < RAMFS_MAX_NODES; i++) {
+                if (g_nodes[i].used && g_nodes[i].link_to == n) g_nodes[i].link_to = heir;
+            }
+            /* 旧主节点仅回收槽，数据已转移不释放 */
+            n->data = 0; n->cap = 0; n->used = 0;
+            return;
+        }
+    }
     if (n->data) { RAMFS_KFREE(n->data); n->data = 0; }
     n->cap = 0;
     n->used = 0;
@@ -143,6 +182,34 @@ static ramfs_node_t *dir_lookup(ramfs_node_t *dir, const char *name, unsigned lo
  * 返回目标节点，找不到返回 NULL。
  * 若 want_parent!=0，则返回最后一级的父目录，并把最后一段名字写入 last_name。 ---- */
 static ramfs_node_t *path_resolve(const char *path, int want_parent,
+                                  char *last_name, unsigned long last_cap);
+
+/* M3.5：以 base 目录为起点解析相对路径（不再展开末段软链接，仅用于中间段跳转）*/
+static ramfs_node_t *resolve_relative(ramfs_node_t *base, const char *rel) {
+    if (!base || !rel) return 0;
+    ramfs_node_t *cur = base;
+    const char *p = rel;
+    while (*p == '/') p++;
+    while (*p) {
+        const char *seg = p; unsigned long slen = 0;
+        while (p[slen] && p[slen] != '/') slen++;
+        const char *next = seg + slen;
+        while (*next == '/') next++;
+        if (slen == 1 && seg[0] == '.') {
+            /* 不动 */
+        } else if (slen == 2 && seg[0] == '.' && seg[1] == '.') {
+            if (cur->parent) cur = cur->parent;
+        } else {
+            ramfs_node_t *nx = dir_lookup(cur, seg, slen);
+            if (!nx) return 0;
+            cur = nx;
+        }
+        p = next;
+    }
+    return cur;
+}
+
+static ramfs_node_t *path_resolve(const char *path, int want_parent,
                                   char *last_name, unsigned long last_cap) {
     if (!path || !g_root) return 0;
     /* 跳过前导 '/' */
@@ -181,6 +248,20 @@ static ramfs_node_t *path_resolve(const char *path, int want_parent,
         } else {
             ramfs_node_t *nx = dir_lookup(cur, seg, slen);
             if (!nx) return 0;
+            /* M3.5：中间段遇到软链接，需展开目标后继续下探（限制深度防死循环）*/
+            int hops = 0;
+            while (nx && (nx->inode.mode & 0xF000) == FS_SYMLINK && nx->data) {
+                if (++hops > 16) return 0; /* 链接层数过深或成环 */
+                ramfs_node_t *base = cur; /* 相对链接基于所在目录 */
+                if (nx->data[0] == '/') {
+                    nx = path_resolve(nx->data, 0, 0, 0);
+                } else {
+                    /* 相对路径：以 base 目录为起点逐段解析 */
+                    ramfs_node_t *rr = resolve_relative(base, nx->data);
+                    nx = rr;
+                }
+                if (!nx) return 0;
+            }
             cur = nx;
         }
 
@@ -545,6 +626,7 @@ int vfs_read(int fd, void *buf, uint32_t count) {
     if (!f || !buf) return -1;
     ramfs_node_t *n = f->node;
     if (!n || node_is_dir(n)) return -1;
+    n = node_body(n);   /* M3.5：硬链接重定向到数据体 */
     unsigned long sz = n->inode.size;
     if (f->pos >= sz) return 0;
     unsigned long avail = sz - f->pos;
@@ -562,6 +644,7 @@ int vfs_write(int fd, const void *buf, uint32_t count) {
     if (!f || !buf) return -1;
     ramfs_node_t *n = f->node;
     if (!n || node_is_dir(n)) return -1;
+    n = node_body(n);   /* M3.5：硬链接重定向到数据体 */
     if ((f->flags & 3) == O_RDONLY) return -1; /* 只读打开不允许写 */
     if (count == 0) return 0;
     unsigned long end = f->pos + count;
@@ -616,6 +699,7 @@ int vfs_truncate(const char *path, uint32_t length) {
     if (!path || !g_ramfs_ready) return -1;
     ramfs_node_t *n = path_resolve(path, 0, 0, 0);
     if (!n || node_is_dir(n)) return -1;
+    n = node_body(n);   /* M3.5：硬链接重定向到数据体 */
     if (length == 0) {
         n->inode.size = 0;
         return 0;
@@ -666,6 +750,66 @@ int vfs_unlink(const char *path) {
     node_free(n);
     return 0;
 }
+
+/* ================= M3.5 链接支持 ================= */
+
+/* 硬链接：newpath 新建目录项，与 oldpath 共享同一 inode 数据体。
+ * 仅限普通文件（不能硬链目录）。 */
+int vfs_link(const char *oldpath, const char *newpath) {
+    if (!oldpath || !newpath || !g_ramfs_ready) return -1;
+    ramfs_node_t *src = path_resolve(oldpath, 0, 0, 0);
+    if (!src) return -1;
+    if (node_is_dir(src)) return -1;              /* 不允许硬链目录 */
+    if (path_resolve(newpath, 0, 0, 0)) return -1; /* 目标已存在 */
+    char name[MAX_NAME];
+    ramfs_node_t *parent = path_resolve(newpath, 1, name, sizeof(name));
+    if (!parent || !node_is_dir(parent) || name[0] == 0) return -1;
+    /* 数据体归一：若 src 本身就是链接，则指向其主节点 */
+    ramfs_node_t *body = node_body(src);
+    ramfs_node_t *n = node_create(parent, name, body->inode.mode);
+    if (!n) return -1;
+    n->link_to = body;
+    n->data = 0; n->cap = 0;                       /* 链接节点不拥有独立数据 */
+    n->inode.uid = body->inode.uid;
+    n->inode.gid = body->inode.gid;
+    body->inode.nlinks++;
+    return 0;
+}
+
+/* 软链接：newpath 新建一个 FS_SYMLINK 节点，data 存目标路径字符串。 */
+int vfs_symlink(const char *target, const char *newpath) {
+    if (!target || !newpath || !g_ramfs_ready) return -1;
+    if (path_resolve(newpath, 0, 0, 0)) return -1; /* 目标已存在 */
+    char name[MAX_NAME];
+    ramfs_node_t *parent = path_resolve(newpath, 1, name, sizeof(name));
+    if (!parent || !node_is_dir(parent) || name[0] == 0) return -1;
+    ramfs_node_t *n = node_create(parent, name, FS_SYMLINK | 0777);
+    if (!n) return -1;
+    unsigned long tlen = rstrlen(target);
+    n->data = (char *)RAMFS_KMALLOC(tlen + 1);
+    if (!n->data) { node_detach(n); node_free(n); return -1; }
+    for (unsigned long i = 0; i < tlen; i++) n->data[i] = target[i];
+    n->data[tlen] = 0;
+    n->cap = tlen + 1;
+    n->inode.size = tlen;
+    return 0;
+}
+
+/* 读取软链接目标路径到 buf，返回拷贝长度（不含结尾 0），失败返回 -1。 */
+int vfs_readlink(const char *path, char *buf, uint32_t size) {
+    if (!path || !buf || size == 0 || !g_ramfs_ready) return -1;
+    /* 不能展开末段软链接：用 want_parent 定位父目录后手动查 */
+    char name[MAX_NAME];
+    ramfs_node_t *parent = path_resolve(path, 1, name, sizeof(name));
+    if (!parent || !node_is_dir(parent) || name[0] == 0) return -1;
+    ramfs_node_t *n = dir_lookup(parent, name, rstrlen(name));
+    if (!n || (n->inode.mode & 0xF000) != FS_SYMLINK || !n->data) return -1;
+    unsigned long len = rstrlen(n->data);
+    unsigned long cp = (len < size) ? len : size;
+    for (unsigned long i = 0; i < cp; i++) buf[i] = n->data[i];
+    return (int)cp;
+}
+
 
 /* readdir：按 index 返回 path 目录下第 index 个子项的 dentry。
  * 越界或错误返回 NULL。 */

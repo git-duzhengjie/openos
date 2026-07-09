@@ -617,6 +617,61 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
         early_console64_write("[x86_64][perm] === selftest done ===\n");
     }
 
+    /* ============ M3.5 链接（硬链接/软链接）selftest ============ */
+    {
+        early_console64_write("[x86_64][link] === M3.5 link selftest ===\n");
+        int lp = 0, lf = 0;
+        /* 建源文件 */
+        int fd = vfs_open("/link_src.txt", O_WRONLY|O_CREAT, 0644);
+        if (fd >= 0) { vfs_write(fd, "LINKDATA", 8); vfs_close(fd); }
+        /* --- 硬链接：建立后两名字读到同数据 --- */
+        if (vfs_link("/link_src.txt", "/link_hard.txt") == 0) {
+            char b[16]; int rn = -1;
+            int hf = vfs_open("/link_hard.txt", O_RDONLY, 0);
+            if (hf >= 0) { rn = vfs_read(hf, b, 8); vfs_close(hf); }
+            if (rn == 8 && b[0]=='L' && b[7]=='A') lp++; else lf++;
+            /* 通过硬链接写，源文件同步可见 */
+            hf = vfs_open("/link_hard.txt", O_WRONLY, 0);
+            if (hf >= 0) { vfs_write(hf, "XYZ", 3); vfs_close(hf); }
+            int sf = vfs_open("/link_src.txt", O_RDONLY, 0);
+            rn = -1; if (sf >= 0) { rn = vfs_read(sf, b, 3); vfs_close(sf); }
+            if (rn == 3 && b[0]=='X' && b[2]=='Z') lp++; else lf++;
+            /* 删源名，硬链接仍可读（nlinks递减不释放数据）*/
+            vfs_unlink("/link_src.txt");
+            hf = vfs_open("/link_hard.txt", O_RDONLY, 0);
+            rn = -1; if (hf >= 0) { rn = vfs_read(hf, b, 3); vfs_close(hf); }
+            if (rn == 3 && b[0]=='X') lp++; else lf++;
+            vfs_unlink("/link_hard.txt");
+        } else { lf += 3; }
+        /* --- 软链接：创建 + readlink + 穿透访问 --- */
+        fd = vfs_open("/sl_target.txt", O_WRONLY|O_CREAT, 0644);
+        if (fd >= 0) { vfs_write(fd, "SOFTDATA", 8); vfs_close(fd); }
+        if (vfs_symlink("/sl_target.txt", "/sl_link") == 0) {
+            char lb[32]; int ln = vfs_readlink("/sl_link", lb, sizeof(lb));
+            if (ln == 14 && lb[0]=='/' && lb[1]=='s') lp++; else lf++;
+            /* 经软链接中间段穿透：/sl_link 作为目标——用目录软链接验证中间段展开 */
+            vfs_mkdir("/sl_realdir", 0755);
+            int df = vfs_open("/sl_realdir/deep.txt", O_WRONLY|O_CREAT, 0644);
+            if (df >= 0) { vfs_write(df, "DEEP", 4); vfs_close(df); }
+            if (vfs_symlink("/sl_realdir", "/sl_dirlink") == 0) {
+                char db[8]; int dn = -1;
+                int od = vfs_open("/sl_dirlink/deep.txt", O_RDONLY, 0);
+                if (od >= 0) { dn = vfs_read(od, db, 4); vfs_close(od); }
+                if (dn == 4 && db[0]=='D' && db[3]=='P') lp++; else lf++;
+                vfs_unlink("/sl_dirlink");
+            } else { lf++; }
+            vfs_unlink("/sl_realdir/deep.txt");
+            vfs_rmdir("/sl_realdir");
+            vfs_unlink("/sl_link");
+        } else { lf += 2; }
+        vfs_unlink("/sl_target.txt");
+        early_console64_write("[x86_64][link] link pass=");
+        early_console64_write_hex64((uint64_t)(uint32_t)lp);
+        early_console64_write(" fail=");
+        early_console64_write_hex64((uint64_t)(uint32_t)lf);
+        early_console64_write("\n[x86_64][link] === selftest done ===\n");
+    }
+
     /* Step F.1 IDT registration selftest — runs as the very first selftest
      * because every later subsystem (syscall, sched, net, tsc, ring3 drop)
      * needs the IDT to route #PF/#GP/#UD/etc. to our C handlers. A
