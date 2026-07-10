@@ -281,6 +281,21 @@ static void sched_apply_rsp0_for_next(uint32_t nxt) {
     }
 
     /* gamma.3b-S2a Patch B removed: disp_dbg debug telemetry stripped. */
+    if (sched_slots[nxt].kind == OPENOS_X86_64_SCHED_KIND_USER &&
+        sched_slots[nxt].ctx.rip ==
+            (x86_64_entry_t)&arch_x86_64_user_thread_start_trampoline) {
+        extern void early_serial64_write(const char *);
+        uint64_t *fr = (uint64_t *)(uintptr_t)sched_slots[nxt].ctx.rsp;
+        early_serial64_write("[disp_ut] nxt=");
+        early_console64_write_hex64((uint64_t)nxt);
+        early_serial64_write(" ctxrsp=");
+        early_console64_write_hex64((uint64_t)(uintptr_t)fr);
+        early_serial64_write(" fr1_urip=");
+        early_console64_write_hex64(fr ? fr[1] : 0u);
+        early_serial64_write(" fr4_ursp=");
+        early_console64_write_hex64(fr ? fr[4] : 0u);
+        early_serial64_write("\n");
+    }
 }
 
 static void sched_ensure_bootstrap_slot(void) {
@@ -833,6 +848,18 @@ uint32_t arch_x86_64_sched_spawn_uthread_thread(uint64_t user_rip,
     sched_slots[idx].as               = NULL;  /* caller does slot_set_as before wakeup */
     sched_slots[idx].owner_proc       = NULL;  /* caller does slot_set_owner_proc before wakeup */
     sched_slots[idx].fs_base          = fs_base;  /* M5.2b: TLS programmed on first dispatch */
+    {
+        extern void early_serial64_write(const char *);
+        early_serial64_write("[spawn_ut] idx=");
+        early_console64_write_hex64((uint64_t)idx);
+        early_serial64_write(" frame_base=");
+        early_console64_write_hex64((uint64_t)frame_base);
+        early_serial64_write(" kstack_top=");
+        early_console64_write_hex64((uint64_t)kstack_top);
+        early_serial64_write(" user_rip=");
+        early_console64_write_hex64((uint64_t)user_rip);
+        early_serial64_write("\n");
+    }
     return idx;
 }
 
@@ -1072,6 +1099,18 @@ void arch_x86_64_sched_exit_self(void) {
     sched_pc_inc_switches();
 
     x86_64_context_t *to = (nxt == 0u) ? &bootstrap_context : &sched_slots[nxt].ctx;
+    {
+        extern void early_serial64_write(const char *);
+        early_serial64_write("[exit_self] cur=");
+        early_console64_write_hex64((uint64_t)cur);
+        early_serial64_write(" nxt=");
+        early_console64_write_hex64((uint64_t)nxt);
+        early_serial64_write(" to.rip=");
+        early_console64_write_hex64((uint64_t)(uintptr_t)to->rip);
+        early_serial64_write(" to.rsp=");
+        early_console64_write_hex64((uint64_t)(uintptr_t)to->rsp);
+        early_serial64_write("\n");
+    }
     sched_apply_rsp0_for_next(nxt);
     /* `from == NULL` tells context_switch64.S to skip saving. */
     arch_x86_64_context_switch(NULL, to);
