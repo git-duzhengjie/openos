@@ -806,7 +806,15 @@ static uint64_t do_exit(uint64_t status) {
     int on_bsp_usermode_run =
             (arch_x86_64_this_cpu_idx() == 0u) &&
             (int)arch_x86_64_usermode_is_running();
-        if (owner != NULL && owner == me && !on_bsp_usermode_run &&
+        /* M5.2e: a CLONE_VM thread (is_thread) is ALWAYS sched-dispatched via
+         * a PARKED->READY slot, never via usermode_run(). On a uniprocessor
+         * QEMU the worker threads run on the BSP too, so the CPU-id gate above
+         * wrongly classifies their exit as the BSP usermode_run path and the
+         * legacy longjmp below tries to unwind a usermode_run frame that does
+         * not exist for a thread -> hang. Force threads down the sched exit
+         * path regardless of CPU; processes keep the original CPU gate. */
+        int use_sched_exit = (me != NULL && me->is_thread) || !on_bsp_usermode_run;
+        if (owner != NULL && owner == me && use_sched_exit &&
             sslot != 0u) {
             /* γ.4 DIAG: trace which do_exit path each child takes. */
             early_console64_write("[do_exit:zpath] pid=");
@@ -876,6 +884,21 @@ static uint64_t do_exit(uint64_t status) {
             }
 
             (void)arch_x86_64_sched_slot_set_owner_proc(sslot, NULL);
+
+            /* M5.2e: CLONE_CHILD_CLEARTID for a sched-dispatched thread.
+             * pthread_join() parks on a SYS_FUTEX_WAIT against the child's
+             * tid slot; the child must zero that slot and wake the joiner
+             * on exit. The fork/wait zombie path above does NOT do this, so
+             * without this block a joined worker exits cleanly yet the main
+             * thread waits forever. We are still on the thread's own AS here
+             * (CR3 not rotated), so the user pointer is directly writable.
+             * Do this BEFORE sched_exit_self(), which never returns. */
+            if (me != NULL && me->clear_child_tid != 0) {
+                uint32_t *ctid = (uint32_t *)me->clear_child_tid;
+                *ctid = 0u;
+                (void)arch_x86_64_futex_wake(me->clear_child_tid, 0x7fffffff);
+                me->clear_child_tid = 0;
+            }
 
             /* γ.4 S3 — CROSS-CPU WAKE. Root cause of the fork-multi hang:
              * this child ran on an AP and just published its zombie +
