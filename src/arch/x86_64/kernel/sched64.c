@@ -20,7 +20,20 @@ struct x86_64_proc;
  * which is this label. */
 extern void arch_x86_64_user_thread_trampoline(void);
 extern void arch_x86_64_user_thread_trampoline_full(void);  /* γ.3b-S2a Seg-4 */
+extern void arch_x86_64_user_thread_start_trampoline(void);  /* M5.2b: thread entry(arg) */
 extern void arch_x86_64_user_thread_sentinel_trampoline(void);
+
+/* M5.2b: IA32_FS_BASE MSR + local wrmsr helper for per-slot TLS injection.
+ * percpu64.h defines GS_BASE/KERNEL_GS_BASE but not FS_BASE; declare it
+ * here since only the dispatch hook needs it. */
+#ifndef OPENOS_X86_64_MSR_FS_BASE
+#define OPENOS_X86_64_MSR_FS_BASE  0xC0000100u
+#endif
+static inline void sched_wrmsr64(uint32_t msr, uint64_t value) {
+    uint32_t lo = (uint32_t)(value & 0xFFFFFFFFu);
+    uint32_t hi = (uint32_t)(value >> 32);
+    __asm__ __volatile__("wrmsr" : : "c"(msr), "a"(lo), "d"(hi));
+}
 
 /* γ.5-F1: dedicated per-CPU idle stacks.
  *
@@ -211,6 +224,13 @@ typedef struct {
      * field. Set by fork_alloc_child right before slot_wakeup; cleared
      * on slot_release / EXITED reap. */
     struct x86_64_proc          *owner_proc;
+    /* M5.2b: per-slot TLS base (%fs.base). Loaded into IA32_FS_BASE right
+     * before a USER slot is dispatched to ring3, so a cloned thread sees
+     * its own thread-local storage. 0 = leave %fs.base untouched (this is
+     * the fork/spawn default -- they never set it, keeping legacy
+     * behaviour intact). Set by clone_thread's slot setup before wakeup;
+     * cleared to 0 on slot reap. */
+    uint64_t            fs_base;
 } sched_slot_t;
 
 static sched_slot_t  sched_slots[OPENOS_X86_64_SCHED_MAX_KTHREADS];
@@ -248,6 +268,16 @@ static void sched_apply_rsp0_for_next(uint32_t nxt) {
      * NULL as = keep current CR3 (kthread selftest slots ride the boot AS). */
     if (sched_slots[nxt].as != NULL) {
         arch_x86_64_as_activate(sched_slots[nxt].as);
+    }
+
+    /* M5.2b: load this thread's TLS base into IA32_FS_BASE right before
+     * it is dispatched to ring3. Only USER slots carry a meaningful
+     * fs_base; a value of 0 means "leave %fs.base as-is" which is the
+     * fork/spawn default (they never set fs_base), so legacy single-
+     * threaded user procs are unaffected. */
+    if (sched_slots[nxt].kind == OPENOS_X86_64_SCHED_KIND_USER &&
+        sched_slots[nxt].fs_base != 0u) {
+        sched_wrmsr64(OPENOS_X86_64_MSR_FS_BASE, sched_slots[nxt].fs_base);
     }
 
     /* gamma.3b-S2a Patch B removed: disp_dbg debug telemetry stripped. */
@@ -714,8 +744,98 @@ uint32_t arch_x86_64_sched_spawn_uthread_parked_full(uint64_t user_rip,
     sched_slots[idx].kernel_stack_top = kstack_top;
     sched_slots[idx].as               = NULL;  /* caller does slot_set_as before wakeup */
     sched_slots[idx].owner_proc       = NULL;  /* caller does slot_set_owner_proc before wakeup */
+    sched_slots[idx].fs_base          = 0u;    /* M5.2b: default no-TLS; clone_thread sets it before wakeup */
     return idx;
 }
+
+/*
+ * M5.2b: arch_x86_64_sched_spawn_uthread_thread
+ * ---------------------------------------------
+ * Park a freshly-cloned user THREAD (pthread-style entry(arg)) into a
+ * scheduler slot. Differs from spawn_uthread_parked_full in two ways:
+ *
+ *   1. Uses the 6-qword thread-start frame + arch_x86_64_user_thread_
+ *      start_trampoline instead of the 11-qword fork-resume frame. The
+ *      extra top qword carries 'user_arg', popped into %rdi by the
+ *      trampoline so user code observes entry(arg) per the SysV ABI.
+ *   2. Records fs_base up-front so context_switch programs IA32_FS_BASE
+ *      (TLS) via wrmsr the first time this slot is dispatched.
+ *
+ * As with parked_full the caller must slot_set_as + slot_set_owner_proc
+ * before waking the slot. Returns slot idx, or 0xFFFFFFFF on failure.
+ */
+uint32_t arch_x86_64_sched_spawn_uthread_thread(uint64_t user_rip,
+                                                uint64_t user_rsp,
+                                                uint64_t user_arg,
+                                                uint64_t user_rflags,
+                                                uint16_t user_cs,
+                                                uint16_t user_ss,
+                                                uint64_t fs_base,
+                                                uint32_t priority,
+                                                uint32_t target_cpu) {
+    if (user_rip == 0u || user_rsp == 0u) {
+        return 0xFFFFFFFFu;
+    }
+    if (priority > OPENOS_X86_64_SCHED_PRIO_MAX) {
+        priority = OPENOS_X86_64_SCHED_PRIO_DEFAULT;
+    }
+    if (target_cpu >= OPENOS_X86_64_SMP_MAX_CPUS) {
+        target_cpu = arch_x86_64_this_cpu_ptr()->cpu_idx;
+    }
+    user_rflags |= 0x200ULL;  /* enforce IF=1 in thread on iretq */
+
+    uint32_t idx = sched_alloc_slot();
+    if (idx == 0u) {
+        return 0xFFFFFFFFu;
+    }
+
+    void *stack = arch_x86_64_kmalloc(OPENOS_X86_64_SCHED_KSTACK_BYTES);
+    if (stack == NULL) {
+        sched_slots[idx].state = SCHED_SLOT_FREE;
+        return 0xFFFFFFFFu;
+    }
+    sched_slots[idx].stack_base = stack;
+
+    uintptr_t kstack_top = (uintptr_t)stack + OPENOS_X86_64_SCHED_KSTACK_BYTES;
+    uintptr_t frame_base = kstack_top - (6u * sizeof(uint64_t));
+    frame_base &= ~((uintptr_t)0xFu);
+    uint64_t *frame = (uint64_t *)frame_base;
+    frame[0]  = user_arg;             /* popped into %rdi by start trampoline */
+    frame[1]  = user_rip;
+    frame[2]  = (uint64_t)user_cs;
+    frame[3]  = user_rflags;
+    frame[4]  = user_rsp;
+    frame[5]  = (uint64_t)user_ss;
+
+    x86_64_context_t ctx;
+    ctx.rsp    = (x86_64_stack_ptr_t)frame_base;
+    ctx.rip    = (x86_64_entry_t)&arch_x86_64_user_thread_start_trampoline;
+    ctx.rflags = 0u;
+    ctx.rbx    = 0u;
+    ctx.rbp    = 0u;
+    ctx.r12    = 0u;
+    ctx.r13    = 0u;
+    ctx.r14    = 0u;
+    ctx.r15    = 0u;
+    ctx.r8     = 0u;
+    ctx.r9     = 0u;
+    ctx.r10    = 0u;
+    ctx.r11    = 0u;
+
+    sched_slots[idx].ctx              = ctx;
+    sched_slots[idx].state            = SCHED_SLOT_PARKED;
+    sched_slots[idx].id               = idx;
+    sched_slots[idx].priority         = priority;
+    sched_slots[idx].owner_cpu        = target_cpu;
+    sched_slots[idx].is_idle          = 0u;
+    sched_slots[idx].kind             = OPENOS_X86_64_SCHED_KIND_USER;
+    sched_slots[idx].kernel_stack_top = kstack_top;
+    sched_slots[idx].as               = NULL;  /* caller does slot_set_as before wakeup */
+    sched_slots[idx].owner_proc       = NULL;  /* caller does slot_set_owner_proc before wakeup */
+    sched_slots[idx].fs_base          = fs_base;  /* M5.2b: TLS programmed on first dispatch */
+    return idx;
+}
+
 
 /* gamma.3b-alpha: release a PARKED or EXITED slot allocated via
  * spawn_uthread_parked. Frees the kernel stack, clears AS binding
@@ -744,6 +864,7 @@ uint32_t arch_x86_64_sched_slot_release(uint32_t slot_idx) {
     s->kernel_stack_top = 0u;
     s->as               = NULL;
     s->owner_proc       = NULL;  /* gamma.3b-S2a Seg-2: drop owner PCB back-ptr on reap */
+    s->fs_base          = 0u;    /* M5.2b: drop TLS base so a reused slot doesn't leak it */
     s->kind             = OPENOS_X86_64_SCHED_KIND_KERNEL;
     s->owner_cpu        = 0u;
     s->priority         = OPENOS_X86_64_SCHED_PRIO_DEFAULT;
@@ -1294,6 +1415,24 @@ uint32_t arch_x86_64_sched_slot_set_owner_proc(uint32_t slot_idx,
 struct x86_64_proc *arch_x86_64_sched_slot_get_owner_proc(uint32_t slot_idx) {
     if (slot_idx >= OPENOS_X86_64_SCHED_MAX_KTHREADS) return NULL;
     return sched_slots[slot_idx].owner_proc;
+}
+
+/* M5.2b: per-slot TLS base (%fs.base) setter/getter. Set by clone_thread
+ * before slot_wakeup; loaded into IA32_FS_BASE on the next dispatch of
+ * this slot as USER. fs_base==0 means "don't touch %fs.base" (fork/spawn
+ * default). Returns 0 on success, 0xFFFFFFFF on OOB / FREE slot. */
+uint32_t arch_x86_64_sched_slot_set_fs_base(uint32_t slot_idx,
+                                            uint64_t fs_base) {
+    if (slot_idx >= OPENOS_X86_64_SCHED_MAX_KTHREADS) return 0xFFFFFFFFu;
+    sched_slot_t *s = &sched_slots[slot_idx];
+    if (s->state == SCHED_SLOT_FREE) return 0xFFFFFFFFu;
+    s->fs_base = fs_base;
+    return 0u;
+}
+
+uint64_t arch_x86_64_sched_slot_get_fs_base(uint32_t slot_idx) {
+    if (slot_idx >= OPENOS_X86_64_SCHED_MAX_KTHREADS) return 0u;
+    return sched_slots[slot_idx].fs_base;
 }
 
 /* G.6.6b: migrate a READY slot to target_cpu and poke the target with a

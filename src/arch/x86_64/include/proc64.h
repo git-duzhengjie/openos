@@ -235,11 +235,21 @@ typedef struct x86_64_proc {
      *   is_thread       : true when this PCB was created by clone_thread
      *                     (shares AS with its group). Distinguishes the
      *                     shared-AS teardown path (as_put refcount) from
-     *                     the fork/spawn owned-AS path (as_destroy). */
+     *                     the fork/spawn owned-AS path (as_destroy).
+     *
+     *   thread_entry    : ring3 start address for a cloned thread (the
+     *                     CLONE entry argument). Consumed by the M5.2b
+     *                     launch path which spawns a parked user slot at
+     *                     this %rip. 0 for non-thread PCBs.
+     *
+     *   thread_arg      : single argument delivered in %rdi to thread_entry
+     *                     when the cloned thread first enters ring3. */
     uint32_t                  tgid;
     uint64_t                  tls_base;
     uint64_t                  clear_child_tid;
     bool                      is_thread;
+    uint64_t                  thread_entry;
+    uint64_t                  thread_arg;
 } x86_64_proc_t;
 
 /* Lifecycle ---------------------------------------------------------- */

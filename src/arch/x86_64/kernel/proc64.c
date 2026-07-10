@@ -258,6 +258,20 @@ void arch_x86_64_proc_exit(int code) {
     }
     p->exit_code = code;
     p->state = OPENOS_X86_64_PROC_FREE; /* immediate reap (no wait4 yet) */
+    /*
+     * M5.2b: CLONE_CHILD_CLEARTID — when a thread that requested clearing
+     * exits, write 0 to the userspace tid slot and wake any futex waiters
+     * (e.g. pthread_join). The AS is still active here (CR3 not yet rotated
+     * back), so the user pointer is directly writable. futex wake is a stub
+     * until the futex subsystem lands; the zero-store alone already lets a
+     * spinning joiner observe termination.
+     */
+    if (p->clear_child_tid != 0) {
+        uint32_t *ctid = (uint32_t *)p->clear_child_tid;
+        *ctid = 0u;
+        /* TODO(futex): arch_x86_64_futex_wake(p->clear_child_tid, 1); */
+        p->clear_child_tid = 0;
+    }
     /* H.5b.1: AS pointer is always NULL today; H.5b.3 will replace
      * this with a destroy-AS call before rotating CR3 back. */
     p->as = (struct x86_64_address_space *)0;
@@ -550,6 +564,8 @@ x86_64_proc_t *arch_x86_64_proc_clone_thread(x86_64_proc_t *parent_pcb,
     c->clear_child_tid = (args->flags & OPENOS_CLONE_CHILD_CLEARTID)
                              ? args->child_tid : 0;
     c->fork_user_rsp   = args->child_stack;
+    c->thread_entry    = args->entry;
+    c->thread_arg      = args->arg;
 
     /* Clean scheduling / wait bookkeeping. A thread has no fork frame to
      * replay, so fork_pending stays 0; M5.2b sets up its own launch. */

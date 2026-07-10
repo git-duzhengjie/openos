@@ -336,6 +336,17 @@ uint32_t arch_x86_64_sched_slot_set_owner_proc(uint32_t slot_idx,
                                                 struct x86_64_proc *owner);
 struct x86_64_proc *arch_x86_64_sched_slot_get_owner_proc(uint32_t slot_idx);
 
+/* M5.2b: bind a TLS base (%fs.base) to a slot. When the slot is
+ * dispatched as USER, the kernel loads IA32_FS_BASE with this value
+ * right before iretq so the thread sees its own thread-local storage.
+ * A value of 0 means "do not touch %fs.base" (inherits whatever is
+ * currently loaded), which preserves fork/spawn behaviour (they never
+ * set a per-slot fs_base and thus keep fs_base==0 => no wrmsr).
+ * Returns 0 on success, 0xFFFFFFFFu on OOB / FREE slot. */
+uint32_t arch_x86_64_sched_slot_set_fs_base(uint32_t slot_idx,
+                                            uint64_t fs_base);
+uint64_t arch_x86_64_sched_slot_get_fs_base(uint32_t slot_idx);
+
 /* ---- G.6.7a: preemption tail-hook primitives -----------------------
  *
  * Background: historically the only place we ever made a scheduling
@@ -516,6 +527,25 @@ uint32_t arch_x86_64_sched_spawn_uthread_parked_full(uint64_t user_rip,
                                                      uint64_t init_r13,
                                                      uint64_t init_r14,
                                                      uint64_t init_r15);
+
+/*
+ * M5.2b: arch_x86_64_sched_spawn_uthread_thread
+ * Park a freshly-cloned user thread (pthread-style entry(arg)) into a
+ * scheduler slot using the 6-qword thread-start frame. user_arg is popped
+ * into %rdi by the start trampoline (SysV first arg); fs_base is recorded
+ * so context_switch programs IA32_FS_BASE (TLS) on first dispatch. Caller
+ * must slot_set_as + slot_set_owner_proc before waking. Returns slot idx,
+ * or 0xFFFFFFFF on failure.
+ */
+uint32_t arch_x86_64_sched_spawn_uthread_thread(uint64_t user_rip,
+                                                uint64_t user_rsp,
+                                                uint64_t user_arg,
+                                                uint64_t user_rflags,
+                                                uint16_t user_cs,
+                                                uint16_t user_ss,
+                                                uint64_t fs_base,
+                                                uint32_t priority,
+                                                uint32_t target_cpu);
 
 /* ------------------------------------------------------------------
  * gamma.3b-S1: slot state enum exposed to selftests.

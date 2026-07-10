@@ -10,6 +10,7 @@
 .global arch_x86_64_iretq_enter_user_full
 .global arch_x86_64_user_thread_trampoline
 .global arch_x86_64_user_thread_trampoline_full
+.global arch_x86_64_user_thread_start_trampoline
 .global arch_x86_64_user_thread_sentinel_trampoline
 
 /*
@@ -30,6 +31,50 @@ arch_x86_64_user_thread_trampoline:
      * %gs at this point is still kernel GS (KERNEL_GS_BASE was inactive
      * since we never SWAPGS'd in this dispatch path). swapgs below then
      * flips to user GS just before iretq. */
+    incq %gs:PERCPU_OFF_USER_DISPATCH
+    swapgs
+    iretq
+
+
+/*
+ * M5.2b: arch_x86_64_user_thread_start_trampoline
+ * ------------------------------------------------
+ * Entry point for a freshly-cloned user thread (pthread-style entry(arg)).
+ * context_switch lands here with %gs=kernel_gs, IF=0. Unlike the fork
+ * '_full' trampoline there are NO callee-saved qwords to restore; instead
+ * the top qword on the kernel stack carries the thread argument, which we
+ * pop into %rdi so user code sees entry(arg) per SysV ABI. Stack layout at
+ * entry (low -> high):
+ *
+ *   0x00 arg    (popped into %rdi below)
+ *   0x08 rip    (iretq consumes from here down)
+ *   0x10 cs
+ *   0x18 rflags
+ *   0x20 rsp    (user stack top)
+ *   0x28 ss
+ *
+ * All other scratch/callee registers are zeroed for a clean thread start.
+ * The %fs.base (TLS) is programmed by context_switch via wrmsr before we
+ * ever reach here, so no TLS work is needed in the trampoline itself.
+ */
+arch_x86_64_user_thread_start_trampoline:
+    popq %rdi                     /* thread argument -> first SysV arg */
+
+    xorq %rax, %rax
+    xorq %rcx, %rcx
+    xorq %rdx, %rdx
+    xorq %rsi, %rsi
+    xorq %rbx, %rbx
+    xorq %rbp, %rbp
+    xorq %r8,  %r8
+    xorq %r9,  %r9
+    xorq %r10, %r10
+    xorq %r11, %r11
+    xorq %r12, %r12
+    xorq %r13, %r13
+    xorq %r14, %r14
+    xorq %r15, %r15
+
     incq %gs:PERCPU_OFF_USER_DISPATCH
     swapgs
     iretq

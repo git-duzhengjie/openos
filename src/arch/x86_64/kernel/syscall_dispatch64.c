@@ -32,6 +32,7 @@
 #include "../include/syscall_net64.h" /* split-out network syscall backends */
 #include "../include/proc64.h"
 #include "../include/sched64.h"
+#include "../include/gdt64.h"      /* M5.2b: user CS/SS selectors for clone launch */
 #include "../include/tsc64.h"
 #include "../include/usermode64.h"
 #include "../include/vfs64.h"
@@ -1014,12 +1015,46 @@ static uint64_t do_clone(uint64_t a0, uint64_t a1, uint64_t a2,
         return (uint64_t)-1;
     }
 
-    early_console64_write("[x86_64][clone] new thread tid=");
+    /*
+     * M5.2b: launch the thread for real. clone_thread has built a PCB that
+     * SHARES our address space; now park it into a scheduler slot with the
+     * 6-qword thread-start frame so it begins at entry(arg) on child_stack
+     * with %fs.base=tls. Mirrors the fork spawn path in syscall64.c but uses
+     * spawn_uthread_thread (arg->rdi) instead of the fork-resume trampoline.
+     */
+    uint16_t ucs = (uint16_t)(OPENOS_X86_64_GDT_USER_CODE | 3u);
+    uint16_t uss = (uint16_t)(OPENOS_X86_64_GDT_USER_DATA | 3u);
+    uint32_t slot = arch_x86_64_sched_spawn_uthread_thread(
+        (uint64_t)child->thread_entry,
+        child->fork_user_rsp,
+        child->thread_arg,
+        0x202ULL,                 /* IF=1, reserved bit 1 */
+        ucs, uss,
+        child->tls_base,
+        OPENOS_X86_64_SCHED_PRIO_DEFAULT,
+        arch_x86_64_this_cpu_ptr()->cpu_idx);
+    if (slot == 0xFFFFFFFFu) {
+        /* spawn failed: tear the PCB back down (release_slot -> as_put drops
+         * the shared-AS refcount clone_thread bumped) so we don't leak. */
+        arch_x86_64_proc_release_slot(arch_x86_64_proc_slot_of(child));
+        return (uint64_t)-1;
+    }
+
+    /* Bind AS + owner BEFORE wakeup, otherwise the target CPU may dispatch
+     * the slot with a NULL address space and fault. */
+    (void)arch_x86_64_sched_slot_set_as(slot, child->as);
+    (void)arch_x86_64_sched_slot_set_owner_proc(slot, child);
+    child->fork_child_sched_slot = slot;
+
+    early_console64_write("[x86_64][clone] launch thread tid=");
     early_console64_write_hex64((uint64_t)child->tid);
     early_console64_write(" tgid=");
     early_console64_write_hex64((uint64_t)child->tgid);
-    early_console64_write(" (M5.2a: PCB ready, launch in M5.2b)\n");
+    early_console64_write(" slot=");
+    early_console64_write_hex64((uint64_t)slot);
+    early_console64_write("\n");
 
+    (void)arch_x86_64_sched_slot_wakeup(slot);
     return (uint64_t)child->tid;
 }
 
