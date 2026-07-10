@@ -185,6 +185,7 @@ x86_64_address_space_t *arch_x86_64_as_create(void) {
     as->pml4_va = pml4_va;
     as->user_pages = 0;
     as->generation = 0;
+    as->refcount = 1;   /* M5.2a: owned by its creating PCB */
     pool_used++;
     early_console64_write("[x86_64][as] create pml4_pa=");
     early_console64_write_hex64((uint64_t)pml4_phys);
@@ -226,6 +227,45 @@ void arch_x86_64_as_destroy(x86_64_address_space_t *as) {
     arch_x86_64_pmm_free_page(as->pml4_phys);
     as->pml4_va = NULL;
     as->pml4_phys = 0;
+}
+
+/* ----------------------------------------------------------------------
+ * M5.2a: reference-count helpers for CLONE_VM thread sharing.
+ * -------------------------------------------------------------------- */
+x86_64_address_space_t *arch_x86_64_as_share(x86_64_address_space_t *as) {
+    if (as == NULL) {
+        return NULL;
+    }
+    as->refcount++;
+    early_console64_write("[x86_64][as] share as=");
+    early_console64_write_hex64((uint64_t)(uintptr_t)as);
+    early_console64_write(" refcount=");
+    early_console64_write_hex64((uint64_t)as->refcount);
+    early_console64_write("\n");
+    return as;
+}
+
+uint32_t arch_x86_64_as_put(x86_64_address_space_t *as) {
+    uint32_t rc;
+    if (as == NULL) {
+        return 0;
+    }
+    /* Defensive: a valid shared AS always has refcount>=1. Guard against
+     * an accidental double-put underflowing the counter. */
+    if (as->refcount == 0) {
+        return 0;
+    }
+    as->refcount--;
+    rc = as->refcount;
+    early_console64_write("[x86_64][as] put as=");
+    early_console64_write_hex64((uint64_t)(uintptr_t)as);
+    early_console64_write(" refcount=");
+    early_console64_write_hex64((uint64_t)rc);
+    early_console64_write("\n");
+    if (rc == 0) {
+        arch_x86_64_as_destroy(as);
+    }
+    return rc;
 }
 
 void arch_x86_64_as_activate(x86_64_address_space_t *as) {

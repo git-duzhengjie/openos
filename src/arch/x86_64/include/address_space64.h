@@ -56,6 +56,14 @@ typedef struct x86_64_address_space {
     uint64_t *pml4_va;              /* identity-mapped virtual pointer    */
     uint64_t  user_pages;           /* leaf user pages currently mapped   */
     uint64_t  generation;           /* bumped on activate (debug)         */
+    /* M5.2a: reference count for CLONE_VM thread sharing. An AS created
+     * by arch_x86_64_as_create() starts at refcount==1 (owned by its
+     * creating PCB). arch_x86_64_as_share() bumps it when a CLONE_VM
+     * thread joins the group; arch_x86_64_as_put() drops it and only
+     * calls arch_x86_64_as_destroy() when it reaches zero. Single-owner
+     * fork/spawn paths that never call as_share keep refcount==1 and
+     * behave exactly as before (put == destroy). */
+    uint32_t  refcount;
 } x86_64_address_space_t;
 
 /* Create a fresh AS. Returns NULL on OOM. PML4[0] is shared with the
@@ -95,5 +103,16 @@ x86_64_phys_addr_t arch_x86_64_as_boot_pml4(void);
 
 /* Switch CR3 back to the boot/kernel PML4. */
 void arch_x86_64_as_activate_boot(void);
+
+/* M5.2a: reference-count helpers for CLONE_VM thread sharing.
+ *
+ * arch_x86_64_as_share(as) increments as->refcount and returns as (or
+ * NULL if as is NULL). Call it when a new thread joins an existing AS.
+ *
+ * arch_x86_64_as_put(as) decrements as->refcount; when it hits zero the
+ * AS is torn down via arch_x86_64_as_destroy(). Returns the resulting
+ * refcount (0 means the AS was destroyed). Safe to call with NULL (0). */
+x86_64_address_space_t *arch_x86_64_as_share(x86_64_address_space_t *as);
+uint32_t arch_x86_64_as_put(x86_64_address_space_t *as);
 
 #endif /* OPENOS_ARCH_X86_64_ADDRESS_SPACE64_H */

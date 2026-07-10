@@ -34,6 +34,7 @@
 #include "usermode64.h"  /* for x86_64_user_iretq_frame_t (saved_user_frame) */
 #include "syscall64.h"   /* A2.P3-B: x86_64_int80_frame_t / x86_64_syscall_frame_t */
 #include "signal64.h"    /* M4.2: per-process signal state (x86_64_sigstate_t) */
+#include "clone64.h"     /* M5.2a: openos_clone_args_t / OPENOS_CLONE_* flags */
 
 /* Forward decl: H.5b.1 wiring. The full definition lives in
  * address_space64.h; PCBs only need a pointer field today (NULL on every
@@ -205,6 +206,40 @@ typedef struct x86_64_proc {
      * default to the pid at spawn and are inherited across fork. */
     uint32_t                  pgid;
     uint32_t                  sid;
+
+    /* ------------------------------------------------------------------
+     * M5.2a — thread (clone) support.
+     *
+     * A "thread" in openos is a PCB that SHARES its parent's address
+     * space instead of deep-cloning it (fork). Threads created via
+     * SYS_CLONE with CLONE_VM|CLONE_THREAD form a *thread group*:
+     *
+     *   tgid            : thread-group id == pid of the group leader.
+     *                     A plain process (or fork child) has tgid==pid.
+     *                     A CLONE_THREAD child inherits the parent's tgid
+     *                     so getpid()-semantics can distinguish the shared
+     *                     group id (tgid) from the unique kernel tid (pid).
+     *
+     *   tls_base        : value to load into %fs.base (IA32_FS_BASE MSR)
+     *                     when this thread is dispatched to ring3. Set from
+     *                     the CLONE_SETTLS argument; 0 means "inherit /
+     *                     leave untouched". Consumed by the ring3 dispatch
+     *                     path in M5.2b.
+     *
+     *   clear_child_tid : user virtual address the kernel must zero (and
+     *                     futex-wake) when this thread exits, per the
+     *                     CLONE_CHILD_CLEARTID contract used by pthread
+     *                     join. 0 == disabled. Recorded here at clone time;
+     *                     acted upon by do_exit in a later sub-step.
+     *
+     *   is_thread       : true when this PCB was created by clone_thread
+     *                     (shares AS with its group). Distinguishes the
+     *                     shared-AS teardown path (as_put refcount) from
+     *                     the fork/spawn owned-AS path (as_destroy). */
+    uint32_t                  tgid;
+    uint64_t                  tls_base;
+    uint64_t                  clear_child_tid;
+    bool                      is_thread;
 } x86_64_proc_t;
 
 /* Lifecycle ---------------------------------------------------------- */
@@ -237,6 +272,24 @@ uint32_t arch_x86_64_proc_alloc_child_pid(x86_64_proc_t *parent);
  * rotate current_index — the parent keeps running until wait() drives the
  * child via arch_x86_64_proc_switch_to() below. Returns NULL on failure. */
 x86_64_proc_t *arch_x86_64_proc_fork_alloc_child(x86_64_proc_t *parent_pcb);
+
+/* M5.2a — allocate a PCB slot for a NEW THREAD that SHARES the parent's
+ * address space (CLONE_VM). Unlike fork_alloc_child (which deep-clones the
+ * AS), this bumps the parent AS refcount via arch_x86_64_as_share() and
+ * points the child at the same AS. The child inherits the parent's tgid
+ * (thread-group id) and is flagged is_thread=true so release_slot uses the
+ * shared-AS teardown path.
+ *
+ *   parent_pcb : the creating thread (usually arch_x86_64_proc_current()).
+ *   args       : parsed clone arguments (flags/child_stack/entry/arg/tls/
+ *                parent_tid/child_tid). Must include CLONE_VM|CLONE_THREAD.
+ *
+ * Sets up the child's saved user frame so that, when dispatched to ring3
+ * (M5.2b), it starts at args->entry with %rsp=args->child_stack and
+ * %rdi=args->arg. Records tls_base (if CLONE_SETTLS) and clear_child_tid
+ * (if CLONE_CHILD_CLEARTID). Returns the new PCB, or NULL on failure. */
+x86_64_proc_t *arch_x86_64_proc_clone_thread(x86_64_proc_t *parent_pcb,
+                                             const openos_clone_args_t *args);
 
 /* γ.2.a — current-slot management for the wait-driven child run. Returns
  * the previous current slot index so the caller can restore it after the

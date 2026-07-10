@@ -167,6 +167,12 @@ void arch_x86_64_proc_init(void) {
     /* M4.4b: the kernel/init process is its own session + group leader. */
     proc_table[0].pgid = proc_table[0].pid;
     proc_table[0].sid  = proc_table[0].pid;
+    /* M5.2a: the kernel proc is its own thread-group leader (tgid==pid)
+     * and is not a CLONE_VM thread. */
+    proc_table[0].tgid            = proc_table[0].pid;
+    proc_table[0].tls_base        = 0;
+    proc_table[0].clear_child_tid = 0;
+    proc_table[0].is_thread       = false;
     /* BSS zero-init already leaves every percpu.current_proc_slot at 0,
      * so this store is redundant but explicit for BSP clarity. */
     current_index_set(0);
@@ -198,6 +204,12 @@ uint32_t arch_x86_64_proc_spawn_user(const char *name) {
      * (pgid == sid == pid) until setpgid()/setsid() move it. */
     p->pgid = p->pid;
     p->sid  = p->pid;
+    /* M5.2a: a spawned process is its own thread-group leader and is not
+     * a CLONE_VM thread; TLS / clear_child_tid start clean. */
+    p->tgid            = p->pid;
+    p->tls_base        = 0;
+    p->clear_child_tid = 0;
+    p->is_thread       = false;
     /* H.5b.1: AS slot reserved; CR3 still points at the shared
      * boot-time PML4 until H.5b.3 wires up per-process AS. */
     p->as = (struct x86_64_address_space *)0;
@@ -366,6 +378,15 @@ x86_64_proc_t *arch_x86_64_proc_fork_alloc_child(x86_64_proc_t *parent_pcb) {
     c->pgid = parent_pcb->pgid;
     c->sid  = parent_pcb->sid;
 
+    /* M5.2a: a fork child is an independent PROCESS — it leads its own
+     * thread group (tgid==pid) and owns (not shares) its cloned AS, so it
+     * is not flagged is_thread. TLS / clear_child_tid start clean; POSIX
+     * fork does not propagate the parent's set_child_tid pointer. */
+    c->tgid            = c->pid;
+    c->tls_base        = 0;
+    c->clear_child_tid = 0;
+    c->is_thread       = false;
+
     /* γ.2.b: deep-clone the parent AS so the child has its own PML4[1]
      * subtree (user pages eagerly copied). Kernel-half PML4[0] stays
      * shared via as_create()'s boot PML4 copy, so kernel stacks / PCBs
@@ -447,6 +468,115 @@ x86_64_proc_t *arch_x86_64_proc_fork_alloc_child(x86_64_proc_t *parent_pcb) {
     return c;
 }
 
+/* ------------------------------------------------------------------- */
+/* M5.2a — clone_thread: allocate a PCB that SHARES the parent AS       */
+/* ------------------------------------------------------------------- */
+
+x86_64_proc_t *arch_x86_64_proc_clone_thread(x86_64_proc_t *parent_pcb,
+                                             const openos_clone_args_t *args) {
+    if (parent_pcb == NULL || args == NULL) return NULL;
+
+    /* A thread MUST share the address space and join the group. Without
+     * CLONE_VM|CLONE_THREAD this is not a thread; M5.2a does not implement
+     * the (fork-equivalent) non-thread clone, so reject it up front. */
+    if ((args->flags & OPENOS_CLONE_THREAD_MIN) != OPENOS_CLONE_THREAD_MIN) {
+        return NULL;
+    }
+    /* The new thread needs a valid, non-zero user stack: there is no
+     * copy-on-write parent stack to fall back on when the AS is shared. */
+    if (args->child_stack == 0 || args->entry == 0) {
+        return NULL;
+    }
+    /* The parent must actually own an address space to share. */
+    if (parent_pcb->as == (struct x86_64_address_space *)0) {
+        return NULL;
+    }
+
+    uint16_t parent_slot = proc_index_of(parent_pcb);
+    if (parent_slot == OPENOS_X86_64_PROC_INVALID_INDEX) return NULL;
+
+    uint16_t slot = proc_alloc_slot();
+    if (slot == OPENOS_X86_64_PROC_INVALID_INDEX) return NULL;
+
+    x86_64_proc_t *c = &proc_table[slot];
+
+    /* Unique kernel-visible tid (== pid slot identity). Same rolling
+     * counter scheme as fork_alloc_child so tids never collide. */
+    uint32_t cpid = next_child_pid++;
+    if (next_child_pid == 0) next_child_pid = 2;
+
+    c->pid  = cpid;
+    c->tid  = cpid;
+    /* A thread's ppid is the CREATING thread's pid, matching Linux where
+     * CLONE_THREAD children report the group leader's parent for wait()
+     * purposes; here we keep the direct creator for the family list. */
+    c->ppid = parent_pcb->pid;
+    c->uid  = parent_pcb->uid;
+    c->gid  = parent_pcb->gid;
+    c->exit_code = 0;
+    c->state = OPENOS_X86_64_PROC_RUNNING;
+    proc_copy_name(c->name, parent_pcb->name);
+
+    /* Signal disposition: CLONE_SIGHAND shares the handler table; we copy
+     * it either way (openos has no shared-struct indirection yet) but a
+     * fresh thread always starts with an EMPTY pending set and inherits
+     * the creator's blocked mask. */
+    c->sig = parent_pcb->sig;
+    c->sig.pending = 0;
+
+    /* Threads live in the SAME job (process group + session) as the
+     * creator; job control acts on the whole group. */
+    c->pgid = parent_pcb->pgid;
+    c->sid  = parent_pcb->sid;
+
+    /* M5.2a core distinction from fork: SHARE the parent AS instead of
+     * deep-cloning it. as_share() bumps the refcount so the AS survives
+     * until the LAST thread in the group exits (release_slot->as_put). */
+    c->as = (struct x86_64_address_space *)
+            arch_x86_64_as_share(parent_pcb->as);
+    c->is_thread = true;
+
+    /* Thread-group id: a CLONE_THREAD child inherits the parent's tgid so
+     * every sibling reports the same group id. The group leader itself
+     * has tgid==pid (set at init/fork; see note below). */
+    c->tgid = parent_pcb->tgid ? parent_pcb->tgid : parent_pcb->pid;
+
+    /* Record the ring3 launch parameters. M5.2a stops here (PCB ready);
+     * M5.2b will assemble the actual trapframe from these fields so the
+     * thread starts at entry(arg) on child_stack with %fs.base=tls. We
+     * reuse the fork_* staging fields to carry entry/stack across to the
+     * dispatch path without adding a parallel mechanism. */
+    c->tls_base        = (args->flags & OPENOS_CLONE_SETTLS) ? args->tls : 0;
+    c->clear_child_tid = (args->flags & OPENOS_CLONE_CHILD_CLEARTID)
+                             ? args->child_tid : 0;
+    c->fork_user_rsp   = args->child_stack;
+
+    /* Clean scheduling / wait bookkeeping. A thread has no fork frame to
+     * replay, so fork_pending stays 0; M5.2b sets up its own launch. */
+    c->fork_pending     = 0;
+    c->fork_via_syscall = 0;
+    c->child_pid        = 0;
+    c->child_exited     = false;
+    c->child_exit_code  = 0;
+    c->wait_in_progress = false;
+    c->child_slot       = OPENOS_X86_64_PROC_INVALID_INDEX;
+    c->parent_slot      = parent_slot;
+    c->children_head    = OPENOS_X86_64_PROC_INVALID_INDEX;
+    c->zombie_head      = OPENOS_X86_64_PROC_INVALID_INDEX;
+    c->zombie_next      = OPENOS_X86_64_PROC_INVALID_INDEX;
+    c->fork_child_sched_slot = 0u;
+
+    /* Link into the creator's children list (same family plumbing as
+     * fork), guarded against concurrent do_exit unlinks. */
+    arch_x86_64_proc_family_lock();
+    c->sibling_next            = parent_pcb->children_head;
+    parent_pcb->children_head  = slot;
+    arch_x86_64_proc_family_unlock();
+
+    ++spawn_count;
+    return c;
+}
+
 uint16_t arch_x86_64_proc_current_slot(void) {
     return current_index_get();
 }
@@ -486,9 +616,15 @@ void arch_x86_64_proc_release_slot(uint16_t slot) {
      * down before the pointer is cleared. Note: the caller must have
      * already switched CR3 off of `p->as` (usermode_run_pending_child_
      * for_wait re-activates parent.as right before calling release_slot),
-     * otherwise we would free page tables that CR3 still walks. */
+     * otherwise we would free page tables that CR3 still walks.
+     *
+     * M5.2a: use as_put (refcount) instead of as_destroy. A fork/spawn
+     * owned AS starts at refcount==1, so as_put drops it to 0 and
+     * destroys it exactly as before (no regression). A CLONE_VM thread
+     * shares its group's AS (refcount>1); as_put merely decrements it,
+     * leaving the AS alive for the surviving siblings. */
     if (p->as != (struct x86_64_address_space *)0) {
-        arch_x86_64_as_destroy(p->as);
+        arch_x86_64_as_put(p->as);
         p->as = (struct x86_64_address_space *)0;
     }
     p->state = OPENOS_X86_64_PROC_FREE;

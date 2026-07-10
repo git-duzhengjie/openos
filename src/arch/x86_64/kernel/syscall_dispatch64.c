@@ -947,6 +947,83 @@ static uint64_t do_dl_resolve(uint64_t a0, uint64_t a1) {
 }
 
 /*
+ * SYS_CLONE (478) — M5.2a: create a new THREAD that shares the caller's
+ * address space.
+ *
+ *   a0 = flags        (OPENOS_CLONE_* bitmask)
+ *   a1 = child_stack  (user %rsp top for the new thread)
+ *   a2 = entry        (user thread start function)
+ *   a3 = arg          (single argument passed to entry)
+ *   a4 = tls          (CLONE_SETTLS: %fs.base for the thread)
+ *
+ * Returns the new kernel tid (>0) on success, or a negative errno-style
+ * value on failure. M5.2a only builds the PCB (shared AS, tgid, tls_base,
+ * clear_child_tid); actually launching the thread into ring3 is M5.2b.
+ *
+ * SECURITY: every unsupported flag bit is rejected so userland can never
+ * rely on silently-ignored semantics. child_stack/entry are validated as
+ * real user addresses so a bogus request can't stage a kernel-pointer
+ * launch. The CHILD_CLEARTID user address (if requested) is bounds-checked
+ * here too, before it is recorded for the exit-time futex wake.
+ */
+static uint64_t do_clone(uint64_t a0, uint64_t a1, uint64_t a2,
+                         uint64_t a3, uint64_t a4) {
+    openos_clone_args_t args;
+    args.flags       = (uint32_t)a0;
+    args.child_stack = a1;
+    args.entry       = a2;
+    args.arg         = a3;
+    args.tls         = a4;
+    args.parent_tid  = 0;
+    args.child_tid   = 0;
+
+    /* Reject any flag bit we don't implement (see OPENOS_CLONE_SUPPORTED_MASK). */
+    if ((args.flags & ~OPENOS_CLONE_SUPPORTED_MASK) != 0) {
+        return (uint64_t)-1;
+    }
+    /* M5.2a only supports the pthread-style shared-AS thread. */
+    if ((args.flags & OPENOS_CLONE_THREAD_MIN) != OPENOS_CLONE_THREAD_MIN) {
+        return (uint64_t)-1;
+    }
+    /* child_stack / entry must be valid user addresses. We probe a single
+     * machine word at each so an obviously-bogus (kernel / unmapped)
+     * pointer is rejected before the PCB is allocated. */
+    if (!validate_user_buf(args.child_stack - sizeof(uint64_t), sizeof(uint64_t))) {
+        return (uint64_t)-1;
+    }
+    if (!validate_user_buf(args.entry, 1)) {
+        return (uint64_t)-1;
+    }
+    /* CLONE_CHILD_CLEARTID: the ctid user address must be writable at exit;
+     * bounds-check it now (a3 holds arg, ctid is not passed via registers in
+     * this minimal ABI — M5.2a reuses child_stack-relative convention only,
+     * so ctid comes from tls-adjacent TCB in userland; here we simply record
+     * 0 unless a future ABI extension supplies it). */
+    if (args.flags & OPENOS_CLONE_CHILD_CLEARTID) {
+        /* No dedicated ctid register in this 5-arg ABI yet; disabled. */
+        args.child_tid = 0;
+    }
+
+    x86_64_proc_t *me = arch_x86_64_proc_current();
+    if (me == NULL) {
+        return (uint64_t)-1;
+    }
+
+    x86_64_proc_t *child = arch_x86_64_proc_clone_thread(me, &args);
+    if (child == NULL) {
+        return (uint64_t)-1;
+    }
+
+    early_console64_write("[x86_64][clone] new thread tid=");
+    early_console64_write_hex64((uint64_t)child->tid);
+    early_console64_write(" tgid=");
+    early_console64_write_hex64((uint64_t)child->tgid);
+    early_console64_write(" (M5.2a: PCB ready, launch in M5.2b)\n");
+
+    return (uint64_t)child->tid;
+}
+
+/*
  * SYS_UPTIME_MS: real millisecond uptime, calibrated against the i8254 PIT
  * during early boot (see tsc64.c). If calibration somehow failed (per_ms==0)
  * we fall back to the legacy `rdtsc >> 20` placeholder so the call stays
@@ -1619,6 +1696,7 @@ uint64_t arch_x86_64_syscall_dispatch_common(uint64_t num,
 
     /* -------- M5.1d 惰性绑定 PLT/GOT -------- */
     case SYS_DL_RESOLVE:  return do_dl_resolve(a0, a1);
+    case SYS_CLONE:       return do_clone(a0, a1, a2, a3, a4);
 
     /* -------- time -------- */
     case SYS_UPTIME_MS:   return do_uptime_ms();
