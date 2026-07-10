@@ -40,6 +40,8 @@
 #include "../include/fifo64.h" /* M4.3b: named pipes (FIFO) */
 #include "../include/shm64.h" /* M4.3c: System V shared memory segments */
 #include "../include/tty64.h" /* M4.4: pseudo-terminal line discipline */
+#include "../include/lapic64.h" /* γ.4 S3: cross-CPU wake IPI for fork/wait */
+#include "../include/smp64.h"   /* γ.4 S3: BSP apic_id for wake IPI target */
 #include "vmem64.h" /* M4.1b: anonymous vmem for mmap/munmap/mprotect/brk/sbrk */
 #include "../../../kernel/core/fs/vfs.h" /* RAMFS-backed vfs_open/read/stat */
 #include "../../../kernel/net/net.h" /* real TCP/IP stack: ping/dns/netinfo/dev-ctl */
@@ -794,6 +796,14 @@ static uint64_t do_exit(uint64_t status) {
             (int)arch_x86_64_usermode_is_running();
         if (owner != NULL && owner == me && !on_bsp_usermode_run &&
             sslot != 0u) {
+            /* γ.4 DIAG: trace which do_exit path each child takes. */
+            early_console64_write("[do_exit:zpath] pid=");
+            early_console64_write_hex64((uint64_t)(me ? me->pid : 0xFFFF));
+            early_console64_write(" sslot=");
+            early_console64_write_hex64((uint64_t)sslot);
+            early_console64_write(" cpu=");
+            early_console64_write_hex64((uint64_t)arch_x86_64_this_cpu_idx());
+            early_console64_write("\n");
             me->child_exit_code = (int)status;
             me->child_exited    = true;  /* legacy self-flag; harmless */
             /* γ.4: notify the *parent* PCB so its do_wait Mode-A poll
@@ -816,15 +826,19 @@ static uint64_t do_exit(uint64_t status) {
                  * 4. Raise parent->child_exited so any Mode-A poller
                  *    still spinning wakes up.
                  *
-                 * NB: no locking here. Every fork/wait syscall is
-                 * serviced under a single-CPU dispatcher (Mode A spins,
-                 * Mode B is BSP-only) and the parent isn't concurrently
-                 * mutating its own children/zombie list — parent is
-                 * either running (won't be here) or spinning on
-                 * child_exited (won't touch the lists). do_wait's list
-                 * mutation happens *after* it observes child_exited,
-                 * i.e. strictly after this store. */
+                 * γ.4 S2d: LOCKING. The old code ran unlocked on the
+                 * assumption that fork/wait was serviced single-CPU. That
+                 * is FALSE once children run on APs: fork-multi spawns 3
+                 * children, the scheduler lands them on CPU1/CPU2, and two
+                 * of them can hit this unlink/prepend concurrently. The
+                 * interleaving drops a node (observed: pid=3 on CPU1 lost,
+                 * parent's wait blocks forever). We now take the global
+                 * family lock around the whole list surgery. CRITICAL: the
+                 * lock is released BEFORE sched_exit_self() (which never
+                 * returns) — holding it across the context switch would
+                 * wedge every other CPU spinning on the lock. */
                 uint16_t my_slot = arch_x86_64_proc_slot_of(me);
+                arch_x86_64_proc_family_lock();
                 if (parent->children_head == my_slot) {
                     parent->children_head = me->sibling_next;
                 } else {
@@ -846,9 +860,26 @@ static uint64_t do_exit(uint64_t status) {
 
                 parent->child_exit_code = (int)status;
                 parent->child_exited    = true;
+                arch_x86_64_proc_family_unlock();
             }
 
             (void)arch_x86_64_sched_slot_set_owner_proc(sslot, NULL);
+
+            /* γ.4 S3 — CROSS-CPU WAKE. Root cause of the fork-multi hang:
+             * this child ran on an AP and just published its zombie +
+             * child_exited=true, but the parent is asleep in do_wait's
+             * `sti; hlt` idle loop on the BSP. Nothing pokes the BSP, so
+             * the parent only re-checks zombie_head on the next stray
+             * interrupt (LAPIC timer) — and with 3 children the timing
+             * lines up so the *middle* child's wakeup is lost (classic
+             * test-and-hlt lost-wakeup). We now explicitly send the parent
+             * a reschedule IPI (vector 0x41) so its hlt returns immediately
+             * and it re-evaluates zombie_head. The parent runs on the BSP
+             * (fork/wait Mode B is BSP-only), so target the BSP apic_id.
+             * The 0x41 handler just EOIs + counts, so a spurious poke is
+             * harmless if the parent was already awake. */
+            arch_x86_64_lapic_send_fixed_ipi(arch_x86_64_smp_bsp_apic_id(),
+                                             0x41u);
 
             /* Hand control back to the scheduler. sched_exit_self marks
              * the current slot EXITED, picks the next runnable, and
@@ -865,6 +896,17 @@ static uint64_t do_exit(uint64_t status) {
      * user proc -- mark_exited() flips current to the kernel proc whose
      * kernel_return_rsp is 0, so the trampoline would lose its unwind
      * target otherwise. */
+    /* γ.4 DIAG: this is the BSP/else fallback path (NOT the zombie-list
+     * path). If a fork-multi child lands here its exit is invisible to the
+     * parent's wait -- that is the bug we are hunting. */
+    {
+        x86_64_proc_t *dme = arch_x86_64_proc_current();
+        early_console64_write("[do_exit:bsppath] pid=");
+        early_console64_write_hex64((uint64_t)(dme ? dme->pid : 0xFFFF));
+        early_console64_write(" cpu=");
+        early_console64_write_hex64((uint64_t)arch_x86_64_this_cpu_idx());
+        early_console64_write("\n");
+    }
     arch_x86_64_usermode_snapshot_return_rsp();
     arch_x86_64_usermode_mark_exited((int)status);
     /*
@@ -1286,6 +1328,13 @@ static uint64_t do_yield(void) {
  * zombie in the chain has that pid. Walks the singly-linked list with a
  * `prev` cursor so we can splice out interior nodes. */
 static x86_64_proc_t *try_reap_zombie_by_pid(x86_64_proc_t *parent, uint32_t pid) {
+    /* γ.4 S2d: this splices a node out of zombie_head, which do_exit on
+     * another CPU may be prepending to concurrently. Serialise with the
+     * global family lock. The critical section is O(N<=8) with no nested
+     * acquire and no blocking, so it is safe to hold briefly here; callers
+     * that spin (waitpid live-child path) call us repeatedly WITHOUT the
+     * lock held across their hlt, so no deadlock. */
+    arch_x86_64_proc_family_lock();
     uint16_t prev = OPENOS_X86_64_PROC_INVALID_INDEX;
     uint16_t cur  = parent->zombie_head;
     while (cur != OPENOS_X86_64_PROC_INVALID_INDEX) {
@@ -1300,11 +1349,13 @@ static x86_64_proc_t *try_reap_zombie_by_pid(x86_64_proc_t *parent, uint32_t pid
                 if (pp != NULL) pp->zombie_next = nxt;
             }
             z->zombie_next = OPENOS_X86_64_PROC_INVALID_INDEX;
+            arch_x86_64_proc_family_unlock();
             return z;
         }
         prev = cur;
         cur  = z->zombie_next;
     }
+    arch_x86_64_proc_family_unlock();
     return NULL;
 }
 
@@ -1359,7 +1410,10 @@ static uint64_t do_wait_common(uint64_t pid_arg, uint64_t status_ptr, int use_pi
              * the LAPIC keeps ticking. */
             __asm__ volatile ("sti" ::: "memory");
             while ((z = try_reap_zombie_by_pid(p, target_pid)) == NULL) {
-                __asm__ volatile ("pause" ::: "memory");
+                /* γ.4 S2c fix: hlt (not pause) so the BSP yields host
+                 * cycles to the APs under QEMU/TCG. See the wait-any path
+                 * below for the full rationale. */
+                __asm__ volatile ("hlt" ::: "memory");
             }
             __asm__ volatile ("cli" ::: "memory");
         }
@@ -1415,7 +1469,15 @@ static uint64_t do_wait_common(uint64_t pid_arg, uint64_t status_ptr, int use_pi
         __asm__ volatile ("sti" ::: "memory");
         while (p->zombie_head == OPENOS_X86_64_PROC_INVALID_INDEX &&
                !p->child_exited) {
-            __asm__ volatile ("pause" ::: "memory");
+            /* γ.4 S2a fix: hlt instead of a raw pause spin. A busy pause
+             * loop keeps the BSP 100% hot, which under QEMU/TCG (single
+             * host thread multiplexing all vCPUs) starves the APs running
+             * our child threads -> reaping degrades to minutes. hlt parks
+             * the BSP until the next LAPIC tick (or the child's do_exit
+             * cross-CPU IPI), yielding host cycles to the APs. IF=1 was set
+             * by the sti above; the AP-side write is cache-coherent so we
+             * never miss the wakeup between the test and the hlt. */
+            __asm__ volatile ("hlt" ::: "memory");
         }
         __asm__ volatile ("cli" ::: "memory");
 
@@ -1423,7 +1485,15 @@ static uint64_t do_wait_common(uint64_t pid_arg, uint64_t status_ptr, int use_pi
          * exit first) which is fine because user-space is expected to
          * treat wait() results as an unordered set. If zombie_head is
          * empty here it means the legacy singleton path fired (fork
-         * without list linkage, or Mode B fallback); fall through. */
+         * without list linkage, or Mode B fallback); fall through.
+         *
+         * γ.4 S2d: hold the family lock across the pop so a do_exit
+         * prepend on another CPU cannot splice a node in between our read
+         * of zombie_head and our write of z->zombie_next back into it.
+         * The section is short and non-blocking (interrupts already masked
+         * by the cli above), so no deadlock with the hlt spin, which sits
+         * entirely before this point WITHOUT the lock held. */
+        arch_x86_64_proc_family_lock();
         if (p->zombie_head != OPENOS_X86_64_PROC_INVALID_INDEX) {
             uint16_t zslot = p->zombie_head;
             x86_64_proc_t *z = arch_x86_64_proc_slot(zslot);
@@ -1449,6 +1519,7 @@ static uint64_t do_wait_common(uint64_t pid_arg, uint64_t status_ptr, int use_pi
             child_pid = p->child_pid;
             p->child_exited = false;
         }
+        arch_x86_64_proc_family_unlock();
     } else {
         /* Mode B: legacy hand-dispatch. */
         code = arch_x86_64_usermode_run_pending_child_for_wait();

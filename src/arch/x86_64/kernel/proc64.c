@@ -84,6 +84,42 @@ static uint32_t      next_child_pid;
 /* helpers                                                              */
 /* ------------------------------------------------------------------- */
 
+/* γ.4 S2d — global family-list spinlock.
+ *
+ * Serialises every mutation of parent->children_head / parent->zombie_head
+ * across all CPUs (see proc64.h for the full rationale). A plain
+ * test-and-set (xchg) lock with an interrupt-state save/restore: taking the
+ * lock disables interrupts on the local CPU so a timer preemption cannot
+ * deadlock a CPU against itself while it holds the lock. The saved RFLAGS
+ * (specifically IF) is stashed per-holder on the stack via the paired
+ * lock/unlock helpers below.
+ *
+ * The lock word lives in a cache line by itself is unnecessary at N<=8
+ * cores in QEMU; a bare volatile int suffices. */
+static volatile int  proc_family_lock_word = 0;
+static volatile uint64_t proc_family_lock_flags = 0; /* saved RFLAGS of holder */
+
+void arch_x86_64_proc_family_lock(void) {
+    uint64_t flags;
+    __asm__ __volatile__("pushfq; popq %0" : "=r"(flags) :: "memory");
+    __asm__ __volatile__("cli" ::: "memory");
+    /* test-and-set spin */
+    while (__atomic_exchange_n(&proc_family_lock_word, 1, __ATOMIC_ACQUIRE) != 0) {
+        /* spin hint; interrupts already masked locally */
+        __asm__ __volatile__("pause" ::: "memory");
+    }
+    proc_family_lock_flags = flags; /* remember caller IF for unlock */
+}
+
+void arch_x86_64_proc_family_unlock(void) {
+    uint64_t flags = proc_family_lock_flags;
+    __atomic_store_n(&proc_family_lock_word, 0, __ATOMIC_RELEASE);
+    /* restore interrupt-enable state the caller had before locking */
+    if (flags & (1u << 9)) { /* IF bit */
+        __asm__ __volatile__("sti" ::: "memory");
+    }
+}
+
 static void proc_copy_name(char *dst, const char *src) {
     unsigned i = 0;
     if (src != NULL) {
@@ -388,9 +424,12 @@ x86_64_proc_t *arch_x86_64_proc_fork_alloc_child(x86_64_proc_t *parent_pcb) {
 
     /* γ.4 S2b — push the new child onto parent->children_head. This is the
      * *live children* list (drained on exit into zombie_head, further drained
-     * by wait()). Prepending keeps the O(1) cost regardless of fan-out. */
+     * by wait()). Prepending keeps the O(1) cost regardless of fan-out.
+     * γ.4 S2d: serialise against concurrent do_exit unlinks on other CPUs. */
+    arch_x86_64_proc_family_lock();
     c->sibling_next            = parent_pcb->children_head;
     parent_pcb->children_head  = slot;
+    arch_x86_64_proc_family_unlock();
 
     /* Wire parent -> child. Also mirror the child pid into the legacy
      * parent.child_pid so existing wait()/mark_exited() consumers keep

@@ -363,4 +363,30 @@ uint32_t arch_x86_64_proc_getsid(uint32_t pid);
 int      arch_x86_64_proc_setsid(void);
 int      arch_x86_64_proc_signal_group(uint32_t pgid, int sig);
 
+/* γ.4 S2d — family-list spinlock.
+ *
+ * The parent->children_head / parent->zombie_head singly-linked lists are
+ * mutated from three concurrent sites once the scheduler runs children on
+ * APs:
+ *   - fork_alloc_child (proc64.c): push a new live child (parent context).
+ *   - do_exit         (syscall_dispatch64.c): a child on ANY cpu unlinks
+ *     itself from children_head and prepends itself to zombie_head.
+ *   - do_wait         (syscall_dispatch64.c): the parent splices a zombie
+ *     out of zombie_head.
+ *
+ * With >1 child exiting on different CPUs the unlink/prepend interleaves
+ * and loses a node (observed: fork-multi drops pid=3 on CPU1, parent's
+ * wait blocks forever). This global test-and-set spinlock serialises every
+ * mutation of these two lists across all CPUs.
+ *
+ * CRITICAL usage rules (deadlock avoidance):
+ *   - do_exit MUST release the lock BEFORE calling sched_exit_self(), which
+ *     never returns — holding it across the context switch would wedge the
+ *     whole system.
+ *   - do_wait MUST NOT hold the lock across its `hlt` idle spin; acquire
+ *     only around the brief try_reap / list-splice, release before hlt.
+ *   - The critical sections are all O(N<=8), no nested acquire. */
+void arch_x86_64_proc_family_lock(void);
+void arch_x86_64_proc_family_unlock(void);
+
 #endif /* OPENOS_ARCH_X86_64_PROC64_H */

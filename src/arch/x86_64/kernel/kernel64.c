@@ -836,10 +836,12 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
     /* ============================================================
      * GUI 桌面启动 —— 早期验证路径 (GUI_EARLY_VERIFY)
      *
-     * 用户态 fork-multi 自检当前 wait 回收极慢（分钟级），会挡住
-     * 主线到达文件末尾的 GUI 启动点。为先行验证"桌面能否显示"，
-     * 这里在 ring3 测试之前拉起 GUI 桌面。验证通过后再决定最终
-     * 落点（或修复 fork wait 后移回文件末尾）。
+     * 历史遗留：早期 do_wait 采用 pause 死自旋，BSP 空转饿死跑
+     * child 的 AP，fork-multi 回收退化到分钟级，撞 headless 超时。
+     * 已修复：do_wait 两处自旋改为 sti; hlt，让 BSP 让出 host
+     * 时间片给 AP，child 的 do_exit 跨核 IPI / LAPIC tick 均可
+     * 唤醒 BSP，回收降至毫秒级。fork-multi 三 child 现秒级全回收。
+     * 此早期 GUI 拉起路径保留作桌面可视化验证入口。
      * ============================================================ */
 #ifdef SHELL_LAUNCH_SELFTEST
     /* M1.5.3: ring3 network round-trip. Runs AFTER smp/prio self-tests so
@@ -863,7 +865,13 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
     early_console64_write("[x86_64][r2-selftest] done\n");
 #endif
 
-#ifdef GUI_EARLY_VERIFY
+/* M5.1: when M5_RING3_CONSOLE is defined, skip the early-GUI lockscreen
+ * dead-loop so control falls through to the launcher ring3 closed loop
+ * below (line ~913). After ring3 finishes (launcher -> execve hello64_v2
+ * -> exit), the second GUI block (also gated by GUI_EARLY_VERIFY) brings
+ * up the desktop. This makes ring3 user output observable on serial in
+ * headless builds while keeping the GUI demo path intact. */
+#if defined(GUI_EARLY_VERIFY) && !defined(M5_RING3_CONSOLE)
     early_console64_write("[x86_64][gui] (early) starting desktop before ring3 test...\n");
     {
         framebuffer_init();

@@ -350,7 +350,17 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
     ARCH64_USER_BUILD="$ARCH64_BUILD/user"
     ARCH64_BOOT_BUILD="$ARCH64_BUILD/boot"
     ARCH64_BIN_BUILD="$ARCH64_BUILD/bin"
-    ARCH64_CFLAGS="-m64 -mcmodel=kernel -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-80387 -mno-avx -ffreestanding -nostdlib -Wall -Wextra -O2 -fno-pic -fno-pie -fno-PIE -fno-stack-protector -fno-builtin -DGUI_EARLY_VERIFY -I$ARCH64_SRC/include -Isrc/kernel/include -Isrc/kernel"
+    # M5.1: M5_RING3_CONSOLE (default OFF) — when ON it skips the early-GUI
+    # lockscreen loop so the launcher ring3 closed loop runs and its user output
+    # is observable on serial before the desktop comes up. Default is now 0 to
+    # restore the early-GUI path WITH the boot lockscreen. Set M5_RING3_CONSOLE=1
+    # only for ring3 serial-debug sessions.
+    M5_RING3_CONSOLE="${M5_RING3_CONSOLE:-0}"
+    M5_RING3_DEF=""
+    if [ "$M5_RING3_CONSOLE" != "0" ]; then
+        M5_RING3_DEF="-DM5_RING3_CONSOLE"
+    fi
+    ARCH64_CFLAGS="-m64 -mcmodel=kernel -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-80387 -mno-avx -ffreestanding -nostdlib -Wall -Wextra -O2 -fno-pic -fno-pie -fno-PIE -fno-stack-protector -fno-builtin -DGUI_EARLY_VERIFY $M5_RING3_DEF -I$ARCH64_SRC/include -Isrc/kernel/include -Isrc/kernel"
     ARCH64_ASFLAGS="-m64 -mcmodel=kernel -mno-red-zone -fno-pic -fno-pie -fno-PIE -I$ARCH64_SRC/include -Isrc/kernel/include"
     ARCH64_USER_CFLAGS="-m64 -mcmodel=large -ffreestanding -nostdlib -Wall -Wextra -O2 -fno-pic -fno-pie -fno-PIE -fno-stack-protector -fno-builtin -I$ARCH64_SRC/user"
     ARCH64_USER_ASFLAGS="-m64 -mcmodel=large -fno-pic -fno-pie -fno-PIE -I$ARCH64_SRC/user"
