@@ -533,6 +533,7 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         kernel/as_selftest64.c \
         kernel/heap64.c \
         kernel/elf64_loader.c \
+        kernel/elf64_dynamic.c \
         kernel/usermode64.c \
         kernel/early_console64.c \
         kernel/pci64.c \
@@ -675,6 +676,7 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         "$ARCH64_BUILD/as_selftest64.o" \
         "$ARCH64_BUILD/heap64.o" \
         "$ARCH64_BUILD/elf64_loader.o" \
+        "$ARCH64_BUILD/elf64_dynamic.o" \
         "$ARCH64_BUILD/usermode64.o" \
         "$ARCH64_BUILD/usermode64_asm.o" \
         "$ARCH64_BUILD/early_console64.o" \
