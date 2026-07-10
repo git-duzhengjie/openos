@@ -534,6 +534,7 @@ static uint64_t do_rename(uint64_t old_ptr, uint64_t new_ptr) {
  * the *current* image and can handle it (typically by calling exit()).
  */
 static uint64_t do_exec(uint64_t path_ptr, uint64_t argv_ptr, uint64_t envp_ptr) {
+    early_console64_write("[x86_64][exec] ENTER do_exec\n");
     if (path_ptr == 0) {
         arch_x86_64_usermode_note_exec_fail();
         return (uint64_t)-1;
@@ -713,13 +714,21 @@ static uint64_t do_exec(uint64_t path_ptr, uint64_t argv_ptr, uint64_t envp_ptr)
          * triple-faults trying to fetch the ISR.
          *
          * Order: (1) set PCB.as=new_as, (2) load CR3 from new_as, (3) free old.
+         *
+         * M5.2d exec double-alloc fix: step (3) is no longer done inline.
+         * seed_user_stack + the stack remap in usermode_run() still run
+         * alloc_table() calls AFTER this point; if we freed old_as here, one
+         * of those allocations could pull a just-freed page that physically
+         * overlaps the new image's .text and memset() it to zero, faulting
+         * ring3 on all-zero bytes. Instead we QUEUE old_as and let
+         * usermode_run() drain the queue only after all such allocations are
+         * done (right before the iretq drop). CR3 has already been switched
+         * to new_as above, so the old PML4 page is safe to free later.
          */
         struct x86_64_address_space *old_as = arch_x86_64_proc_current_get_as();
         arch_x86_64_proc_current_set_as(new_as);
         arch_x86_64_as_activate(new_as);
-        if (old_as != ((struct x86_64_address_space *)0)) {
-            arch_x86_64_as_destroy(old_as);
-        }
+        arch_x86_64_usermode_queue_as_destroy(old_as);
     }
     early_console64_write("[x86_64][exec] path=");
     early_console64_write(path);
@@ -1074,6 +1083,11 @@ static uint64_t do_clone(uint64_t a0, uint64_t a1, uint64_t a2,
  * All negative returns are errno-style codes from futex64.h.
  */
 static uint64_t do_futex_wait(uint64_t a0, uint64_t a1) {
+    early_serial64_write("[futex] WAIT uaddr=");
+    early_console64_write_hex64(a0);
+    early_serial64_write(" val=");
+    early_console64_write_hex64(a1);
+    early_serial64_write("\n");
     return (uint64_t)(int64_t)arch_x86_64_futex_wait(a0, (uint32_t)a1, 0);
 }
 
@@ -1082,6 +1096,11 @@ static uint64_t do_futex_wait_timeout(uint64_t a0, uint64_t a1, uint64_t a2) {
 }
 
 static uint64_t do_futex_wake(uint64_t a0, uint64_t a1) {
+    early_serial64_write("[futex] WAKE uaddr=");
+    early_console64_write_hex64(a0);
+    early_serial64_write(" n=");
+    early_console64_write_hex64(a1);
+    early_serial64_write("\n");
     return (uint64_t)(int64_t)arch_x86_64_futex_wake(a0, (int)(int32_t)a1);
 }
 
@@ -1750,7 +1769,7 @@ uint64_t arch_x86_64_syscall_dispatch_common(uint64_t num,
     case SYS_UNLINK:      return do_unlink(a0);
     case SYS_RENAME:      return do_rename(a0, a1);
     /* -------- H.3 execve -------- */
-    case SYS_EXEC:        return do_exec(a0, a1, a2);
+    case SYS_EXEC:        early_console64_write("[x86_64][disp] SYS_EXEC case\n"); return do_exec(a0, a1, a2);
 
     /* -------- memory -------- */
     case SYS_MALLOC:      return do_malloc(a0);

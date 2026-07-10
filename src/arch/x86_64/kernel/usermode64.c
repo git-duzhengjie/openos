@@ -99,6 +99,21 @@ static volatile x86_64_entry_t usermode_pending_exec_entry;
 static volatile uint64_t usermode_exec_count;
 static volatile uint64_t usermode_exec_fail_count;
 
+/*
+ * M5.2d exec double-alloc fix: deferred old-AS teardown queue.
+ *
+ * do_exec stashes the outgoing AS here instead of destroying it inline.
+ * usermode_run() drains this queue (calls arch_x86_64_as_destroy) only
+ * after seed_user_stack + stack remap have finished all alloc_table()
+ * calls for the freshly loaded image -- see the header comment on
+ * arch_x86_64_usermode_queue_as_destroy(). A tiny fixed-size ring is
+ * plenty: there is at most one pending old AS per exec, but keep a couple
+ * of slots for robustness against nested/rapid exec chains.
+ */
+#define USERMODE_AS_DESTROY_QUEUE_LEN 4U
+static struct x86_64_address_space *usermode_as_destroy_queue[USERMODE_AS_DESTROY_QUEUE_LEN];
+static volatile unsigned usermode_as_destroy_count;
+
 static uintptr_t bootstrap_user_stack_top(void) {
     if (bootstrap_user_stack_base == 0) {
         x86_64_phys_addr_t p = 0;
@@ -130,6 +145,10 @@ void arch_x86_64_usermode_init(void) {
     usermode_pending_exec_entry = 0;
     usermode_exec_count = 0;
     usermode_exec_fail_count = 0;
+    usermode_as_destroy_count = 0;
+    for (unsigned i = 0; i < USERMODE_AS_DESTROY_QUEUE_LEN; ++i) {
+        usermode_as_destroy_queue[i] = ((struct x86_64_address_space *)0);
+    }
     PREPARED_USER_FRAME.rip = 0;
     PREPARED_USER_FRAME.cs = (uint64_t)(OPENOS_X86_64_GDT_USER_CODE | 3u);
     PREPARED_USER_FRAME.rflags = 0x202ULL;
@@ -243,6 +262,12 @@ int arch_x86_64_usermode_run(x86_64_entry_t entry) {
         (x86_64_virt_addr_t)bootstrap_user_stack_top(),
         (x86_64_virt_addr_t)OPENOS_X86_64_USER_VBASE);
     if (user_rsp == 0) {
+        /*
+         * M5.2d: seed failed -> this exec is dead. Drain any queued old
+         * AS so it is not leaked. Safe here because no further image
+         * setup will run.
+         */
+        arch_x86_64_usermode_drain_as_destroy();
         return -3;
     }
 
@@ -276,6 +301,17 @@ int arch_x86_64_usermode_run(x86_64_entry_t entry) {
              * seed_user_stack_ex(); no further translation needed here. */
         }
     }
+
+    /*
+     * M5.2d exec double-alloc fix: NOW is the safe point to tear down the
+     * outgoing AS(es) queued by do_exec. seed_user_stack_ex + the stack
+     * remap loop above have completed every alloc_table() call for the
+     * freshly loaded image, so returning the old AS's pages to the PMM
+     * free list can no longer race a walk_or_alloc that would memset() a
+     * page overlapping the new image's .text. See the header comment on
+     * arch_x86_64_usermode_queue_as_destroy().
+     */
+    arch_x86_64_usermode_drain_as_destroy();
 
     arch_x86_64_usermode_prepare_iretq(&PREPARED_USER_FRAME,
                                        entry,
@@ -626,6 +662,38 @@ uint64_t arch_x86_64_usermode_exec_fail_count(void) {
 
 void arch_x86_64_usermode_note_exec_fail(void) {
     ++usermode_exec_fail_count;
+}
+
+void arch_x86_64_usermode_queue_as_destroy(struct x86_64_address_space *as) {
+    if (as == ((struct x86_64_address_space *)0)) {
+        return;
+    }
+    if (usermode_as_destroy_count >= USERMODE_AS_DESTROY_QUEUE_LEN) {
+        /*
+         * Queue full: this should never happen in practice (at most one
+         * pending old AS per exec). Fall back to immediate destroy rather
+         * than leak -- the double-alloc window only matters when a seed
+         * follows, and a full queue means we already drained recently.
+         */
+        early_console64_write("[x86_64][usermode] as_destroy queue full; destroying inline\n");
+        arch_x86_64_as_destroy(as);
+        return;
+    }
+    usermode_as_destroy_queue[usermode_as_destroy_count] = as;
+    ++usermode_as_destroy_count;
+}
+
+void arch_x86_64_usermode_drain_as_destroy(void) {
+    while (usermode_as_destroy_count > 0) {
+        --usermode_as_destroy_count;
+        struct x86_64_address_space *as =
+            usermode_as_destroy_queue[usermode_as_destroy_count];
+        usermode_as_destroy_queue[usermode_as_destroy_count] =
+            ((struct x86_64_address_space *)0);
+        if (as != ((struct x86_64_address_space *)0)) {
+            arch_x86_64_as_destroy(as);
+        }
+    }
 }
 
 void arch_x86_64_usermode_snapshot_return_rsp(void) {
