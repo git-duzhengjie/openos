@@ -41,6 +41,7 @@
 #include "../include/pipe64.h" /* M4.1c: anonymous pipe pool for pipe/dup/dup2 */
 #include "../include/fifo64.h" /* M4.3b: named pipes (FIFO) */
 #include "../include/shm64.h" /* M4.3c: System V shared memory segments */
+#include "../include/futex64.h" /* M5.2c: fast userspace mutex for pthread */
 #include "../include/tty64.h" /* M4.4: pseudo-terminal line discipline */
 #include "../include/lapic64.h" /* γ.4 S3: cross-CPU wake IPI for fork/wait */
 #include "../include/smp64.h"   /* γ.4 S3: BSP apic_id for wake IPI target */
@@ -1059,6 +1060,32 @@ static uint64_t do_clone(uint64_t a0, uint64_t a1, uint64_t a2,
 }
 
 /*
+ * -------------------------------------------------------------------------
+ * SYS_FUTEX_WAIT / SYS_FUTEX_WAKE / SYS_FUTEX_WAIT_TIMEOUT  (M5.2c)
+ * -------------------------------------------------------------------------
+ * Thin dispatch shims over the futex64 subsystem. PRIVATE semantics: the key
+ * is the user virtual address of a 32-bit word, valid across a CLONE_VM thread
+ * group because siblings share one address space.
+ *
+ *   futex_wait(uaddr, val)          — a0=uaddr, a1=val; blocks until woken
+ *   futex_wait_timeout(uaddr, val, ms) — a0=uaddr, a1=val, a2=timeout_ms
+ *   futex_wake(uaddr, count)        — a0=uaddr, a1=count; returns #woken
+ *
+ * All negative returns are errno-style codes from futex64.h.
+ */
+static uint64_t do_futex_wait(uint64_t a0, uint64_t a1) {
+    return (uint64_t)(int64_t)arch_x86_64_futex_wait(a0, (uint32_t)a1, 0);
+}
+
+static uint64_t do_futex_wait_timeout(uint64_t a0, uint64_t a1, uint64_t a2) {
+    return (uint64_t)(int64_t)arch_x86_64_futex_wait(a0, (uint32_t)a1, a2);
+}
+
+static uint64_t do_futex_wake(uint64_t a0, uint64_t a1) {
+    return (uint64_t)(int64_t)arch_x86_64_futex_wake(a0, (int)(int32_t)a1);
+}
+
+/*
  * SYS_UPTIME_MS: real millisecond uptime, calibrated against the i8254 PIT
  * during early boot (see tsc64.c). If calibration somehow failed (per_ms==0)
  * we fall back to the legacy `rdtsc >> 20` placeholder so the call stays
@@ -1732,6 +1759,9 @@ uint64_t arch_x86_64_syscall_dispatch_common(uint64_t num,
     /* -------- M5.1d 惰性绑定 PLT/GOT -------- */
     case SYS_DL_RESOLVE:  return do_dl_resolve(a0, a1);
     case SYS_CLONE:       return do_clone(a0, a1, a2, a3, a4);
+    case SYS_FUTEX_WAIT:         return do_futex_wait(a0, a1);
+    case SYS_FUTEX_WAKE:         return do_futex_wake(a0, a1);
+    case SYS_FUTEX_WAIT_TIMEOUT: return do_futex_wait_timeout(a0, a1, a2);
 
     /* -------- time -------- */
     case SYS_UPTIME_MS:   return do_uptime_ms();

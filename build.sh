@@ -520,6 +520,7 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         kernel/pipe64.c \
         kernel/fifo64.c \
         kernel/shm64.c \
+        kernel/futex64.c \
         kernel/tty64.c \
         kernel/vmem64.c \
         kernel/initrd64.c \
@@ -663,6 +664,7 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         "$ARCH64_BUILD/pipe64.o" \
         "$ARCH64_BUILD/fifo64.o" \
         "$ARCH64_BUILD/shm64.o" \
+        "$ARCH64_BUILD/futex64.o" \
         "$ARCH64_BUILD/tty64.o" \
         "$ARCH64_BUILD/vmem64.o" \
         "$ARCH64_BUILD/initrd64.o" \

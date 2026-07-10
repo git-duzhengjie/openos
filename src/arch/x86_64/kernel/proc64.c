@@ -21,6 +21,7 @@
 
 #include "../include/early_console64.h"
 #include "../include/sched64.h"
+#include "../include/futex64.h" /* M5.2c: wake CLONE_CHILD_CLEARTID joiners on exit */
 #include "../include/percpu64.h"
 
 static x86_64_proc_t proc_table[OPENOS_X86_64_PROC_MAX];
@@ -259,17 +260,17 @@ void arch_x86_64_proc_exit(int code) {
     p->exit_code = code;
     p->state = OPENOS_X86_64_PROC_FREE; /* immediate reap (no wait4 yet) */
     /*
-     * M5.2b: CLONE_CHILD_CLEARTID — when a thread that requested clearing
+     * M5.2c: CLONE_CHILD_CLEARTID — when a thread that requested clearing
      * exits, write 0 to the userspace tid slot and wake any futex waiters
      * (e.g. pthread_join). The AS is still active here (CR3 not yet rotated
-     * back), so the user pointer is directly writable. futex wake is a stub
-     * until the futex subsystem lands; the zero-store alone already lets a
-     * spinning joiner observe termination.
+     * back), so the user pointer is directly writable. The zero-store lets a
+     * spinning joiner observe termination; the futex wake releases a joiner
+     * that parked via SYS_FUTEX_WAIT on the same address.
      */
     if (p->clear_child_tid != 0) {
         uint32_t *ctid = (uint32_t *)p->clear_child_tid;
         *ctid = 0u;
-        /* TODO(futex): arch_x86_64_futex_wake(p->clear_child_tid, 1); */
+        (void)arch_x86_64_futex_wake(p->clear_child_tid, 0x7fffffff);
         p->clear_child_tid = 0;
     }
     /* H.5b.1: AS pointer is always NULL today; H.5b.3 will replace
