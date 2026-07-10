@@ -39,6 +39,10 @@ static volatile uint64_t prio_low_counter;
 static volatile uint32_t prio_high_done;
 static volatile uint32_t prio_normal_done;
 static volatile uint32_t prio_low_done;
+/* M5.2d fix: burners must be able to exit once the measurement window
+ * closes; otherwise they linger as READY zombies hogging the BSP and
+ * starve every later user thread (e.g. thread_demo workers). */
+static volatile uint32_t prio_stop;
 
 static inline void cli(void)    { __asm__ __volatile__("cli"); }
 static inline void sti(void)    { __asm__ __volatile__("sti"); }
@@ -51,7 +55,7 @@ static void log_kv(const char *key, uint64_t val) {
 
 static void burner_high(void *arg) {
     (void)arg;
-    for (uint32_t i = 0; i < PRIO_WORKER_ITERS; ++i) {
+    for (uint32_t i = 0; i < PRIO_WORKER_ITERS && !prio_stop; ++i) {
         prio_high_counter++;
         pause_();
     }
@@ -62,7 +66,7 @@ static void burner_high(void *arg) {
 
 static void burner_normal(void *arg) {
     (void)arg;
-    for (uint32_t i = 0; i < PRIO_WORKER_ITERS; ++i) {
+    for (uint32_t i = 0; i < PRIO_WORKER_ITERS && !prio_stop; ++i) {
         prio_normal_counter++;
         pause_();
     }
@@ -73,7 +77,7 @@ static void burner_normal(void *arg) {
 
 static void burner_low(void *arg) {
     (void)arg;
-    for (uint32_t i = 0; i < PRIO_WORKER_ITERS; ++i) {
+    for (uint32_t i = 0; i < PRIO_WORKER_ITERS && !prio_stop; ++i) {
         prio_low_counter++;
         pause_();
     }
@@ -92,6 +96,7 @@ int arch_x86_64_sched_prio_selftest_run(void) {
 
     prio_high_counter = prio_normal_counter = prio_low_counter = 0ull;
     prio_high_done    = prio_normal_done    = prio_low_done    = 0u;
+    prio_stop         = 0u;
 
     uint64_t preempts_before = arch_x86_64_sched_preempt_count();
     uint64_t switches_before = arch_x86_64_sched_switch_count();
@@ -150,6 +155,20 @@ int arch_x86_64_sched_prio_selftest_run(void) {
         pause_();
     }
     uint64_t t1 = arch_x86_64_tsc_uptime_ms();
+
+    /* M5.2d fix: signal burners to stop, then busy-wait (interrupts on, IRQ0
+     * still preempting) until every burner slot has actually reached the
+     * EXITED state via its own exit_self path. Waiting on slot state (not a
+     * pre-exit "done" flag) closes the race where a burner sets done but is
+     * preempted before exit_self, leaving a READY zombie that later starves
+     * user threads. Cooperative sched_yield is avoided here because these
+     * slots were built for the preemptive switch path. */
+    prio_stop = 1u;
+    while (arch_x86_64_sched_slot_state(id_h) != (uint32_t)SCHED_SLOT_EXITED ||
+           arch_x86_64_sched_slot_state(id_n) != (uint32_t)SCHED_SLOT_EXITED ||
+           arch_x86_64_sched_slot_state(id_l) != (uint32_t)SCHED_SLOT_EXITED) {
+        pause_();
+    }
 
     cli();
     if (arch_x86_64_lapic_is_ready() && arch_x86_64_ioapic_is_ready()) {
