@@ -569,6 +569,55 @@ void arch_x86_64_exception_dispatch(struct x86_64_exception_frame *frame) {
         early_console64_write_hex64(frame->ss);
         early_console64_write(" cr2=");
         early_console64_write_hex64(cr2);
+
+        /* On a #PF, walk current CR3 for cr2 and dump the PTE chain so we
+         * can tell "unmapped" from "present-but-wrong-perms". */
+        if (frame->vector == 0x0E) {
+            uint64_t cr3 = 0;
+            __asm__ __volatile__("mov %%cr3, %0" : "=r"(cr3));
+            uint64_t pml4_pa = cr3 & 0x000FFFFFFFFFF000ULL;
+            uint64_t va = cr2;
+            uint64_t i4 = (va >> 39) & 0x1FF;
+            uint64_t i3 = (va >> 30) & 0x1FF;
+            uint64_t i2 = (va >> 21) & 0x1FF;
+            uint64_t i1 = (va >> 12) & 0x1FF;
+            early_console64_write("\n[x86_64][pf-walk] cr3=");
+            early_console64_write_hex64(cr3);
+            volatile uint64_t *pml4 = (volatile uint64_t *)pml4_pa;
+            uint64_t e4 = pml4[i4];
+            early_console64_write(" pml4[");
+            early_console64_write_hex64(i4);
+            early_console64_write("]=");
+            early_console64_write_hex64(e4);
+            if (e4 & 1) {
+                volatile uint64_t *pdpt =
+                    (volatile uint64_t *)(e4 & 0x000FFFFFFFFFF000ULL);
+                uint64_t e3 = pdpt[i3];
+                early_console64_write(" pdpt[");
+                early_console64_write_hex64(i3);
+                early_console64_write("]=");
+                early_console64_write_hex64(e3);
+                if ((e3 & 1) && !(e3 & 0x80)) {
+                    volatile uint64_t *pd =
+                        (volatile uint64_t *)(e3 & 0x000FFFFFFFFFF000ULL);
+                    uint64_t e2 = pd[i2];
+                    early_console64_write(" pd[");
+                    early_console64_write_hex64(i2);
+                    early_console64_write("]=");
+                    early_console64_write_hex64(e2);
+                    if ((e2 & 1) && !(e2 & 0x80)) {
+                        volatile uint64_t *pt =
+                            (volatile uint64_t *)(e2 & 0x000FFFFFFFFFF000ULL);
+                        uint64_t e1 = pt[i1];
+                        early_console64_write(" pt[");
+                        early_console64_write_hex64(i1);
+                        early_console64_write("]=");
+                        early_console64_write_hex64(e1);
+                    }
+                }
+            }
+            early_console64_write("\n");
+        }
     }
     early_console64_write("\n");
     for (;;) {

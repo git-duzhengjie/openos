@@ -180,6 +180,13 @@ static elf64_loader_status_t map_segment(const uint8_t *image,
     seg_start = align_down_addr(phdr->p_vaddr);
     seg_end = align_up_addr(phdr->p_vaddr + phdr->p_memsz);
     (void)flags_from_phdr;  /* boot-vmm mirror retired in step B */
+    early_console64_write("[elf64] seg va=");
+    early_console64_write_hex64(phdr->p_vaddr);
+    early_console64_write(" memsz=");
+    early_console64_write_hex64(phdr->p_memsz);
+    early_console64_write(" pages=");
+    early_console64_write_hex64((seg_end - seg_start) / OPENOS_X86_64_VMM_PAGE_SIZE);
+    early_console64_write("\n");
 
     /*
      * Walk pages in one pass: allocate a fresh phys, zero+copy the slice of
@@ -215,9 +222,25 @@ static elf64_loader_status_t map_segment(const uint8_t *image,
                          (x86_64_size_t)(copy_hi - copy_lo));
             }
 
-            (void)arch_x86_64_as_map_user(target_as, page_va, phys,
+            if (arch_x86_64_as_map_user(target_as, page_va, phys,
                                      OPENOS_X86_64_VMM_PAGE_SIZE,
-                                     as_flags_from_phdr(phdr));
+                                     as_flags_from_phdr(phdr)) != 0) {
+                early_console64_write("[elf64] map_user FAIL va=");
+                early_console64_write_hex64(page_va);
+                early_console64_write(" phys=");
+                early_console64_write_hex64(phys);
+                early_console64_write("\n");
+                return ELF64_LOADER_ERR_BAD_SEGMENT;
+            }
+            if (copy_lo < copy_hi) {
+                early_console64_write("[elf64] page va=");
+                early_console64_write_hex64(page_va);
+                early_console64_write(" phys=");
+                early_console64_write_hex64(phys);
+                early_console64_write(" first8=");
+                early_console64_write_hex64(*(volatile uint64_t *)(uintptr_t)phys);
+                early_console64_write("\n");
+            }
         }
     }
 
