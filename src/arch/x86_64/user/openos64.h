@@ -41,6 +41,7 @@
 #define OPENOS64_SYS_TCP_RECV    462ULL
 #define OPENOS64_SYS_TCP_CLOSE   463ULL
 #define OPENOS64_SYS_HTTP_GET    464ULL
+#define OPENOS64_SYS_DL_RESOLVE  477ULL   /* M5.1d 惰性绑定：a0=link_map a1=reloc_index -> 目标地址 */
 
 /* The kernel currently only accepts AF_OPENOS / SOCK_DGRAM / PROTO_DEFAULT. */
 #define OPENOS64_AF_OPENOS     1

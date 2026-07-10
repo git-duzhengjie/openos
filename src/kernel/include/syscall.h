@@ -218,6 +218,7 @@
 #define SYS_SETSID        474  /* M4.4b: (no args) -> new sid/<0 */
 #define SYS_GETSID        475  /* M4.4b: a0=pid(0=self) -> sid/<0 */
 #define SYS_RT_SIGRETURN  476  /* M4.2b: (no args) restore ring3 ctx from sigframe -> ret via iretq */
+#define SYS_DL_RESOLVE    477  /* M5.1d: a0=link_map* a1=reloc_index -> 目标函数运行时地址（惰性绑定 PLT/GOT） */
 #define SYS_GUI_ADD_TABLEVIEW 400
 #define SYS_GUI_SET_TABLEVIEW_ROW 401
 #define SYS_GUI_GET_TABLEVIEW_ROW 402

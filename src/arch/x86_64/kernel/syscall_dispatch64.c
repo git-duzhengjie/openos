@@ -23,6 +23,7 @@
 
 #include "../include/early_console64.h"
 #include "../include/elf64_loader.h"
+#include "../include/elf64_lazy.h" /* M5.1d: 惰性绑定 dl_resolve */
 #include "../include/address_space64.h"
 #include "../include/fdtable64.h"
 #include "../include/heap64.h"
@@ -936,6 +937,16 @@ static uint64_t do_free(uint64_t ptr) {
 }
 
 /*
+ * M5.1d: 惰性绑定解析。由用户态 _dl_runtime_resolve trampoline 首次调用时陷入。
+ *   a0 = link_map*  (GOT[1]，内核白名单校验)
+ *   a1 = reloc_index (JMPREL 下标)
+ * 返回目标函数运行时地址；0 表示失败。
+ */
+static uint64_t do_dl_resolve(uint64_t a0, uint64_t a1) {
+    return openos_elf64_dl_resolve_entry(a0, a1);
+}
+
+/*
  * SYS_UPTIME_MS: real millisecond uptime, calibrated against the i8254 PIT
  * during early boot (see tsc64.c). If calibration somehow failed (per_ms==0)
  * we fall back to the legacy `rdtsc >> 20` placeholder so the call stays
@@ -1605,6 +1616,9 @@ uint64_t arch_x86_64_syscall_dispatch_common(uint64_t num,
     /* -------- memory -------- */
     case SYS_MALLOC:      return do_malloc(a0);
     case SYS_FREE:        return do_free(a0);
+
+    /* -------- M5.1d 惰性绑定 PLT/GOT -------- */
+    case SYS_DL_RESOLVE:  return do_dl_resolve(a0, a1);
 
     /* -------- time -------- */
     case SYS_UPTIME_MS:   return do_uptime_ms();
