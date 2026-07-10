@@ -86,6 +86,29 @@ uint64_t arch_x86_64_usermode_exec_fail_count(void);
 void arch_x86_64_usermode_note_exec_fail(void);
 
 /*
+ * M5.2d exec double-alloc fix: deferred old-AS teardown.
+ *
+ * Problem: do_exec used to arch_x86_64_as_destroy(old_as) *before*
+ * usermode_run() re-seeds the user stack for the freshly loaded image.
+ * as_destroy returns the old AS's page-table + leaf pages to the PMM
+ * free list; the subsequent seed_user_stack -> as_map_user ->
+ * walk_or_alloc -> alloc_table() then pulls a page off that same free
+ * list and memset()s it to zero. When the pulled page physically
+ * overlaps the just-loaded new image's .text page, the new text is
+ * silently zeroed and ring3 faults executing all-zero bytes.
+ *
+ * Fix: instead of destroying old_as inline, do_exec stashes it here via
+ * arch_x86_64_usermode_queue_as_destroy(old_as). usermode_run() then
+ * drains the queue (calls as_destroy) only AFTER seed_user_stack and the
+ * stack remap have finished all their alloc_table() calls, i.e. right
+ * before the iretq drop. This guarantees no page freed by the old AS can
+ * be re-allocated (and zeroed) into the new image before ring3 runs.
+ */
+struct x86_64_address_space;
+void arch_x86_64_usermode_queue_as_destroy(struct x86_64_address_space *as);
+void arch_x86_64_usermode_drain_as_destroy(void);
+
+/*
  * H.4 argv plumbing.
  *
  * arch_x86_64_usermode_set_args():

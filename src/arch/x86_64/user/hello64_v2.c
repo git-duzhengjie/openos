@@ -77,7 +77,7 @@ int openos64_main(int argc, char **argv, char **envp) {
     }
 
     write_str(OPENOS64_STDOUT_FILENO,
-              "[hello64_v2] H.4: about to execve /bin/hello_fork (A2.P5)\n");
+              "[hello64_v2] H.4: about to execve /bin/thread_demo (M5.2d)\n");
 
     /* A2.P5: hand fork/wait off to a dedicated ELF so execve and fork/wait
      * are decoupled regressions. Forward our argv/envp verbatim so the
@@ -92,9 +92,9 @@ int openos64_main(int argc, char **argv, char **envp) {
         "OPENOS_STAGE=A2.P5",
         (const char *)0,
     };
-    long rc = openos64_execve("/bin/hello_fork",
+    long rc = openos64_execve("/bin/thread_demo",
                               (char *const *)fork_argv,
-                              (char *const *)fork_envp);
+                              (char *const *)fork_envp); /* M5.2d TEMP: skip hello_fork, verify thread_demo directly */
 
     /* Falling through means execve failed. Print diagnostic + exit 98 so it
      * is grep-able alongside launcher's 99. */

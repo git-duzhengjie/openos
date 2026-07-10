@@ -416,6 +416,19 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
     nm "$ARCH64_BIN_BUILD/hello_fork.elf" | grep -q ' openos64_main$'
     python3 _embed_elf.py "$ARCH64_BIN_BUILD/hello_fork.elf" "$ARCH64_SRC/include/embed_hello_fork.h" hello_fork_elf
 
+    echo "[1b''/5] Building x86_64 /bin/thread_demo ELF (M5.2d clone+futex+pthread target)..."
+    gcc $ARCH64_USER_CFLAGS -c "$ARCH64_SRC/user/pthread64.c" -o "$ARCH64_USER_BUILD/pthread64.o"
+    gcc $ARCH64_USER_CFLAGS -c "$ARCH64_SRC/user/thread_demo64.c" -o "$ARCH64_USER_BUILD/thread_demo64.o"
+    ld $ARCH64_USER_LDFLAGS -o "$ARCH64_BIN_BUILD/thread_demo.elf" \
+        "$ARCH64_USER_BUILD/start.o" \
+        "$ARCH64_USER_BUILD/crt0.o" \
+        "$ARCH64_USER_BUILD/pthread64.o" \
+        "$ARCH64_USER_BUILD/thread_demo64.o"
+    readelf -h "$ARCH64_BIN_BUILD/thread_demo.elf" | grep -q 'Class:.*ELF64'
+    readelf -h "$ARCH64_BIN_BUILD/thread_demo.elf" | grep -q 'Machine:.*X86-64'
+    nm "$ARCH64_BIN_BUILD/thread_demo.elf" | grep -q ' openos64_main$'
+    python3 _embed_elf.py "$ARCH64_BIN_BUILD/thread_demo.elf" "$ARCH64_SRC/include/embed_thread_demo.h" thread_demo_elf
+
     echo "[1c/5] Building x86_64 /bin/launcher ELF (H.3 execve caller)..."
     gcc $ARCH64_USER_CFLAGS -c "$ARCH64_SRC/user/launcher.c" -o "$ARCH64_USER_BUILD/launcher.o"
     ld $ARCH64_USER_LDFLAGS -o "$ARCH64_BIN_BUILD/launcher.elf" \

@@ -253,5 +253,17 @@ int openos64_main(int argc, char **argv, char **envp) {
         write_str(OPENOS64_STDOUT_FILENO, "\n");
     }
 
+    /* M5.2d: hand off to /bin/thread_demo as the tail of the launch chain
+     * so clone/futex/pthread get exercised from ring3 right after fork/wait.
+     * execve preserves pid; falling through means it failed. */
+    write_str(OPENOS64_STDOUT_FILENO,
+              "[hello_fork] M5.2d: about to execve /bin/thread_demo\n");
+    static const char *td_argv[] = { "thread_demo", (const char *)0 };
+    static const char *td_envp[] = { "PATH=/bin", (const char *)0 };
+    (void)openos64_execve("/bin/thread_demo",
+                          (char *const *)td_argv,
+                          (char *const *)td_envp);
+    write_str(OPENOS64_STDERR_FILENO,
+              "[hello_fork] ERR: execve /bin/thread_demo failed\n");
     return 0;
 }

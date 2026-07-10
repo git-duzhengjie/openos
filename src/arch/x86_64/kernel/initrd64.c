@@ -12,6 +12,7 @@
 #include "../include/embed_hello64.h"
 #include "../include/embed_hello64_v2.h"  /* H.3: execve target image */
 #include "../include/embed_hello_fork.h"  /* A2.P5: standalone fork/wait target */
+#include "../include/embed_thread_demo.h" /* M5.2d: clone+futex+pthread target */
 #include "../include/embed_launcher.h"     /* H.3: initial /bin/launcher  */
 #include "../include/embed_ifconfig64.h"   /* M1.5.3: /bin/ifconfig net tool */
 #include "../include/embed_ping64.h"       /* M1.5.3: /bin/ping net tool */
@@ -53,6 +54,9 @@ static const x86_64_initrd_file_t initrd_files[] = {
      * execve inside /bin/hello64_v2. Splitting the historical inline [wait]
      * block out here decouples execve and fork/wait regressions. */
     { .name = "/bin/hello_fork", .data = hello_fork_elf, .size = (x86_64_size_t)hello_fork_elf_size, .mode = 0755u },
+    /* M5.2d: /bin/thread_demo exercises clone/futex/pthread from ring3.
+     * /bin/hello_fork execve's into it as the tail of the launch chain. */
+    { .name = "/bin/thread_demo", .data = thread_demo_elf, .size = (x86_64_size_t)thread_demo_elf_size, .mode = 0755u },
     /* M1.5.3: userland network tools backed by the live virtio-net TCP/IP
      * stack (SYS_NETINFO/PING/DNSLOOKUP). */
     { .name = "/bin/ifconfig", .data = ifconfig64_elf, .size = (x86_64_size_t)ifconfig64_elf_size, .mode = 0755u },

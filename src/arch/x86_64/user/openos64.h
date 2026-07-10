@@ -43,6 +43,24 @@
 #define OPENOS64_SYS_HTTP_GET    464ULL
 #define OPENOS64_SYS_DL_RESOLVE  477ULL   /* M5.1d 惰性绑定：a0=link_map a1=reloc_index -> 目标地址 */
 
+/* M5.2 threads: clone + futex.
+ * CLONE:  a0=flags a1=child_stack a2=entry a3=arg a4=tls  -> new tid
+ * FUTEX_WAIT:         a0=uaddr a1=expected            -> 0 / -EAGAIN
+ * FUTEX_WAKE:         a0=uaddr a1=n                    -> #woken
+ * FUTEX_WAIT_TIMEOUT: a0=uaddr a1=expected a2=timeout_ms -> 0/-EAGAIN/-ETIMEDOUT */
+#define OPENOS64_SYS_CLONE              478ULL
+#define OPENOS64_SYS_FUTEX_WAIT         269ULL
+#define OPENOS64_SYS_FUTEX_WAKE         270ULL
+#define OPENOS64_SYS_FUTEX_WAIT_TIMEOUT 339ULL
+
+/* clone() flag subset accepted by the kernel (must include VM|THREAD). */
+#define OPENOS64_CLONE_VM      0x00000100ULL
+#define OPENOS64_CLONE_FS      0x00000200ULL
+#define OPENOS64_CLONE_FILES   0x00000400ULL
+#define OPENOS64_CLONE_SIGHAND 0x00000800ULL
+#define OPENOS64_CLONE_THREAD  0x00010000ULL
+#define OPENOS64_CLONE_SETTLS  0x00080000ULL
+
 /* The kernel currently only accepts AF_OPENOS / SOCK_DGRAM / PROTO_DEFAULT. */
 #define OPENOS64_AF_OPENOS     1
 #define OPENOS64_SOCK_DGRAM    2
@@ -368,6 +386,32 @@ static inline int openos64_http_get(const char *host, const char *path, void *bu
                                   (uint64_t)(uintptr_t)path,
                                   (uint64_t)(uintptr_t)buf,
                                   (uint64_t)buflen);
+}
+
+/* ---- M5.2 low-level thread primitives ----
+ * openos64_clone: raw clone. child begins at entry(arg) on child_stack with
+ * %fs.base=tls; returns new tid to caller (never returns in child). */
+static inline long openos64_clone(uint64_t flags, void *child_stack,
+                                  void *entry, void *arg, void *tls) {
+    return openos64_syscall5(OPENOS64_SYS_CLONE, flags,
+                             (uint64_t)(uintptr_t)child_stack,
+                             (uint64_t)(uintptr_t)entry,
+                             (uint64_t)(uintptr_t)arg,
+                             (uint64_t)(uintptr_t)tls);
+}
+static inline long openos64_futex_wait(volatile int *uaddr, int expected) {
+    return openos64_syscall2(OPENOS64_SYS_FUTEX_WAIT,
+                             (uint64_t)(uintptr_t)uaddr, (uint64_t)(uint32_t)expected);
+}
+static inline long openos64_futex_wake(volatile int *uaddr, int n) {
+    return openos64_syscall2(OPENOS64_SYS_FUTEX_WAKE,
+                             (uint64_t)(uintptr_t)uaddr, (uint64_t)(uint32_t)n);
+}
+static inline long openos64_futex_wait_timeout(volatile int *uaddr, int expected,
+                                               uint64_t timeout_ms) {
+    return openos64_syscall3(OPENOS64_SYS_FUTEX_WAIT_TIMEOUT,
+                             (uint64_t)(uintptr_t)uaddr,
+                             (uint64_t)(uint32_t)expected, timeout_ms);
 }
 
 openos64_size_t openos64_strlen(const char *text);
