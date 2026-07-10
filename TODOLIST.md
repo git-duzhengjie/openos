@@ -1713,7 +1713,11 @@
 
 ### M5：生态与运行时（🟡 第三优先级）
 
-- [ ] M5.1：动态链接（.so + 动态链接器 + PLT/GOT 重定位）
+- [√] M5.1：动态链接（.so + 动态链接器 + PLT/GOT 重定位）
+  - [√] M5.1a：ELF 动态段解析（PT_INTERP/PT_DYNAMIC/.dynamic 表；单测 3/3）
+  - [√] M5.1b：静态重定位引擎（RELATIVE/64/GLOB_DAT/JUMP_SLOT 立即绑定/IRELATIVE）
+  - [√] M5.1c：跨模块符号解析（全局符号表 16 模块，GLOBAL>WEAK、load-order 优先）
+  - [√] M5.1d：真惰性绑定 PLT/GOT（_dl_runtime_resolve trampoline + SYS_DL_RESOLVE=477 + link_map 白名单；单测 6/6，elf64 系列 15/15 全绿）
 - [ ] M5.2：用户态多线程（clone / pthread / 用户级线程库）
 - [ ] M5.3：标准 C 库对齐（向 musl/newlib 兼容子集靠拢，便于移植第三方软件）
 - [ ] M5.4：包管理 / 软件安装机制（最小可用的程序分发）
