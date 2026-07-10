@@ -179,3 +179,154 @@ void openos_elf64_dyninfo_dump(const openos_elf64_dyninfo_t *info) {
     }
     early_console64_write("[dyn] ======================\n");
 }
+
+/* ==================== M5.1b：重定位 ==================== */
+
+/*
+ * 解析单个重定位需要的符号值 S。
+ * 优先级：
+ *   1) 符号在本模块 symtab 内已定义（st_shndx != 0）-> st_value + load_bias
+ *   2) 否则调 resolver 回调（跨模块，M5.1c）
+ *   3) 弱符号未定义 -> 0（合法）
+ * out_is_weak_undef：置 1 表示“未解析但是弱符号”（不计错）。
+ * 返回：解析到的地址；0 表示未解析。
+ */
+static uint64_t reloc_resolve_symbol(const openos_elf64_dyninfo_t *info,
+                                     uint32_t sym_idx,
+                                     openos_elf64_symresolve_fn resolver,
+                                     void *resolver_user,
+                                     int *out_is_weak_undef) {
+    *out_is_weak_undef = 0;
+    if (sym_idx == 0 || !info->symtab) {
+        return 0;
+    }
+    const openos_elf64_sym_t *sym = &info->symtab[sym_idx];
+
+    /* 本模块内已定义（st_shndx != SHN_UNDEF=0） */
+    if (sym->st_shndx != 0) {
+        return sym->st_value + info->load_bias;
+    }
+
+    /* 未定义：试图跨模块解析 */
+    const char *name = 0;
+    if (info->strtab && sym->st_name) {
+        name = info->strtab + sym->st_name;
+    }
+    if (resolver && name) {
+        uint64_t r = resolver(name, resolver_user);
+        if (r != 0) {
+            return r;
+        }
+    }
+
+    /* 弱符号未解析合法（值为 0） */
+    if (OPENOS_ELF64_ST_BIND(sym->st_info) == OPENOS_STB_WEAK) {
+        *out_is_weak_undef = 1;
+        return 0;
+    }
+    return 0;
+}
+
+/* 处理一张 RELA 表（主表或 PLT 表）。返回未解析非弱符号个数。 */
+static uint64_t reloc_apply_table(const openos_elf64_dyninfo_t *info,
+                                  const openos_elf64_rela_t *table,
+                                  uint64_t table_sz,
+                                  openos_elf64_symresolve_fn resolver,
+                                  void *resolver_user,
+                                  openos_elf64_reloc_stats_t *stats) {
+    uint64_t unresolved = 0;
+    if (!table || table_sz == 0) {
+        return 0;
+    }
+    uint64_t count = table_sz / sizeof(openos_elf64_rela_t);
+    for (uint64_t i = 0; i < count; i++) {
+        const openos_elf64_rela_t *r = &table[i];
+        uint32_t type = OPENOS_ELF64_R_TYPE(r->r_info);
+        uint32_t sym  = OPENOS_ELF64_R_SYM(r->r_info);
+        /* 重定位写入目标：r_offset 是模块内虚地址，加 load_bias 后为运行时地址 */
+        uint64_t *where = (uint64_t *)(r->r_offset + info->load_bias);
+        if (stats) stats->total++;
+
+        switch (type) {
+        case OPENOS_R_X86_64_NONE:
+            if (stats) stats->skipped_count++;
+            break;
+
+        case OPENOS_R_X86_64_RELATIVE:
+            /* B + A */
+            *where = info->load_bias + (uint64_t)r->r_addend;
+            if (stats) stats->relative_count++;
+            break;
+
+        case OPENOS_R_X86_64_64: {
+            /* S + A */
+            int weak = 0;
+            uint64_t s = reloc_resolve_symbol(info, sym, resolver,
+                                              resolver_user, &weak);
+            if (s == 0 && !weak) { unresolved++; if (stats) stats->unresolved_count++; }
+            *where = s + (uint64_t)r->r_addend;
+            if (stats) stats->abs64_count++;
+            break;
+        }
+
+        case OPENOS_R_X86_64_GLOB_DAT: {
+            /* S */
+            int weak = 0;
+            uint64_t s = reloc_resolve_symbol(info, sym, resolver,
+                                              resolver_user, &weak);
+            if (s == 0 && !weak) { unresolved++; if (stats) stats->unresolved_count++; }
+            *where = s;
+            if (stats) stats->glob_dat_count++;
+            break;
+        }
+
+        case OPENOS_R_X86_64_JUMP_SLOT: {
+            /* S（M5.1b：立即绑定，直接填入符号地址） */
+            int weak = 0;
+            uint64_t s = reloc_resolve_symbol(info, sym, resolver,
+                                              resolver_user, &weak);
+            if (s == 0 && !weak) { unresolved++; if (stats) stats->unresolved_count++; }
+            *where = s;
+            if (stats) stats->jump_slot_count++;
+            break;
+        }
+
+        case OPENOS_R_X86_64_IRELATIVE:
+            /* ifunc：解析器返回值为 (B + A) 处的函数，调用它得到实际地址。
+             * 内核态不宜直接调用用户 ifunc resolver；此阶段仅填入 B+A 占位。 */
+            *where = info->load_bias + (uint64_t)r->r_addend;
+            if (stats) stats->irelative_count++;
+            break;
+
+        default:
+            /* 未支持类型（PC32/TLS 等）：暂跳过，不写入 */
+            if (stats) stats->skipped_count++;
+            break;
+        }
+    }
+    return unresolved;
+}
+
+int openos_elf64_apply_relocations(const openos_elf64_dyninfo_t *info,
+                                   openos_elf64_symresolve_fn resolver,
+                                   void *resolver_user,
+                                   openos_elf64_reloc_stats_t *stats) {
+    if (!info) return -1;
+    if (stats) dyn_memzero(stats, sizeof(*stats));
+
+    uint64_t unresolved = 0;
+
+    /* 1) DT_RELA 主重定位表 */
+    unresolved += reloc_apply_table(info, info->rela, info->rela_sz,
+                                    resolver, resolver_user, stats);
+
+    /* 2) DT_JMPREL PLT 重定位表（M5.1b 立即绑定）。
+     *    仅当 PLTREL 类型为 DT_RELA(7) 时才能按 rela 处理。 */
+    if (info->jmprel && info->pltrel_sz > 0 &&
+        (info->pltrel_type == OPENOS_DT_RELA || info->pltrel_type == 0)) {
+        unresolved += reloc_apply_table(info, info->jmprel, info->pltrel_sz,
+                                        resolver, resolver_user, stats);
+    }
+
+    return (int)unresolved;
+}

@@ -207,4 +207,45 @@ int openos_elf64_parse_dynamic(const void *image, uint64_t image_size,
 /* 调试：打印 dyninfo 概要到串口 */
 void openos_elf64_dyninfo_dump(const openos_elf64_dyninfo_t *info);
 
+/* ==================== M5.1b：重定位 ==================== */
+
+/*
+ * 符号解析回调（M5.1c 用于跨模块解析）。
+ *   name - 需解析的符号名（以 \0 结尾）
+ *   user - 透传的用户上下文
+ * 返回符号的运行时绝对地址；找不到返回 0。
+ * M5.1b 可传 NULL：此时仅本模块 symtab 内已定义的符号（st_shndx!=0）可解析。
+ */
+typedef uint64_t (*openos_elf64_symresolve_fn)(const char *name, void *user);
+
+/* 重定位统计（调试/自测用） */
+typedef struct {
+    uint64_t relative_count;   /* R_X86_64_RELATIVE */
+    uint64_t abs64_count;      /* R_X86_64_64 */
+    uint64_t glob_dat_count;   /* R_X86_64_GLOB_DAT */
+    uint64_t jump_slot_count;  /* R_X86_64_JUMP_SLOT */
+    uint64_t irelative_count;  /* R_X86_64_IRELATIVE */
+    uint64_t unresolved_count; /* 找不到定义的非弱符号 */
+    uint64_t skipped_count;    /* 不支持/忽略的类型（NONE 等） */
+    uint64_t total;            /* 遍历的重定位项总数 */
+} openos_elf64_reloc_stats_t;
+
+/*
+ * M5.1b：对已解析的动态模块应用重定位。
+ * 处理 DT_RELA 主表 + DT_JMPREL(PLT) 表（M5.1b 阶段 PLT 立即绑定）。
+ * 支持类型：RELATIVE / 64 / GLOB_DAT / JUMP_SLOT / IRELATIVE。
+ *
+ *   info          - parse_dynamic 的输出（含 load_bias、rela、jmprel、symtab...）
+ *   resolver      - 跨模块符号解析回调，可为 NULL
+ *   resolver_user - 透传给 resolver 的上下文
+ *   stats         - 输出统计，可为 NULL
+ * 返回 0 成功；<0 参数错误；>0 表示存在未解析的非弱符号（返回其数量）。
+ *
+ * 前置：所有 PT_LOAD 段已按 load_bias 映射为可写（重定位需写 r_offset 处）。
+ */
+int openos_elf64_apply_relocations(const openos_elf64_dyninfo_t *info,
+                                   openos_elf64_symresolve_fn resolver,
+                                   void *resolver_user,
+                                   openos_elf64_reloc_stats_t *stats);
+
 #endif /* OPENOS_ARCH_X86_64_ELF64_DYNAMIC_H */
