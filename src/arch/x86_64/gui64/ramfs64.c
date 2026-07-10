@@ -21,6 +21,15 @@ extern void  early_serial64_write(const char *text);
 #define RAMFS_KMALLOC(sz) arch_x86_64_kmalloc((unsigned long)(sz))
 #define RAMFS_KFREE(p)    arch_x86_64_kfree((void *)(p))
 
+/* ---- M5.2d: 页对齐分配（绕开 heap64，恒等映射 phys==virt）----
+ * kmalloc 堆在大块跨页分配时存在中段被重叠清零的 bug，
+ * 故对较大的文件缓冲改用 pmm 页分配（连续多页）。 */
+extern uint64_t arch_x86_64_pmm_alloc_pages(uint64_t count);
+extern void arch_x86_64_pmm_free_range(uint64_t base, uint64_t length);
+#define RAMFS_PAGE_SIZE      4096UL
+/* 达到此阈值（含）的容量需求走 pmm 页分配，以避开 heap64 大块 bug */
+#define RAMFS_PAGE_THRESHOLD 2048UL
+
 /* ---- 节点池 ---- */
 #define RAMFS_MAX_NODES   512   /* inode + dentry 成对，最多 512 个文件/目录 */
 
@@ -32,6 +41,7 @@ typedef struct ramfs_node {
     struct ramfs_node *sibling; /* 下一个兄弟节点 */
     char     *data;             /* 文件数据缓冲（kmalloc），目录为 NULL；软链接存目标路径 */
     unsigned long cap;          /* data 缓冲容量 */
+    unsigned long data_pages;   /* !=0 表示 data 由 pmm 页对齐分配（恒等映射），值为页数 */
     int       used;             /* 该槽是否被占用 */
     /* ---- M3.5 硬链接：共享 inode 数据体 ---- */
     struct ramfs_node *link_to; /* !=NULL 表示本节点为硬链接，指向承载数据的主节点 */
@@ -78,6 +88,19 @@ static ramfs_node_t *node_alloc(void) {
     return 0;
 }
 
+/* M5.2d: 统一释放节点数据缓冲（区分 pmm 页 / kmalloc 块）。
+ * 释放后清零 data/cap/data_pages。 */
+static void node_free_data(ramfs_node_t *n) {
+    if (!n || !n->data) { if (n) { n->cap = 0; n->data_pages = 0; } return; }
+    if (n->data_pages) {
+        arch_x86_64_pmm_free_range((uint64_t)(unsigned long)n->data,
+                                   n->data_pages * RAMFS_PAGE_SIZE);
+    } else {
+        RAMFS_KFREE(n->data);
+    }
+    n->data = 0; n->cap = 0; n->data_pages = 0;
+}
+
 static void node_free(ramfs_node_t *n) {
     if (!n) return;
     /* M3.5：硬链接节点——不释放共享数据，仅递减主节点 nlinks，回收自身槽 */
@@ -85,7 +108,7 @@ static void node_free(ramfs_node_t *n) {
         ramfs_node_t *body = n->link_to;
         if (body->inode.nlinks > 0) body->inode.nlinks--;
         n->link_to = 0;
-        n->data = 0; n->cap = 0; n->used = 0;
+        n->data = 0; n->cap = 0; n->data_pages = 0; n->used = 0;
         return;
     }
     /* 主节点且仍有其他硬链接：把数据体转移给一个存活的链接，将其提升为新主 */
@@ -97,6 +120,7 @@ static void node_free(ramfs_node_t *n) {
         if (heir) {
             heir->data = n->data;
             heir->cap  = n->cap;
+            heir->data_pages = n->data_pages;
             heir->link_to = 0;
             heir->inode.mode = n->inode.mode;
             heir->inode.size = n->inode.size;
@@ -108,12 +132,11 @@ static void node_free(ramfs_node_t *n) {
                 if (g_nodes[i].used && g_nodes[i].link_to == n) g_nodes[i].link_to = heir;
             }
             /* 旧主节点仅回收槽，数据已转移不释放 */
-            n->data = 0; n->cap = 0; n->used = 0;
+            n->data = 0; n->cap = 0; n->data_pages = 0; n->used = 0;
             return;
         }
     }
-    if (n->data) { RAMFS_KFREE(n->data); n->data = 0; }
-    n->cap = 0;
+    node_free_data(n);
     n->used = 0;
 }
 
@@ -140,6 +163,7 @@ static ramfs_node_t *node_create(ramfs_node_t *parent, const char *name, uint32_
     n->sibling = 0;
     n->data    = 0;
     n->cap     = 0;
+    n->data_pages = 0;
     if (parent) {
         /* 挂到 parent 子链表尾部 */
         if (!parent->child) {
@@ -467,18 +491,42 @@ static void ext4_list_pick(const char *path, int index,
 /* ---- 确保文件数据缓冲至少有 need 字节容量（按块扩容）---- */
 static int file_ensure_cap(ramfs_node_t *n, unsigned long need) {
     if (need <= n->cap) return 0;
-    /* 向上取整到 64 字节的整数倍，减少频繁 realloc */
-    unsigned long newcap = (need + 63UL) & ~63UL;
-    if (newcap < 64UL) newcap = 64UL;
-    char *nb = (char *)RAMFS_KMALLOC(newcap);
-    if (!nb) return -1;
+
+    char *nb;
+    unsigned long newcap;
+    unsigned long new_pages = 0;
+
+    if (need >= RAMFS_PAGE_THRESHOLD) {
+        /* 大块：走 pmm 页分配（恒等映射 phys==virt），避开 heap64 大块 bug */
+        new_pages = (need + RAMFS_PAGE_SIZE - 1UL) / RAMFS_PAGE_SIZE;
+        newcap = new_pages * RAMFS_PAGE_SIZE;
+        uint64_t pa = arch_x86_64_pmm_alloc_pages(new_pages);
+        if (!pa) return -1;
+        nb = (char *)(unsigned long)pa;
+    } else {
+        /* 小块：仍用 kmalloc，向上取整到 64 字节 */
+        newcap = (need + 63UL) & ~63UL;
+        if (newcap < 64UL) newcap = 64UL;
+        nb = (char *)RAMFS_KMALLOC(newcap);
+        if (!nb) return -1;
+    }
+
     rmemset(nb, 0, newcap);
     if (n->data && n->inode.size > 0) {
         rmemcpy(nb, n->data, n->inode.size);
     }
-    if (n->data) RAMFS_KFREE(n->data);
+    /* 释放旧缓冲：区分 pmm 页 / kmalloc 块 */
+    if (n->data) {
+        if (n->data_pages) {
+            arch_x86_64_pmm_free_range((uint64_t)(unsigned long)n->data,
+                                       n->data_pages * RAMFS_PAGE_SIZE);
+        } else {
+            RAMFS_KFREE(n->data);
+        }
+    }
     n->data = nb;
     n->cap  = newcap;
+    n->data_pages = new_pages;
     return 0;
 }
 
