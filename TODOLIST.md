@@ -1731,6 +1731,7 @@
   - [x] M5.3a：`libc/string.c` + `libc/string.h` — memcpy/memset/memmove/memcmp/memchr/strlen/strnlen/strcmp/strncmp/strcpy/strncpy/strcat/strncat/strchr/strrchr/strstr（纯计算零依赖）✅ 宿主机单测 ALL PASS，提交
   - [x] M5.3b：`libc/stdlib.c` + `libc/stdlib.h` + `libc/libc_sbrk.c` — malloc/free/calloc/realloc（freelist+coalescing，SYS_SBRK=253 扩堆）+ atoi/atol/strtol/strtoul/abs/labs/qsort/bsearch/rand/srand/exit/_Exit ✅ 宿主机单测 ALL PASS + freestanding 编译零警告，提交
   - [x] M5.3c：`libc/stdio.c` + `libc/stdio.h` + `libc/libc_write.c` — putchar/putc/fputc/puts/fputs/fwrite + printf/fprintf/snprintf/vsnprintf/vprintf/vfprintf（sink-based 格式化引擎：%d/i/u/x/X/o/p/c/s/%，flags -+0# space、width/precision、`*`、长度修饰 l/ll/h/hh/z）+ FILE/stdin/stdout/stderr（基于 SYS_WRITE=64）✅ 宿主机单测 ALL PASS + freestanding 编译零警告，提交
+  - [x] M5.3d：头文件对齐 — `stddef.h`（size_t/ptrdiff_t/NULL/offsetof，权威 size_t 定义）+ `stdint.h`（exact/least/fast/ptr/max 全宽度 + 限制宏 + INTxx_C）+ `stdbool.h` + `limits.h`（LP64）+ `ctype.h`/`ctype.c`（ASCII C-locale 14 函数）+ `errno.h`/`errno.c`（__errno_location，Linux 数值对齐 futex）+ `assert.h`/`assert.c`（__assert_fail）+ stdlib abort()。✅ 宿主机单测 37 项 ALL PASS + freestanding 编译零警告，提交
   - [ ] M5.3c：`libc/stdio.c` + `libc/stdio.h` — putchar/puts/printf/snprintf/vsnprintf/fputs/fputc/fwrite（基于 write syscall）+ FILE/stdin/stdout/stderr 抽象
   - [ ] M5.3d：标准头文件对齐 — ctype.h/errno.h/stddef.h/stdint.h/stdarg.h/assert.h + 汇整 `libc/libc.h` 总头
   - [ ] M5.3e：迁移 + 端到端验证 — hello64_v2/thread_demo64 等切到标准符号；build.sh 接入 libc 编译链；ring3 真机 PASS 无回归

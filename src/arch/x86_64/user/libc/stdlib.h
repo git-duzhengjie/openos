@@ -47,5 +47,6 @@ void srand(unsigned int seed);
 /* --- process termination --- */
 void _Exit(int status);
 void exit(int status);
+void abort(void);
 
 #endif /* OPENOS_LIBC_STDLIB_H */

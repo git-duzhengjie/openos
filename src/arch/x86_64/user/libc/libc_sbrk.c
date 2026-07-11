@@ -25,3 +25,9 @@ void _Exit(int status)
 }
 
 void exit(int status) { _Exit(status); }
+
+void abort(void)
+{
+    _Exit(134);   /* 128 + SIGABRT(6), matching the conventional shell status */
+    for (;;) { }
+}
