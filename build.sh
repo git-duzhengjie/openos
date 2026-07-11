@@ -155,6 +155,9 @@ case "${1:-}" in
     host-tools-bootstrap|bootstrap-host-tools)
         exec bash scripts/bootstrap-host-tools.sh --download
         ;;
+    opkg|opk|opkg-build)
+        exec bash tools/build_opk.sh
+        ;;
     i386|x86_64|aarch64)
         BUILD_ARCH="$1"
         shift
