@@ -17,7 +17,6 @@
 #include "../include/futex64.h"
 #ifndef OPENOS_UNIT_TEST
 #include "../include/tsc64.h"
-#include "../include/proc64.h"  /* M5.2e L4-DIAG: proc_current identity probe */
 #endif
 
 /* ------------------------------------------------------------------------- */
@@ -147,30 +146,6 @@ int arch_x86_64_futex_wait(uint64_t uaddr, uint32_t val, uint64_t timeout_ms) {
     uint64_t start = arch_x86_64_tsc_uptime_ms();
     int rc = 0;
 
-    /* M5.2e diag: prove the slot0 main-thread's syscall return frame (user_rip
-     * = saved rcx at baseline_rsp0 - 64) gets clobbered across a yield to a
-     * worker. The syscall entry pushes 8 regs (rcx is the 8th), so user_rip
-     * lives at baseline_top - 8*8 = baseline_top - 64. We snapshot it right
-     * before/after every yield and shout when it changes (esp. -> 0). */
-    extern void early_serial64_write(const char *);
-    extern void early_console64_write_hex64(uint64_t);
-    extern uint64_t arch_x86_64_percpu_baseline_rsp0(uint32_t);
-    extern uint32_t arch_x86_64_sched_current_slot(void);
-    uint64_t diag_base = arch_x86_64_percpu_baseline_rsp0(0u);
-    volatile uint64_t *diag_rip = (diag_base != 0u)
-        ? (volatile uint64_t *)(uintptr_t)(diag_base - 64u)
-        : (volatile uint64_t *)0;
-    uint64_t diag_last = (diag_rip != 0) ? *diag_rip : 0u;
-    {
-        early_serial64_write("[fwait diag] enter slot=");
-        early_console64_write_hex64((uint64_t)arch_x86_64_sched_current_slot());
-        early_serial64_write(" base=");
-        early_console64_write_hex64(diag_base);
-        early_serial64_write(" user_rip@base-64=");
-        early_console64_write_hex64(diag_last);
-        early_serial64_write("\n");
-    }
-
     for (;;) {
         if (g_futex_table[idx].woken) {
             rc = 0;
@@ -182,47 +157,6 @@ int arch_x86_64_futex_wait(uint64_t uaddr, uint32_t val, uint64_t timeout_ms) {
             break;
         }
         (void)arch_x86_64_proc_yield();
-        if (diag_rip != 0) {
-            uint64_t now = *diag_rip;
-            if (now != diag_last) {
-                early_serial64_write("[fwait diag] CLOBBER after yield: user_rip ");
-                early_console64_write_hex64(diag_last);
-                early_serial64_write(" -> ");
-                early_console64_write_hex64(now);
-                early_serial64_write("\n");
-                diag_last = now;
-            }
-        }
-    }
-
-    {
-        early_serial64_write("[fwait diag] exit rc=");
-        early_console64_write_hex64((uint64_t)(int64_t)rc);
-        early_serial64_write(" final user_rip@base-64=");
-        early_console64_write_hex64((diag_rip != 0) ? *diag_rip : 0u);
-        early_serial64_write("\n");
-
-        /* M5.2e L4-DIAG: prove proc_current() mis-identity. The main thread
-         * (execve user proc) parks here; if slot0.owner_proc==NULL then
-         * proc_current() falls back to the slot0 KERNEL PCB and its
-         * saved_user_frame is the STALE/zero kernel frame -> sysret returns
-         * to rip=0. Dump the PCB slot proc_current() resolves to and the
-         * rip/rsp it will iretq/sysret with. */
-        {
-            x86_64_proc_t *cur = arch_x86_64_proc_current();
-            early_serial64_write("[fwait diag L4] proc_current slot=");
-            early_console64_write_hex64(
-                (uint64_t)(cur ? arch_x86_64_proc_slot_of(cur) : 0xFFFFu));
-            early_serial64_write(" is_thread=");
-            early_console64_write_hex64((uint64_t)(cur ? cur->is_thread : 0xFFu));
-            early_serial64_write(" suf.rip=");
-            early_console64_write_hex64(cur ? cur->saved_user_frame.rip : 0u);
-            early_serial64_write(" suf.rsp=");
-            early_console64_write_hex64(cur ? cur->saved_user_frame.rsp : 0u);
-            early_serial64_write(" kret_rsp=");
-            early_console64_write_hex64(cur ? cur->kernel_return_rsp : 0u);
-            early_serial64_write("\n");
-        }
     }
 
     futex_release_slot(idx);

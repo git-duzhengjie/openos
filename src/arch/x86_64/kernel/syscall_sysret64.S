@@ -37,8 +37,21 @@ x86_64_syscall_entry:
      * The displacements 0x68 (syscall_user_rsp) and 0x60
      * (syscall_kernel_rsp) are pinned by _Static_assert in percpu64.c.
      */
-    movq %rsp, %gs:0x68          /* save user rsp */
+    movq %rsp, %gs:0x68          /* stash user rsp in scratch slot */
     movq %gs:0x60, %rsp          /* load kernel rsp (== TSS.RSP0) */
+
+    /*
+     * L5 FIX: the per-CPU syscall_user_rsp slot (%gs:0x68) is a SINGLE
+     * slot shared by all threads on this CPU. If this syscall blocks
+     * (e.g. futex_wait) and cooperatively switches to another thread
+     * that itself enters syscall, that thread overwrites %gs:0x68.
+     * When we later resume and reach the epilogue, restoring rsp from
+     * %gs:0x68 would load the OTHER thread's user rsp -> sysret onto the
+     * wrong user stack -> crash. Move the user rsp onto THIS thread's
+     * kernel stack (per-thread, immune to cross-thread clobber) so it
+     * is preserved across any context switch.
+     */
+    pushq %gs:0x68              /* [saved user rsp on kernel stack] */
 
     pushq %r15
     pushq %r14
@@ -78,10 +91,12 @@ x86_64_syscall_entry:
     popq %r15
 
     /*
-     * G.7c: restore user stack pointer that we saved on entry, then
-     * pair swapgs back to user GS and sysretq.
+     * L5 FIX: restore the user rsp we pushed onto the kernel stack at
+     * entry (see comment above). This is per-thread and cannot have
+     * been clobbered by another thread's syscall, unlike the old
+     * `movq %gs:0x68, %rsp` which read a shared per-CPU slot.
      */
-    movq %gs:0x68, %rsp
+    popq %rsp                   /* restore user rsp from kernel stack */
     swapgs
     sysretq
 
