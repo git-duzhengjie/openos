@@ -16,6 +16,8 @@
 
 #include "../include/proc64.h"
 #include "../include/address_space64.h"
+#include "../include/pmm64.h"
+#include "../include/vmm64.h"
 
 #include <stddef.h>
 
@@ -381,6 +383,12 @@ x86_64_proc_t *arch_x86_64_proc_fork_alloc_child(x86_64_proc_t *parent_pcb) {
     c->exit_code = 0;
     c->state = OPENOS_X86_64_PROC_RUNNING;
     proc_copy_name(c->name, parent_pcb->name);
+    /* M5.3e: fork() duplicates the parent's address space, so the child
+     * inherits the same heap layout and current break. Subsequent SYS_SBRK
+     * calls map fresh pages into the child's own AS copy. */
+    c->brk_base = parent_pcb->brk_base;
+    c->brk_cur  = parent_pcb->brk_cur;
+    c->brk_max  = parent_pcb->brk_max;
     /* M4.2: POSIX fork() signal inheritance — the child keeps the
      * parent's blocked mask and disposition table but starts with an
      * EMPTY pending set (pending signals are NOT inherited). */
@@ -531,6 +539,12 @@ x86_64_proc_t *arch_x86_64_proc_clone_thread(x86_64_proc_t *parent_pcb,
     c->exit_code = 0;
     c->state = OPENOS_X86_64_PROC_RUNNING;
     proc_copy_name(c->name, parent_pcb->name);
+    /* M5.3e: CLONE_VM threads share the creator's address space, so they
+     * MUST share the same heap break — malloc()/free() from any thread in
+     * the group operate on one heap. Inherit the brk cursors verbatim. */
+    c->brk_base = parent_pcb->brk_base;
+    c->brk_cur  = parent_pcb->brk_cur;
+    c->brk_max  = parent_pcb->brk_max;
 
     /* Signal disposition: CLONE_SIGHAND shares the handler table; we copy
      * it either way (openos has no shared-struct indirection yet) but a
@@ -990,5 +1004,100 @@ int arch_x86_64_proc_signal_group(uint32_t pgid, int sig) {
         if (proc_deliver_signal(p, sig) == 0) ++hits;
     }
     return hits;
+}
+
+/* ----------------------------------------------------------------------
+ * M5.3e — per-process user-space heap (brk/sbrk).
+ *
+ * The libc subset's malloc() grows the heap through SYS_SBRK(delta). This
+ * must return memory that is visible AND writable from ring3, i.e. pages
+ * mapped into the calling process' own address space with U=1. The older
+ * M4.1b vmem64 heap returns identity-mapped kernel addresses (U=0), which
+ * ring3 cannot touch — hence malloc() previously handed back unusable
+ * pointers and the demo faulted at cr2=0.
+ *
+ * Layout convention (matches usermode64.c stack/image mapping): every user
+ * virtual address equals USER_VBASE + phys. PMM is a bump allocator handing
+ * out low physical frames, so heap VAs never collide with the image/stack
+ * (each is a distinct physical frame => distinct VA).
+ *
+ * Heap window: [brk_base, brk_max). brk_base is lazily initialised on the
+ * first SYS_SBRK to sit at a fixed high offset inside PML4[1], giving the
+ * heap a private multi-MiB window. Grows one 4 KiB page at a time.
+ *
+ * Returns the PREVIOUS break (so libc carves [old, old+delta)), or
+ * (uint64_t)-1 on failure (bad AS / ENOMEM / out of window).
+ * ---------------------------------------------------------------------- */
+#define OPENOS_X86_64_USER_HEAP_OFFSET 0x0000000040000000ULL /* +1 GiB into PML4[1] */
+#define OPENOS_X86_64_USER_HEAP_WINDOW 0x0000000010000000ULL /* 256 MiB reserved   */
+
+uint64_t arch_x86_64_proc_user_sbrk(int64_t delta) {
+    x86_64_proc_t *cur = arch_x86_64_proc_current();
+    if (cur == (void *)0) return (uint64_t)-1;
+    struct x86_64_address_space *as = arch_x86_64_proc_current_get_as();
+    if (as == (void *)0) return (uint64_t)-1;
+
+    const uint64_t PAGE = OPENOS_X86_64_VMM_PAGE_SIZE;
+
+    /* Lazy init of the heap window on first use. */
+    if (cur->brk_base == 0u) {
+        cur->brk_base = OPENOS_X86_64_USER_VBASE + OPENOS_X86_64_USER_HEAP_OFFSET;
+        cur->brk_cur  = cur->brk_base;
+        cur->brk_max  = cur->brk_base + OPENOS_X86_64_USER_HEAP_WINDOW;
+    }
+
+    uint64_t old_brk = cur->brk_cur;
+
+    /* delta == 0: query current break. */
+    if (delta == 0) return old_brk;
+
+    /* Shrink: just move the cursor back (pages left mapped; simple & safe). */
+    if (delta < 0) {
+        uint64_t dec = (uint64_t)(-delta);
+        if (dec > (old_brk - cur->brk_base)) {
+            cur->brk_cur = cur->brk_base;
+        } else {
+            cur->brk_cur = old_brk - dec;
+        }
+        return old_brk;
+    }
+
+    /* Grow: map anonymous user pages to cover [old_brk, old_brk + delta). */
+    uint64_t new_brk = old_brk + (uint64_t)delta;
+    if (new_brk > cur->brk_max || new_brk < old_brk /* overflow */) {
+        return (uint64_t)-1; /* ENOMEM */
+    }
+
+    /* Page-aligned span that must be backed. old_brk may sit mid-page if a
+     * previous sub-page grow already mapped its page; start from the first
+     * page boundary at/above the last mapped byte. */
+    uint64_t map_from = (old_brk + PAGE - 1u) & ~(PAGE - 1u);
+    uint64_t map_to   = (new_brk + PAGE - 1u) & ~(PAGE - 1u);
+
+    const uint64_t flags = OPENOS_X86_64_AS_FLAG_P |
+                           OPENOS_X86_64_AS_FLAG_RW |
+                           OPENOS_X86_64_AS_FLAG_US;
+
+    for (uint64_t va = map_from; va < map_to; va += PAGE) {
+        x86_64_phys_addr_t phys = arch_x86_64_pmm_alloc_page();
+        if (phys == 0u) {
+            /* Out of physical memory: roll cursor forward only over what we
+             * actually mapped so callers see a consistent (short) break. */
+            cur->brk_cur = va;
+            return (uint64_t)-1;
+        }
+        /* Zero the fresh frame via its identity mapping before exposing it. */
+        uint64_t *ident = (uint64_t *)(uintptr_t)phys;
+        for (uint64_t q = 0; q < PAGE / sizeof(uint64_t); q++) ident[q] = 0u;
+
+        if (arch_x86_64_as_map_user(as, va, phys, PAGE, flags) != 0) {
+            arch_x86_64_pmm_free_page(phys);
+            cur->brk_cur = va;
+            return (uint64_t)-1;
+        }
+    }
+
+    cur->brk_cur = new_brk;
+    return old_brk;
 }
 

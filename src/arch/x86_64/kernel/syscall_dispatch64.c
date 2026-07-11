@@ -729,6 +729,18 @@ static uint64_t do_exec(uint64_t path_ptr, uint64_t argv_ptr, uint64_t envp_ptr)
         arch_x86_64_proc_current_set_as(new_as);
         arch_x86_64_as_activate(new_as);
         arch_x86_64_usermode_queue_as_destroy(old_as);
+
+        /* M5.3e: the new image gets a fresh, empty heap. The old heap lived
+         * in old_as (now queued for destruction), so reset the brk cursors
+         * to force lazy re-init on the next SYS_SBRK against new_as. */
+        {
+            x86_64_proc_t *self = arch_x86_64_proc_current();
+            if (self != NULL) {
+                self->brk_base = 0u;
+                self->brk_cur  = 0u;
+                self->brk_max  = 0u;
+            }
+        }
     }
     early_console64_write("[x86_64][exec] path=");
     early_console64_write(path);
@@ -1499,9 +1511,12 @@ static uint64_t do_brk(uint64_t addr) {
     return arch_x86_64_vmem_brk(addr);
 }
 
-/* SYS_SBRK(delta): grow/shrink heap; returns previous break or MAP_FAILED. */
+/* SYS_SBRK(delta): grow/shrink heap; returns previous break or MAP_FAILED.
+ * M5.3e: routed to the per-process user-space heap (U=1 pages in the caller's
+ * own address space) instead of the M4.1b kernel vmem heap, whose addresses
+ * are not visible to ring3. */
 static uint64_t do_sbrk(uint64_t delta) {
-    return arch_x86_64_vmem_sbrk((int64_t)delta);
+    return arch_x86_64_proc_user_sbrk((int64_t)delta);
 }
 
 /*

@@ -98,5 +98,19 @@ int openos64_main(int argc, char **argv, char **envp) {
     int ok = (g_counter == expect_counter) && (retsum == expect_retsum);
     write_str(OPENOS64_STDOUT_FILENO,
               ok ? "[thread] PASS\n" : "[thread] FAIL\n");
+
+    /* M5.3e launch-chain tail: hand off to /bin/libc_demo to exercise the
+     * standard C library subset (memcpy/malloc/printf/qsort/...) in ring3. */
+    if (ok) {
+        write_str(OPENOS64_STDOUT_FILENO,
+                  "[thread_demo] execve /bin/libc_demo (M5.3e)...\n");
+        char *const argv[] = { "/bin/libc_demo", 0 };
+        char *const envp[] = { 0 };
+        openos64_execve("/bin/libc_demo", argv, envp);
+        /* execve only returns on failure */
+        write_str(OPENOS64_STDOUT_FILENO,
+                  "[thread_demo] execve /bin/libc_demo FAILED\n");
+        return 1;
+    }
     return ok ? 0 : 1;
 }

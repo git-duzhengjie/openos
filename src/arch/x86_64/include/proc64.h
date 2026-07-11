@@ -250,6 +250,28 @@ typedef struct x86_64_proc {
     bool                      is_thread;
     uint64_t                  thread_entry;
     uint64_t                  thread_arg;
+
+    /* ------------------------------------------------------------------
+     * M5.3e — per-process user-space heap (brk/sbrk).
+     *
+     * The libc subset's malloc() grows the heap through SYS_SBRK. Unlike
+     * the M4.1b kernel-side vmem heap (which returns identity-mapped
+     * physical addresses NOT visible to ring3), this heap lives in the
+     * process' OWN address space: anonymous, user-accessible (U=1) pages
+     * mapped via arch_x86_64_as_map_user() into a dedicated high region.
+     *
+     *   brk_base : first virtual address of the heap region. Chosen at
+     *              spawn/exec time to sit well below the user stack and
+     *              above the loaded image. 0 == not yet initialised (lazy
+     *              init on first SYS_SBRK).
+     *   brk_cur  : current break (== brk_base + bytes handed out). Page
+     *              granularity is enforced by the kernel; sbrk() returns
+     *              the PREVIOUS break so libc can carve the new region.
+     *   brk_max  : hard ceiling for the heap region (brk_base + reserved
+     *              window). SYS_SBRK past this returns -1 (ENOMEM). */
+    uint64_t                  brk_base;
+    uint64_t                  brk_cur;
+    uint64_t                  brk_max;
 } x86_64_proc_t;
 
 /* Lifecycle ---------------------------------------------------------- */
@@ -425,6 +447,11 @@ int      arch_x86_64_proc_setpgid(uint32_t pid, uint32_t pgid);
 uint32_t arch_x86_64_proc_getsid(uint32_t pid);
 int      arch_x86_64_proc_setsid(void);
 int      arch_x86_64_proc_signal_group(uint32_t pgid, int sig);
+
+/* M5.3e: per-process user-space heap growth backing malloc()'s SYS_SBRK.
+ * Maps anonymous U=1 pages into the caller's address space. Returns the
+ * previous break, or (uint64_t)-1 on failure (bad AS / ENOMEM / window). */
+uint64_t arch_x86_64_proc_user_sbrk(int64_t delta);
 
 /* γ.4 S2d — family-list spinlock.
  *
