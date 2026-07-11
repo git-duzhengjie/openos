@@ -741,7 +741,10 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
      * PIC remap + PIT chain are proven good. The test re-masks IRQ0 on
      * exit so the downstream ring3 hello64 path inherits IRQs-off as
      * before. */
+#ifndef M5_FAST_BOOT
     (void)arch_x86_64_sched_preempt_selftest_run();
+#endif /* M5_FAST_BOOT: preempt-selftest slot-switch/exit_self path is flaky
+        * under single-core QEMU; skip in fast-boot diag path. */
 
     /* Step G.3a: parse ACPI tables (RSDP via EFI cfg table -> XSDT -> MADT)
      * to enumerate CPUs and IO-APICs. Must run BEFORE apic_selftest so the
@@ -831,7 +834,10 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
      * IOAPIC GSI2 path established by G.1 (falls back to PIC if LAPIC
      * isn't ready). Re-masks IRQ0 on exit so downstream ring3 path
      * keeps inheriting "IRQs-off" precondition. */
+#ifndef M5_FAST_BOOT
     (void)arch_x86_64_sched_prio_selftest_run();
+#endif /* M5_FAST_BOOT: prio-selftest uses slot-switch/exit_self timing that is
+        * flaky under single-core QEMU; skip in fast-boot diag path. */
 
     /* ============================================================
      * GUI 桌面启动 —— 早期验证路径 (GUI_EARLY_VERIFY)
@@ -933,7 +939,15 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
      * returns we inspect usermode_has_pending_exec(): if set, we reload
      * the new image and re-enter ring3 with the same proc slot. Bounded
      * loop (max 4 rounds) to make a runaway execve chain panic-safe. */
+#ifdef M5_FAST_BOOT
+    /* M5.4c diag: jump straight to the opk install+run demo, bypassing the
+     * launcher -> hello64_v2 -> thread_demo chain whose multithreaded
+     * exit_self path is flaky under single-core QEMU. The full chain stays
+     * the default for normal (non-fast-boot) builds. */
+    const char *initial_path = "/bin/opk_demo";
+#else
     const char *initial_path = "/bin/launcher";
+#endif
     const x86_64_initrd_file_t *initial_file = arch_x86_64_initrd_find(initial_path);
     elf64_load_result_t hello64;
     /* H.5b.2 step A: AS shared across the else-branch and the

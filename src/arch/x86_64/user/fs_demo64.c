@@ -139,6 +139,12 @@ int openos64_main(int argc, char **argv, char **envp)
     printf("[fs_demo] results: %d passed, %d failed\n", g_pass, g_fail);
     if (g_fail == 0) {
         printf("[fs] PASS\n");
+        /* M5.4c launch-chain tail: hand off to /bin/opk_demo to exercise
+         * the .opk package installer end to end. */
+        char *const argv[] = { "/bin/opk_demo", 0 };
+        printf("[fs_demo] execve /bin/opk_demo (M5.4c)...\n");
+        openos64_execve("/bin/opk_demo", argv, envp);
+        printf("[fs_demo] execve /bin/opk_demo FAILED\n");
         return 0;
     }
     printf("[fs] FAIL\n");

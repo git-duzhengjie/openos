@@ -958,19 +958,32 @@ int arch_x86_64_syscall_selftest_run(void) {
         }
         log_kv_hex("[x86_64][selftest] M4.1b brk cur=", cur_brk);
 
-        /* sbrk(+page) returns previous break == cur_brk, then grows */
+        /* sbrk(+page) returns previous break == cur_brk, then grows.
+         *
+         * M5.3e note: SYS_SBRK was re-routed to the per-process user-space
+         * heap (U=1 pages in the caller's own address space). This kernel-side
+         * selftest runs before any ring3 process exists, so there is no current
+         * process / address space to grow -- the call legitimately returns -1.
+         * The real sbrk/malloc validation now lives in the ring3 libc/opk demo.
+         * Only treat -1 as a hard failure when a user process context exists. */
         uint64_t prev = do_syscall(SYS_SBRK, page, 0u, 0u);
         if (prev == (uint64_t)-1) {
-            early_console64_write("[x86_64][selftest] FAIL M4.1b sbrk grow failed\n");
-            return 45;
+            if (arch_x86_64_proc_current() == (void *)0) {
+                early_console64_write("[x86_64][selftest] SKIP M4.1b sbrk "
+                                      "(no ring3 ctx; user-heap tested in libc demo)\n");
+            } else {
+                early_console64_write("[x86_64][selftest] FAIL M4.1b sbrk grow failed\n");
+                return 45;
+            }
+        } else {
+            uint64_t after = do_syscall(SYS_BRK, 0u, 0u, 0u);
+            if (after != prev + page) {
+                early_console64_write("[x86_64][selftest] FAIL M4.1b sbrk break not advanced\n");
+                return 46;
+            }
+            /* give it back */
+            (void)do_syscall(SYS_SBRK, (uint64_t)(-(int64_t)page), 0u, 0u);
         }
-        uint64_t after = do_syscall(SYS_BRK, 0u, 0u, 0u);
-        if (after != prev + page) {
-            early_console64_write("[x86_64][selftest] FAIL M4.1b sbrk break not advanced\n");
-            return 46;
-        }
-        /* give it back */
-        (void)do_syscall(SYS_SBRK, (uint64_t)(-(int64_t)page), 0u, 0u);
 
         early_console64_write("[x86_64][selftest] M4.1b mmap/munmap/mprotect/brk/sbrk path OK\n");
     }

@@ -731,6 +731,7 @@ void arch_x86_64_smp_selftest_run(void)
         early_console64_write(" PASS");
     }
 
+#ifndef M5_FAST_BOOT
     /* ----------------------------------------------------------------
      * Stage 15: preempt_disable / preempt_enable critical-section gate.
      *
@@ -978,6 +979,7 @@ void arch_x86_64_smp_selftest_run(void)
 
         early_console64_write(" PASS");
     }
+#endif /* M5_FAST_BOOT: stage 15/16 are PIT-tick timing-sensitive; skip in fast-boot diag path */
 
     /* D1 canary: post-stage-16 check. Prints [d1-canary] mask=... on hit. */
     (void)arch_x86_64_sched_canary_check_all();

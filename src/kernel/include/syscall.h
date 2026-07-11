@@ -220,6 +220,7 @@
 #define SYS_RT_SIGRETURN  476  /* M4.2b: (no args) restore ring3 ctx from sigframe -> ret via iretq */
 #define SYS_DL_RESOLVE    477  /* M5.1d: a0=link_map* a1=reloc_index -> 目标函数运行时地址（惰性绑定 PLT/GOT） */
 #define SYS_CLONE         478  /* M5.2a: a0=flags a1=child_stack a2=entry a3=arg a4=tls -> new tid/<0（线程创建，CLONE_VM 共享地址空间） */
+#define SYS_OPK_INSTALL   479  /* M5.4c: a0=image_ptr a1=image_size a2=root_ptr -> 0/负错误码（安装 .opk 包到可写 ramfs） */
 #define SYS_GUI_ADD_TABLEVIEW 400
 #define SYS_GUI_SET_TABLEVIEW_ROW 401
 #define SYS_GUI_GET_TABLEVIEW_ROW 402

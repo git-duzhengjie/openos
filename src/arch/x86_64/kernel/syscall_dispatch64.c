@@ -27,6 +27,7 @@
 #include "../include/address_space64.h"
 #include "../include/fdtable64.h"
 #include "../include/heap64.h"
+#include "../include/pmm64.h" /* M5.4c: page-aligned image buffer for opk install */
 #include "../include/initrd64.h"
 #include "../include/net64.h"
 #include "../include/syscall_net64.h" /* split-out network syscall backends */
@@ -36,6 +37,10 @@
 #include "../include/tsc64.h"
 #include "../include/usermode64.h"
 #include "../include/vfs64.h"
+#include "../include/opk_install.h" /* M5.4c: .opk 包安装器 */
+/* M5.4c: kernel-side .opk installer bridge (opk_install_kernel.c) */
+extern int opk_install_to_ramfs(const uint8_t *image, uint32_t image_size,
+                                const char *root, opk_install_result_t *result);
 #include "../include/percpu64.h"
 #include "../include/sfdtable64.h" /* M4.1a: syscall fd -> vfs fd indirection */
 #include "../include/pipe64.h" /* M4.1c: anonymous pipe pool for pipe/dup/dup2 */
@@ -1529,6 +1534,79 @@ static uint64_t do_sbrk(uint64_t delta) {
 }
 
 /*
+ * SYS_OPK_INSTALL (479) — M5.4c: install an in-memory .opk package image
+ * into the writable ramfs.
+ *   a0 = image_ptr (user)   a1 = image_size   a2 = root_ptr (user, C-string)
+ * Returns 0 on success or a negative OPK_ERR_* code. The image and root
+ * string are validated to lie in the user's address space; root is copied
+ * into a bounded kernel buffer so the installer never dereferences a raw
+ * user pointer for path building.
+ */
+static uint64_t do_opk_install(uint64_t image_ptr, uint64_t image_size,
+                               uint64_t root_ptr) {
+    if (image_size == 0 || image_size > (16u * 1024u * 1024u))
+        return (uint64_t)(int64_t)OPK_ERR_ARG;
+    if (!validate_user_buf(image_ptr, image_size))
+        return (uint64_t)(int64_t)OPK_ERR_ARG;
+    if (!validate_user_buf(root_ptr, 1))
+        return (uint64_t)(int64_t)OPK_ERR_ARG;
+
+    /* copy the root path into a bounded kernel buffer (NUL-terminated) */
+    char root[128];
+    const char *uroot = (const char *)(uintptr_t)root_ptr;
+    uint32_t i = 0;
+    for (; i < sizeof(root) - 1; i++) {
+        if (!validate_user_buf(root_ptr + i, 1)) return (uint64_t)(int64_t)OPK_ERR_ARG;
+        char c = uroot[i];
+        root[i] = c;
+        if (c == '\0') break;
+    }
+    if (i == sizeof(root) - 1) root[i] = '\0';
+    if (root[0] != '/') return (uint64_t)(int64_t)OPK_ERR_ARG;
+
+    /*
+     * Copy the image into a page-aligned kernel buffer before installing.
+     * heap64's kmalloc has a known large/cross-page bug where the middle of
+     * an allocation can be overlap-zeroed when neighbouring allocations churn
+     * (ramfs works around this by using pmm page allocation above a threshold,
+     * see ramfs64.c). The installer walks the TOC while calling back into the
+     * VFS to write each entry; those ramfs allocations were clobbering the
+     * kmalloc'd image mid-install (observed: entry[1].name zeroed after
+     * entry[0] was written). Allocating the image via pmm pages puts it in an
+     * identity-mapped region that never shares a heap64 block with ramfs, so
+     * the source stays immutable for the whole install.
+     */
+    uint64_t kimg_pages = ((uint64_t)image_size + 4095u) / 4096u;
+    uint64_t kimg_pa = arch_x86_64_pmm_alloc_pages(kimg_pages);
+    if (!kimg_pa) return (uint64_t)(int64_t)OPK_ERR_ARG;
+    void *kimg = (void *)(uintptr_t)kimg_pa;
+    {
+        const uint8_t *usrc = (const uint8_t *)(uintptr_t)image_ptr;
+        uint8_t *kdst = (uint8_t *)kimg;
+        for (uint32_t b = 0; b < (uint32_t)image_size; b++) kdst[b] = usrc[b];
+    }
+
+    opk_install_result_t res;
+    for (uint32_t k = 0; k < OPK_PKGNAME_MAX; k++) res.pkgname[k] = 0;
+    res.files_installed = 0;
+    res.bytes_written = 0;
+
+    int r = opk_install_to_ramfs((const uint8_t *)kimg,
+                                 (uint32_t)image_size, root, &res);
+    arch_x86_64_pmm_free_range(kimg_pa, kimg_pages * 4096u);
+    if (r == OPK_OK) {
+        early_console64_write("[opk] installed '");
+        early_console64_write(res.pkgname);
+        early_console64_write("'\n");
+    } else {
+        early_console64_write("[opk] install FAILED rc=-0x");
+        early_console64_write_hex64((unsigned long long)(int64_t)(-r));
+        early_console64_write("\n");
+    }
+    return (uint64_t)(int64_t)r;
+}
+
+/*
  * SYS_YIELD: Step E.1 routes the call through proc64's cooperative yield
  * counter. The dispatcher itself stays branchless so future sched64 work
  * only has to swap proc64_yield()'s body for a real reschedule. We still
@@ -1857,6 +1935,7 @@ uint64_t arch_x86_64_syscall_dispatch_common(uint64_t num,
     case SYS_MPROTECT:      return do_mprotect(a0, a1, a2);
     case SYS_BRK:           return do_brk(a0);
     case SYS_SBRK:          return do_sbrk(a0);
+    case SYS_OPK_INSTALL:   return do_opk_install(a0, a1, a2); /* M5.4c: 安装 .opk 包 */
 
     /* -------- net (Step E.3, loopback only) -------- */
     case SYS_SOCKET:      return arch_x86_64_sys_socket(a0, a1, a2);

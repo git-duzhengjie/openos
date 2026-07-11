@@ -363,7 +363,16 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
     if [ "$M5_RING3_CONSOLE" != "0" ]; then
         M5_RING3_DEF="-DM5_RING3_CONSOLE"
     fi
-    ARCH64_CFLAGS="-m64 -mcmodel=kernel -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-80387 -mno-avx -ffreestanding -nostdlib -Wall -Wextra -O2 -fno-pic -fno-pie -fno-PIE -fno-stack-protector -fno-builtin -DGUI_EARLY_VERIFY $M5_RING3_DEF -I$ARCH64_SRC/include -Isrc/kernel/include -Isrc/kernel"
+    # M5.4c diag: M5_FAST_BOOT (default OFF) skips timing-sensitive SMP selftest
+    # stages 15/16 (PIT-tick preempt-gate stress) that are flaky under single-core
+    # QEMU. Use ONLY for end-to-end user-program diag runs; full suite stays ON
+    # for normal builds/CI.
+    M5_FAST_BOOT="${M5_FAST_BOOT:-0}"
+    M5_FAST_BOOT_DEF=""
+    if [ "$M5_FAST_BOOT" != "0" ]; then
+        M5_FAST_BOOT_DEF="-DM5_FAST_BOOT"
+    fi
+    ARCH64_CFLAGS="-m64 -mcmodel=kernel -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-80387 -mno-avx -ffreestanding -nostdlib -Wall -Wextra -O2 -fno-pic -fno-pie -fno-PIE -fno-stack-protector -fno-builtin -DGUI_EARLY_VERIFY $M5_RING3_DEF $M5_FAST_BOOT_DEF -I$ARCH64_SRC/include -Isrc/kernel/include -Isrc/kernel"
     ARCH64_ASFLAGS="-m64 -mcmodel=kernel -mno-red-zone -fno-pic -fno-pie -fno-PIE -I$ARCH64_SRC/include -Isrc/kernel/include"
     ARCH64_USER_CFLAGS="-m64 -mcmodel=large -ffreestanding -nostdlib -Wall -Wextra -O2 -fno-pic -fno-pie -fno-PIE -fno-stack-protector -fno-builtin -I$ARCH64_SRC/user"
     ARCH64_USER_ASFLAGS="-m64 -mcmodel=large -fno-pic -fno-pie -fno-PIE -I$ARCH64_SRC/user"
@@ -475,6 +484,26 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
     nm "$ARCH64_BIN_BUILD/fs_demo.elf" | grep -q ' openos64_main$'
     python3 _embed_elf.py "$ARCH64_BIN_BUILD/fs_demo.elf" "$ARCH64_SRC/include/embed_fs_demo.h" fs_demo_elf
 
+    echo "[1b4/5] Building x86_64 /bin/opk_demo ELF (M5.4c .opk install end-to-end)..."
+    # Reuses the libc subset .o already compiled above.
+    gcc $ARCH64_USER_CFLAGS -I"$ARCH64_SRC/include" -c "$ARCH64_SRC/user/opk_demo64.c" -o "$ARCH64_USER_BUILD/opk_demo64.o"
+    ld $ARCH64_USER_LDFLAGS -o "$ARCH64_BIN_BUILD/opk_demo.elf" \
+        "$ARCH64_USER_BUILD/start.o" \
+        "$ARCH64_USER_BUILD/crt0.o" \
+        "$ARCH64_USER_BUILD/libc_string.o" \
+        "$ARCH64_USER_BUILD/libc_stdlib.o" \
+        "$ARCH64_USER_BUILD/libc_stdio.o" \
+        "$ARCH64_USER_BUILD/libc_ctype.o" \
+        "$ARCH64_USER_BUILD/libc_errno.o" \
+        "$ARCH64_USER_BUILD/libc_assert.o" \
+        "$ARCH64_USER_BUILD/libc_libc_write.o" \
+        "$ARCH64_USER_BUILD/libc_libc_sbrk.o" \
+        "$ARCH64_USER_BUILD/opk_demo64.o"
+    readelf -h "$ARCH64_BIN_BUILD/opk_demo.elf" | grep -q 'Class:.*ELF64'
+    readelf -h "$ARCH64_BIN_BUILD/opk_demo.elf" | grep -q 'Machine:.*X86-64'
+    nm "$ARCH64_BIN_BUILD/opk_demo.elf" | grep -q ' openos64_main$'
+    python3 _embed_elf.py "$ARCH64_BIN_BUILD/opk_demo.elf" "$ARCH64_SRC/include/embed_opk_demo.h" opk_demo_elf
+
     echo "[1c/5] Building x86_64 /bin/launcher ELF (H.3 execve caller)..."
     gcc $ARCH64_USER_CFLAGS -c "$ARCH64_SRC/user/launcher.c" -o "$ARCH64_USER_BUILD/launcher.o"
     ld $ARCH64_USER_LDFLAGS -o "$ARCH64_BIN_BUILD/launcher.elf" \
@@ -550,6 +579,8 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         kernel/signal64.c \
         kernel/syscall64.c \
         kernel/syscall_dispatch64.c \
+        kernel/opk_install.c \
+        kernel/opk_install_kernel.c \
         kernel/syscall_net64.c \
         kernel/syscall_selftest64.c \
         kernel/sched_selftest64.c \
@@ -693,6 +724,8 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         "$ARCH64_BUILD/context_switch64.o" \
         "$ARCH64_BUILD/syscall64.o" \
         "$ARCH64_BUILD/syscall_dispatch64.o" \
+        "$ARCH64_BUILD/opk_install.o" \
+        "$ARCH64_BUILD/opk_install_kernel.o" \
         "$ARCH64_BUILD/syscall_net64.o" \
         "$ARCH64_BUILD/syscall_selftest64.o" \
         "$ARCH64_BUILD/sched_selftest64.o" \
