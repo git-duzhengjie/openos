@@ -569,6 +569,11 @@ void arch_x86_64_exception_dispatch(struct x86_64_exception_frame *frame) {
         early_console64_write_hex64(frame->ss);
         early_console64_write(" cr2=");
         early_console64_write_hex64(cr2);
+        {
+            extern uint32_t arch_x86_64_sched_current_slot(void);
+            early_console64_write(" cur_slot=");
+            early_console64_write_hex64((uint64_t)arch_x86_64_sched_current_slot());
+        }
 
         /* On a #PF, walk current CR3 for cr2 and dump the PTE chain so we
          * can tell "unmapped" from "present-but-wrong-perms". */

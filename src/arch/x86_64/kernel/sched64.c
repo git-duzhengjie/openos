@@ -1111,6 +1111,24 @@ void arch_x86_64_sched_exit_self(void) {
         early_console64_write_hex64((uint64_t)(uintptr_t)to->rsp);
         early_serial64_write("\n");
     }
+    {
+        /* M5.2e diag: dump the frame the next slot's ctx.rsp points at,
+         * to prove whether the iretq boot-frame (rip@+8) got clobbered
+         * between spawn and dispatch. */
+        extern void early_serial64_write(const char *);
+        volatile uint64_t *fr = (volatile uint64_t *)(uintptr_t)to->rsp;
+        if (fr != 0) {
+            early_serial64_write("[exit_self] frame@");
+            early_console64_write_hex64((uint64_t)(uintptr_t)fr);
+            early_serial64_write(" f0=");
+            early_console64_write_hex64(fr[0]);
+            early_serial64_write(" f1(rip)=");
+            early_console64_write_hex64(fr[1]);
+            early_serial64_write(" f4(rsp)=");
+            early_console64_write_hex64(fr[4]);
+            early_serial64_write("\n");
+        }
+    }
     sched_apply_rsp0_for_next(nxt);
     /* `from == NULL` tells context_switch64.S to skip saving. */
     arch_x86_64_context_switch(NULL, to);
