@@ -17,6 +17,7 @@
 #include "../include/futex64.h"
 #ifndef OPENOS_UNIT_TEST
 #include "../include/tsc64.h"
+#include "../include/proc64.h"  /* M5.2e L4-DIAG: proc_current identity probe */
 #endif
 
 /* ------------------------------------------------------------------------- */
@@ -200,6 +201,28 @@ int arch_x86_64_futex_wait(uint64_t uaddr, uint32_t val, uint64_t timeout_ms) {
         early_serial64_write(" final user_rip@base-64=");
         early_console64_write_hex64((diag_rip != 0) ? *diag_rip : 0u);
         early_serial64_write("\n");
+
+        /* M5.2e L4-DIAG: prove proc_current() mis-identity. The main thread
+         * (execve user proc) parks here; if slot0.owner_proc==NULL then
+         * proc_current() falls back to the slot0 KERNEL PCB and its
+         * saved_user_frame is the STALE/zero kernel frame -> sysret returns
+         * to rip=0. Dump the PCB slot proc_current() resolves to and the
+         * rip/rsp it will iretq/sysret with. */
+        {
+            x86_64_proc_t *cur = arch_x86_64_proc_current();
+            early_serial64_write("[fwait diag L4] proc_current slot=");
+            early_console64_write_hex64(
+                (uint64_t)(cur ? arch_x86_64_proc_slot_of(cur) : 0xFFFFu));
+            early_serial64_write(" is_thread=");
+            early_console64_write_hex64((uint64_t)(cur ? cur->is_thread : 0xFFu));
+            early_serial64_write(" suf.rip=");
+            early_console64_write_hex64(cur ? cur->saved_user_frame.rip : 0u);
+            early_serial64_write(" suf.rsp=");
+            early_console64_write_hex64(cur ? cur->saved_user_frame.rsp : 0u);
+            early_serial64_write(" kret_rsp=");
+            early_console64_write_hex64(cur ? cur->kernel_return_rsp : 0u);
+            early_serial64_write("\n");
+        }
     }
 
     futex_release_slot(idx);
