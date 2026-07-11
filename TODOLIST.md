@@ -1726,17 +1726,21 @@
   - [√] M5.2e：pthread 端到端 ring3 真机 PASS（4 worker + mutex 累加 counter=40000 + join retsum=10；提交 5c84d8c）
     - 真根因：syscall 入口用户 rsp 存 per-CPU 单槽 %gs:0x68，跨阻塞 syscall 被 worker 覆盖 → sysret 用错用户栈 → rip=0 崩溃
     - 修复（L5 FIX）：用户 rsp 改存内核栈上，随内核栈上下文自然保存/恢复，根治单槽竞态
-- [ ] M5.3：标准 C 库对齐（向 musl/newlib 兼容子集靠拢，便于移植第三方软件）
+- [√] M5.3：标准 C 库对齐（向 musl/newlib 兼容子集靠拢，便于移植第三方软件）
   - 背景：现有用户态运行时全塞在 `user/openos64.h`（18KB 单头），符号全是私有 `openos64_*`，无标准 C 库符号名（malloc/free/memcpy/memset/strlen/printf 等），第三方软件无法直接链接。M5.3 目标是提供导出**标准符号名**的 libc 子集，建 `user/libc/` 分文件管理。
   - [x] M5.3a：`libc/string.c` + `libc/string.h` — memcpy/memset/memmove/memcmp/memchr/strlen/strnlen/strcmp/strncmp/strcpy/strncpy/strcat/strncat/strchr/strrchr/strstr（纯计算零依赖）✅ 宿主机单测 ALL PASS，提交
   - [x] M5.3b：`libc/stdlib.c` + `libc/stdlib.h` + `libc/libc_sbrk.c` — malloc/free/calloc/realloc（freelist+coalescing，SYS_SBRK=253 扩堆）+ atoi/atol/strtol/strtoul/abs/labs/qsort/bsearch/rand/srand/exit/_Exit ✅ 宿主机单测 ALL PASS + freestanding 编译零警告，提交
   - [x] M5.3c：`libc/stdio.c` + `libc/stdio.h` + `libc/libc_write.c` — putchar/putc/fputc/puts/fputs/fwrite + printf/fprintf/snprintf/vsnprintf/vprintf/vfprintf（sink-based 格式化引擎：%d/i/u/x/X/o/p/c/s/%，flags -+0# space、width/precision、`*`、长度修饰 l/ll/h/hh/z）+ FILE/stdin/stdout/stderr（基于 SYS_WRITE=64）✅ 宿主机单测 ALL PASS + freestanding 编译零警告，提交
   - [x] M5.3d：头文件对齐 — `stddef.h`（size_t/ptrdiff_t/NULL/offsetof，权威 size_t 定义）+ `stdint.h`（exact/least/fast/ptr/max 全宽度 + 限制宏 + INTxx_C）+ `stdbool.h` + `limits.h`（LP64）+ `ctype.h`/`ctype.c`（ASCII C-locale 14 函数）+ `errno.h`/`errno.c`（__errno_location，Linux 数值对齐 futex）+ `assert.h`/`assert.c`（__assert_fail）+ stdlib abort()。✅ 宿主机单测 37 项 ALL PASS + freestanding 编译零警告，提交
   - [x] M5.3e（收官）：build.sh 接入 libc 全部 .c（string/stdlib/stdio/ctype/errno/assert + libc_sbrk/libc_write）编入用户程序构建链；`libc_demo64.c` 调用标准符号（malloc/free/realloc/calloc/printf/snprintf/qsort/bsearch/strtol/str*/mem*）；proc64.c clone 线程组共享 AS 同时继承 brk 游标（堆共享）；QEMU ring3 真机端到端 **34 passed / 0 failed，[libc] PASS，post-exit-sentry PASS，无 PANIC/#PF**，提交 ✅ **M5.3 全系列完成** 🎉
-  - [ ] M5.3c：`libc/stdio.c` + `libc/stdio.h` — putchar/puts/printf/snprintf/vsnprintf/fputs/fputc/fwrite（基于 write syscall）+ FILE/stdin/stdout/stderr 抽象
-  - [ ] M5.3d：标准头文件对齐 — ctype.h/errno.h/stddef.h/stdint.h/stdarg.h/assert.h + 汇整 `libc/libc.h` 总头
-  - [ ] M5.3e：迁移 + 端到端验证 — hello64_v2/thread_demo64 等切到标准符号；build.sh 接入 libc 编译链；ring3 真机 PASS 无回归
+
 - [ ] M5.4：包管理 / 软件安装机制（最小可用的程序分发）
+  - 背景：当前所有用户程序（hello64/thread_demo/libc_demo/ifconfig/ping/wget 等）都靠 `embed_*.h` 编译期硬嵌入 initrd，`initrd64.c` 是唯一 consumer。要"安装新软件"必须改内核源码重编，本质上没有运行时分发能力。M5.4 目标：让程序能以**包**的形式在运行时被安装/卸载/查询，落到一个可写的存储层，被 ELF loader 直接加载执行。
+  - [ ] M5.4a：可写文件系统层（ramfs 读写节点）— 现有 vfs64 只读（initrd 挂载）。新增可写内存 FS：create/write/append/truncate/unlink/mkdir/readdir，支撑 /pkg 与 /bin 可写目录；宿主机单测覆盖节点增删改查
+  - [ ] M5.4b：包格式定义 + 打包工具 — 定义最小包格式 `.opk`（header magic/version + metadata: name/version/arch/entry + 段表 + payload ELF/资源），host 侧 `tools/opkg-build`（Python/C）把一个 ELF + manifest 打成 .opk；宿主机单测：打包→解析回读字段一致
+  - [ ] M5.4c：内核侧包安装器 — 解析 .opk（校验 magic/arch/checksum）→ 释放 payload 到可写 FS（/pkg/<name>/ + 符号链接 /bin/<name>）→ 维护已安装包注册表（name→version→路径）；SYS_PKG_INSTALL/REMOVE/QUERY syscall；宿主机单测：安装→查询→卸载闭环
+  - [ ] M5.4d：用户态包管理器 `opkg` CLI — ring3 程序：`opkg install <file.opk>` / `opkg remove <name>` / `opkg list` / `opkg info <name>`，走 M5.4c syscall；标准符号（用 M5.3 libc）
+  - [ ] M5.4e（收官）：端到端验证 — 构建一个独立 demo 程序打成 .opk（不 embed 进 initrd）→ 运行时 `opkg install` → `/bin/<name>` 出现 → execve 加载执行 PASS → `opkg remove` 后再 execve 返回 ENOENT；QEMU ring3 真机端到端无 PANIC/#PF
 
 ### M6：现代体验与安全（🟡 第三优先级）
 
