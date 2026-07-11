@@ -1718,7 +1718,14 @@
   - [√] M5.1b：静态重定位引擎（RELATIVE/64/GLOB_DAT/JUMP_SLOT 立即绑定/IRELATIVE）
   - [√] M5.1c：跨模块符号解析（全局符号表 16 模块，GLOBAL>WEAK、load-order 优先）
   - [√] M5.1d：真惰性绑定 PLT/GOT（_dl_runtime_resolve trampoline + SYS_DL_RESOLVE=477 + link_map 白名单；单测 6/6，elf64 系列 15/15 全绿）
-- [ ] M5.2：用户态多线程（clone / pthread / 用户级线程库）
+- [√] M5.2：用户态多线程（clone / pthread / 用户级线程库）
+  - [√] M5.2a：clone(478) 线程创建（线程组共享 AS，独立 PCB/内核栈/用户栈；提交 6d3720e）
+  - [√] M5.2b：新线程拉进 ring3（独立 iretq frame + 用户栈，entry 复用；context_switch 保存 bootstrap_context）
+  - [√] M5.2c：futex（PRIVATE 语义，用户虚拟地址作键；compare-then-park 防 lost-wakeup；协作式 sti/hlt spin-yield；TSC 超时；64 槽静态等待表；宿主机单测 7/7；提交 249b718）
+  - [√] M5.2d：极简 pthread 子集（create/join/exit/self + futex-based mutex）；execve double-alloc 时序修复
+  - [√] M5.2e：pthread 端到端 ring3 真机 PASS（4 worker + mutex 累加 counter=40000 + join retsum=10；提交 5c84d8c）
+    - 真根因：syscall 入口用户 rsp 存 per-CPU 单槽 %gs:0x68，跨阻塞 syscall 被 worker 覆盖 → sysret 用错用户栈 → rip=0 崩溃
+    - 修复（L5 FIX）：用户 rsp 改存内核栈上，随内核栈上下文自然保存/恢复，根治单槽竞态
 - [ ] M5.3：标准 C 库对齐（向 musl/newlib 兼容子集靠拢，便于移植第三方软件）
 - [ ] M5.4：包管理 / 软件安装机制（最小可用的程序分发）
 
