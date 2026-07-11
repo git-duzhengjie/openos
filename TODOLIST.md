@@ -1736,7 +1736,7 @@
 
 - [ ] M5.4：包管理 / 软件安装机制（最小可用的程序分发）
   - 背景：当前所有用户程序（hello64/thread_demo/libc_demo/ifconfig/ping/wget 等）都靠 `embed_*.h` 编译期硬嵌入 initrd，`initrd64.c` 是唯一 consumer。要"安装新软件"必须改内核源码重编，本质上没有运行时分发能力。M5.4 目标：让程序能以**包**的形式在运行时被安装/卸载/查询，落到一个可写的存储层，被 ELF loader 直接加载执行。
-  - [ ] M5.4a：可写文件系统层（ramfs 读写节点）— 现有 vfs64 只读（initrd 挂载）。新增可写内存 FS：create/write/append/truncate/unlink/mkdir/readdir，支撑 /pkg 与 /bin 可写目录；宿主机单测覆盖节点增删改查
+  - [x] M5.4a：可写文件系统层（ramfs 读写节点）— 发现内核已有完整可写 VFS（`gui64/ramfs64.c` 1519 行，目录树 + open/read/write/lseek/truncate/mkdir/rmdir/unlink）且 do_exec 已"vfs 优先 initrd 兑底"。本子步补齐：① 用户态 openos64.h 文件 API 封装（lseek/mkdir/unlink/rmdir/stat + openos64_stat_t 精确对齐内核布局 + O_* flags 对齐内核原生值 O_CREAT=0x100/O_TRUNC=0x200）；② 内核补 `do_rmdir` + SYS_RMDIR(232) 分发（原缺失）；③ initrd MAX_FILES 16→32（新增程序超限会导致 mount 失败）；④ exec-chain round cap 4→6（hello→fork→thread→libc→fs 链需 5 环）。`fs_demo64.c` 真机端到端：mkdir/open O_CREAT/write/read/lseek(SET/END)/stat/unlink/rmdir **14 项全 PASS，[fs] PASS**，libc/thread 回归依旧 PASS，无真崩溃（stage 25/26 的 #PF/#GP 是内核自检可恢复探针，本身 PASS），提交
   - [ ] M5.4b：包格式定义 + 打包工具 — 定义最小包格式 `.opk`（header magic/version + metadata: name/version/arch/entry + 段表 + payload ELF/资源），host 侧 `tools/opkg-build`（Python/C）把一个 ELF + manifest 打成 .opk；宿主机单测：打包→解析回读字段一致
   - [ ] M5.4c：内核侧包安装器 — 解析 .opk（校验 magic/arch/checksum）→ 释放 payload 到可写 FS（/pkg/<name>/ + 符号链接 /bin/<name>）→ 维护已安装包注册表（name→version→路径）；SYS_PKG_INSTALL/REMOVE/QUERY syscall；宿主机单测：安装→查询→卸载闭环
   - [ ] M5.4d：用户态包管理器 `opkg` CLI — ring3 程序：`opkg install <file.opk>` / `opkg remove <name>` / `opkg list` / `opkg info <name>`，走 M5.4c syscall；标准符号（用 M5.3 libc）

@@ -14,6 +14,7 @@
 #include "../include/embed_hello_fork.h"  /* A2.P5: standalone fork/wait target */
 #include "../include/embed_thread_demo.h" /* M5.2d: clone+futex+pthread target */
 #include "../include/embed_libc_demo.h"    /* M5.3e: standard C library subset e2e */
+#include "../include/embed_fs_demo.h"      /* M5.4a: writable-VFS e2e */
 #include "../include/embed_launcher.h"     /* H.3: initial /bin/launcher  */
 #include "../include/embed_ifconfig64.h"   /* M1.5.3: /bin/ifconfig net tool */
 #include "../include/embed_ping64.h"       /* M1.5.3: /bin/ping net tool */
@@ -61,6 +62,9 @@ static const x86_64_initrd_file_t initrd_files[] = {
     /* M5.3e: /bin/libc_demo exercises the standard C library subset
      * (memcpy/malloc/printf/qsort/...). /bin/thread_demo execve's into it. */
     { .name = "/bin/libc_demo", .data = libc_demo_elf, .size = (x86_64_size_t)libc_demo_elf_size, .mode = 0755u },
+    /* M5.4a: /bin/fs_demo exercises the writable VFS (mkdir/open/write/read/
+     * lseek/stat/unlink/rmdir). /bin/libc_demo execve's into it. */
+    { .name = "/bin/fs_demo", .data = fs_demo_elf, .size = (x86_64_size_t)fs_demo_elf_size, .mode = 0755u },
     /* M1.5.3: userland network tools backed by the live virtio-net TCP/IP
      * stack (SYS_NETINFO/PING/DNSLOOKUP). */
     { .name = "/bin/ifconfig", .data = ifconfig64_elf, .size = (x86_64_size_t)ifconfig64_elf_size, .mode = 0755u },

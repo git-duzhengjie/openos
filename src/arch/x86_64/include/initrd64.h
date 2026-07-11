@@ -6,7 +6,7 @@
 #include "arch64_types.h"
 #include "bootinfo.h"
 
-#define OPENOS_X86_64_INITRD_MAX_FILES 16u
+#define OPENOS_X86_64_INITRD_MAX_FILES 32u
 #define OPENOS_X86_64_INITRD_NAME_MAX  64u
 #define OPENOS_X86_64_INITRD_MAGIC     0x494E52443634554CULL /* "INRD64UL" */
 

@@ -15,6 +15,13 @@
 #define OPENOS64_SYS_YIELD   201ULL
 #define OPENOS64_SYS_OPEN    225ULL
 #define OPENOS64_SYS_CLOSE   226ULL
+/* M5.4a: writable-VFS file operations (numbers mirror src/kernel/include/syscall.h) */
+#define OPENOS64_SYS_SEEK    229ULL
+#define OPENOS64_SYS_MKDIR   230ULL
+#define OPENOS64_SYS_UNLINK  231ULL
+#define OPENOS64_SYS_RMDIR   232ULL
+#define OPENOS64_SYS_STAT    236ULL
+#define OPENOS64_SYS_READDIR 239ULL
 #define OPENOS64_SYS_GETPPID 224ULL
 #define OPENOS64_SYS_EXEC    221ULL
 #define OPENOS64_SYS_FORK    220ULL
@@ -150,6 +157,63 @@ static inline int openos64_open(const char *path, int flags, int mode) {
 
 static inline int openos64_close(int fd) {
     return (int)openos64_syscall1(OPENOS64_SYS_CLOSE, (uint64_t)fd);
+}
+
+/* -------- M5.4a: writable-VFS file operations -------- */
+
+/* lseek whence values (mirror kernel do_lseek). */
+#define OPENOS64_SEEK_SET 0
+#define OPENOS64_SEEK_CUR 1
+#define OPENOS64_SEEK_END 2
+
+/* open flags (mirror kernel VFS: src/kernel/core/fs/vfs.h). NOTE: these are
+ * openos-native values, NOT Linux values. O_CREAT=0x100, O_TRUNC=0x200. */
+#ifndef OPENOS64_O_RDONLY
+#define OPENOS64_O_RDONLY 0x000
+#define OPENOS64_O_WRONLY 0x001
+#define OPENOS64_O_RDWR   0x002
+#define OPENOS64_O_CREAT  0x100
+#define OPENOS64_O_TRUNC  0x200
+#endif
+
+static inline long openos64_lseek(int fd, long offset, int whence) {
+    return openos64_syscall3(OPENOS64_SYS_SEEK, (uint64_t)fd,
+                             (uint64_t)offset, (uint64_t)whence);
+}
+
+static inline int openos64_mkdir(const char *path, int mode) {
+    return (int)openos64_syscall2(OPENOS64_SYS_MKDIR,
+                                  (uint64_t)(uintptr_t)path, (uint64_t)mode);
+}
+
+static inline int openos64_unlink(const char *path) {
+    return (int)openos64_syscall1(OPENOS64_SYS_UNLINK,
+                                  (uint64_t)(uintptr_t)path);
+}
+
+static inline int openos64_rmdir(const char *path) {
+    return (int)openos64_syscall1(OPENOS64_SYS_RMDIR,
+                                  (uint64_t)(uintptr_t)path);
+}
+
+/* stat buffer must match kernel openos_stat_t layout (src/kernel/include/syscall.h). */
+typedef struct {
+    unsigned int       ino;
+    unsigned int       mode;
+    unsigned int       size;
+    unsigned int       nlinks;
+    unsigned int       fs_type;
+    unsigned int       uid;
+    unsigned int       gid;
+    unsigned long long ctime_utc;
+    unsigned long long mtime_utc;
+    unsigned long long atime_utc;
+} openos64_stat_t;
+
+static inline int openos64_stat(const char *path, openos64_stat_t *st) {
+    return (int)openos64_syscall2(OPENOS64_SYS_STAT,
+                                  (uint64_t)(uintptr_t)path,
+                                  (uint64_t)(uintptr_t)st);
 }
 
 static inline long openos64_getpid(void) {

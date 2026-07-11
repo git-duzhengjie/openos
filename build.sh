@@ -452,6 +452,26 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
     nm "$ARCH64_BIN_BUILD/libc_demo.elf" | grep -q ' openos64_main$'
     python3 _embed_elf.py "$ARCH64_BIN_BUILD/libc_demo.elf" "$ARCH64_SRC/include/embed_libc_demo.h" libc_demo_elf
 
+    echo "[1b3/5] Building x86_64 /bin/fs_demo ELF (M5.4a writable-VFS end-to-end)..."
+    # Reuses the libc subset .o already compiled above.
+    gcc $ARCH64_USER_CFLAGS -c "$ARCH64_SRC/user/fs_demo64.c" -o "$ARCH64_USER_BUILD/fs_demo64.o"
+    ld $ARCH64_USER_LDFLAGS -o "$ARCH64_BIN_BUILD/fs_demo.elf" \
+        "$ARCH64_USER_BUILD/start.o" \
+        "$ARCH64_USER_BUILD/crt0.o" \
+        "$ARCH64_USER_BUILD/libc_string.o" \
+        "$ARCH64_USER_BUILD/libc_stdlib.o" \
+        "$ARCH64_USER_BUILD/libc_stdio.o" \
+        "$ARCH64_USER_BUILD/libc_ctype.o" \
+        "$ARCH64_USER_BUILD/libc_errno.o" \
+        "$ARCH64_USER_BUILD/libc_assert.o" \
+        "$ARCH64_USER_BUILD/libc_libc_write.o" \
+        "$ARCH64_USER_BUILD/libc_libc_sbrk.o" \
+        "$ARCH64_USER_BUILD/fs_demo64.o"
+    readelf -h "$ARCH64_BIN_BUILD/fs_demo.elf" | grep -q 'Class:.*ELF64'
+    readelf -h "$ARCH64_BIN_BUILD/fs_demo.elf" | grep -q 'Machine:.*X86-64'
+    nm "$ARCH64_BIN_BUILD/fs_demo.elf" | grep -q ' openos64_main$'
+    python3 _embed_elf.py "$ARCH64_BIN_BUILD/fs_demo.elf" "$ARCH64_SRC/include/embed_fs_demo.h" fs_demo_elf
+
     echo "[1c/5] Building x86_64 /bin/launcher ELF (H.3 execve caller)..."
     gcc $ARCH64_USER_CFLAGS -c "$ARCH64_SRC/user/launcher.c" -o "$ARCH64_USER_BUILD/launcher.o"
     ld $ARCH64_USER_LDFLAGS -o "$ARCH64_BIN_BUILD/launcher.elf" \

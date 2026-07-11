@@ -17,6 +17,7 @@
 #include "libc/string.h"
 #include "libc/stdlib.h"
 #include "libc/stdio.h"
+#include "openos64.h"    /* M5.4a: openos64_execve for launch-chain tail */
 
 static int g_pass = 0;
 static int g_fail = 0;
@@ -160,6 +161,16 @@ int openos64_main(int argc, char **argv, char **envp)
     printf("[libc_demo] results: %d passed, %d failed\n", g_pass, g_fail);
     if (g_fail == 0) {
         printf("[libc] PASS\n");
+        /* M5.4a launch-chain tail: hand off to /bin/fs_demo to exercise the
+         * writable VFS (mkdir/open/write/read/lseek/stat/unlink/rmdir). */
+        {
+            char *const argv[] = { "/bin/fs_demo", 0 };
+            char *const envp[] = { 0 };
+            printf("[libc_demo] execve /bin/fs_demo (M5.4a)...\n");
+            openos64_execve("/bin/fs_demo", argv, envp);
+            /* execve only returns on failure */
+            printf("[libc_demo] execve /bin/fs_demo FAILED\n");
+        }
         return 0;
     }
     printf("[libc] FAIL\n");

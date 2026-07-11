@@ -1032,7 +1032,7 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
             };
             arch_x86_64_usermode_set_envs(2, initial_envp);
         }
-        const int kExecRoundCap = 4;
+        const int kExecRoundCap = 6; /* M5.4a: hello->fork->thread->libc->fs chain needs 5 */
         int round = 0;
         int fork_rounds = 0;
         const int kForkRoundCap = 2; /* alpha: at most one child */

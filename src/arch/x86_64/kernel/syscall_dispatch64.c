@@ -505,6 +505,15 @@ static uint64_t do_unlink(uint64_t path_ptr) {
     return (r < 0) ? (uint64_t)-1 : 0;
 }
 
+/* M5.4a: SYS_RMDIR removes an empty directory (vfs_rmdir rejects non-empty
+ * dirs, the root, and non-directory targets). */
+static uint64_t do_rmdir(uint64_t path_ptr) {
+    if (path_ptr == 0) return (uint64_t)-1;
+    const char *path = (const char *)(uintptr_t)path_ptr;
+    int r = vfs_rmdir(path);
+    return (r < 0) ? (uint64_t)-1 : 0;
+}
+
 static uint64_t do_rename(uint64_t old_ptr, uint64_t new_ptr) {
     if (old_ptr == 0 || new_ptr == 0) return (uint64_t)-1;
     const char *oldp = (const char *)(uintptr_t)old_ptr;
@@ -1805,6 +1814,7 @@ uint64_t arch_x86_64_syscall_dispatch_common(uint64_t num,
     case SYS_FSTAT:       return do_fstat(a0, a1);
     case SYS_MKDIR:       return do_mkdir(a0, a1);
     case SYS_UNLINK:      return do_unlink(a0);
+    case SYS_RMDIR:       return do_rmdir(a0);
     case SYS_RENAME:      return do_rename(a0, a1);
     /* -------- H.3 execve -------- */
     case SYS_EXEC:        early_console64_write("[x86_64][disp] SYS_EXEC case\n"); return do_exec(a0, a1, a2);
