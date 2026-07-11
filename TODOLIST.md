@@ -1727,6 +1727,12 @@
     - 真根因：syscall 入口用户 rsp 存 per-CPU 单槽 %gs:0x68，跨阻塞 syscall 被 worker 覆盖 → sysret 用错用户栈 → rip=0 崩溃
     - 修复（L5 FIX）：用户 rsp 改存内核栈上，随内核栈上下文自然保存/恢复，根治单槽竞态
 - [ ] M5.3：标准 C 库对齐（向 musl/newlib 兼容子集靠拢，便于移植第三方软件）
+  - 背景：现有用户态运行时全塞在 `user/openos64.h`（18KB 单头），符号全是私有 `openos64_*`，无标准 C 库符号名（malloc/free/memcpy/memset/strlen/printf 等），第三方软件无法直接链接。M5.3 目标是提供导出**标准符号名**的 libc 子集，建 `user/libc/` 分文件管理。
+  - [ ] M5.3a：`libc/string.c` + `libc/string.h` — memcpy/memset/memmove/memcmp/strlen/strcmp/strncmp/strcpy/strncpy/strcat/strncat/strchr/strrchr/strstr（纯计算零依赖，最先做）
+  - [ ] M5.3b：`libc/stdlib.c` + `libc/stdlib.h` — malloc/free/calloc/realloc（基于 brk/mmap 的 bump+freelist 分配器）+ atoi/atol/strtol/abs/labs/qsort/bsearch/rand/srand（移植第三方软件关键；需先确认内核 brk/sbrk/mmap syscall 现状）
+  - [ ] M5.3c：`libc/stdio.c` + `libc/stdio.h` — putchar/puts/printf/snprintf/vsnprintf/fputs/fputc/fwrite（基于 write syscall）+ FILE/stdin/stdout/stderr 抽象
+  - [ ] M5.3d：标准头文件对齐 — ctype.h/errno.h/stddef.h/stdint.h/stdarg.h/assert.h + 汇整 `libc/libc.h` 总头
+  - [ ] M5.3e：迁移 + 端到端验证 — hello64_v2/thread_demo64 等切到标准符号；build.sh 接入 libc 编译链；ring3 真机 PASS 无回归
 - [ ] M5.4：包管理 / 软件安装机制（最小可用的程序分发）
 
 ### M6：现代体验与安全（🟡 第三优先级）
