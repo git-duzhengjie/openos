@@ -11,6 +11,14 @@
  * 实测时用 -cpu qemu64,+smep,+smap 打开硬件特性。
  */
 #include "../include/security64.h"
+#include "../include/vmm64.h"
+
+/* 链接脚本导出的内核段边界 (higher-half 虚拟地址, 4K 对齐) */
+extern char __kernel64_start[];
+extern char __etext64[];
+extern char __rodata64_start[];
+extern char __data64_start[];
+extern char __kernel64_end[];
 
 /* 共享内核串口打印 */
 extern void early_serial64_write(const char *text);
@@ -156,6 +164,88 @@ void arch_x86_64_security_enable_smap(void) {
     arch_x86_64_serial_write(g_caps.smap_enabled
         ? "[sec] M6.4.4 SMAP=on (kernel user-mem access gated by STAC/CLAC)\n"
         : "[sec] M6.4.4 SMAP enable FAILED\n");
+}
+
+/* ------------------------------------------------------------------ */
+/* M6.4.2 W^X 强制                                                       */
+/* ------------------------------------------------------------------ */
+
+#define OPENOS_X86_64_MSR_EFER   0xC0000080u
+#define OPENOS_X86_64_EFER_NXE    (1ULL << 11)
+
+static inline uint64_t rdmsr(uint32_t msr) {
+    uint32_t lo, hi;
+    __asm__ __volatile__("rdmsr" : "=a"(lo), "=d"(hi) : "c"(msr));
+    return ((uint64_t)hi << 32) | lo;
+}
+static inline void wrmsr(uint32_t msr, uint64_t v) {
+    __asm__ __volatile__("wrmsr" :: "c"(msr), "a"((uint32_t)v),
+                         "d"((uint32_t)(v >> 32)));
+}
+
+/* 保证 EFER.NXE=1 (否则置 PTE.NX 位会 #GP)。需 CPU 支持 NX。 */
+static int ensure_nxe(void) {
+    (void)arch_x86_64_security_probe();
+    if (!g_caps.nx) {
+        arch_x86_64_serial_write("[sec] NX unsupported, cannot enforce W^X NX bits\n");
+        return 0;
+    }
+    uint64_t efer = rdmsr(OPENOS_X86_64_MSR_EFER);
+    if ((efer & OPENOS_X86_64_EFER_NXE) == 0) {
+        wrmsr(OPENOS_X86_64_MSR_EFER, efer | OPENOS_X86_64_EFER_NXE);
+        serial_hex64("[sec] EFER was = ", efer);
+        serial_hex64("[sec] EFER now = ", rdmsr(OPENOS_X86_64_MSR_EFER));
+    } else {
+        arch_x86_64_serial_write("[sec] EFER.NXE already set by firmware\n");
+    }
+    return 1;
+}
+
+/* 对 [start,end) 区间逐页施加 set/clear 保护位。 */
+static uint64_t protect_range(uint64_t start, uint64_t end,
+                              uint64_t set_bits, uint64_t clear_bits) {
+    uint64_t page = start & ~0xFFFULL;
+    uint64_t count = 0;
+    for (; page < end; page += 0x1000ULL) {
+        if (arch_x86_64_vmm_protect_page(page, set_bits, clear_bits) == 0) {
+            count++;
+        }
+    }
+    return count;
+}
+
+/* W^X: 内核 .text = RX (清 RW), .rodata/.data/.bss = NX (保留 RW/RO)。
+ * 结果: 任何页不会同时 "可写 + 可执行", 阻断代码注入。 */
+void arch_x86_64_security_enforce_wxorx(void) {
+    if (!ensure_nxe()) {
+        arch_x86_64_serial_write("[sec] M6.4.2 W^X skipped (no NX)\n");
+        return;
+    }
+
+    uint64_t text_s   = (uint64_t)__kernel64_start;
+    uint64_t text_e   = (uint64_t)__etext64;
+    uint64_t rodata_s = (uint64_t)__rodata64_start;
+    uint64_t data_s   = (uint64_t)__data64_start;
+    uint64_t kern_e   = (uint64_t)__kernel64_end;
+
+    serial_hex64("[sec] .text   start = ", text_s);
+    serial_hex64("[sec] .text   end   = ", text_e);
+    serial_hex64("[sec] .rodata start = ", rodata_s);
+    serial_hex64("[sec] .data   start = ", data_s);
+    serial_hex64("[sec] kernel  end   = ", kern_e);
+
+    /* .text: 清 RW -> RX (不可写); 不置 NX (需可执行)。 */
+    uint64_t rx = protect_range(text_s, text_e, 0, OPENOS_X86_64_PTE_RW);
+    /* .rodata: 清 RW + 置 NX -> 只读不可执行。 */
+    uint64_t ro = protect_range(rodata_s, data_s,
+                                OPENOS_X86_64_PTE_NX, OPENOS_X86_64_PTE_RW);
+    /* .data/.bss: 置 NX (保留 RW) -> 可读写不可执行。 */
+    uint64_t nx = protect_range(data_s, kern_e, OPENOS_X86_64_PTE_NX, 0);
+
+    serial_hex64("[sec] .text   RX pages = ", rx);
+    serial_hex64("[sec] .rodata RO pages = ", ro);
+    serial_hex64("[sec] .data   NX pages = ", nx);
+    arch_x86_64_serial_write("[sec] M6.4.2 W^X enforced (text=RX, rodata=RO-NX, data=RW-NX)\n");
 }
 
 /* ------------------------------------------------------------------ */

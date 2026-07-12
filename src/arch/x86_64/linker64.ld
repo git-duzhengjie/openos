@@ -47,6 +47,8 @@ SECTIONS
     } :text
 
     . = ALIGN(4096);
+    __etext64 = .;
+    __rodata64_start = .;
     .rodata : AT(ADDR(.rodata) - KERNEL_VIRT_OFFSET)
     {
         *(.rodata*)
@@ -55,6 +57,7 @@ SECTIONS
     } :rodata
 
     . = ALIGN(4096);
+    __data64_start = .;
     .data : AT(ADDR(.data) - KERNEL_VIRT_OFFSET)
     {
         *(.data*)

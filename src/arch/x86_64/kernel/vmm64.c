@@ -258,6 +258,29 @@ x86_64_phys_addr_t arch_x86_64_vmm_translate(x86_64_virt_addr_t virt_addr) {
     return (entry & OPENOS_X86_64_PTE_ADDR_MASK) | (virt_addr & (OPENOS_X86_64_VMM_PAGE_SIZE - 1ULL));
 }
 
+int arch_x86_64_vmm_protect_page(x86_64_virt_addr_t virt_addr,
+                                 uint64_t set_bits, uint64_t clear_bits) {
+    vmm64_table_t *pt;
+    uint16_t index;
+    uint64_t entry;
+
+    virt_addr = align_down_virt(virt_addr);
+    pt = walk_existing(virt_addr);
+    if (!pt) {
+        return -1;
+    }
+    index = pt_index(virt_addr);
+    entry = (*pt)[index];
+    if ((entry & OPENOS_X86_64_PTE_PRESENT) == 0) {
+        return -1;
+    }
+    entry |= set_bits;
+    entry &= ~clear_bits;
+    (*pt)[index] = entry;
+    __asm__ __volatile__("invlpg (%0)" : : "r"(virt_addr) : "memory");
+    return 0;
+}
+
 x86_64_phys_addr_t arch_x86_64_vmm_get_cr3(void) {
     x86_64_phys_addr_t cr3;
     __asm__ __volatile__("mov %%cr3, %0" : "=r"(cr3));

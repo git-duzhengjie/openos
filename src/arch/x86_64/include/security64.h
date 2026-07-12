@@ -45,6 +45,10 @@ void arch_x86_64_security_enable_smep(void);
  * 否则会立即触发 #PF。故与 SMEP 分离, 单独按 M6.4.4 上线。 */
 void arch_x86_64_security_enable_smap(void);
 
+/* M6.4.2 W^X 强制: 内核 .text=RX, .rodata=RO-NX, .data/.bss=RW-NX。
+ * 内部先保证 EFER.NXE。无 NX 能力则安全跳过。必须在 vmm_init 后调用。 */
+void arch_x86_64_security_enforce_wxorx(void);
+
 /* 获取最近一次探测结果 (未探测则先探测) */
 const openos_x86_64_security_caps_t *arch_x86_64_security_caps(void);
 

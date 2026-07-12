@@ -43,6 +43,13 @@ int arch_x86_64_vmm_map_range(x86_64_virt_addr_t virt_addr,
                               uint64_t flags);
 void arch_x86_64_vmm_unmap_page(x86_64_virt_addr_t virt_addr);
 x86_64_phys_addr_t arch_x86_64_vmm_translate(x86_64_virt_addr_t virt_addr);
+
+/* M6.4.2 W^X: 修改已映射页的保护位 (不改物理地址)。
+ * set_bits: 要置 1 的 PTE flag (如 PTE_NX)
+ * clear_bits: 要清 0 的 PTE flag (如 PTE_RW)
+ * 返回 0 成功, -1 页未映射。自动 invlpg。 */
+int arch_x86_64_vmm_protect_page(x86_64_virt_addr_t virt_addr,
+                                 uint64_t set_bits, uint64_t clear_bits);
 x86_64_phys_addr_t arch_x86_64_vmm_get_cr3(void);
 void arch_x86_64_vmm_load_cr3(x86_64_phys_addr_t cr3);
 const x86_64_vmm_info_t *arch_x86_64_vmm_get_info(void);

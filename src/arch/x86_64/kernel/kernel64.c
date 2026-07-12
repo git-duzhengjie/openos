@@ -146,6 +146,7 @@ void arch_x86_64_early_init(const openos_bootinfo_t *bootinfo) {
     arch_x86_64_security_probe();
     arch_x86_64_stack_guard_init();
     arch_x86_64_security_enable_smep();
+    arch_x86_64_security_enforce_wxorx();
     arch_x86_64_heap_init();
     arch_x86_64_elf64_loader_init();
     arch_x86_64_usermode_init();
