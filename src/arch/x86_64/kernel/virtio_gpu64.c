@@ -31,6 +31,9 @@ static virtqueue_t         g_cursorq;
 static uint16_t            g_cursorq_notify_off;
 static uint32_t            g_cursor_ready;   /* cursorq + resource live */
 static uint8_t            *g_cursor_fb;      /* 64x64 BGRA sprite backing */
+static uint32_t            g_edid_ok;        /* EDID negotiated + parsed */
+static uint32_t            g_edid_pref_w;    /* preferred mode width */
+static uint32_t            g_edid_pref_h;    /* preferred mode height */
 static uint32_t            g_count;
 static uint32_t            g_width;
 static uint32_t            g_height;
@@ -227,6 +230,43 @@ static int gpu_setup_cursor(void) {
     return (gpu_resp_type() == VIRTIO_GPU_RESP_OK_NODATA) ? 0 : -5;
 }
 
+/* Parse the preferred resolution from the first EDID detailed timing
+ * descriptor (base block offset 54, 18 bytes).  Horizontal active =
+ * byte[2] | ((byte[4] & 0xF0) << 4); vertical active =
+ * byte[5] | ((byte[7] & 0xF0) << 4).  Returns 0 on a plausible mode. */
+static int gpu_parse_edid(const uint8_t *e, uint32_t len,
+                          uint32_t *out_w, uint32_t *out_h) {
+    if (len < 128) return -1;
+    /* validate EDID magic: 00 FF FF FF FF FF FF 00 */
+    static const uint8_t magic[8] = {0,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0};
+    for (int i = 0; i < 8; i++)
+        if (e[i] != magic[i]) return -2;
+    const uint8_t *d = e + 54;                 /* first detailed timing */
+    uint32_t w = (uint32_t)d[2] | (((uint32_t)(d[4] & 0xF0)) << 4);
+    uint32_t h = (uint32_t)d[5] | (((uint32_t)(d[7] & 0xF0)) << 4);
+    if (w == 0 || h == 0 || w > 16384 || h > 16384) return -3;
+    *out_w = w; *out_h = h;
+    return 0;
+}
+
+/* Issue GET_EDID for scanout 0 and parse the preferred mode.
+ * Only meaningful when VIRTIO_GPU_F_EDID was negotiated. */
+static int gpu_setup_edid(void) {
+    virtio_gpu_get_edid_t *req =
+        (virtio_gpu_get_edid_t *)(g_cmd_buf + CMD_REQ_OFF);
+    gpu_memset(req, 0, sizeof(*req));
+    req->hdr.type = VIRTIO_GPU_CMD_GET_EDID;
+    req->scanout  = 0;
+    if (gpu_cmd(sizeof(*req), sizeof(virtio_gpu_resp_edid_t)) != 0) return -1;
+
+    virtio_gpu_resp_edid_t *resp =
+        (virtio_gpu_resp_edid_t *)(g_cmd_buf + CMD_RESP_OFF);
+    if (resp->hdr.type != VIRTIO_GPU_RESP_OK_EDID) return -2;
+    uint32_t sz = resp->size;
+    if (sz > sizeof(resp->edid)) sz = sizeof(resp->edid);
+    return gpu_parse_edid(resp->edid, sz, &g_edid_pref_w, &g_edid_pref_h);
+}
+
 /* ---- per-frame present ---- */
 
 int virtio_gpu_flush_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
@@ -373,6 +413,15 @@ int virtio_gpu_hide_cursor(void) {
 
 /* ---- accessors ---- */
 uint32_t virtio_gpu_device_count(void) { return g_count; }
+
+uint32_t virtio_gpu_edid_available(void) { return g_edid_ok; }
+
+int virtio_gpu_edid_preferred_mode(uint32_t *w, uint32_t *h) {
+    if (!g_edid_ok) return -1;
+    if (w) *w = g_edid_pref_w;
+    if (h) *h = g_edid_pref_h;
+    return 0;
+}
 uint32_t virtio_gpu_width(void)  { return g_width; }
 uint32_t virtio_gpu_height(void) { return g_height; }
 void    *virtio_gpu_framebuffer(void) { return g_fb; }
@@ -396,8 +445,13 @@ void virtio_gpu_init(void) {
 
     virtio_modern_reset(&g_dev);
     uint64_t host = virtio_modern_get_features(&g_dev);
-    /* only require VERSION_1; we use no optional gpu features */
+    /* require VERSION_1; opportunistically negotiate EDID if the host offers it */
     uint64_t want = host & (1ULL << VIRTIO_F_VERSION_1);
+    uint32_t edid_negotiated = 0;
+    if (host & (1ULL << VIRTIO_GPU_F_EDID)) {
+        want |= (1ULL << VIRTIO_GPU_F_EDID);
+        edid_negotiated = 1;
+    }
     if (virtio_modern_set_features(&g_dev, want) != 0) {
         serial_write("[virtio-gpu] feature negotiation failed\n");
         virtio_modern_fail(&g_dev);
@@ -453,6 +507,17 @@ void virtio_gpu_init(void) {
 
     g_count = 1;
     serial_write("[virtio-gpu] 2D pipeline ready\n");
+
+    /* query display EDID if the feature was negotiated */
+    g_edid_ok = 0;
+    if (edid_negotiated) {
+        if (gpu_setup_edid() == 0) {
+            g_edid_ok = 1;
+            serial_write("[virtio-gpu] EDID preferred mode parsed\n");
+        } else {
+            serial_write("[virtio-gpu] EDID query/parse failed\n");
+        }
+    }
 
     /* bring up the hardware cursor if the cursor queue is available */
     g_cursor_ready = 0;

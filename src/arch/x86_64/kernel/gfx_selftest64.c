@@ -178,6 +178,19 @@ int arch_x86_64_gfx_selftest_run(void)
         early_console64_write("\n[x86_64][gfx-selftest] HW cursor OK");
     }
 
+    /* 11. EDID (virtio-gpu display capabilities). Skipped when the feature
+     * wasn't negotiated (older QEMU / GOP path). */
+    if (virtio_gpu_edid_available()) {
+        uint32_t ew = 0, eh = 0;
+        if (virtio_gpu_edid_preferred_mode(&ew, &eh) != 0 || ew == 0 || eh == 0) {
+            early_console64_write("\n[x86_64][gfx-selftest] FAIL edid mode\n");
+            return 0;
+        }
+        log_dec("\n[x86_64][gfx-selftest] EDID preferred ", ew);
+        log_dec("x", eh);
+        early_console64_write(" OK");
+    }
+
     log_dec("\n[x86_64][gfx-selftest] fb ", fi->width);
     log_dec("x", fi->height);
     early_console64_write("\n[x86_64][gfx-selftest] PASS\n");

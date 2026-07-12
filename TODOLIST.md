@@ -1784,6 +1784,11 @@
   - [x] 驱动 `virtio_gpu64.c`：新建**第 2 队列 cursorq（index 1）**（`virtio_modern_setup_queue`，失败仅禁用硬件光标不影响 2D）；专用 cursor 命令引擎 `cursor_cmd()`（独立 `g_cur_cmd_buf` bounce 页 + 双 desc + 轮询 used 环 + `virtio_modern_notify(GPU_CURSORQ)`）；`gpu_setup_cursor()` 建 64×64 BGRA 光标 resource（RESID=2）+ ATTACH_BACKING 到专用 backing。API：`virtio_gpu_cursor_available()` / `virtio_gpu_set_cursor(src,w,h,hot_x,hot_y)`（填 64×64 精灵 + TRANSFER_TO_HOST_2D 经 controlq + UPDATE_CURSOR 经 cursorq）/ `virtio_gpu_move_cursor(x,y)`（廉价 MOVE_CURSOR）/ `virtio_gpu_hide_cursor()`（UPDATE_CURSOR resid=0）。接入 init 末尾，`g_cursor_ready` 门控。
   - [x] gfx-selftest 第 10 项：`virtio_gpu_cursor_available()` 门控，验证 set/move/hide 三命令，末尾恢复可见光标。
   - [x] 实机验证：挂 virtio-gpu-pci（`M5_FAST_BOOT=1` 绕开单核 preempt-selftest flaky）——`[virtio-gpu] hardware cursor ready` → `backend=virtio-gpu (present-mode)` → `[x86_64][gfx-selftest] HW cursor OK` → `fb 1280x800` → **`PASS`**（全 10 项）。正常构建 GOP 回退 + host opkg ALL PASS 无回归。
+- [x] M6.7：virtio-gpu EDID 显示能力协商✅ **实机解析出 1280x800 与 fb 完全吐合**
+  - [x] 协议头 `virtio_gpu.h`：`GET_EDID=0x010a` / `RESP_OK_EDID=0x1104`；feature 位 `VIRTIO_GPU_F_VIRGL=0` / `VIRTIO_GPU_F_EDID=1`；`virtio_gpu_get_edid_t`（hdr + scanout + padding）；`virtio_gpu_resp_edid_t`（hdr + size + padding + edid[1024]）。
+  - [x] 驱动 `virtio_gpu64.c`：feature 协商时 host 提供则 opportunistically 协商 `VIRTIO_GPU_F_EDID`（`edid_negotiated` 标记）；`gpu_setup_edid()` 发 GET_EDID(scanout 0) → `gpu_parse_edid()` 校验 EDID magic + 从首个 detailed timing descriptor（偏移 54）提取水平/垂直 active（byte[2]|((byte[4]&0xF0)<<4) 等）得首选分辨率。API：`virtio_gpu_edid_available()` / `virtio_gpu_edid_preferred_mode(w,h)`。接入 init（GET_DISPLAY_INFO 后），`g_edid_ok` 门控。
+  - [x] gfx-selftest 第 11 项：`edid_available()` 门控，验证首选模式非零并打印 `EDID preferred WxH`。
+  - [x] 实机验证：`[virtio-gpu] EDID preferred mode parsed` → `[x86_64][gfx-selftest] EDID preferred 1280x800 OK` ——**与 `fb 1280x800` 完全一致** → `PASS`（全 11 项）。正常 GOP 回退 + host opkg ALL PASS 无回归。
 - [ ] M6.4：安全加固（ASLR / W^X 强制 / SMEP / SMAP / 栈保护）
 - [ ] M6.5：多用户与会话（完整 uid/gid 体系 + 登录管理 + 权限隔离）
 - [ ] M6.6：系统日志 / dmesg / journald 风格日志子系统

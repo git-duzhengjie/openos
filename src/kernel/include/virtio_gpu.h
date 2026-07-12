@@ -26,6 +26,14 @@
 #define VIRTIO_GPU_CMD_UPDATE_CURSOR           0x0300u
 #define VIRTIO_GPU_CMD_MOVE_CURSOR             0x0301u
 
+/* GET_EDID request/response (needs VIRTIO_GPU_F_EDID) */
+#define VIRTIO_GPU_CMD_GET_EDID                0x010au
+#define VIRTIO_GPU_RESP_OK_EDID                0x1104u
+
+/* feature bits (device config negotiation) */
+#define VIRTIO_GPU_F_VIRGL                     0u
+#define VIRTIO_GPU_F_EDID                      1u
+
 /* response types */
 #define VIRTIO_GPU_RESP_OK_NODATA              0x1100u
 #define VIRTIO_GPU_RESP_OK_DISPLAY_INFO        0x1101u
@@ -135,6 +143,21 @@ typedef struct virtio_gpu_update_cursor {
 #define VIRTIO_GPU_CURSOR_W  64u
 #define VIRTIO_GPU_CURSOR_H  64u
 
+/* GET_EDID request: scanout id selects which display's EDID to read */
+typedef struct virtio_gpu_get_edid {
+    virtio_gpu_ctrl_hdr_t hdr;
+    uint32_t scanout;
+    uint32_t padding;
+} __attribute__((packed)) virtio_gpu_get_edid_t;
+
+/* GET_EDID response: size bytes of raw EDID blob (up to 1024) */
+typedef struct virtio_gpu_resp_edid {
+    virtio_gpu_ctrl_hdr_t hdr;
+    uint32_t size;
+    uint32_t padding;
+    uint8_t  edid[1024];
+} __attribute__((packed)) virtio_gpu_resp_edid_t;
+
 /* ---- public driver API ---- */
 
 /* Probe PCI for virtio-gpu, bring up the 2D pipeline and register a
@@ -174,5 +197,14 @@ int virtio_gpu_move_cursor(uint32_t x, uint32_t y);
 
 /* Hide the hardware cursor (UPDATE_CURSOR with resource_id 0). */
 int virtio_gpu_hide_cursor(void);
+
+/* ---- EDID (display capabilities) ---- */
+
+/* Non-zero if the device negotiated VIRTIO_GPU_F_EDID and we parsed a blob. */
+uint32_t virtio_gpu_edid_available(void);
+
+/* Preferred (native) mode parsed from the EDID detailed timing descriptor.
+ * Returns 0 and fills the w/h out-params on success; -1 if no EDID. */
+int virtio_gpu_edid_preferred_mode(uint32_t *w, uint32_t *h);
 
 #endif /* OPENOS_KERNEL_VIRTIO_GPU_H */
