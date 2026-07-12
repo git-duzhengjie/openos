@@ -142,11 +142,13 @@ void arch_x86_64_early_init(const openos_bootinfo_t *bootinfo) {
     arch_x86_64_memory_init_from_bootinfo(bootinfo);
     arch_x86_64_vmm_init();
     /* M6.4 安全加固: 探测 CPU 安全能力, 启用 SMEP (禁止内核执行用户页),
-     * 初始化栈保护 canary。SMAP 需内核用户内存访问审计后单独上线。 */
+     * 初始化栈保护 canary, 强制 W^X。M6.4.4: SMAP 现已上线——syscall 汇编
+     * 入口已用 STAC/CLAC 包裹 dispatch 对用户内存的访问(粗粒度收口)。 */
     arch_x86_64_security_probe();
     arch_x86_64_stack_guard_init();
     arch_x86_64_security_enable_smep();
     arch_x86_64_security_enforce_wxorx();
+    arch_x86_64_security_enable_smap();
     arch_x86_64_heap_init();
     arch_x86_64_elf64_loader_init();
     arch_x86_64_usermode_init();

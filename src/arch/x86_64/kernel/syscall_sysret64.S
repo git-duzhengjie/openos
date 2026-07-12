@@ -4,6 +4,7 @@
 .global x86_64_syscall_entry
 .global arch_x86_64_usermode_syscall_return_trampoline
 .extern arch_x86_64_syscall_dispatch
+.extern arch_x86_64_smap_on
 
 /*
  * syscall/sysret fast path skeleton.
@@ -71,8 +72,27 @@ x86_64_syscall_entry:
 
     movq %rsp, %rdi
     cld
+    /*
+     * M6.4.4 SMAP: dispatch 会访问用户内存(用户指针参数)。开启 SMAP 后
+     * 内核默认 AC=0 无法访问 user 页, 故在 dispatch 前 STAC 打开窗口、
+     * 返回后 CLAC 关闭。rax 此时可自由破坏(syscall 号已在栈上)。
+     * 由 arch_x86_64_smap_on 门控: SMAP 未启用时跳过以免 #UD。
+     * STAC = 0f 01 cb。
+     */
+    movl arch_x86_64_smap_on(%rip), %eax
+    testl %eax, %eax
+    jz 2f
+    .byte 0x0f,0x01,0xcb        /* stac */
+2:
     call arch_x86_64_syscall_dispatch
     movq %rax, 0x00(%rsp)
+    /* M6.4.4 SMAP: 关闭 user-access 窗口。CLAC = 0f 01 ca。
+     * 返回值已存入 0x00(%rsp), 此处可自由破坏 rax, 随后 popq %rax 恢复。 */
+    movl arch_x86_64_smap_on(%rip), %eax
+    testl %eax, %eax
+    jz 3f
+    .byte 0x0f,0x01,0xca        /* clac */
+3:
 
     popq %rax
     popq %rdx

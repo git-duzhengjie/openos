@@ -75,6 +75,11 @@ static void serial_hex64(const char *label, uint64_t v) {
 static openos_x86_64_security_caps_t g_caps;
 static int g_probed = 0;
 
+/* M6.4.4: 汇编 syscall 入口读取此标志决定是否 STAC/CLAC。
+ * 0 = SMAP 未启用(勿执行 STAC 以免 #UD); 非 0 = 已启用。
+ * 导出为全局非 static 符号, 供 syscall_sysret64.S 引用。 */
+unsigned int arch_x86_64_smap_on = 0;
+
 const openos_x86_64_security_caps_t *arch_x86_64_security_probe(void) {
     if (g_probed) {
         return &g_caps;
@@ -157,6 +162,7 @@ void arch_x86_64_security_enable_smap(void) {
     /* 启用后内核默认应 AC=0 (禁止越权访问 user 页)。 */
     if (g_caps.smap_enabled) {
         arch_x86_64_clac();
+        arch_x86_64_smap_on = 1;   /* M6.4.4: 通知 syscall 汇编入口启用 STAC/CLAC 包裹 */
     }
 
     serial_hex64("[sec] CR4 before SMAP = ", before);
