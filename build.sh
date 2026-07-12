@@ -715,6 +715,7 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         kernel/power_selftest64.c \
         kernel/cpufreq64.c \
         kernel/cpufreq_selftest64.c \
+        kernel/security64.c \
         kernel/gfx_selftest64.c \
         kernel/virtio_gpu_selftest64.c \
         kernel/smp64.c \
@@ -869,6 +870,7 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         "$ARCH64_BUILD/power_selftest64.o" \
         "$ARCH64_BUILD/cpufreq64.o" \
         "$ARCH64_BUILD/cpufreq_selftest64.o" \
+        "$ARCH64_BUILD/security64.o" \
         "$ARCH64_BUILD/gfx_selftest64.o" \
         "$ARCH64_BUILD/virtio_gpu_selftest64.o" \
         "$ARCH64_BUILD/smp64.o" \

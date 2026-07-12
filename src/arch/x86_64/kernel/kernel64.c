@@ -38,6 +38,7 @@ extern void net_print_info(void);
 #include "../include/ahci64.h"
 #include "../include/ext4_64.h"
 #include "../include/nvme64.h"
+#include "../include/security64.h"
 #include "../include/xhci64.h"
 #include "../../../kernel/include/sound.h"
 #include "../include/tsc64.h"
@@ -140,6 +141,11 @@ void arch_x86_64_early_init(const openos_bootinfo_t *bootinfo) {
     arch_x86_64_syscall_init();
     arch_x86_64_memory_init_from_bootinfo(bootinfo);
     arch_x86_64_vmm_init();
+    /* M6.4 安全加固: 探测 CPU 安全能力, 启用 SMEP (禁止内核执行用户页),
+     * 初始化栈保护 canary。SMAP 需内核用户内存访问审计后单独上线。 */
+    arch_x86_64_security_probe();
+    arch_x86_64_stack_guard_init();
+    arch_x86_64_security_enable_smep();
     arch_x86_64_heap_init();
     arch_x86_64_elf64_loader_init();
     arch_x86_64_usermode_init();
