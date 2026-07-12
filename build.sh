@@ -532,7 +532,38 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
     nm "$ARCH64_BIN_BUILD/opkg.elf" | grep -q ' openos64_main$'
     python3 _embed_elf.py "$ARCH64_BIN_BUILD/opkg.elf" "$ARCH64_SRC/include/embed_opkg.h" opkg_elf
 
-    echo "[1b6/5] Building x86_64 /bin/opkg_selftest ELF (M5.4d package-manager e2e test)..."
+    echo "[1b6/5] Building x86_64 opk_payload real-ELF package (M5.4e install+execve e2e)..."
+    # opk_payload is a genuine ring3 ELF that is NOT embedded in the initrd.
+    # Its only route into a running system is: pack -> SYS_OPK_INSTALL -> execve
+    # out of the writable ramfs. Build the ELF, pack it into a .opk with the
+    # host opkg-build tool, then embed the .opk *image bytes* so the e2e test
+    # can install+run it. Package name 'payload', exec entry install-name 'app'
+    # -> unpacks to /pkg/payload/app.
+    gcc $ARCH64_USER_CFLAGS -I"$ARCH64_SRC/include" -c "$ARCH64_SRC/user/opk_payload64.c" -o "$ARCH64_USER_BUILD/opk_payload64.o"
+    ld $ARCH64_USER_LDFLAGS -o "$ARCH64_BIN_BUILD/opk_payload.elf" \
+        "$ARCH64_USER_BUILD/start.o" \
+        "$ARCH64_USER_BUILD/crt0.o" \
+        "$ARCH64_USER_BUILD/libc_string.o" \
+        "$ARCH64_USER_BUILD/libc_stdlib.o" \
+        "$ARCH64_USER_BUILD/libc_stdio.o" \
+        "$ARCH64_USER_BUILD/libc_ctype.o" \
+        "$ARCH64_USER_BUILD/libc_errno.o" \
+        "$ARCH64_USER_BUILD/libc_assert.o" \
+        "$ARCH64_USER_BUILD/libc_libc_write.o" \
+        "$ARCH64_USER_BUILD/libc_libc_sbrk.o" \
+        "$ARCH64_USER_BUILD/opk_payload64.o"
+    readelf -h "$ARCH64_BIN_BUILD/opk_payload.elf" | grep -q 'Class:.*ELF64'
+    readelf -h "$ARCH64_BIN_BUILD/opk_payload.elf" | grep -q 'Machine:.*X86-64'
+    nm "$ARCH64_BIN_BUILD/opk_payload.elf" | grep -q ' openos64_main$'
+    # host opkg-build packager (self-contained, mirrors opk64.h layout)
+    gcc -O2 -Wall -Wextra -Werror -I"$ARCH64_SRC/include" \
+        "tools/opkg-build.c" -o "$ARCH64_USER_BUILD/opkg-build"
+    "$ARCH64_USER_BUILD/opkg-build" \
+        -o "$ARCH64_BIN_BUILD/payload.opk" -n payload \
+        -e "$ARCH64_BIN_BUILD/opk_payload.elf:app"
+    python3 _embed_elf.py "$ARCH64_BIN_BUILD/payload.opk" "$ARCH64_SRC/include/embed_opk_payload.h" opk_payload_opk
+
+    echo "[1b7/5] Building x86_64 /bin/opkg_selftest ELF (M5.4d/M5.4e package-manager e2e test)..."
     gcc $ARCH64_USER_CFLAGS -I"$ARCH64_SRC/include" -c "$ARCH64_SRC/user/opkg_selftest64.c" -o "$ARCH64_USER_BUILD/opkg_selftest64.o"
     ld $ARCH64_USER_LDFLAGS -o "$ARCH64_BIN_BUILD/opkg_selftest.elf" \
         "$ARCH64_USER_BUILD/start.o" \

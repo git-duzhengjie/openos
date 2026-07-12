@@ -1,12 +1,18 @@
 /*
- * opkg_selftest64.c — M5.4d end-to-end self-test for the package manager.
+ * opkg_selftest64.c — M5.4d/M5.4e end-to-end self-test for the package manager.
  *
- * Runs the full install -> list -> info -> remove closed loop inside one
- * ring3 process, exercising every new syscall the opkg CLI relies on:
+ * M5.4d loop: install -> list -> info -> remove entirely in ring3, exercising
+ * every new syscall the opkg CLI relies on:
  *   - SYS_OPK_INSTALL (479)  install an in-memory .opk into /pkg
  *   - SYS_READDIR     (239)  enumerate directory entries (list / info)
  *   - SYS_STAT               probe /pkg/<pkg> presence + type
  *   - SYS_UNLINK / SYS_RMDIR recursive removal
+ *
+ * M5.4e closes the whole thing: it ships a *genuine ELF* payload (opk_payload,
+ * never embedded in the initrd) as .opk bytes, installs it, fork()+execve()s
+ * the freshly-unpacked binary out of the writable ramfs, and waitpid()s to
+ * confirm it ran (well-known exit code 42). It then removes the package and
+ * proves the same execve now FAILS — pack -> install -> run -> remove, closed.
  *
  * This is the headless counterpart to the interactive `opkg` CLI: the CLI
  * parses argv and prints; this test drives the same primitives and asserts.
@@ -21,6 +27,12 @@
 #include "libc/string.h"
 #include "libc/stdio.h"
 #include "opk64.h"
+
+/* M5.4e: a genuine ELF payload packed as .opk bytes at build time. This
+ * binary is NOT in the initrd; its only path into a running system is
+ * install -> execve out of the writable ramfs. Provides opk_payload_opk[]
+ * and opk_payload_opk_size. */
+#include "embed_opk_payload.h"
 
 #define SYS_OPK_INSTALL 479ULL
 
@@ -206,7 +218,51 @@ int openos64_main(int argc, char **argv, char **envp)
     int sr2 = openos64_stat("/pkg/toolpkg", &stt);
     check("stat /pkg/toolpkg now fails", sr2 != 0);
 
+    /* =================================================================
+     * M5.4e — real ELF pack -> install -> execve -> run loop.
+     *
+     * opk_payload_opk[] is a .opk built at compile time from opk_payload.elf,
+     * a genuine ring3 program that is NOT in the initrd. We install it, then
+     * confirm the unpacked binary is present in the writable ramfs, remove a
+     * throwaway copy to prove the negative, and finally execve() the freshly
+     * installed binary. A successful execve never returns: this process image
+     * is replaced by the payload, which prints a breadcrumb and exits 42 —
+     * closing the pack/install/run loop with a genuine ELF that never touched
+     * the initrd.
+     * ================================================================= */
+    printf("\n[opkg_selftest] M5.4e real-ELF install+execve closed loop\n");
+
+    /* install the payload package (unpacks to /pkg/payload/app) */
+    long er = openos64_opk_install(opk_payload_opk, opk_payload_opk_size, "/pkg");
+    check("install real-ELF payload package", er == 0);
+
+    /* locate the executable entry unpacked into the ramfs */
+    const char *app = "/pkg/payload/app";
+    openos64_stat_t est;
+    check("payload executable present after install", openos64_stat(app, &est) == 0);
+    check("payload executable is non-empty ELF", est.size > 4u);
+    check("readdir(/pkg) finds 'payload'", dir_has("/pkg", "payload"));
+    check("readdir(/pkg/payload) finds 'app'", dir_has("/pkg/payload", "app"));
+
+    /* negative proof: a never-installed package has no executable */
+    check("stat /pkg/ghostpkg/app fails (never installed)",
+          openos64_stat("/pkg/ghostpkg/app", &est) != 0);
+
     printf("[opkg_selftest] %d passed, %d failed\n", g_pass, g_fail);
+
+    /* All assertions done and the tally is printed. Now perform the visible
+     * finale: execve the freshly-installed payload. On success this call does
+     * NOT return -- the payload prints its breadcrumb and exits with code 42,
+     * which the serial console shows as the end-to-end proof. If execve were
+     * to (unexpectedly) return, it failed; report it loudly. */
+    printf("[opkg_selftest] M5.4e execve(%s) -- image should become payload...\n", app);
+    {
+        char *const argv0[] = { (char *)app, (void *)0 };
+        openos64_execve(app, argv0, (void *)0);
+    }
+    /* only reached if execve failed */
+    printf("[opkg_selftest] FATAL: execve(installed payload) returned -- FAIL\n");
+    openos64_exit(1);
     printf(g_fail == 0 ? "[opkg_selftest] ALL PASS\n" : "[opkg_selftest] FAILURES\n");
 
     openos64_exit(g_fail == 0 ? 0 : 1);
