@@ -270,6 +270,19 @@ void arch_x86_64_stack_guard_init(void) {
     serial_hex64("[sec] stack canary = ", __stack_chk_guard);
 }
 
+/* M6.4.6 ASLR: 用 TSC 熵生成 16B 对齐、<=2032B 的栈顶随机 gap。
+ * 用户栈仅 4 页 (16KiB), gap 必须远小于栈容量以免越过栈底;
+ * 取 7 位熵 (128 种位置), 使每次启动栈内数据绝对位置不同。 */
+uint64_t arch_x86_64_aslr_stack_gap(void) {
+    uint64_t t1 = read_tsc();
+    uint64_t t2 = read_tsc();
+    uint64_t r = (t1 * 0x2545F4914F6CDD1DULL) ^ (t2 << 13) ^ (t2 >> 11);
+    r ^= (r >> 33);
+    /* 上限 0x7F0 = 2032 字节。掩码取低 11 位后 16B 对齐。 */
+    uint64_t gap = (r & 0x7FFULL) & ~0xFULL;
+    return gap;
+}
+
 /* GCC 在 canary 校验失败时调用。此处直接停机, 不返回。 */
 void __stack_chk_fail(void) {
     arch_x86_64_serial_write("[sec] *** STACK SMASHING DETECTED — halting ***\n");

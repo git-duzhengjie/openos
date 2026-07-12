@@ -4,6 +4,7 @@
 
 #include "../include/address_space64.h"
 #include "../include/early_console64.h"
+#include "../include/security64.h"
 #include "../include/gdt64.h"
 #include "../include/idt64.h"
 #include "../include/pmm64.h"
@@ -919,6 +920,16 @@ x86_64_virt_addr_t arch_x86_64_usermode_seed_user_stack_ex(
     /* 1) Copy env strings to the very top of the user stack first, then
      *    argv strings below them. Both grow downward. */
     uint8_t *sp = (uint8_t *)(uintptr_t)stack_top_in;
+
+    /* M6.4.6 ASLR: 从栈顶预留一个 TSC 熵驱动的随机 gap, 使每次启动
+     * 用户栈内容的虚拟位置不同。gap <= 2032B, 远小于 16KiB 栈容量。 */
+    {
+        uint64_t gap = arch_x86_64_aslr_stack_gap();
+        sp -= gap;
+        early_serial64_write("[aslr] user stack gap = ");
+        early_serial64_write_hex64(gap);
+        early_serial64_write("\n");
+    }
 
     uintptr_t env_va[X86_64_USER_ENVP_MAX];
     for (int i = envc - 1; i >= 0; --i) {

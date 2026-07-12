@@ -26,6 +26,7 @@ void early_console64_write_hex64(uint64_t value);
 void early_serial64_init(void);
 void early_serial64_putc(char c);
 void early_serial64_write(const char *text);
+void early_serial64_write_hex64(uint64_t value);
 
 void early_vga64_init(void);
 void early_vga64_clear(void);

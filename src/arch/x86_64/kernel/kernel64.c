@@ -734,6 +734,7 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
     /* Step E.2 cooperative scheduler selftest — must run before we drop
      * into ring3, otherwise the bootstrap context's stack starts being
      * shared with the user-mode trampoline path. */
+#ifndef M5_FAST_BOOT
     {
         int sched_rv = arch_x86_64_sched_selftest_run();
         early_console64_write("[x86_64][sched-selftest] result=");
@@ -751,6 +752,8 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
         early_console64_write("\n");
         arch_x86_64_net_print_status();
     }
+#endif /* M5_FAST_BOOT: sched/net cooperative selftests are slow+flaky under
+        * single-core QEMU; skip in fast-boot diag path to reach ring3 fast. */
 
     /* Step E.4 TSC<->PIT calibration sanity. Non-fatal — uptime_ms() falls
      * back to the legacy estimator if anything in this chain goes sideways. */

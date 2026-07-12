@@ -64,4 +64,10 @@ static inline void arch_x86_64_clac(void) {
 extern uint64_t __stack_chk_guard;
 void arch_x86_64_stack_guard_init(void);
 
+/* ---- M6.4.6 ASLR: 用户栈基址随机化 ----
+ * 返回一个 16 字节对齐、上限受控 (<= 512 页, 即 2MiB) 的随机 gap 字节数,
+ * 供 seed_user_stack 从栈顶向下预留, 使每次启动的用户栈虚拟位置不同,
+ * 抵御依赖固定栈地址的 ROP/信息泄露利用链。TSC 熵驱动, 幂等安全。 */
+uint64_t arch_x86_64_aslr_stack_gap(void);
+
 #endif /* OPENOS_ARCH_X86_64_SECURITY64_H */

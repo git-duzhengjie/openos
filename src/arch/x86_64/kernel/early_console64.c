@@ -101,6 +101,15 @@ void early_serial64_write(const char *text) {
     }
 }
 
+void early_serial64_write_hex64(uint64_t v) {
+    static const char hx[] = "0123456789abcdef";
+    early_serial64_putc('0');
+    early_serial64_putc('x');
+    for (int i = 60; i >= 0; i -= 4) {
+        early_serial64_putc(hx[(v >> i) & 0xF]);
+    }
+}
+
 void early_vga64_init(void) {
     early_vga_x = 0;
     early_vga_y = 0;
