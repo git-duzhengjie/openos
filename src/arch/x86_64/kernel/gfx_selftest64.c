@@ -191,6 +191,25 @@ int arch_x86_64_gfx_selftest_run(void)
         early_console64_write(" OK");
     }
 
+    /* 12. Multi-scanout (multi-head). Every enabled scanout mirrors our 2D
+     * resource; verify at least one head and each geometry is sane. */
+    if (virtio_gpu_device_count() > 0) {
+        uint32_t sc = virtio_gpu_scanout_count();
+        if (sc == 0) {
+            early_console64_write("\n[x86_64][gfx-selftest] FAIL scanout count\n");
+            return 0;
+        }
+        for (uint32_t i = 0; i < sc; i++) {
+            uint32_t sw = 0, sh = 0;
+            if (virtio_gpu_scanout_mode(i, &sw, &sh) != 0 || sw == 0 || sh == 0) {
+                early_console64_write("\n[x86_64][gfx-selftest] FAIL scanout mode\n");
+                return 0;
+            }
+        }
+        log_dec("\n[x86_64][gfx-selftest] scanouts=", sc);
+        early_console64_write(" OK");
+    }
+
     log_dec("\n[x86_64][gfx-selftest] fb ", fi->width);
     log_dec("x", fi->height);
     early_console64_write("\n[x86_64][gfx-selftest] PASS\n");

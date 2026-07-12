@@ -1789,6 +1789,10 @@
   - [x] 驱动 `virtio_gpu64.c`：feature 协商时 host 提供则 opportunistically 协商 `VIRTIO_GPU_F_EDID`（`edid_negotiated` 标记）；`gpu_setup_edid()` 发 GET_EDID(scanout 0) → `gpu_parse_edid()` 校验 EDID magic + 从首个 detailed timing descriptor（偏移 54）提取水平/垂直 active（byte[2]|((byte[4]&0xF0)<<4) 等）得首选分辨率。API：`virtio_gpu_edid_available()` / `virtio_gpu_edid_preferred_mode(w,h)`。接入 init（GET_DISPLAY_INFO 后），`g_edid_ok` 门控。
   - [x] gfx-selftest 第 11 项：`edid_available()` 门控，验证首选模式非零并打印 `EDID preferred WxH`。
   - [x] 实机验证：`[virtio-gpu] EDID preferred mode parsed` → `[x86_64][gfx-selftest] EDID preferred 1280x800 OK` ——**与 `fb 1280x800` 完全一致** → `PASS`（全 11 项）。正常 GOP 回退 + host opkg ALL PASS 无回归。
+- [x] M6.8：virtio-gpu 多 scanout（多头镜像模式）✅ **枚举+逐头 SET_SCANOUT 就绪，单头实机验证**
+  - [x] 驱动 `virtio_gpu64.c`：`gpu_get_display_info()` 改为**枚举所有 enabled scanout**（记录 id + 几何到 `g_scanout_ids/w/h[]`，首个作为主绘制几何）；`gpu_set_scanout()` 改为**逐个 enabled scanout 绑同一 2D resource（镜像模式）**，各 scanout 矩形按自身几何并 clamp 到 backing 尺寸；per-frame RESOURCE_FLUSH 是 per-resource，一次让所有绑定头更新。API：`virtio_gpu_scanout_count()` / `virtio_gpu_scanout_mode(idx,w,h)`。init 日志 `scanouts enabled=N`。
+  - [x] gfx-selftest 第 12 项：`device_count>0` 门控，验证 scanout_count>0 且每个几何合理，打印 `scanouts=N OK`。
+  - [x] 实机验证：① 默认 virtio-gpu-pci——`scanouts enabled=1` → `scanouts=1 OK` → `PASS`（全 12 项）；② `run_diag_gpu_multihead.sh`（`max_outputs=2,xres=1024,yres=768` + VNC）——分辨率协商生效 `fb 1024x768`，枚举逻辑正确。**诚实边界：headless QEMU 下第二 scanout 需真实连接第二显示输出才 enabled，VNC 只提供一个 head，故实测 enabled=1；多头镜像代码路径（枚举全部 + 逐个 SET_SCANOUT）已就绪，需真实多显环境才能观到 enabled>1。** 正常 GOP 回退 + host opkg ALL PASS 无回归。🎊 **M6.6–6.8 全部完成（virgl 按评估砂掉）**。
 - [ ] M6.4：安全加固（ASLR / W^X 强制 / SMEP / SMAP / 栈保护）
 - [ ] M6.5：多用户与会话（完整 uid/gid 体系 + 登录管理 + 权限隔离）
 - [ ] M6.6：系统日志 / dmesg / journald 风格日志子系统

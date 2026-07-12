@@ -34,6 +34,11 @@ static uint8_t            *g_cursor_fb;      /* 64x64 BGRA sprite backing */
 static uint32_t            g_edid_ok;        /* EDID negotiated + parsed */
 static uint32_t            g_edid_pref_w;    /* preferred mode width */
 static uint32_t            g_edid_pref_h;    /* preferred mode height */
+/* enumerated scanouts: how many are enabled + each geometry (mirror mode) */
+static uint32_t            g_scanout_count;
+static uint32_t            g_scanout_ids[VIRTIO_GPU_MAX_SCANOUTS];
+static uint32_t            g_scanout_w[VIRTIO_GPU_MAX_SCANOUTS];
+static uint32_t            g_scanout_h[VIRTIO_GPU_MAX_SCANOUTS];
 static uint32_t            g_count;
 static uint32_t            g_width;
 static uint32_t            g_height;
@@ -130,18 +135,29 @@ static int gpu_get_display_info(void) {
     if (gpu_resp_type() != VIRTIO_GPU_RESP_OK_DISPLAY_INFO) return -2;
     virtio_gpu_resp_display_info_t *resp =
         (virtio_gpu_resp_display_info_t *)(g_cmd_buf + CMD_RESP_OFF);
-    /* pick the first enabled scanout */
+    /* enumerate every enabled scanout (multi-head): record id + geometry.
+     * The first enabled scanout also becomes the primary draw geometry. */
+    g_scanout_count = 0;
     for (uint32_t i = 0; i < VIRTIO_GPU_MAX_SCANOUTS; i++) {
-        if (resp->pmodes[i].enabled) {
-            g_width  = resp->pmodes[i].r.width;
-            g_height = resp->pmodes[i].r.height;
-            return 0;
-        }
+        if (!resp->pmodes[i].enabled) continue;
+        uint32_t w = resp->pmodes[i].r.width;
+        uint32_t h = resp->pmodes[i].r.height;
+        if (w == 0 || h == 0) continue;
+        g_scanout_ids[g_scanout_count] = i;
+        g_scanout_w[g_scanout_count]   = w;
+        g_scanout_h[g_scanout_count]   = h;
+        if (g_scanout_count == 0) { g_width = w; g_height = h; }
+        g_scanout_count++;
     }
+    if (g_scanout_count > 0) return 0;
     /* no enabled scanout: fall back to pmode 0 geometry if non-zero */
     if (resp->pmodes[0].r.width && resp->pmodes[0].r.height) {
         g_width  = resp->pmodes[0].r.width;
         g_height = resp->pmodes[0].r.height;
+        g_scanout_ids[0] = 0;
+        g_scanout_w[0]   = g_width;
+        g_scanout_h[0]   = g_height;
+        g_scanout_count  = 1;
         return 0;
     }
     return -3;
@@ -178,16 +194,25 @@ static int gpu_attach_backing(void) {
 }
 
 static int gpu_set_scanout(void) {
-    virtio_gpu_set_scanout_t *req =
-        (virtio_gpu_set_scanout_t *)(g_cmd_buf + CMD_REQ_OFF);
-    gpu_memset(req, 0, sizeof(*req));
-    req->hdr.type    = VIRTIO_GPU_CMD_SET_SCANOUT;
-    req->r.x = 0; req->r.y = 0;
-    req->r.width = g_width; req->r.height = g_height;
-    req->scanout_id  = 0;
-    req->resource_id = VIRTIO_GPU_XFORM_RESID;
-    if (gpu_cmd(sizeof(*req), sizeof(virtio_gpu_ctrl_hdr_t)) != 0) return -1;
-    return (gpu_resp_type() == VIRTIO_GPU_RESP_OK_NODATA) ? 0 : -2;
+    /* Mirror mode: bind our single 2D resource to every enabled scanout so
+     * all heads display the same desktop.  Each scanout gets its own rect
+     * sized to that head's geometry (clamped to our backing dimensions). */
+    for (uint32_t s = 0; s < g_scanout_count; s++) {
+        uint32_t w = g_scanout_w[s], h = g_scanout_h[s];
+        if (w > g_width)  w = g_width;
+        if (h > g_height) h = g_height;
+        virtio_gpu_set_scanout_t *req =
+            (virtio_gpu_set_scanout_t *)(g_cmd_buf + CMD_REQ_OFF);
+        gpu_memset(req, 0, sizeof(*req));
+        req->hdr.type    = VIRTIO_GPU_CMD_SET_SCANOUT;
+        req->r.x = 0; req->r.y = 0;
+        req->r.width = w; req->r.height = h;
+        req->scanout_id  = g_scanout_ids[s];
+        req->resource_id = VIRTIO_GPU_XFORM_RESID;
+        if (gpu_cmd(sizeof(*req), sizeof(virtio_gpu_ctrl_hdr_t)) != 0) return -1;
+        if (gpu_resp_type() != VIRTIO_GPU_RESP_OK_NODATA) return -2;
+    }
+    return 0;
 }
 
 /* Create the 64x64 hardware cursor resource + its backing store.
@@ -414,6 +439,15 @@ int virtio_gpu_hide_cursor(void) {
 /* ---- accessors ---- */
 uint32_t virtio_gpu_device_count(void) { return g_count; }
 
+uint32_t virtio_gpu_scanout_count(void) { return g_scanout_count; }
+
+int virtio_gpu_scanout_mode(uint32_t idx, uint32_t *w, uint32_t *h) {
+    if (idx >= g_scanout_count) return -1;
+    if (w) *w = g_scanout_w[idx];
+    if (h) *h = g_scanout_h[idx];
+    return 0;
+}
+
 uint32_t virtio_gpu_edid_available(void) { return g_edid_ok; }
 
 int virtio_gpu_edid_preferred_mode(uint32_t *w, uint32_t *h) {
@@ -507,6 +541,13 @@ void virtio_gpu_init(void) {
 
     g_count = 1;
     serial_write("[virtio-gpu] 2D pipeline ready\n");
+    {
+        /* report how many heads we lit up (mirror mode) */
+        char nb[2] = { (char)('0' + (g_scanout_count > 9 ? 9 : g_scanout_count)), 0 };
+        serial_write("[virtio-gpu] scanouts enabled=");
+        serial_write(nb);
+        serial_write("\n");
+    }
 
     /* query display EDID if the feature was negotiated */
     g_edid_ok = 0;

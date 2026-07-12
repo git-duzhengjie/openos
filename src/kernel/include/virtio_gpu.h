@@ -207,4 +207,13 @@ uint32_t virtio_gpu_edid_available(void);
  * Returns 0 and fills the w/h out-params on success; -1 if no EDID. */
 int virtio_gpu_edid_preferred_mode(uint32_t *w, uint32_t *h);
 
+/* ---- multi-scanout (multi-head) ---- */
+
+/* Number of enabled scanouts discovered at GET_DISPLAY_INFO time.
+ * All enabled scanouts mirror the same 2D resource (mirror mode). */
+uint32_t virtio_gpu_scanout_count(void);
+
+/* Geometry of enabled scanout idx (0..count-1). Returns 0 on success. */
+int virtio_gpu_scanout_mode(uint32_t idx, uint32_t *w, uint32_t *h);
+
 #endif /* OPENOS_KERNEL_VIRTIO_GPU_H */
