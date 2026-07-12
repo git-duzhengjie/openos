@@ -216,6 +216,39 @@ static inline int openos64_stat(const char *path, openos64_stat_t *st) {
                                   (uint64_t)(uintptr_t)st);
 }
 
+/* dirent buffer must match kernel openos_dirent_t layout (src/kernel/include/syscall.h). */
+typedef struct {
+    unsigned int  ino;
+    unsigned int  mode;
+    unsigned int  size;
+    char          name[32];
+} openos64_dirent_t;
+
+/*
+ * Read directory entry #index of `path` into *out.
+ * Returns 1 when an entry was written, 0 at end-of-directory, -1 on error.
+ */
+static inline int openos64_readdir(const char *path, int index, openos64_dirent_t *out) {
+    return (int)openos64_syscall3(OPENOS64_SYS_READDIR,
+                                  (uint64_t)(uintptr_t)path,
+                                  (uint64_t)(unsigned)index,
+                                  (uint64_t)(uintptr_t)out);
+}
+
+/*
+ * Install an in-memory .opk image (M5.4c).
+ * a0=image ptr, a1=image size, a2=install root (e.g. "/pkg").
+ * Returns OPK_OK(0) or a negative opk error code.
+ */
+#define OPENOS64_SYS_OPK_INSTALL 479ULL
+static inline long openos64_opk_install(const void *image, unsigned long size,
+                                        const char *root) {
+    return openos64_syscall3(OPENOS64_SYS_OPK_INSTALL,
+                             (uint64_t)(uintptr_t)image,
+                             (uint64_t)size,
+                             (uint64_t)(uintptr_t)root);
+}
+
 static inline long openos64_getpid(void) {
     return openos64_syscall0(OPENOS64_SYS_GETPID);
 }

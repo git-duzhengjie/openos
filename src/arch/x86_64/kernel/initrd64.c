@@ -16,6 +16,8 @@
 #include "../include/embed_libc_demo.h"    /* M5.3e: standard C library subset e2e */
 #include "../include/embed_fs_demo.h"      /* M5.4a: writable-VFS e2e */
 #include "../include/embed_opk_demo.h"     /* M5.4c: .opk install e2e */
+#include "../include/embed_opkg.h"         /* M5.4d: user-space package manager CLI */
+#include "../include/embed_opkg_selftest.h"/* M5.4d: package-manager e2e self-test */
 #include "../include/embed_launcher.h"     /* H.3: initial /bin/launcher  */
 #include "../include/embed_ifconfig64.h"   /* M1.5.3: /bin/ifconfig net tool */
 #include "../include/embed_ping64.h"       /* M1.5.3: /bin/ping net tool */
@@ -70,6 +72,11 @@ static const x86_64_initrd_file_t initrd_files[] = {
      * SYS_OPK_INSTALL into the writable ramfs, then reads files back.
      * /bin/fs_demo execve's into it as the tail of the launch chain. */
     { .name = "/bin/opk_demo", .data = opk_demo_elf, .size = (x86_64_size_t)opk_demo_elf_size, .mode = 0755u },
+    /* M5.4d: /bin/opkg is the user-space package manager CLI
+     * (install/remove/list/info) driving SYS_OPK_INSTALL + the writable ramfs. */
+    { .name = "/bin/opkg", .data = opkg_elf, .size = (x86_64_size_t)opkg_elf_size, .mode = 0755u },
+    /* M5.4d: /bin/opkg_selftest exercises install/list/info/remove end-to-end. */
+    { .name = "/bin/opkg_selftest", .data = opkg_selftest_elf, .size = (x86_64_size_t)opkg_selftest_elf_size, .mode = 0755u },
     /* M1.5.3: userland network tools backed by the live virtio-net TCP/IP
      * stack (SYS_NETINFO/PING/DNSLOOKUP). */
     { .name = "/bin/ifconfig", .data = ifconfig64_elf, .size = (x86_64_size_t)ifconfig64_elf_size, .mode = 0755u },

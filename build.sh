@@ -372,7 +372,15 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
     if [ "$M5_FAST_BOOT" != "0" ]; then
         M5_FAST_BOOT_DEF="-DM5_FAST_BOOT"
     fi
-    ARCH64_CFLAGS="-m64 -mcmodel=kernel -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-80387 -mno-avx -ffreestanding -nostdlib -Wall -Wextra -O2 -fno-pic -fno-pie -fno-PIE -fno-stack-protector -fno-builtin -DGUI_EARLY_VERIFY $M5_RING3_DEF $M5_FAST_BOOT_DEF -I$ARCH64_SRC/include -Isrc/kernel/include -Isrc/kernel"
+    # M5.4d diag: M5_OPKG_DIAG (default OFF) boots straight into the package-
+    # manager end-to-end self-test (/bin/opkg_selftest). Implies fast-boot to
+    # skip the flaky SMP selftest. Use ONLY for opkg diag runs.
+    M5_OPKG_DIAG="${M5_OPKG_DIAG:-0}"
+    M5_OPKG_DIAG_DEF=""
+    if [ "$M5_OPKG_DIAG" != "0" ]; then
+        M5_OPKG_DIAG_DEF="-DM5_OPKG_DIAG -DM5_FAST_BOOT"
+    fi
+    ARCH64_CFLAGS="-m64 -mcmodel=kernel -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-80387 -mno-avx -ffreestanding -nostdlib -Wall -Wextra -O2 -fno-pic -fno-pie -fno-PIE -fno-stack-protector -fno-builtin -DGUI_EARLY_VERIFY $M5_RING3_DEF $M5_FAST_BOOT_DEF $M5_OPKG_DIAG_DEF -I$ARCH64_SRC/include -Isrc/kernel/include -Isrc/kernel"
     ARCH64_ASFLAGS="-m64 -mcmodel=kernel -mno-red-zone -fno-pic -fno-pie -fno-PIE -I$ARCH64_SRC/include -Isrc/kernel/include"
     ARCH64_USER_CFLAGS="-m64 -mcmodel=large -ffreestanding -nostdlib -Wall -Wextra -O2 -fno-pic -fno-pie -fno-PIE -fno-stack-protector -fno-builtin -I$ARCH64_SRC/user"
     ARCH64_USER_ASFLAGS="-m64 -mcmodel=large -fno-pic -fno-pie -fno-PIE -I$ARCH64_SRC/user"
@@ -503,6 +511,44 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
     readelf -h "$ARCH64_BIN_BUILD/opk_demo.elf" | grep -q 'Machine:.*X86-64'
     nm "$ARCH64_BIN_BUILD/opk_demo.elf" | grep -q ' openos64_main$'
     python3 _embed_elf.py "$ARCH64_BIN_BUILD/opk_demo.elf" "$ARCH64_SRC/include/embed_opk_demo.h" opk_demo_elf
+
+    echo "[1b5/5] Building x86_64 /bin/opkg ELF (M5.4d user-space package manager CLI)..."
+    # Reuses the libc subset .o already compiled above.
+    gcc $ARCH64_USER_CFLAGS -I"$ARCH64_SRC/include" -c "$ARCH64_SRC/user/opkg64.c" -o "$ARCH64_USER_BUILD/opkg64.o"
+    ld $ARCH64_USER_LDFLAGS -o "$ARCH64_BIN_BUILD/opkg.elf" \
+        "$ARCH64_USER_BUILD/start.o" \
+        "$ARCH64_USER_BUILD/crt0.o" \
+        "$ARCH64_USER_BUILD/libc_string.o" \
+        "$ARCH64_USER_BUILD/libc_stdlib.o" \
+        "$ARCH64_USER_BUILD/libc_stdio.o" \
+        "$ARCH64_USER_BUILD/libc_ctype.o" \
+        "$ARCH64_USER_BUILD/libc_errno.o" \
+        "$ARCH64_USER_BUILD/libc_assert.o" \
+        "$ARCH64_USER_BUILD/libc_libc_write.o" \
+        "$ARCH64_USER_BUILD/libc_libc_sbrk.o" \
+        "$ARCH64_USER_BUILD/opkg64.o"
+    readelf -h "$ARCH64_BIN_BUILD/opkg.elf" | grep -q 'Class:.*ELF64'
+    readelf -h "$ARCH64_BIN_BUILD/opkg.elf" | grep -q 'Machine:.*X86-64'
+    nm "$ARCH64_BIN_BUILD/opkg.elf" | grep -q ' openos64_main$'
+    python3 _embed_elf.py "$ARCH64_BIN_BUILD/opkg.elf" "$ARCH64_SRC/include/embed_opkg.h" opkg_elf
+
+    echo "[1b6/5] Building x86_64 /bin/opkg_selftest ELF (M5.4d package-manager e2e test)..."
+    gcc $ARCH64_USER_CFLAGS -I"$ARCH64_SRC/include" -c "$ARCH64_SRC/user/opkg_selftest64.c" -o "$ARCH64_USER_BUILD/opkg_selftest64.o"
+    ld $ARCH64_USER_LDFLAGS -o "$ARCH64_BIN_BUILD/opkg_selftest.elf" \
+        "$ARCH64_USER_BUILD/start.o" \
+        "$ARCH64_USER_BUILD/crt0.o" \
+        "$ARCH64_USER_BUILD/libc_string.o" \
+        "$ARCH64_USER_BUILD/libc_stdlib.o" \
+        "$ARCH64_USER_BUILD/libc_stdio.o" \
+        "$ARCH64_USER_BUILD/libc_ctype.o" \
+        "$ARCH64_USER_BUILD/libc_errno.o" \
+        "$ARCH64_USER_BUILD/libc_assert.o" \
+        "$ARCH64_USER_BUILD/libc_libc_write.o" \
+        "$ARCH64_USER_BUILD/libc_libc_sbrk.o" \
+        "$ARCH64_USER_BUILD/opkg_selftest64.o"
+    readelf -h "$ARCH64_BIN_BUILD/opkg_selftest.elf" | grep -q 'Class:.*ELF64'
+    nm "$ARCH64_BIN_BUILD/opkg_selftest.elf" | grep -q ' openos64_main$'
+    python3 _embed_elf.py "$ARCH64_BIN_BUILD/opkg_selftest.elf" "$ARCH64_SRC/include/embed_opkg_selftest.h" opkg_selftest_elf
 
     echo "[1c/5] Building x86_64 /bin/launcher ELF (H.3 execve caller)..."
     gcc $ARCH64_USER_CFLAGS -c "$ARCH64_SRC/user/launcher.c" -o "$ARCH64_USER_BUILD/launcher.o"

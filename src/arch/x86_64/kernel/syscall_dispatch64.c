@@ -37,6 +37,7 @@
 #include "../include/tsc64.h"
 #include "../include/usermode64.h"
 #include "../include/vfs64.h"
+#include "../include/ramfs64.h" /* M5.4d: dentry_t/inode_t + vfs_readdir for SYS_READDIR */
 #include "../include/opk_install.h" /* M5.4c: .opk 包安装器 */
 /* M5.4c: kernel-side .opk installer bridge (opk_install_kernel.c) */
 extern int opk_install_to_ramfs(const uint8_t *image, uint32_t image_size,
@@ -280,6 +281,28 @@ static uint64_t do_open(uint64_t path_ptr, uint64_t flags, uint64_t mode) {
         return (uint64_t)-1;
     }
     return (uint64_t)sfd;
+}
+
+/*
+ * SYS_READDIR (M5.4d): enumerate directory entries one at a time.
+ *   a0 = path (user ptr), a1 = index (0-based), a2 = openos_dirent_t* (out).
+ * Returns 1 when an entry was written, 0 at end-of-directory, -1 on error.
+ * Backed by vfs_readdir(path, index) which returns a dentry snapshot.
+ */
+static uint64_t do_readdir(uint64_t path_ptr, uint64_t index, uint64_t out_ptr) {
+    if (path_ptr == 0 || out_ptr == 0) return (uint64_t)-1;
+    if (!validate_user_buf(out_ptr, sizeof(openos_dirent_t))) return (uint64_t)-1;
+    const char *path = (const char *)(uintptr_t)path_ptr;
+    dentry_t *de = vfs_readdir(path, (int)index);
+    if (!de) return 0;   /* end of directory (or empty) */
+    openos_dirent_t *out = (openos_dirent_t *)(uintptr_t)out_ptr;
+    out->ino  = de->inode ? de->inode->ino  : 0;
+    out->mode = de->inode ? de->inode->mode : 0;
+    out->size = de->inode ? de->inode->size : 0;
+    int i = 0;
+    for (; i + 1 < (int)sizeof(out->name) && de->name[i]; i++) out->name[i] = de->name[i];
+    out->name[i] = 0;
+    return 1;
 }
 
 static uint64_t do_close(uint64_t fd) {
@@ -1891,6 +1914,7 @@ uint64_t arch_x86_64_syscall_dispatch_common(uint64_t num,
     case SYS_LSTAT:       return do_lstat(a0, a1);
     case SYS_FSTAT:       return do_fstat(a0, a1);
     case SYS_MKDIR:       return do_mkdir(a0, a1);
+    case SYS_READDIR:     return do_readdir(a0, a1, a2); /* M5.4d: 目录枚举 */
     case SYS_UNLINK:      return do_unlink(a0);
     case SYS_RMDIR:       return do_rmdir(a0);
     case SYS_RENAME:      return do_rename(a0, a1);

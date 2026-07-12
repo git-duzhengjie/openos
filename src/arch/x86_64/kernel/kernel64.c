@@ -939,7 +939,13 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
      * returns we inspect usermode_has_pending_exec(): if set, we reload
      * the new image and re-enter ring3 with the same proc slot. Bounded
      * loop (max 4 rounds) to make a runaway execve chain panic-safe. */
-#ifdef M5_FAST_BOOT
+#if defined(M5_OPKG_DIAG)
+    /* M5.4d diag: jump straight to the package-manager end-to-end self-test
+     * (install/list/info/remove closed loop). Single ring3 process, no
+     * multithreaded exit_self path, so it is reliable under single-core QEMU.
+     * Enabled only for -DM5_OPKG_DIAG builds; normal builds keep launcher. */
+    const char *initial_path = "/bin/opkg_selftest";
+#elif defined(M5_FAST_BOOT)
     /* M5.4c diag: jump straight to the opk install+run demo, bypassing the
      * launcher -> hello64_v2 -> thread_demo chain whose multithreaded
      * exit_self path is flaky under single-core QEMU. The full chain stays
