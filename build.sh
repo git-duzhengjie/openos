@@ -388,7 +388,15 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
     if [ "$M6_POWER_DIAG" != "0" ]; then
         M6_POWER_DIAG_DEF="-DM6_POWER_DIAG -DM5_FAST_BOOT"
     fi
-    ARCH64_CFLAGS="-m64 -mcmodel=kernel -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-80387 -mno-avx -ffreestanding -nostdlib -Wall -Wextra -O2 -fno-pic -fno-pie -fno-PIE -fno-stack-protector -fno-builtin -DGUI_EARLY_VERIFY $M5_RING3_DEF $M5_FAST_BOOT_DEF $M5_OPKG_DIAG_DEF $M6_POWER_DIAG_DEF -I$ARCH64_SRC/include -Isrc/kernel/include -Isrc/kernel"
+    # M6.2 diag: M6_CPUINFO_DIAG (default OFF) boots straight into the CPU
+    # frequency / thermal self-test (/bin/cpuinfo_selftest), exercising
+    # SYS_CPUINFO end-to-end. Implies fast-boot. Use ONLY for cpuinfo diag.
+    M6_CPUINFO_DIAG="${M6_CPUINFO_DIAG:-0}"
+    M6_CPUINFO_DIAG_DEF=""
+    if [ "$M6_CPUINFO_DIAG" != "0" ]; then
+        M6_CPUINFO_DIAG_DEF="-DM6_CPUINFO_DIAG -DM5_FAST_BOOT"
+    fi
+    ARCH64_CFLAGS="-m64 -mcmodel=kernel -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-80387 -mno-avx -ffreestanding -nostdlib -Wall -Wextra -O2 -fno-pic -fno-pie -fno-PIE -fno-stack-protector -fno-builtin -DGUI_EARLY_VERIFY $M5_RING3_DEF $M5_FAST_BOOT_DEF $M5_OPKG_DIAG_DEF $M6_POWER_DIAG_DEF $M6_CPUINFO_DIAG_DEF -I$ARCH64_SRC/include -Isrc/kernel/include -Isrc/kernel"
     ARCH64_ASFLAGS="-m64 -mcmodel=kernel -mno-red-zone -fno-pic -fno-pie -fno-PIE -I$ARCH64_SRC/include -Isrc/kernel/include"
     ARCH64_USER_CFLAGS="-m64 -mcmodel=large -ffreestanding -nostdlib -Wall -Wextra -O2 -fno-pic -fno-pie -fno-PIE -fno-stack-protector -fno-builtin -I$ARCH64_SRC/user"
     ARCH64_USER_ASFLAGS="-m64 -mcmodel=large -fno-pic -fno-pie -fno-PIE -I$ARCH64_SRC/user"
@@ -589,6 +597,24 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
     nm "$ARCH64_BIN_BUILD/opkg_selftest.elf" | grep -q ' openos64_main$'
     python3 _embed_elf.py "$ARCH64_BIN_BUILD/opkg_selftest.elf" "$ARCH64_SRC/include/embed_opkg_selftest.h" opkg_selftest_elf
 
+    echo "[1b8/5] Building x86_64 /bin/cpuinfo_selftest ELF (M6.2d SYS_CPUINFO e2e test)..."
+    gcc $ARCH64_USER_CFLAGS -I"$ARCH64_SRC/include" -c "$ARCH64_SRC/user/cpuinfo_selftest64.c" -o "$ARCH64_USER_BUILD/cpuinfo_selftest64.o"
+    ld $ARCH64_USER_LDFLAGS -o "$ARCH64_BIN_BUILD/cpuinfo_selftest.elf" \
+        "$ARCH64_USER_BUILD/start.o" \
+        "$ARCH64_USER_BUILD/crt0.o" \
+        "$ARCH64_USER_BUILD/libc_string.o" \
+        "$ARCH64_USER_BUILD/libc_stdlib.o" \
+        "$ARCH64_USER_BUILD/libc_stdio.o" \
+        "$ARCH64_USER_BUILD/libc_ctype.o" \
+        "$ARCH64_USER_BUILD/libc_errno.o" \
+        "$ARCH64_USER_BUILD/libc_assert.o" \
+        "$ARCH64_USER_BUILD/libc_libc_write.o" \
+        "$ARCH64_USER_BUILD/libc_libc_sbrk.o" \
+        "$ARCH64_USER_BUILD/cpuinfo_selftest64.o"
+    readelf -h "$ARCH64_BIN_BUILD/cpuinfo_selftest.elf" | grep -q 'Class:.*ELF64'
+    nm "$ARCH64_BIN_BUILD/cpuinfo_selftest.elf" | grep -q ' openos64_main$'
+    python3 _embed_elf.py "$ARCH64_BIN_BUILD/cpuinfo_selftest.elf" "$ARCH64_SRC/include/embed_cpuinfo_selftest.h" cpuinfo_selftest_elf
+
     echo "[1c/5] Building x86_64 /bin/launcher ELF (H.3 execve caller)..."
     gcc $ARCH64_USER_CFLAGS -c "$ARCH64_SRC/user/launcher.c" -o "$ARCH64_USER_BUILD/launcher.o"
     ld $ARCH64_USER_LDFLAGS -o "$ARCH64_BIN_BUILD/launcher.elf" \
@@ -687,6 +713,8 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         kernel/acpi_selftest64.c \
         kernel/power64.c \
         kernel/power_selftest64.c \
+        kernel/cpufreq64.c \
+        kernel/cpufreq_selftest64.c \
         kernel/smp64.c \
         kernel/smp_selftest64.c \
         kernel/percpu64.c \
@@ -834,6 +862,8 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         "$ARCH64_BUILD/acpi_selftest64.o" \
         "$ARCH64_BUILD/power64.o" \
         "$ARCH64_BUILD/power_selftest64.o" \
+        "$ARCH64_BUILD/cpufreq64.o" \
+        "$ARCH64_BUILD/cpufreq_selftest64.o" \
         "$ARCH64_BUILD/smp64.o" \
         "$ARCH64_BUILD/smp_selftest64.o" \
         "$ARCH64_BUILD/percpu64.o" \

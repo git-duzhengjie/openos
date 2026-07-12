@@ -47,6 +47,8 @@ extern void net_print_info(void);
 #include "../include/acpi_selftest64.h"
 #include "../include/power64.h"
 #include "../include/power_selftest64.h"
+#include "../include/cpufreq64.h"
+#include "../include/cpufreq_selftest64.h"
 #include "../include/smp_selftest64.h"
 #include "../include/lapic64.h"  /* G.7g-1: lapic_timer_calibrate */
 #include "../include/sched_prio_selftest64.h"
@@ -748,6 +750,14 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
 #endif /* M5_FAST_BOOT: preempt-selftest slot-switch/exit_self path is flaky
         * under single-core QEMU; skip in fast-boot diag path. */
 
+    /* Step M6.2: probe CPU frequency / thermal state via CPUID-gated MSR
+     * access (read-only; never changes the P-state). Placed BEFORE the ACPI
+     * / power path since it only depends on CPUID + the already-calibrated
+     * TSC, and must not sit behind the single-core-flaky preempt-selftest.
+     * Non-fatal. */
+    (void)arch_x86_64_cpufreq_init();
+    (void)arch_x86_64_cpufreq_selftest_run();
+
     /* Step G.3a: parse ACPI tables (RSDP via EFI cfg table -> XSDT -> MADT)
      * to enumerate CPUs and IO-APICs. Must run BEFORE apic_selftest so the
      * latter can later be evolved to use MADT-discovered LAPIC/IOAPIC bases
@@ -956,7 +966,12 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
      * returns we inspect usermode_has_pending_exec(): if set, we reload
      * the new image and re-enter ring3 with the same proc slot. Bounded
      * loop (max 4 rounds) to make a runaway execve chain panic-safe. */
-#if defined(M5_OPKG_DIAG)
+#if defined(M6_CPUINFO_DIAG)
+    /* M6.2d diag: jump straight to the CPU frequency / thermal self-test
+     * (SYS_CPUINFO end-to-end). Single ring3 process, read-only, reliable
+     * under single-core QEMU. Enabled only for -DM6_CPUINFO_DIAG builds. */
+    const char *initial_path = "/bin/cpuinfo_selftest";
+#elif defined(M5_OPKG_DIAG)
     /* M5.4d diag: jump straight to the package-manager end-to-end self-test
      * (install/list/info/remove closed loop). Single ring3 process, no
      * multithreaded exit_self path, so it is reliable under single-core QEMU.

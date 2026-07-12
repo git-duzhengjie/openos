@@ -39,6 +39,7 @@
 #include "../include/vfs64.h"
 #include "../include/ramfs64.h" /* M5.4d: dentry_t/inode_t + vfs_readdir for SYS_READDIR */
 #include "../include/power64.h"  /* M6.1: ACPI shutdown / reboot */
+#include "../include/cpufreq64.h" /* M6.2: CPU frequency / thermal snapshot */
 #include "../include/opk_install.h" /* M5.4c: .opk 包安装器 */
 /* M5.4c: kernel-side .opk installer bridge (opk_install_kernel.c) */
 extern int opk_install_to_ramfs(const uint8_t *image, uint32_t image_size,
@@ -1663,6 +1664,84 @@ static uint64_t do_power(uint64_t op) {
 }
 
 /*
+ * SYS_CPUINFO (481) — M6.2: copy a snapshot of CPU frequency / thermal state
+ * into the caller-provided buffer. a0 = user pointer, a1 = buffer size.
+ * Strictly read-only: this never writes PERF_CTL / changes the P-state.
+ * Returns 0 on success, -1 on error (bad pointer / cpufreq uninitialised).
+ * The kernel copies at most a1 bytes so smaller/older user structs stay
+ * forward-compatible.
+ */
+static uint64_t do_cpuinfo(uint64_t user_ptr, uint64_t user_size) {
+    if (user_ptr == 0 || user_size == 0) return (uint64_t)(int64_t)-1;
+    if (!validate_user_buf(user_ptr, (uint32_t)user_size))
+        return (uint64_t)(int64_t)-1;
+
+    /* Refresh live fields (current ratio + temperatures) before copying. */
+    const arch_x86_64_cpufreq_info_t *ci = arch_x86_64_cpufreq_info();
+    if (ci == 0 || !ci->valid) {
+        if (!arch_x86_64_cpufreq_init()) return (uint64_t)(int64_t)-1;
+        ci = arch_x86_64_cpufreq_info();
+        if (ci == 0 || !ci->valid) return (uint64_t)(int64_t)-1;
+    }
+    (void)arch_x86_64_cpufreq_refresh();
+    ci = arch_x86_64_cpufreq_info();
+
+    /* Build the user-ABI struct (layout mirrors openos64_cpuinfo_t). */
+    struct {
+        uint32_t caps;
+        char     vendor[16];
+        uint32_t family;
+        uint32_t model;
+        uint32_t stepping;
+        uint32_t base_mhz;
+        uint32_t max_mhz;
+        uint32_t bus_mhz;
+        uint32_t tsc_mhz;
+        uint32_t cur_ratio;
+        uint32_t cur_mhz;
+        uint32_t max_nonturbo_ratio;
+        uint32_t min_ratio;
+        uint32_t tjmax_c;
+        uint32_t core_temp_c;
+        uint32_t pkg_temp_c;
+        uint8_t  core_temp_valid;
+        uint8_t  pkg_temp_valid;
+        uint8_t  thermal_alert;
+        uint8_t  reserved0;
+    } u;
+
+    u.caps = ci->caps;
+    for (int i = 0; i < 13 && i < 16; i++) u.vendor[i] = ci->vendor[i];
+    for (int i = 13; i < 16; i++) u.vendor[i] = 0;
+    u.family             = ci->family;
+    u.model              = ci->model;
+    u.stepping           = ci->stepping;
+    u.base_mhz           = ci->base_mhz;
+    u.max_mhz            = ci->max_mhz;
+    u.bus_mhz            = ci->bus_mhz;
+    u.tsc_mhz            = ci->tsc_mhz;
+    u.cur_ratio          = ci->cur_ratio;
+    u.cur_mhz            = ci->cur_mhz;
+    u.max_nonturbo_ratio = ci->max_nonturbo_ratio;
+    u.min_ratio          = ci->min_ratio;
+    u.tjmax_c            = ci->tjmax_c;
+    u.core_temp_c        = ci->core_temp_c;
+    u.pkg_temp_c         = ci->pkg_temp_c;
+    u.core_temp_valid    = ci->core_temp_valid;
+    u.pkg_temp_valid     = ci->pkg_temp_valid;
+    u.thermal_alert      = ci->thermal_alert;
+    u.reserved0          = 0;
+
+    uint32_t n = (uint32_t)user_size;
+    if (n > sizeof(u)) n = sizeof(u);
+    const uint8_t *src = (const uint8_t *)&u;
+    uint8_t *dst = (uint8_t *)(uintptr_t)user_ptr;
+    for (uint32_t b = 0; b < n; b++) dst[b] = src[b];
+
+    return 0;
+}
+
+/*
  * SYS_YIELD: Step E.1 routes the call through proc64's cooperative yield
  * counter. The dispatcher itself stays branchless so future sched64 work
  * only has to swap proc64_yield()'s body for a real reschedule. We still
@@ -1994,6 +2073,7 @@ uint64_t arch_x86_64_syscall_dispatch_common(uint64_t num,
     case SYS_SBRK:          return do_sbrk(a0);
     case SYS_OPK_INSTALL:   return do_opk_install(a0, a1, a2); /* M5.4c: 安装 .opk 包 */
     case SYS_POWER:         return do_power(a0);              /* M6.1: 关机/重启/查询 */
+    case SYS_CPUINFO:       return do_cpuinfo(a0, a1);         /* M6.2: CPU 频率/温度快照 */
 
     /* -------- net (Step E.3, loopback only) -------- */
     case SYS_SOCKET:      return arch_x86_64_sys_socket(a0, a1, a2);

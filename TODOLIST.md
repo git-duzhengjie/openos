@@ -1752,7 +1752,13 @@
   - [x] M6.1b：`arch_x86_64_power_shutdown()` — ACPI S5 软关机：可选通过 SMI_CMD 切 ACPI 模式→向 PM1a_CNT（及 PM1b_CNT）写 `SLP_TYPa|SLP_EN`；失败回退到 QEMU/Bochs 调试关机端口（0x604/0xB004/0x4004），最后 halt。成功不返回。
   - [x] M6.1c：`arch_x86_64_power_reboot()` — 暖重启：优先 FADT RESET_REG（I/O 或 MMIO）+ RESET_VALUE；回退到 8042 键盘控制器脉冲（0x64←0xFE）；最后 null-IDT 三重故障重置。成功不返回。
   - [x] M6.1 syscall + selftest：新增 `SYS_POWER=480`（a0: 0=shutdown/1=reboot/2=query；query 返回能力位 bit0=ACPI S5 / bit1=FADT reset）+ 用户 API `openos64_power()`。内核态 `power_selftest64.c` 打印并校验 FADT/\_S5 快照（**不真关机**）。QEMU headless 实测：`[power-selftest] PASS`，fadt=0x0FxxxxE0、pm1a_cnt=0xB004、`\_S5` 解码 SLP_TYP=0。另新增 `M6_POWER_DIAG` 编译开关（默认 OFF）：ON 时 selftest 后真触发 ACPI S5——实测 QEMU **7.5s 内 rc=0 干净关机**（非 30s 超时），串口打出 `triggering ACPI shutdown` + `shutdown requested (ACPI S5)`，证明 PM1a_CNT 写入路径生效；默认构建 0 处 trigger（不会自毁）但 selftest 照常 PASS。
-- [ ] M6.2：CPU 频率/温度管理（P-state / C-state）
+- [x] M6.2：CPU 频率/温度管理（P-state / C-state）✅ **观测层完成**（只读：不写 PERF_CTL / 不改 P-state；主动变频待后续）
+  - [x] M6.2a：CPUID 能力探测 + 快照骨架——新模块 `cpufreq64.c/.h`（与 acpi64/power64 解耦，按功能拆小模块）。**CPUID 门控 MSR 访问**：每个 rdmsr 都由保证 MSR 存在的 CPUID 特性位护卫，在 QEMU `-cpu qemu64`（无热/P-state MSR）上优雅降级为“unknown”而非 #GP。leaf 0/1/6/0x16/0x80000007 提取 vendor/family/model、能力位（TSC/MSR/InvariantTSC/DTS/Turbo/ARAT/HWP/PkgTherm/FreqLeaf）、base/max/bus MHz。复用 tsc64 PIT 标定频率作 tsc_mhz。
+  - [x] M6.2b：P-state 比值→MHz——Intel 且 MSR 能力位且 GenuineIntel 时才读 MSR_PLATFORM_INFO（max_nonturbo/min ratio）+ IA32_PERF_STATUS（cur_ratio），×100 MHz bclk 估算 MHz。
+  - [x] M6.2c：数字温度传感器→摄氏度——由 DTS 能力位门控，读 IA32_TEMPERATURE_TARGET 得 Tjmax，读 IA32_THERM_STATUS/IA32_PACKAGE_THERM 得 readout，temp = Tjmax - readout（core/pkg 分开，各带 valid 位）。`arch_x86_64_cpufreq_refresh()` 刷新时变字段。
+  - [x] M6.2d：`SYS_CPUINFO=481` + 用户 API `openos64_cpuinfo(openos64_cpuinfo_t*)`（a0=buf ptr a1=sizeof，内核 `validate_user_buf` 校验后拷至多 a1 字节，向前兼容）。内核 `do_cpuinfo` 先 refresh 再拷快照。
+  - [x] M6.2 selftest 两层：① 内核态 `cpufreq_selftest64.c`（置于 preempt-selftest 之前以避开单核 QEMU flaky 区，仅依赖 CPUID+已标定 TSC）：默认构建 QEMU headless 实测 **`[x86_64][cpufreq-selftest] PASS`**，vendor=AuthenticAMD、caps=0x3（TSC+MSR）、tsc_mhz=3396（合理）；qemu64 无 leaf 0x16/非 Intel，P-state/温度优雅为 n/a（无 #GP）。② ring3 `cpuinfo_selftest64.c`（`M6_CPUINFO_DIAG` 开关，需叠 `M5_RING3_CONSOLE=1`）：实测 **`[cpuinfo_selftest] ALL PASS` 6 passed / 0 failed**，SYS_CPUINFO 用户态 ABI 端到端走通（拷贝、不变字段一致、幂等二次查询）。host opkg 23/23 无回归。`M6_CPUINFO_DIAG` 已接入 build.sh，cpuinfo_selftest.elf 随 initrd 打包入库。
+    - 备注：本里程碑为“观测层”（只读）；C-state 空闲管理（MWAIT/HLT 深度）与主动 P-state 变频（写 IA32_PERF_CTL / HWP_REQUEST）待后续里程碑。
 - [ ] M6.3：图形加速（2D blit 加速 / 可选 GPU 驱动 / 双缓冲无撕裂）
 - [ ] M6.4：安全加固（ASLR / W^X 强制 / SMEP / SMAP / 栈保护）
 - [ ] M6.5：多用户与会话（完整 uid/gid 体系 + 登录管理 + 权限隔离）

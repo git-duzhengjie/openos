@@ -222,6 +222,7 @@
 #define SYS_CLONE         478  /* M5.2a: a0=flags a1=child_stack a2=entry a3=arg a4=tls -> new tid/<0（线程创建，CLONE_VM 共享地址空间） */
 #define SYS_OPK_INSTALL   479  /* M5.4c: a0=image_ptr a1=image_size a2=root_ptr -> 0/负错误码（安装 .opk 包到可写 ramfs） */
 #define SYS_POWER         480  /* M6.1: a0=op(0=shutdown/1=reboot/2=query) -> query返回能力位；shutdown/reboot 成功不返回 */
+#define SYS_CPUINFO       481  /* M6.2: a0=user buf ptr a1=buf size -> 0/负；拷贝 CPU 频率/温度快照（只读，不改 P-state） */
 #define SYS_GUI_ADD_TABLEVIEW 400
 #define SYS_GUI_SET_TABLEVIEW_ROW 401
 #define SYS_GUI_GET_TABLEVIEW_ROW 402

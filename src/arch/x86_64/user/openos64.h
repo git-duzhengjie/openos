@@ -268,6 +268,59 @@ static inline long openos64_power(unsigned long op) {
     return openos64_syscall1(OPENOS64_SYS_POWER, (uint64_t)op);
 }
 
+/*
+ * M6.2 — CPU frequency / thermal observation (read-only). The kernel copies
+ * a snapshot of CPUID/MSR-derived CPU power-management state into the
+ * caller-provided buffer. Strictly read-only: querying never changes the
+ * P-state. a0 = pointer to openos64_cpuinfo_t, a1 = sizeof that struct.
+ * Returns 0 on success, -1 on error (bad pointer / cpufreq uninitialised).
+ * The kernel fills at most a1 bytes, so older binaries with a smaller struct
+ * remain forward-compatible.
+ */
+#define OPENOS64_SYS_CPUINFO  481ULL
+
+/* Capability bits (mirror of kernel CPUFREQ_CAP_*). */
+#define OPENOS64_CPU_CAP_TSC            (1u << 0)
+#define OPENOS64_CPU_CAP_MSR            (1u << 1)
+#define OPENOS64_CPU_CAP_INVARIANT_TSC  (1u << 2)
+#define OPENOS64_CPU_CAP_THERM_DTS      (1u << 3)
+#define OPENOS64_CPU_CAP_TURBO          (1u << 4)
+#define OPENOS64_CPU_CAP_ARAT           (1u << 5)
+#define OPENOS64_CPU_CAP_HWP            (1u << 6)
+#define OPENOS64_CPU_CAP_PKG_THERM      (1u << 7)
+#define OPENOS64_CPU_CAP_FREQ_LEAF      (1u << 8)
+#define OPENOS64_CPU_CAP_PLATFORM_INFO  (1u << 9)
+#define OPENOS64_CPU_CAP_PERF_STATUS    (1u << 10)
+
+typedef struct {
+    uint32_t caps;              /* OPENOS64_CPU_CAP_* bitmask       */
+    char     vendor[16];        /* CPUID vendor string, NUL-term    */
+    uint32_t family;
+    uint32_t model;
+    uint32_t stepping;
+    uint32_t base_mhz;          /* CPUID leaf 0x16 (0 if absent)    */
+    uint32_t max_mhz;
+    uint32_t bus_mhz;
+    uint32_t tsc_mhz;           /* PIT-calibrated TSC MHz           */
+    uint32_t cur_ratio;         /* current P-state ratio            */
+    uint32_t cur_mhz;
+    uint32_t max_nonturbo_ratio;
+    uint32_t min_ratio;
+    uint32_t tjmax_c;           /* junction max temp (Celsius)      */
+    uint32_t core_temp_c;
+    uint32_t pkg_temp_c;
+    uint8_t  core_temp_valid;
+    uint8_t  pkg_temp_valid;
+    uint8_t  thermal_alert;
+    uint8_t  reserved0;
+} openos64_cpuinfo_t;
+
+static inline long openos64_cpuinfo(openos64_cpuinfo_t *out) {
+    return openos64_syscall2(OPENOS64_SYS_CPUINFO,
+                             (uint64_t)(uintptr_t)out,
+                             (uint64_t)sizeof(openos64_cpuinfo_t));
+}
+
 static inline long openos64_gettid(void) {
     return openos64_syscall0(OPENOS64_SYS_GETTID);
 }
