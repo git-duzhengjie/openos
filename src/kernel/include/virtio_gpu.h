@@ -22,6 +22,10 @@
 #define VIRTIO_GPU_CMD_RESOURCE_ATTACH_BACKING 0x0106u
 #define VIRTIO_GPU_CMD_RESOURCE_DETACH_BACKING 0x0107u
 
+/* cursor queue command types (spec §5.7) */
+#define VIRTIO_GPU_CMD_UPDATE_CURSOR           0x0300u
+#define VIRTIO_GPU_CMD_MOVE_CURSOR             0x0301u
+
 /* response types */
 #define VIRTIO_GPU_RESP_OK_NODATA              0x1100u
 #define VIRTIO_GPU_RESP_OK_DISPLAY_INFO        0x1101u
@@ -107,6 +111,30 @@ typedef struct virtio_gpu_resource_flush {
     uint32_t padding;
 } __attribute__((packed)) virtio_gpu_resource_flush_t;
 
+/* cursor position descriptor (shared by UPDATE_CURSOR / MOVE_CURSOR) */
+typedef struct virtio_gpu_cursor_pos {
+    uint32_t scanout_id;
+    uint32_t x;
+    uint32_t y;
+    uint32_t padding;
+} __attribute__((packed)) virtio_gpu_cursor_pos_t;
+
+/* UPDATE_CURSOR / MOVE_CURSOR request (cursor queue).
+ * UPDATE_CURSOR sets image (resource_id) + hotspot + position;
+ * MOVE_CURSOR reuses the same struct but only pos is honoured. */
+typedef struct virtio_gpu_update_cursor {
+    virtio_gpu_ctrl_hdr_t   hdr;
+    virtio_gpu_cursor_pos_t pos;
+    uint32_t                resource_id;
+    uint32_t                hot_x;
+    uint32_t                hot_y;
+    uint32_t                padding;
+} __attribute__((packed)) virtio_gpu_update_cursor_t;
+
+/* hardware cursor image is a fixed 64x64 BGRA sprite (spec requirement) */
+#define VIRTIO_GPU_CURSOR_W  64u
+#define VIRTIO_GPU_CURSOR_H  64u
+
 /* ---- public driver API ---- */
 
 /* Probe PCI for virtio-gpu, bring up the 2D pipeline and register a
@@ -128,5 +156,23 @@ void *virtio_gpu_framebuffer(void);
  * (TRANSFER_TO_HOST_2D + RESOURCE_FLUSH).  Coordinates are clipped to
  * the scanout.  Returns 0 on success. */
 int virtio_gpu_flush_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h);
+
+/* ---- hardware cursor (cursor queue) ---- */
+
+/* Non-zero once the cursor queue + 64x64 cursor resource are live. */
+uint32_t virtio_gpu_cursor_available(void);
+
+/* Upload a cursor sprite and show it.  src is BGRA, src_w x src_h pixels
+ * (clamped/padded to 64x64); hot_x/hot_y is the pointer hotspot.
+ * Returns 0 on success. */
+int virtio_gpu_set_cursor(const uint32_t *src, uint32_t src_w, uint32_t src_h,
+                          uint32_t hot_x, uint32_t hot_y);
+
+/* Move the hardware cursor to absolute scanout coordinate (x,y).
+ * Cheap: single MOVE_CURSOR on the cursor queue.  Returns 0 on success. */
+int virtio_gpu_move_cursor(uint32_t x, uint32_t y);
+
+/* Hide the hardware cursor (UPDATE_CURSOR with resource_id 0). */
+int virtio_gpu_hide_cursor(void);
 
 #endif /* OPENOS_KERNEL_VIRTIO_GPU_H */

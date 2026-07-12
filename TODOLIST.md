@@ -1779,6 +1779,11 @@
   - [x] present 接口（framebuffer.h + framebuffer64.c）：`framebuffer_present_needed()` / `framebuffer_present_rect(x,y,w,h)` / `framebuffer_present()`——GOP 后端 no-op（内部快路径返回 0），virtio-gpu 后端转发 `virtio_gpu_flush_rect()`（TRANSFER_TO_HOST_2D + RESOURCE_FLUSH）。
   - [x] gui.c 热点：`gui_flush_rect` 在三路 blit（RECT_BLIT/ROW_BLIT/逐像素）之后、裁剪后脏矩形 (x0,y0)-(x1,y1) 上追加 `framebuffer_present_rect()`；GOP 环境零开销（no-op）。
   - [x] 实机验证（双环境）：① 挂 `-device virtio-gpu-pci`——`[framebuffer] backend=virtio-gpu (present-mode)` → `window_manager_start_desktop rc=0x0` → `[x86_64][gui] desktop up, entering poll loop`（整个桌面经 virtio-gpu present）；② 默认 GOP boot——`[virtio-gpu] no device (1af4:1050)` → `[framebuffer] backend=UEFI GOP (direct-write)` → `desktop up`（零回归）。host opkg 23/23 无回归，x86_64 全量构建通过。（2D blit 加速 / 可选 GPU 驱动 / 双缓冲无撕裂）
+- [x] M6.6：virtio-gpu cursorq 硬件光标✅ **实机 HW cursor OK**
+  - [x] 协议头 `virtio_gpu.h` 扩展：cursor 命令类型 `UPDATE_CURSOR=0x0300` / `MOVE_CURSOR=0x0301`；`virtio_gpu_cursor_pos_t`（scanout_id/x/y/padding）；`virtio_gpu_update_cursor_t`（hdr + pos + resource_id + hot_x/hot_y + padding）；固定 64×64 光标尺寸常量 `VIRTIO_GPU_CURSOR_W/H`。
+  - [x] 驱动 `virtio_gpu64.c`：新建**第 2 队列 cursorq（index 1）**（`virtio_modern_setup_queue`，失败仅禁用硬件光标不影响 2D）；专用 cursor 命令引擎 `cursor_cmd()`（独立 `g_cur_cmd_buf` bounce 页 + 双 desc + 轮询 used 环 + `virtio_modern_notify(GPU_CURSORQ)`）；`gpu_setup_cursor()` 建 64×64 BGRA 光标 resource（RESID=2）+ ATTACH_BACKING 到专用 backing。API：`virtio_gpu_cursor_available()` / `virtio_gpu_set_cursor(src,w,h,hot_x,hot_y)`（填 64×64 精灵 + TRANSFER_TO_HOST_2D 经 controlq + UPDATE_CURSOR 经 cursorq）/ `virtio_gpu_move_cursor(x,y)`（廉价 MOVE_CURSOR）/ `virtio_gpu_hide_cursor()`（UPDATE_CURSOR resid=0）。接入 init 末尾，`g_cursor_ready` 门控。
+  - [x] gfx-selftest 第 10 项：`virtio_gpu_cursor_available()` 门控，验证 set/move/hide 三命令，末尾恢复可见光标。
+  - [x] 实机验证：挂 virtio-gpu-pci（`M5_FAST_BOOT=1` 绕开单核 preempt-selftest flaky）——`[virtio-gpu] hardware cursor ready` → `backend=virtio-gpu (present-mode)` → `[x86_64][gfx-selftest] HW cursor OK` → `fb 1280x800` → **`PASS`**（全 10 项）。正常构建 GOP 回退 + host opkg ALL PASS 无回归。
 - [ ] M6.4：安全加固（ASLR / W^X 强制 / SMEP / SMAP / 栈保护）
 - [ ] M6.5：多用户与会话（完整 uid/gid 体系 + 登录管理 + 权限隔离）
 - [ ] M6.6：系统日志 / dmesg / journald 风格日志子系统

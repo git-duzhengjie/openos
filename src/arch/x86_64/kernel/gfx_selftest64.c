@@ -1,6 +1,7 @@
 #include "../include/gfx_selftest64.h"
 #include "../include/early_console64.h"
 #include "framebuffer.h"
+#include "virtio_gpu.h"
 
 #include <stdint.h>
 
@@ -152,6 +153,29 @@ int arch_x86_64_gfx_selftest_run(void)
     if (!rok) {
         early_console64_write("\n[x86_64][gfx-selftest] FAIL rect readback mismatch\n");
         return 0;
+    }
+
+    /* 10. Hardware cursor (virtio-gpu cursor queue). Only meaningful when the
+     * GPU + cursor queue are live; on the GOP boot path it is skipped. */
+    if (virtio_gpu_cursor_available()) {
+        /* build a tiny 8x8 opaque-white sprite with a transparent border */
+        static uint32_t spr[64];
+        for (uint32_t i = 0; i < 64; i++) spr[i] = 0xFFFFFFFFu;
+        if (virtio_gpu_set_cursor(spr, 8, 8, 0, 0) != 0) {
+            early_console64_write("\n[x86_64][gfx-selftest] FAIL cursor set\n");
+            return 0;
+        }
+        if (virtio_gpu_move_cursor(100, 100) != 0) {
+            early_console64_write("\n[x86_64][gfx-selftest] FAIL cursor move\n");
+            return 0;
+        }
+        if (virtio_gpu_hide_cursor() != 0) {
+            early_console64_write("\n[x86_64][gfx-selftest] FAIL cursor hide\n");
+            return 0;
+        }
+        /* restore visible cursor for the desktop */
+        virtio_gpu_set_cursor(spr, 8, 8, 0, 0);
+        early_console64_write("\n[x86_64][gfx-selftest] HW cursor OK");
     }
 
     log_dec("\n[x86_64][gfx-selftest] fb ", fi->width);
