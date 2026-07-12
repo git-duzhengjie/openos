@@ -1,12 +1,12 @@
 # openos 待开发功能清单
 
-> 更新时间：2026-07-09
+> 更新时间：2026-07-12
 >
 > 当前状态：openos 已具备 32 位 x86 原型内核能力，能够启动、显示、输入、调度、运行基础用户程序，并具备基础 syscall、VFS、ramfs/tmpfs、shell、GUI Terminal 等模块。浏览器路线已切换为 OpenOS 自研轻量浏览器，Chromium 官方内核迁移冻结为历史备选。
 >
-> 最近完成：**M4.1 里程碑收官** —— syscall 扩充四子项全部完成：M4.1a 文件元数据（stat/fstat/lstat/mkdir/unlink/rename，open/read/write/close 迁移到统一 VFS）、M4.1b 内存（mmap/munmap/mprotect/brk/sbrk，修复 g_heap_slot 未初始化 bug）、M4.1c IPC（pipe/dup/dup2，引入 OFD 打开文件描述层）、M4.1d 时间/设备/信号（gettimeofday/ioctl/kill）。x86_64 syscall dispatch 从 M4 初的 29 个扩到 49 个（0x31），dispatch_enosys=0 全部真实现无兜底。headless SMP=1/4 双矩阵 + 各子项自测全绿，Stages 1-30 基线保住。
+> 最近完成：**M6 里程碑全部收官（系统资源 + 图形加速 + 安全加固）** —— M6.1 ACPI 电源（关机/重启）、M6.2 CPU 频率/温度观测层、M6.3 整行/矩形 blit 软件加速、M6.4 virtio-gpu modern PCI transport + 2D 管线、M6.5 framebuffer 双后端自动选择（virtio-gpu present / GOP direct-write）、M6.6 硬件光标 cursorq、M6.7 EDID 显示能力协商、M6.8 多 scanout 镜像、M6.9 virtio-input 键鼠驱动、**M6.10 安全加固 6/6（CPU 能力探测 + W^X + SMEP + SMAP + 栈 canary + ASLR，commit `ecfc876`）**。另本轮复验确认：整套 TCP/IP 网络栈（以太网/ARP/IPv4/ICMP/UDP/TCP/DHCP/DNS/HTTP + virtio-net）早在 M1.x 完成并实机 pcap 验证，位于 `src/kernel/net/netstack.c`（2093 行），零回归（DHCP/PING/DNS/HTTP/TCP 五连测全 PASS，43 个真实网络包走通整条协议栈）；修复 M4.1b sbrk 假故障（commit `31b7842`）。
 >
-> 当前推荐下一步：在继续保持自研浏览器回归门禁的同时，优先推进 OPENOS 作为真正操作系统的 PC/Mobile 跨设备架构路线：冻结 i386 稳定基线，将 √86_64 升级为 PC 主线，抽象 BootInfo / HAL / Device Model，并新增 aarch64 作为 Mobile 主线基础。
+> 当前推荐下一步：M6 已全部收官（M6.1–M6.10）。建议推进 **M6.11 多用户与会话**（完整 uid/gid 体系 + 登录管理 + 权限隔离）与 **M6.12 系统日志子系统**（dmesg / journald 风格）；或回头收口 H 系列 x86_64 ring3 进阶（H.5b.2+ 独立地址空间 + CR3 切换、fork、wait/waitpid、ELF 解释器、动态库）。任何后续工作均需保持 Stages 1-30 SMP=1/4 双矩阵全绿基线不退化。
 
 ---
 
@@ -1800,9 +1800,15 @@
   - [x] transport 复用 `virtio_modern_*`：attach/reset/get_features(仅留 VERSION_1 bit32)/set_features/setup_queue/set_driver_ok/notify。物理页 `arch_x86_64_pmm_alloc_pages`。
   - [x] GUI 集成：gui.c 加**弱符号** `gui_platform_poll_input()`（i386 no-op），`gui_poll_mouse()` 每帧调用；virtio_input64.c 提供**强符号**转发 `virtio_input_poll()`。kernel64.c 在 `virtio_gpu_init()` 后调 `virtio_input_init()`。
   - [x] 实机验证（双分支）：① `run_diag_input.sh`（挂 virtio-keyboard-pci + virtio-tablet-pci + virtio-gpu-pci）——**2×`[virtio-input] device up`** → `backend=virtio-gpu present-mode` → `desktop up, entering poll loop`；② `run_diag_gpu.sh`（不挂 input）——`[virtio-input] no device (1af4:1052)` → desktop up（PS/2 通路继续，**零回归**）。host opkg 23/23，x86_64 全量构建通过。selftest 中的 #PF/#GP 均为故意故障注入探针(PASS)，rc=124 为 timeout 杀常驻 poll loop(预期)。
-- [ ] M6.4：安全加固（ASLR / W^X 强制 / SMEP / SMAP / 栈保护）
-- [ ] M6.5：多用户与会话（完整 uid/gid 体系 + 登录管理 + 权限隔离）
-- [ ] M6.6：系统日志 / dmesg / journald 风格日志子系统
+- [x] **M6.10：安全加固（ASLR / W^X 强制 / SMEP / SMAP / 栈保护 / CPU 能力探测）✅ 6/6 全收官**（注：原编号 M6.4 与 virtio-gpu 里程碑冲突，重编为 M6.10）
+  - [x] **M6.10.1 CPU 能力探测**：CPUID 探测 NX/SMEP/SMAP/UMIP 能力位，为后续各加固项门控铺路
+  - [x] **M6.10.2 W^X（写异或执行）**：页权限分区实测 124 页 RX + 157 页 RO + 1674 页 NX，代码段不可写、数据段不可执行
+  - [x] **M6.10.3 SMEP**：CR4.bit20 置位（实机 CR4=0x300668 双位置位），内核态取指用户页触发 #PF
+  - [x] **M6.10.4 SMAP**（commit `ecfc876`）：CR4.bit21 置位。粗粒度用户内存访问收口——`syscall_sysret64.S` 汇编入口用 STAC 打开、dispatch 返回后 CLAC 关闭 user-access 窗口（一处改动覆盖 32+ 处散落用户指针访问），由全局标志 `arch_x86_64_smap_on` 门控（非 SMAP CPU 跳过 STAC/CLAC 避免 #UD，完美向后兼容）；STAC/CLAC 用 `.byte` 硬编码不依赖汇编器特性。**双构建实测铁证**：`+smep,+smap` CPU 启动 CR4=0x300668，全 syscall 用户内存路径（文件读写、signal trampoline、net 收发缓冲）PASS 零 #PF 零 guest_error；`qemu64`（无 SMAP）门控跳过、selftest 全绿进桌面、向后兼容 PASS
+  - [x] **M6.10.5 栈 canary（栈保护）**：TSC 熵源生成栈 canary，每次启动值不同
+  - [x] **M6.10.6 ASLR**：栈基址随机化，实测栈 gap 三次启动全不同
+- [ ] M6.11：多用户与会话（完整 uid/gid 体系 + 登录管理 + 权限隔离）
+- [ ] M6.12：系统日志 / dmesg / journald 风格日志子系统
 
 > 推荐攻关顺序：**M1.1 PCI → M1.2 virtio-net → M1.3/M1.4 TCP/IP 栈 → M1.5 真实上网**。此路线打通后 OpenOS 才真正跨入现代 OS 门槛；M2/M4 可并行推进。
 
