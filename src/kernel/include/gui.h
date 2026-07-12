@@ -427,6 +427,7 @@ typedef struct gui_accel_info {
     uint32_t flush_rects;
     uint32_t flush_pixels;
     uint32_t flush_rows;
+    uint32_t flush_row_blits;   /* M6.3：通过整行 blit 加速刷写的行数 */
     framebuffer_backend_type_t backend;
     uint32_t backend_caps;
     uint32_t alpha_pixels;

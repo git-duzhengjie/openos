@@ -1759,7 +1759,11 @@
   - [x] M6.2d：`SYS_CPUINFO=481` + 用户 API `openos64_cpuinfo(openos64_cpuinfo_t*)`（a0=buf ptr a1=sizeof，内核 `validate_user_buf` 校验后拷至多 a1 字节，向前兼容）。内核 `do_cpuinfo` 先 refresh 再拷快照。
   - [x] M6.2 selftest 两层：① 内核态 `cpufreq_selftest64.c`（置于 preempt-selftest 之前以避开单核 QEMU flaky 区，仅依赖 CPUID+已标定 TSC）：默认构建 QEMU headless 实测 **`[x86_64][cpufreq-selftest] PASS`**，vendor=AuthenticAMD、caps=0x3（TSC+MSR）、tsc_mhz=3396（合理）；qemu64 无 leaf 0x16/非 Intel，P-state/温度优雅为 n/a（无 #GP）。② ring3 `cpuinfo_selftest64.c`（`M6_CPUINFO_DIAG` 开关，需叠 `M5_RING3_CONSOLE=1`）：实测 **`[cpuinfo_selftest] ALL PASS` 6 passed / 0 failed**，SYS_CPUINFO 用户态 ABI 端到端走通（拷贝、不变字段一致、幂等二次查询）。host opkg 23/23 无回归。`M6_CPUINFO_DIAG` 已接入 build.sh，cpuinfo_selftest.elf 随 initrd 打包入库。
     - 备注：本里程碑为“观测层”（只读）；C-state 空闲管理（MWAIT/HLT 深度）与主动 P-state 变频（写 IA32_PERF_CTL / HWP_REQUEST）待后续里程碑。
-- [ ] M6.3：图形加速（2D blit 加速 / 可选 GPU 驱动 / 双缓冲无撕裂）
+- [x] M6.3：图形加速✅ **整行 blit 加速层完成**
+  - [x] M6.3a：内核层整行 blit 原语 `framebuffer_blit_row(x,y,src,count)`（framebuffer64.c）— 32bpp linear 直存后端，目标行起始地址 + 单次叠拷，消除逐像素函数调用+地址重算；水平自动裁剪，返回实写像素数。新增 caps 位 `FRAMEBUFFER_CAP_ROW_BLIT`。
+  - [x] M6.3b：热点改造 `gui_flush_rect`（gui.c）——屏幕内裁剪 + 加速路径逐行 blit（回退逐像素）；新增 `flush_row_blits` 统计字段。
+  - [x] M6.3 selftest：内核态 `gfx_selftest64.c`（置于 framebuffer_init 之后、preempt-selftest 之前；framebuffer_init 幂等），QEMU headless 实测 **`[x86_64][gfx-selftest] PASS` fb 1280x800**：验证 ROW_BLIT 能力位、NULL/越界拒绝、水平裁剪（返回 3）、写入-读回正确性（探针后恢复原像素不破坏 splash）。host opkg 23/23 无回归。gfx_selftest64.o 已接入 build.sh 链接。
+    - 备注：本里程碑为“整行 blit 软件加速”（消除逐像素函数调用）；硬件 2D 引擎（GPU BitBLT）、双缓冲页翻转（double buffer page flip）、DMA 加速待后续里程碑。（2D blit 加速 / 可选 GPU 驱动 / 双缓冲无撕裂）
 - [ ] M6.4：安全加固（ASLR / W^X 强制 / SMEP / SMAP / 栈保护）
 - [ ] M6.5：多用户与会话（完整 uid/gid 体系 + 登录管理 + 权限隔离）
 - [ ] M6.6：系统日志 / dmesg / journald 风格日志子系统

@@ -57,7 +57,7 @@ void framebuffer_init(void)
 
     g_fb_caps.backend = FRAMEBUFFER_BACKEND_EFI_GOP;
     g_fb_caps.name = "UEFI GOP";
-    g_fb_caps.flags = FRAMEBUFFER_CAP_LINEAR | FRAMEBUFFER_CAP_SOFTWARE_2D | FRAMEBUFFER_CAP_ALPHA_BLEND;
+    g_fb_caps.flags = FRAMEBUFFER_CAP_LINEAR | FRAMEBUFFER_CAP_SOFTWARE_2D | FRAMEBUFFER_CAP_ALPHA_BLEND | FRAMEBUFFER_CAP_ROW_BLIT;
     g_fb_caps.max_width = fb->width;
     g_fb_caps.max_height = fb->height;
     g_fb_caps.preferred_bpp = fb->bpp ? fb->bpp : 32;
@@ -127,6 +127,25 @@ void framebuffer_put_pixel(uint32_t x, uint32_t y, uint32_t color)
         return;
     }
     g_fb_base[(uint64_t)y * g_fb_pitch_px + x] = color;
+}
+
+uint32_t framebuffer_blit_row(uint32_t x, uint32_t y, const uint32_t *src, uint32_t count)
+{
+    if (!g_fb_ready || !src || y >= g_fb_height || x >= g_fb_width) {
+        return 0;
+    }
+    /* 水平裁剪：不超出可见宽度 */
+    uint32_t max = g_fb_width - x;
+    if (count > max) {
+        count = max;
+    }
+    /* 32bpp linear 直存：目标行起始地址 + 单调叠拷（消除逐像素函数调用）。
+     * VRAM 为 volatile，不能直接 memcpy，逐字写入；编译器仍可向量化/展开。 */
+    volatile uint32_t *dst = g_fb_base + (uint64_t)y * g_fb_pitch_px + x;
+    for (uint32_t i = 0; i < count; i++) {
+        dst[i] = src[i];
+    }
+    return count;
 }
 
 uint32_t framebuffer_get_pixel(uint32_t x, uint32_t y)

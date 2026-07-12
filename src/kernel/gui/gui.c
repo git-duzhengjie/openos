@@ -2075,16 +2075,40 @@ int gui_copy_rect(int dst_x, int dst_y, int src_x, int src_y, int w, int h) {
 }
 
 static void gui_flush_rect(const gui_rect_t *r) {
-    int x, y;
+    int y;
+    int x0, y0, x1, y1;
     if (!r || !g_gui.backbuffer) return;
+
+    /* 屏幕内裁剪：避免越界行/列 */
+    x0 = r->x < 0 ? 0 : r->x;
+    y0 = r->y < 0 ? 0 : r->y;
+    x1 = r->x + r->w;
+    y1 = r->y + r->h;
+    if (x1 > (int)g_gui.width)  x1 = (int)g_gui.width;
+    if (y1 > (int)g_gui.height) y1 = (int)g_gui.height;
+    if (x0 >= x1 || y0 >= y1) return;
+
     g_gui_accel.flush_rects++;
-    g_gui_accel.flush_pixels += (uint32_t)r->w * (uint32_t)r->h;
-    for (y = r->y; y < r->y + r->h; y++) {
-        const uint32_t *src = &g_gui.backbuffer[(uint32_t)y * g_gui.width + (uint32_t)r->x];
-        for (x = 0; x < r->w; x++) {
-            framebuffer_put_pixel((uint32_t)(r->x + x), (uint32_t)y, src[x]);
+    g_gui_accel.flush_pixels += (uint32_t)(x1 - x0) * (uint32_t)(y1 - y0);
+
+    if (g_gui_accel.enabled && (framebuffer_get_caps()->flags & FRAMEBUFFER_CAP_ROW_BLIT)) {
+        /* M6.3 加速路径：整行 blit（单次调用 memcpy 语义，消除逐像素函数调用） */
+        for (y = y0; y < y1; y++) {
+            const uint32_t *src = &g_gui.backbuffer[(uint32_t)y * g_gui.width + (uint32_t)x0];
+            framebuffer_blit_row((uint32_t)x0, (uint32_t)y, src, (uint32_t)(x1 - x0));
+            g_gui_accel.flush_rows++;
+            g_gui_accel.flush_row_blits++;
         }
-        g_gui_accel.flush_rows++;
+    } else {
+        /* 回退路径：逐像素 */
+        int x;
+        for (y = y0; y < y1; y++) {
+            const uint32_t *src = &g_gui.backbuffer[(uint32_t)y * g_gui.width + (uint32_t)x0];
+            for (x = 0; x < x1 - x0; x++) {
+                framebuffer_put_pixel((uint32_t)(x0 + x), (uint32_t)y, src[x]);
+            }
+            g_gui_accel.flush_rows++;
+        }
     }
 }
 

@@ -57,6 +57,7 @@ typedef struct framebuffer_caps {
 #define FRAMEBUFFER_CAP_MODESET     0x00000002u
 #define FRAMEBUFFER_CAP_SOFTWARE_2D 0x00000004u
 #define FRAMEBUFFER_CAP_ALPHA_BLEND 0x00000008u
+#define FRAMEBUFFER_CAP_ROW_BLIT    0x00000010u  /* 支持整行 memcpy blit（32bpp linear 直存） */
 
 typedef struct framebuffer_info {
     uint32_t width;
@@ -86,6 +87,11 @@ uint32_t framebuffer_get_pixel(uint32_t x, uint32_t y);
 uint32_t framebuffer_blend_color(uint32_t dst, uint32_t src, uint8_t alpha);
 void framebuffer_put_pixel_alpha(uint32_t x, uint32_t y, uint32_t color, uint8_t alpha);
 void framebuffer_fill_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t color);
+/* M6.3 图形加速：整行 blit 原语。
+ * 将 src[0..count) 连续 32bpp 像素写入 VRAM 行 (x,y) 起始处。
+ * 32bpp linear 直存后端走单次 memcpy（消除逐像素函数调用+地址重算）；
+ * 越界部分自动裁剪。返回实际写入的像素数。 */
+uint32_t framebuffer_blit_row(uint32_t x, uint32_t y, const uint32_t *src, uint32_t count);
 void framebuffer_fill_rect_alpha(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t color, uint8_t alpha);
 void framebuffer_draw_line(int x0, int y0, int x1, int y1, uint32_t color);
 void framebuffer_test_pattern(void);

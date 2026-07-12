@@ -49,6 +49,7 @@ extern void net_print_info(void);
 #include "../include/power_selftest64.h"
 #include "../include/cpufreq64.h"
 #include "../include/cpufreq_selftest64.h"
+#include "../include/gfx_selftest64.h"
 #include "../include/smp_selftest64.h"
 #include "../include/lapic64.h"  /* G.7g-1: lapic_timer_calibrate */
 #include "../include/sched_prio_selftest64.h"
@@ -757,6 +758,15 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
      * Non-fatal. */
     (void)arch_x86_64_cpufreq_init();
     (void)arch_x86_64_cpufreq_selftest_run();
+
+    /* Step M6.3: verify the framebuffer row-blit acceleration primitive
+     * (framebuffer_blit_row). framebuffer_init() is idempotent and only wires
+     * up the already-existing UEFI GOP framebuffer, so calling it here is safe
+     * even before the desktop starts. This probe only touches VRAM briefly,
+     * restoring every pixel it reads. Kept before the single-core-flaky
+     * preempt path region. Non-fatal. */
+    framebuffer_init();
+    (void)arch_x86_64_gfx_selftest_run();
 
     /* Step G.3a: parse ACPI tables (RSDP via EFI cfg table -> XSDT -> MADT)
      * to enumerate CPUs and IO-APICs. Must run BEFORE apic_selftest so the
