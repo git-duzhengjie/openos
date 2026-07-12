@@ -1763,7 +1763,12 @@
   - [x] M6.3a：内核层整行 blit 原语 `framebuffer_blit_row(x,y,src,count)`（framebuffer64.c）— 32bpp linear 直存后端，目标行起始地址 + 单次叠拷，消除逐像素函数调用+地址重算；水平自动裁剪，返回实写像素数。新增 caps 位 `FRAMEBUFFER_CAP_ROW_BLIT`。
   - [x] M6.3b：热点改造 `gui_flush_rect`（gui.c）——屏幕内裁剪 + 加速路径逐行 blit（回退逐像素）；新增 `flush_row_blits` 统计字段。
   - [x] M6.3 selftest：内核态 `gfx_selftest64.c`（置于 framebuffer_init 之后、preempt-selftest 之前；framebuffer_init 幂等），QEMU headless 实测 **`[x86_64][gfx-selftest] PASS` fb 1280x800**：验证 ROW_BLIT 能力位、NULL/越界拒绝、水平裁剪（返回 3）、写入-读回正确性（探针后恢复原像素不破坏 splash）。host opkg 23/23 无回归。gfx_selftest64.o 已接入 build.sh 链接。
-    - 备注：本里程碑为“整行 blit 软件加速”（消除逐像素函数调用）；硬件 2D 引擎（GPU BitBLT）、双缓冲页翻转（double buffer page flip）、DMA 加速待后续里程碑。（2D blit 加速 / 可选 GPU 驱动 / 双缓冲无撕裂）
+    - 备注：本里程碑为“整行 blit 软件加速”（消除逐像素函数调用）；硬件 2D 引擎（GPU BitBLT）、双缓冲页翻转（double buffer page flip）、DMA 加速待后续里程碑。
+  - [x] M6.3d：矩形块 blit 原语（进阶项）✅——可行性评估后的务实落地。**诚实结论**：后端为 UEFI GOP（固件锁定的线性帧缓冲），无 CRTC/扫描地址寄存器访问权，硬件页翻转（double buffer page flip）与 GPU BitBLT 在当前平台不可行；而软件双缓冲（backbuffer + 脏矩形合并 + present）**早已在 gui.c 存在**。因此本子任务职于可落地的真实提速点：将脏矩形 present 从“逐行调用 blit_row”升级为“单次矩形块 blit”，能力位/边界校验从每行一次降为整矩形一次。
+    - 内核层：新增 `framebuffer_blit_rect(x,y,src,src_stride,w,h)`（framebuffer64.c）——右/下越界自动裁剪，返回实写行数；新增 caps 位 `FRAMEBUFFER_CAP_RECT_BLIT`。
+    - 热点：`gui_flush_rect`（gui.c）新增 RECT_BLIT 最优分支（优先于 ROW_BLIT 与逐像素回退）；新增 `flush_rect_blits` 统计字段。
+    - selftest：`gfx_selftest64.c` 扩展至 **9 项**（新增 RECT_BLIT cap / NULL·退化·越界拒绝 / 垂直裁剪返回 2 / 2×3 块写入-读回，均无损探针），QEMU headless 实测 **`[x86_64][gfx-selftest] PASS` fb 1280x800**；cpufreq-selftest 无回归；host opkg 23/23。
+    - 未落地（平台限制）：硬件 GPU BitBLT / 硬件扫描地址页翻转 / DMA ——需 virtio-gpu 或 BGA/Bochs VBE 后端（非 GOP）方可开展，待专项驱动里程碑。（2D blit 加速 / 可选 GPU 驱动 / 双缓冲无撕裂）
 - [ ] M6.4：安全加固（ASLR / W^X 强制 / SMEP / SMAP / 栈保护）
 - [ ] M6.5：多用户与会话（完整 uid/gid 体系 + 登录管理 + 权限隔离）
 - [ ] M6.6：系统日志 / dmesg / journald 风格日志子系统

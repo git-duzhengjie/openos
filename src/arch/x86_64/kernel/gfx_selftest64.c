@@ -96,6 +96,64 @@ int arch_x86_64_gfx_selftest_run(void)
         return 0;
     }
 
+    /* 6. M6.3d RECT_BLIT capability must be advertised. */
+    if (!(fc->flags & FRAMEBUFFER_CAP_RECT_BLIT)) {
+        early_console64_write("\n[x86_64][gfx-selftest] FAIL RECT_BLIT cap missing\n");
+        return 0;
+    }
+
+    /* 7. RECT_BLIT NULL / degenerate / oob rejection. */
+    if (framebuffer_blit_rect(0, 0, 0, 4, 2, 2) != 0 ||
+        framebuffer_blit_rect(0, 0, probe, 4, 0, 2) != 0 ||
+        framebuffer_blit_rect(0, 0, probe, 4, 2, 0) != 0 ||
+        framebuffer_blit_rect(fi->width, 0, probe, 4, 2, 2) != 0 ||
+        framebuffer_blit_rect(0, fi->height, probe, 4, 2, 2) != 0) {
+        early_console64_write("\n[x86_64][gfx-selftest] FAIL rect reject\n");
+        return 0;
+    }
+
+    /* 8. RECT_BLIT vertical clipping: request more rows than remaining -> clipped. */
+    uint32_t rh = framebuffer_blit_rect(0, fi->height - 2, probe, 4, 2, 16);
+    if (rh != 2) {
+        log_dec("\n[x86_64][gfx-selftest] FAIL rect vclip rows=", rh);
+        early_console64_write("\n");
+        return 0;
+    }
+    /* Restore the 2x2 region touched by check 8. */
+    for (uint32_t ry = 0; ry < 2; ry++) {
+        for (uint32_t rx = 0; rx < 2; rx++) {
+            uint32_t px = rx;
+            uint32_t py = fi->height - 2 + ry;
+            framebuffer_put_pixel(px, py, framebuffer_get_pixel(px, py));
+        }
+    }
+
+    /* 9. RECT_BLIT write-then-readback correctness (2x3 block at row 0, x=0). */
+    uint32_t src2[6] = { 0x00A1B2C3u, 0x00C3B2A1u, 0x00445566u,
+                         0x00665544u, 0x00778899u, 0x00998877u };
+    uint32_t rsaved[6];
+    for (uint32_t ry = 0; ry < 3; ry++) {
+        for (uint32_t rx = 0; rx < 2; rx++) {
+            rsaved[ry * 2 + rx] = framebuffer_get_pixel(rx, ry);
+        }
+    }
+    uint32_t rrows = framebuffer_blit_rect(0, 0, src2, 2, 2, 3);
+    int rok = (rrows == 3);
+    for (uint32_t ry = 0; ry < 3 && rok; ry++) {
+        for (uint32_t rx = 0; rx < 2 && rok; rx++) {
+            uint32_t got = framebuffer_get_pixel(rx, ry);
+            if ((got & 0x00FFFFFFu) != (src2[ry * 2 + rx] & 0x00FFFFFFu)) {
+                rok = 0;
+            }
+        }
+    }
+    /* Restore original pixels of the 2x3 block. */
+    framebuffer_blit_rect(0, 0, rsaved, 2, 2, 3);
+    if (!rok) {
+        early_console64_write("\n[x86_64][gfx-selftest] FAIL rect readback mismatch\n");
+        return 0;
+    }
+
     log_dec("\n[x86_64][gfx-selftest] fb ", fi->width);
     log_dec("x", fi->height);
     early_console64_write("\n[x86_64][gfx-selftest] PASS\n");

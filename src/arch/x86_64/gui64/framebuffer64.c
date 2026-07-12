@@ -57,7 +57,7 @@ void framebuffer_init(void)
 
     g_fb_caps.backend = FRAMEBUFFER_BACKEND_EFI_GOP;
     g_fb_caps.name = "UEFI GOP";
-    g_fb_caps.flags = FRAMEBUFFER_CAP_LINEAR | FRAMEBUFFER_CAP_SOFTWARE_2D | FRAMEBUFFER_CAP_ALPHA_BLEND | FRAMEBUFFER_CAP_ROW_BLIT;
+    g_fb_caps.flags = FRAMEBUFFER_CAP_LINEAR | FRAMEBUFFER_CAP_SOFTWARE_2D | FRAMEBUFFER_CAP_ALPHA_BLEND | FRAMEBUFFER_CAP_ROW_BLIT | FRAMEBUFFER_CAP_RECT_BLIT;
     g_fb_caps.max_width = fb->width;
     g_fb_caps.max_height = fb->height;
     g_fb_caps.preferred_bpp = fb->bpp ? fb->bpp : 32;
@@ -146,6 +146,32 @@ uint32_t framebuffer_blit_row(uint32_t x, uint32_t y, const uint32_t *src, uint3
         dst[i] = src[i];
     }
     return count;
+}
+
+uint32_t framebuffer_blit_rect(uint32_t x, uint32_t y, const uint32_t *src, uint32_t src_stride, uint32_t w, uint32_t h)
+{
+    if (!g_fb_ready || !src || y >= g_fb_height || x >= g_fb_width || w == 0 || h == 0) {
+        return 0;
+    }
+    /* 边界检查仅一次：右/下越界自动裁剪 */
+    uint32_t maxw = g_fb_width - x;
+    if (w > maxw) {
+        w = maxw;
+    }
+    uint32_t maxh = g_fb_height - y;
+    if (h > maxh) {
+        h = maxh;
+    }
+    /* 逐行直存：目标行步进 g_fb_pitch_px，源行步进 src_stride。
+     * 与逐行调用 blit_row 相比，开销、能力位、边界校验均只做一次。 */
+    for (uint32_t ry = 0; ry < h; ry++) {
+        volatile uint32_t *dst = g_fb_base + (uint64_t)(y + ry) * g_fb_pitch_px + x;
+        const uint32_t *srow = src + (uint64_t)ry * src_stride;
+        for (uint32_t rx = 0; rx < w; rx++) {
+            dst[rx] = srow[rx];
+        }
+    }
+    return h;
 }
 
 uint32_t framebuffer_get_pixel(uint32_t x, uint32_t y)

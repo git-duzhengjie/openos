@@ -2091,7 +2091,16 @@ static void gui_flush_rect(const gui_rect_t *r) {
     g_gui_accel.flush_rects++;
     g_gui_accel.flush_pixels += (uint32_t)(x1 - x0) * (uint32_t)(y1 - y0);
 
-    if (g_gui_accel.enabled && (framebuffer_get_caps()->flags & FRAMEBUFFER_CAP_ROW_BLIT)) {
+    if (g_gui_accel.enabled && (framebuffer_get_caps()->flags & FRAMEBUFFER_CAP_RECT_BLIT)) {
+        /* M6.3d 最优路径：矩形块 blit——单次调用完成整个脏矩形，
+         * 能力位/边界校验仅一次（而非每行一次）。 */
+        const uint32_t *src = &g_gui.backbuffer[(uint32_t)y0 * g_gui.width + (uint32_t)x0];
+        uint32_t rows = framebuffer_blit_rect((uint32_t)x0, (uint32_t)y0, src,
+                                              g_gui.width,
+                                              (uint32_t)(x1 - x0), (uint32_t)(y1 - y0));
+        g_gui_accel.flush_rows += rows;
+        g_gui_accel.flush_rect_blits++;
+    } else if (g_gui_accel.enabled && (framebuffer_get_caps()->flags & FRAMEBUFFER_CAP_ROW_BLIT)) {
         /* M6.3 加速路径：整行 blit（单次调用 memcpy 语义，消除逐像素函数调用） */
         for (y = y0; y < y1; y++) {
             const uint32_t *src = &g_gui.backbuffer[(uint32_t)y * g_gui.width + (uint32_t)x0];
