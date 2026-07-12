@@ -1792,7 +1792,14 @@
 - [x] M6.8：virtio-gpu 多 scanout（多头镜像模式）✅ **枚举+逐头 SET_SCANOUT 就绪，单头实机验证**
   - [x] 驱动 `virtio_gpu64.c`：`gpu_get_display_info()` 改为**枚举所有 enabled scanout**（记录 id + 几何到 `g_scanout_ids/w/h[]`，首个作为主绘制几何）；`gpu_set_scanout()` 改为**逐个 enabled scanout 绑同一 2D resource（镜像模式）**，各 scanout 矩形按自身几何并 clamp 到 backing 尺寸；per-frame RESOURCE_FLUSH 是 per-resource，一次让所有绑定头更新。API：`virtio_gpu_scanout_count()` / `virtio_gpu_scanout_mode(idx,w,h)`。init 日志 `scanouts enabled=N`。
   - [x] gfx-selftest 第 12 项：`device_count>0` 门控，验证 scanout_count>0 且每个几何合理，打印 `scanouts=N OK`。
-  - [x] 实机验证：① 默认 virtio-gpu-pci——`scanouts enabled=1` → `scanouts=1 OK` → `PASS`（全 12 项）；② `run_diag_gpu_multihead.sh`（`max_outputs=2,xres=1024,yres=768` + VNC）——分辨率协商生效 `fb 1024x768`，枚举逻辑正确。**诚实边界：headless QEMU 下第二 scanout 需真实连接第二显示输出才 enabled，VNC 只提供一个 head，故实测 enabled=1；多头镜像代码路径（枚举全部 + 逐个 SET_SCANOUT）已就绪，需真实多显环境才能观到 enabled>1。** 正常 GOP 回退 + host opkg ALL PASS 无回归。🎊 **M6.6–6.8 全部完成（virgl 按评估砂掉）**。
+  - [x] 实机验证：① 默认 virtio-gpu-pci——`scanouts enabled=1` → `scanouts=1 OK` → `PASS`（全 12 项）；② `run_diag_gpu_multihead.sh`（`max_outputs=2,xres=1024,yres=768` + VNC）——分辨率协商生效 `fb 1024x768`，枚举逻辑正确。**诚实边界：headless QEMU 下第二 scanout 需真实连接第二显示输出才 enabled，VNC 只提供一个 head，故实测 enabled=1；多头镜像代码路径（枚举全部 + 逐个 SET_SCANOUT）已就绪，需真实多显环境才能观到 enabled>1。** 正常 GOP 回退 + host opkg ALL PASS 无回归。🎊 **M6.6–6.8 全部完成（virgl 按评估砍掉）**。
+- [x] M6.9：virtio-input 键盘/鼠标驱动（摆脱 PS/2 依赖，与 PS/2 共存）✅ **双设备实机 bring-up 验证**
+  - [x] 头文件 `virtio_input.h`：evdev 事件布局 `virtio_input_event_t`{type/code/value 8B 小端}；EV_SYN/KEY/REL/ABS 类型常量；REL_X/Y/WHEEL、ABS_X/Y、BTN_LEFT/RIGHT/MIDDLE code 常量；`virtio_input_init/poll/device_count()` 接口。
+  - [x] 驱动 `virtio_input64.c`：单 eventq(queue 0) 接收型设备——driver 预投递 16 个 write-only 事件 buffer（单物理页），poll used 环取事件、翻译、重投递。**evdev→GUI 映射**：EV_KEY(KEY_*) 查表→ASCII/控制键→`gui_post_key_code_with_modifiers()`；修饰键(SHIFT/CTRL/ALT make/break)累积到 mods；鼠标 EV_REL→累积 dx/dy/wheel、EV_ABS→abs 坐标、BTN_*→按钮位图，在 EV_SYN 帧末提交 `mouse_inject_relative()` / `mouse_set_absolute_position_with_wheel()`。**与 PS/2 共存**：叠加注入同一 GUI 事件通路。
+  - [x] PCI 多设备枚举：新增 `pci_find_nth_by_id(vendor,device,index)`（键盘+鼠标同为 1af4:1052，需按 index 遍历）；`VINPUT_MAX_DEVS=4`。
+  - [x] transport 复用 `virtio_modern_*`：attach/reset/get_features(仅留 VERSION_1 bit32)/set_features/setup_queue/set_driver_ok/notify。物理页 `arch_x86_64_pmm_alloc_pages`。
+  - [x] GUI 集成：gui.c 加**弱符号** `gui_platform_poll_input()`（i386 no-op），`gui_poll_mouse()` 每帧调用；virtio_input64.c 提供**强符号**转发 `virtio_input_poll()`。kernel64.c 在 `virtio_gpu_init()` 后调 `virtio_input_init()`。
+  - [x] 实机验证（双分支）：① `run_diag_input.sh`（挂 virtio-keyboard-pci + virtio-tablet-pci + virtio-gpu-pci）——**2×`[virtio-input] device up`** → `backend=virtio-gpu present-mode` → `desktop up, entering poll loop`；② `run_diag_gpu.sh`（不挂 input）——`[virtio-input] no device (1af4:1052)` → desktop up（PS/2 通路继续，**零回归**）。host opkg 23/23，x86_64 全量构建通过。selftest 中的 #PF/#GP 均为故意故障注入探针(PASS)，rc=124 为 timeout 杀常驻 poll loop(预期)。
 - [ ] M6.4：安全加固（ASLR / W^X 强制 / SMEP / SMAP / 栈保护）
 - [ ] M6.5：多用户与会话（完整 uid/gid 体系 + 登录管理 + 权限隔离）
 - [ ] M6.6：系统日志 / dmesg / journald 风格日志子系统

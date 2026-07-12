@@ -69,6 +69,8 @@ extern void x86_64_irq_lapic_resched(void); /* G.6.6a: cross-CPU reschedule IPI 
 extern int  window_manager_start_desktop(void);
 extern void window_manager_poll(void);
 extern void framebuffer_init(void);  /* UEFI GOP 后端初始化 (framebuffer64.c) */
+extern void virtio_input_init(void);  /* virtio-input 键鼠驱动初始化 (virtio_input64.c) */
+extern void virtio_input_poll(void);  /* virtio-input eventq 轮询注入 GUI */
 extern int  arch_x86_64_mouse_install(void);  /* PS/2 鼠标接入 (mouse64.c) */
 extern int  arch_x86_64_keyboard_install(void);  /* PS/2 键盘接入 (keyboard64.c) */
 extern void gui_invalidate_all(void);  /* 标记整屏为脏，下一帧全屏重绘 */
@@ -166,6 +168,11 @@ void arch_x86_64_early_init(const openos_bootinfo_t *bootinfo) {
      * CREATE_2D -> ATTACH_BACKING -> SET_SCANOUT 建立 2D 管线。
      * 无设备时安全跳过（device_count == 0）。 */
     virtio_gpu_init();
+    /* Step M6.9: virtio-input 键盘/鼠标驱动。查找 1af4:1052（可多设备），
+     * 建立 eventq，预投递 write-only 事件 buffer，进入 DRIVER_OK。
+     * evdev 事件在 GUI poll loop 中经 virtio_input_poll() 翻译并注入。
+     * 无设备时安全跳过（PS/2 继续工作）。 */
+    virtio_input_init();
     /* Step M1.3: 真实网络协议栈（Ethernet + ARP + IPv4 + ICMP + UDP）。
      * 挂载到 virtio-net 之上，注册 eth0，配置静态 IP(10.0.2.15)，
      * 之后可响应 ARP、被 ping、主动 ping、收发 UDP。 */

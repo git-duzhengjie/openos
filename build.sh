@@ -749,7 +749,8 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         kernel/pci64.c \
         kernel/virtio_net64.c \
         kernel/virtio_modern64.c \
-        kernel/virtio_gpu64.c; do
+        kernel/virtio_gpu64.c \
+        kernel/virtio_input64.c; do
         obj="$ARCH64_BUILD/$(basename "${cfile%.c}").o"
         gcc $ARCH64_CFLAGS -c "$ARCH64_SRC/$cfile" -o "$obj"
     done
@@ -907,6 +908,7 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         "$ARCH64_BUILD/virtio_net64.o" \
         "$ARCH64_BUILD/virtio_modern64.o" \
         "$ARCH64_BUILD/virtio_gpu64.o" \
+        "$ARCH64_BUILD/virtio_input64.o" \
         "$ARCH64_BUILD/arch_ops.o" \
         "$ARCH64_BUILD/platform_ops.o" \
         "$ARCH64_BUILD/device.o" \

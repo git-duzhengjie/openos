@@ -6355,9 +6355,17 @@ void gui_process_events(void) {
     }
 }
 
+/* 平台输入轮询 hook：x86_64 在 kernel64 侧提供强符号转发到 virtio_input_poll()；
+ * i386 无实现，采用弱符号空实现作为 no-op。 */
+__attribute__((weak)) void gui_platform_poll_input(void) { }
+
 static void gui_poll_mouse(void) {
     mouse_state_t ms;
     if (!g_gui.initialized) return;
+
+    /* virtio-input (x86_64) 事件抽取：弱符号 hook，i386 无实现时为 no-op。
+     * 把 virtio 键鼠事件翻译并注入到与 PS/2 共享的 mouse/键盘状态。 */
+    gui_platform_poll_input();
 
     /* Polling the emulated USB tablet every GUI loop iteration is expensive
      * under QEMU and makes pointer movement stutter.  Keep consuming the

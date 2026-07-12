@@ -154,6 +154,8 @@ const pci_device_t *pci_get_device(uint32_t index);
 const pci_device_t *pci_find_by_class(uint8_t class_code, uint8_t subclass);
 /* 按 vendor/device 精确查找 */
 const pci_device_t *pci_find_by_id(uint16_t vendor_id, uint16_t device_id);
+/* 按 index 返回第 n 个匹配 (vendor,device) 的设备；用于同类多设备枚举 */
+const pci_device_t *pci_find_nth_by_id(uint16_t vendor_id, uint16_t device_id, uint32_t index);
 
 /* 打印设备清单到串口/终端（lspci 风格） */
 void pci_dump_devices(void);

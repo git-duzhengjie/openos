@@ -232,6 +232,18 @@ const pci_device_t *pci_find_by_id(uint16_t vendor_id, uint16_t device_id) {
     return 0;
 }
 
+const pci_device_t *pci_find_nth_by_id(uint16_t vendor_id, uint16_t device_id, uint32_t index) {
+    uint32_t seen = 0;
+    for (uint32_t i = 0; i < g_pci_count; i++) {
+        pci_device_t *d = &g_pci_devices[i];
+        if (d->vendor_id == vendor_id && d->device_id == device_id) {
+            if (seen == index) return d;
+            seen++;
+        }
+    }
+    return 0;
+}
+
 /* ---- command 寄存器使能 ---- */
 static void set_command_bits(pci_device_t *d, uint16_t bits) {
     uint16_t cmd = pci_read16(d->bus, d->dev, d->func, PCI_OFFSET_COMMAND);
