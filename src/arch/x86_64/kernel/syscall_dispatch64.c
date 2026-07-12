@@ -38,6 +38,7 @@
 #include "../include/usermode64.h"
 #include "../include/vfs64.h"
 #include "../include/ramfs64.h" /* M5.4d: dentry_t/inode_t + vfs_readdir for SYS_READDIR */
+#include "../include/power64.h"  /* M6.1: ACPI shutdown / reboot */
 #include "../include/opk_install.h" /* M5.4c: .opk 包安装器 */
 /* M5.4c: kernel-side .opk installer bridge (opk_install_kernel.c) */
 extern int opk_install_to_ramfs(const uint8_t *image, uint32_t image_size,
@@ -1630,6 +1631,38 @@ static uint64_t do_opk_install(uint64_t image_ptr, uint64_t image_size,
 }
 
 /*
+ * SYS_POWER (480) — M6.1: ACPI power management.
+ *   a0 = op: 0 = shutdown (S5 soft-off), 1 = reboot (warm),
+ *            2 = query capabilities.
+ * Shutdown / reboot do not return on success. Query returns a capability
+ * bitmap: bit0 = ACPI \_S5 available, bit1 = FADT reset register available.
+ * Any other op returns -1.
+ */
+static uint64_t do_power(uint64_t op) {
+    switch (op) {
+    case OPENOS64_POWER_QUERY: {
+        const arch_x86_64_power_info_t *pi = arch_x86_64_power_info();
+        uint64_t caps = 0;
+        if (pi && pi->valid) {
+            if (pi->s5_valid && pi->pm1a_cnt_port) caps |= 1u;
+            if (pi->reset_supported)                caps |= 2u;
+        }
+        return caps;
+    }
+    case OPENOS64_POWER_SHUTDOWN:
+        early_console64_write("[power] shutdown requested (ACPI S5)\n");
+        arch_x86_64_power_shutdown();
+        return 0; /* unreachable on success */
+    case OPENOS64_POWER_REBOOT:
+        early_console64_write("[power] reboot requested (warm reset)\n");
+        arch_x86_64_power_reboot();
+        return 0; /* unreachable on success */
+    default:
+        return (uint64_t)(int64_t)-1;
+    }
+}
+
+/*
  * SYS_YIELD: Step E.1 routes the call through proc64's cooperative yield
  * counter. The dispatcher itself stays branchless so future sched64 work
  * only has to swap proc64_yield()'s body for a real reschedule. We still
@@ -1960,6 +1993,7 @@ uint64_t arch_x86_64_syscall_dispatch_common(uint64_t num,
     case SYS_BRK:           return do_brk(a0);
     case SYS_SBRK:          return do_sbrk(a0);
     case SYS_OPK_INSTALL:   return do_opk_install(a0, a1, a2); /* M5.4c: 安装 .opk 包 */
+    case SYS_POWER:         return do_power(a0);              /* M6.1: 关机/重启/查询 */
 
     /* -------- net (Step E.3, loopback only) -------- */
     case SYS_SOCKET:      return arch_x86_64_sys_socket(a0, a1, a2);

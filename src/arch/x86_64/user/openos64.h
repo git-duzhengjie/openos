@@ -253,6 +253,21 @@ static inline long openos64_getpid(void) {
     return openos64_syscall0(OPENOS64_SYS_GETPID);
 }
 
+/*
+ * M6.1 — power management. a0 selects the operation.
+ *   OPENOS64_POWER_SHUTDOWN : ACPI S5 soft-off (does not return on success)
+ *   OPENOS64_POWER_REBOOT   : warm reboot       (does not return on success)
+ *   OPENOS64_POWER_QUERY    : return capability bitmap without acting
+ * On QUERY, returns bit0=ACPI \_S5 available, bit1=FADT reset available.
+ */
+#define OPENOS64_SYS_POWER    480ULL
+#define OPENOS64_POWER_SHUTDOWN 0ULL
+#define OPENOS64_POWER_REBOOT   1ULL
+#define OPENOS64_POWER_QUERY    2ULL
+static inline long openos64_power(unsigned long op) {
+    return openos64_syscall1(OPENOS64_SYS_POWER, (uint64_t)op);
+}
+
 static inline long openos64_gettid(void) {
     return openos64_syscall0(OPENOS64_SYS_GETTID);
 }

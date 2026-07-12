@@ -380,7 +380,15 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
     if [ "$M5_OPKG_DIAG" != "0" ]; then
         M5_OPKG_DIAG_DEF="-DM5_OPKG_DIAG -DM5_FAST_BOOT"
     fi
-    ARCH64_CFLAGS="-m64 -mcmodel=kernel -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-80387 -mno-avx -ffreestanding -nostdlib -Wall -Wextra -O2 -fno-pic -fno-pie -fno-PIE -fno-stack-protector -fno-builtin -DGUI_EARLY_VERIFY $M5_RING3_DEF $M5_FAST_BOOT_DEF $M5_OPKG_DIAG_DEF -I$ARCH64_SRC/include -Isrc/kernel/include -Isrc/kernel"
+    # M6.1 diag: M6_POWER_DIAG (default OFF) triggers a real ACPI S5 soft-off
+    # right after the power selftest, so QEMU powers off cleanly (rc 0) proving
+    # the PM1a_CNT write path works. Implies fast-boot. Use ONLY for power diag.
+    M6_POWER_DIAG="${M6_POWER_DIAG:-0}"
+    M6_POWER_DIAG_DEF=""
+    if [ "$M6_POWER_DIAG" != "0" ]; then
+        M6_POWER_DIAG_DEF="-DM6_POWER_DIAG -DM5_FAST_BOOT"
+    fi
+    ARCH64_CFLAGS="-m64 -mcmodel=kernel -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-80387 -mno-avx -ffreestanding -nostdlib -Wall -Wextra -O2 -fno-pic -fno-pie -fno-PIE -fno-stack-protector -fno-builtin -DGUI_EARLY_VERIFY $M5_RING3_DEF $M5_FAST_BOOT_DEF $M5_OPKG_DIAG_DEF $M6_POWER_DIAG_DEF -I$ARCH64_SRC/include -Isrc/kernel/include -Isrc/kernel"
     ARCH64_ASFLAGS="-m64 -mcmodel=kernel -mno-red-zone -fno-pic -fno-pie -fno-PIE -I$ARCH64_SRC/include -Isrc/kernel/include"
     ARCH64_USER_CFLAGS="-m64 -mcmodel=large -ffreestanding -nostdlib -Wall -Wextra -O2 -fno-pic -fno-pie -fno-PIE -fno-stack-protector -fno-builtin -I$ARCH64_SRC/user"
     ARCH64_USER_ASFLAGS="-m64 -mcmodel=large -fno-pic -fno-pie -fno-PIE -I$ARCH64_SRC/user"
@@ -677,6 +685,8 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         kernel/apic_selftest64.c \
         kernel/acpi64.c \
         kernel/acpi_selftest64.c \
+        kernel/power64.c \
+        kernel/power_selftest64.c \
         kernel/smp64.c \
         kernel/smp_selftest64.c \
         kernel/percpu64.c \
@@ -822,6 +832,8 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         "$ARCH64_BUILD/apic_selftest64.o" \
         "$ARCH64_BUILD/acpi64.o" \
         "$ARCH64_BUILD/acpi_selftest64.o" \
+        "$ARCH64_BUILD/power64.o" \
+        "$ARCH64_BUILD/power_selftest64.o" \
         "$ARCH64_BUILD/smp64.o" \
         "$ARCH64_BUILD/smp_selftest64.o" \
         "$ARCH64_BUILD/percpu64.o" \

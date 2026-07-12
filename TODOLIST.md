@@ -1747,7 +1747,11 @@
 
 ### M6：现代体验与安全（🟡 第三优先级）
 
-- [ ] M6.1：ACPI 电源管理（关机 / 重启 / 休眠 S3）
+- [x] M6.1：ACPI 电源管理（关机 / 重启 / 休眠 S3）✅ **关机 + 重启完成**（S3 休眠待后续）
+  - [x] M6.1a：FADT（"FACP"）解析器——新模块 `power64.c/.h`（与 SMP 关键路径上的 `acpi64.c` MADT 解析解耦，按功能拆小模块），复用 `arch_x86_64_acpi_info()->xsdt_phys/rsdt_phys` 自行 walk XSDT/RSDT 定位 FADT；提取 PM1a/PM1b_CNT 端口、SMI_CMD、ACPI_ENABLE/DISABLE、RESET_REG(GAS)+RESET_VALUE；对 DSDT 做经典 osdev AML 模式匹配解码 `\_S5` 包（非完整 AML 解释器，在 QEMU/OVMF 鲁棒）得到 SLP_TYPa/b。idempotent，失败非致命。kernel64.c 在 acpi_selftest 后调 `arch_x86_64_power_init()`。
+  - [x] M6.1b：`arch_x86_64_power_shutdown()` — ACPI S5 软关机：可选通过 SMI_CMD 切 ACPI 模式→向 PM1a_CNT（及 PM1b_CNT）写 `SLP_TYPa|SLP_EN`；失败回退到 QEMU/Bochs 调试关机端口（0x604/0xB004/0x4004），最后 halt。成功不返回。
+  - [x] M6.1c：`arch_x86_64_power_reboot()` — 暖重启：优先 FADT RESET_REG（I/O 或 MMIO）+ RESET_VALUE；回退到 8042 键盘控制器脉冲（0x64←0xFE）；最后 null-IDT 三重故障重置。成功不返回。
+  - [x] M6.1 syscall + selftest：新增 `SYS_POWER=480`（a0: 0=shutdown/1=reboot/2=query；query 返回能力位 bit0=ACPI S5 / bit1=FADT reset）+ 用户 API `openos64_power()`。内核态 `power_selftest64.c` 打印并校验 FADT/\_S5 快照（**不真关机**）。QEMU headless 实测：`[power-selftest] PASS`，fadt=0x0FxxxxE0、pm1a_cnt=0xB004、`\_S5` 解码 SLP_TYP=0。另新增 `M6_POWER_DIAG` 编译开关（默认 OFF）：ON 时 selftest 后真触发 ACPI S5——实测 QEMU **7.5s 内 rc=0 干净关机**（非 30s 超时），串口打出 `triggering ACPI shutdown` + `shutdown requested (ACPI S5)`，证明 PM1a_CNT 写入路径生效；默认构建 0 处 trigger（不会自毁）但 selftest 照常 PASS。
 - [ ] M6.2：CPU 频率/温度管理（P-state / C-state）
 - [ ] M6.3：图形加速（2D blit 加速 / 可选 GPU 驱动 / 双缓冲无撕裂）
 - [ ] M6.4：安全加固（ASLR / W^X 强制 / SMEP / SMAP / 栈保护）

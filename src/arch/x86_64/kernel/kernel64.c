@@ -45,6 +45,8 @@ extern void net_print_info(void);
 #include "../include/sched_preempt_selftest64.h"
 #include "../include/apic_selftest64.h"
 #include "../include/acpi_selftest64.h"
+#include "../include/power64.h"
+#include "../include/power_selftest64.h"
 #include "../include/smp_selftest64.h"
 #include "../include/lapic64.h"  /* G.7g-1: lapic_timer_calibrate */
 #include "../include/sched_prio_selftest64.h"
@@ -752,6 +754,21 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
      * instead of the hard-coded MMIO addresses. Failure is non-fatal: the
      * G.1/G.2 path falls back to its compile-time defaults. */
     (void)arch_x86_64_acpi_selftest_run();
+
+    /* Step M6.1a: parse the FADT + \_S5 for power management (shutdown /
+     * reboot). Must run AFTER the ACPI parser has populated xsdt_phys /
+     * rsdt_phys. Failure is non-fatal: power operations then fall back to
+     * the legacy 8042 pulse (reboot) / QEMU debug-exit (shutdown). */
+    (void)arch_x86_64_power_init();
+    (void)arch_x86_64_power_selftest_run();
+#ifdef M6_POWER_DIAG
+    /* M6.1 end-to-end: actually trigger ACPI S5 soft-off. On QEMU this makes
+     * the VM power off cleanly (exit rc 0) instead of hanging until timeout,
+     * proving the PM1a_CNT write path works. Gated so normal boots never
+     * self-destruct. */
+    early_console64_write("\n[M6_POWER_DIAG] triggering ACPI shutdown...\n");
+    arch_x86_64_power_shutdown();
+#endif
 
     /* Step G.1: switch IRQ0 routing from the 8259A to LAPIC/IOAPIC. From
      * this point on, lapic_is_ready() flips true and pit's IRQ0 handler
