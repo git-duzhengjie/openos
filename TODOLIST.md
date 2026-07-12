@@ -1768,7 +1768,12 @@
     - 内核层：新增 `framebuffer_blit_rect(x,y,src,src_stride,w,h)`（framebuffer64.c）——右/下越界自动裁剪，返回实写行数；新增 caps 位 `FRAMEBUFFER_CAP_RECT_BLIT`。
     - 热点：`gui_flush_rect`（gui.c）新增 RECT_BLIT 最优分支（优先于 ROW_BLIT 与逐像素回退）；新增 `flush_rect_blits` 统计字段。
     - selftest：`gfx_selftest64.c` 扩展至 **9 项**（新增 RECT_BLIT cap / NULL·退化·越界拒绝 / 垂直裁剪返回 2 / 2×3 块写入-读回，均无损探针），QEMU headless 实测 **`[x86_64][gfx-selftest] PASS` fb 1280x800**；cpufreq-selftest 无回归；host opkg 23/23。
-    - 未落地（平台限制）：硬件 GPU BitBLT / 硬件扫描地址页翻转 / DMA ——需 virtio-gpu 或 BGA/Bochs VBE 后端（非 GOP）方可开展，待专项驱动里程碑。（2D blit 加速 / 可选 GPU 驱动 / 双缓冲无撕裂）
+    - 未落地（平台限制）：硬件 GPU BitBLT / 硬件扫描地址页翻转 / DMA ——需 virtio-gpu 或 BGA/Bochs VBE 后端（非 GOP）方可开展，待专项驱动里程碑。
+- [x] M6.4：virtio-gpu 驱动（解锁硬件加速路径）✅ **modern PCI transport + 2D 管线实机跑通**
+  - [x] M6.4a：modern PCI transport `virtio_modern64.c/.h`——virtio-gpu（1af4:1050）为 **modern-only 设备（无 legacy IO 口）**，现有 virtio_net 走 legacy IO 无法复用，新建 modern 传输层：遍历 PCI vendor cap（0x09）定位 common/notify/isr/device 四个 MMIO 窗口并映射（`arch_x86_64_vmm_map_range` + `OPENOS_X86_64_VMM_MMIO_FLAGS` 非缓存）；驱动 reset/ACK/DRIVER/FEATURES_OK/DRIVER_OK 状态握手；split virtqueue setup（pmm 页对齐环内存 + 编程 desc/driver/device 物理地址）；notify（notify_base + off×multiplier）；device-cfg 读写。
+  - [x] M6.4b：virtio-gpu 2D 驱动 `virtio_gpu64.c` + 协议头 `virtio_gpu.h`——完整 2D 命令协议（ctrl_hdr/rect/display_info/create_2d/attach_backing/set_scanout/transfer_to_host_2d/resource_flush）；controlq 请求-响应引擎 `gpu_cmd`（双 desc：req 只读 + resp device-write，轮询 used 环）；bring-up 流水线 GET_DISPLAY_INFO→CREATE_2D→ATTACH_BACKING→SET_SCANOUT；线性 32bpp BGRA backing store（identity 物理页）；per-frame `virtio_gpu_flush_rect`（TRANSFER_TO_HOST_2D + RESOURCE_FLUSH，坐标裁剪）。接入 kernel64.c 早期 boot（virtio_net 之后），无设备时安全跳过。
+  - [x] M6.4c：实机验证 + selftest——专用诊断脚本 `run_diag_gpu.sh`（挂 `-device virtio-gpu-pci`），内核态 `virtio_gpu_selftest64.c`（置于 gfx-selftest 之后）。**实机实测**：① 挂 GPU 时——`[virtio-gpu] device found` → `2D pipeline ready` → `[virtio-gpu-selftest] scanout w=1280 h=800` → `flush rc=0` → **`[x86_64][virtio-gpu-selftest] PASS`**（geometry/backing/probe绘制/flush/越界裁剪/超大矩形裁剪全通）；② 默认 boot 无 GPU 时——`[virtio-gpu] no device (1af4:1050)` → **`PASS (device absent, no-op)`** 优雅降级。host opkg 23/23 无回归。virtio_modern64/virtio_gpu64/virtio_gpu_selftest64 均已接入 build.sh 编译+链接。
+    - 备注：本里程碑解锁了真实硬件加速路径（host 侧 2D resource + scanout present）；cursorq 硬件光标、多 scanout、EDID、virgl 3D 待后续；下一步可将 framebuffer64 后端切换到 `FRAMEBUFFER_BACKEND_VIRTIO_GPU`（已预留枚举）以让 GUI 直接用 virtio-gpu present。（2D blit 加速 / 可选 GPU 驱动 / 双缓冲无撕裂）
 - [ ] M6.4：安全加固（ASLR / W^X 强制 / SMEP / SMAP / 栈保护）
 - [ ] M6.5：多用户与会话（完整 uid/gid 体系 + 登录管理 + 权限隔离）
 - [ ] M6.6：系统日志 / dmesg / journald 风格日志子系统

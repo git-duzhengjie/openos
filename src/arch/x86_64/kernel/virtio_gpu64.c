@@ -1,0 +1,287 @@
+/* =====================================================================
+ * virtio-gpu 2D driver (modern PCI transport)
+ *
+ * Brings up the virtio-gpu 2D pipeline on top of virtio_modern64:
+ *   GET_DISPLAY_INFO -> RESOURCE_CREATE_2D -> ATTACH_BACKING
+ *   -> SET_SCANOUT, then per-frame TRANSFER_TO_HOST_2D + RESOURCE_FLUSH.
+ *
+ * Exposes a linear 32bpp BGRA backing store (identity-mapped phys pages)
+ * that upper layers draw into; virtio_gpu_flush_rect() pushes dirty
+ * regions to the host display.
+ * ===================================================================== */
+
+#include "virtio_gpu.h"
+#include "virtio_modern.h"
+#include "pci.h"
+#include "pmm64.h"
+#include "serial.h"
+
+#define VIRTIO_VENDOR_ID       0x1AF4u
+#define VIRTIO_GPU_DEVICE_ID   0x1050u  /* modern virtio-gpu */
+#define VIRTIO_GPU_XFORM_RESID 1u       /* our single 2D resource id */
+#define GPU_CTRLQ              0        /* controlq index */
+
+/* ---- driver state ---- */
+static virtio_modern_dev_t g_dev;
+static virtqueue_t         g_ctrlq;
+static uint16_t            g_ctrlq_notify_off;
+static uint32_t            g_count;
+static uint32_t            g_width;
+static uint32_t            g_height;
+static uint8_t            *g_fb;        /* backing store base (BGRA) */
+static uint32_t            g_fb_pages;
+
+/* one shared request+response bounce buffer (single-threaded init/flush) */
+static uint8_t            *g_cmd_buf;   /* phys-identity page */
+#define CMD_REQ_OFF   0u
+#define CMD_RESP_OFF  2048u
+
+static void gpu_memset(void *d, int c, uint64_t n) {
+    uint8_t *p = (uint8_t *)d; while (n--) *p++ = (uint8_t)c;
+}
+
+/* ---- virtqueue helpers (mirror virtio_net64 algorithm) ---- */
+static uint16_t vq_alloc_desc(virtqueue_t *vq) {
+    if (vq->num_free == 0) return 0xFFFF;
+    uint16_t head = vq->free_head;
+    vq->free_head = vq->desc[head].next;
+    vq->num_free--;
+    return head;
+}
+static void vq_free_desc(virtqueue_t *vq, uint16_t idx) {
+    vq->desc[idx].next = vq->free_head;
+    vq->free_head = idx;
+    vq->num_free++;
+}
+
+/* Issue one control-queue command: req_len bytes at CMD_REQ_OFF are sent
+ * (device-readable), resp_len bytes written back into CMD_RESP_OFF
+ * (device-writable).  Blocks (polls used ring) until completion.
+ * Returns 0 on success, negative on descriptor exhaustion / timeout. */
+static int gpu_cmd(uint32_t req_len, uint32_t resp_len) {
+    virtqueue_t *vq = &g_ctrlq;
+    uint16_t d0 = vq_alloc_desc(vq);
+    uint16_t d1 = vq_alloc_desc(vq);
+    if (d0 == 0xFFFF || d1 == 0xFFFF) return -1;
+
+    uint64_t base_phys = (uint64_t)(uintptr_t)g_cmd_buf;
+
+    vq->desc[d0].addr  = base_phys + CMD_REQ_OFF;
+    vq->desc[d0].len   = req_len;
+    vq->desc[d0].flags = VIRTQ_DESC_F_NEXT;
+    vq->desc[d0].next  = d1;
+
+    vq->desc[d1].addr  = base_phys + CMD_RESP_OFF;
+    vq->desc[d1].len   = resp_len;
+    vq->desc[d1].flags = VIRTQ_DESC_F_WRITE;
+    vq->desc[d1].next  = 0;
+
+    uint16_t ai = vq->avail->idx % vq->queue_size;
+    vq->avail->ring[ai] = d0;
+    __asm__ volatile("" ::: "memory");
+    vq->avail->idx++;
+    __asm__ volatile("" ::: "memory");
+    virtio_modern_notify(&g_dev, GPU_CTRLQ, g_ctrlq_notify_off);
+
+    /* poll used ring for completion (bounded spin) */
+    uint64_t spins = 0;
+    while (vq->last_used == vq->used->idx) {
+        if (++spins > 200000000ULL) {
+            vq_free_desc(vq, d1);
+            vq_free_desc(vq, d0);
+            return -2; /* timeout */
+        }
+        __asm__ volatile("pause" ::: "memory");
+    }
+    vq->last_used++;
+    vq_free_desc(vq, d1);
+    vq_free_desc(vq, d0);
+    return 0;
+}
+
+/* Convenience: fill request header and dispatch, then read response type. */
+static uint32_t gpu_resp_type(void) {
+    virtio_gpu_ctrl_hdr_t *r = (virtio_gpu_ctrl_hdr_t *)(g_cmd_buf + CMD_RESP_OFF);
+    return r->type;
+}
+
+/* ---- 2D pipeline commands ---- */
+
+static int gpu_get_display_info(void) {
+    virtio_gpu_ctrl_hdr_t *req = (virtio_gpu_ctrl_hdr_t *)(g_cmd_buf + CMD_REQ_OFF);
+    gpu_memset(req, 0, sizeof(*req));
+    req->type = VIRTIO_GPU_CMD_GET_DISPLAY_INFO;
+    if (gpu_cmd(sizeof(*req), sizeof(virtio_gpu_resp_display_info_t)) != 0)
+        return -1;
+    if (gpu_resp_type() != VIRTIO_GPU_RESP_OK_DISPLAY_INFO) return -2;
+    virtio_gpu_resp_display_info_t *resp =
+        (virtio_gpu_resp_display_info_t *)(g_cmd_buf + CMD_RESP_OFF);
+    /* pick the first enabled scanout */
+    for (uint32_t i = 0; i < VIRTIO_GPU_MAX_SCANOUTS; i++) {
+        if (resp->pmodes[i].enabled) {
+            g_width  = resp->pmodes[i].r.width;
+            g_height = resp->pmodes[i].r.height;
+            return 0;
+        }
+    }
+    /* no enabled scanout: fall back to pmode 0 geometry if non-zero */
+    if (resp->pmodes[0].r.width && resp->pmodes[0].r.height) {
+        g_width  = resp->pmodes[0].r.width;
+        g_height = resp->pmodes[0].r.height;
+        return 0;
+    }
+    return -3;
+}
+
+static int gpu_create_2d(void) {
+    virtio_gpu_resource_create_2d_t *req =
+        (virtio_gpu_resource_create_2d_t *)(g_cmd_buf + CMD_REQ_OFF);
+    gpu_memset(req, 0, sizeof(*req));
+    req->hdr.type    = VIRTIO_GPU_CMD_RESOURCE_CREATE_2D;
+    req->resource_id = VIRTIO_GPU_XFORM_RESID;
+    req->format      = VIRTIO_GPU_FORMAT_B8G8R8A8_UNORM;
+    req->width       = g_width;
+    req->height      = g_height;
+    if (gpu_cmd(sizeof(*req), sizeof(virtio_gpu_ctrl_hdr_t)) != 0) return -1;
+    return (gpu_resp_type() == VIRTIO_GPU_RESP_OK_NODATA) ? 0 : -2;
+}
+
+static int gpu_attach_backing(void) {
+    virtio_gpu_resource_attach_backing_t *req =
+        (virtio_gpu_resource_attach_backing_t *)(g_cmd_buf + CMD_REQ_OFF);
+    gpu_memset(req, 0, sizeof(*req));
+    req->hdr.type    = VIRTIO_GPU_CMD_RESOURCE_ATTACH_BACKING;
+    req->resource_id = VIRTIO_GPU_XFORM_RESID;
+    req->nr_entries  = 1;
+    virtio_gpu_mem_entry_t *ent =
+        (virtio_gpu_mem_entry_t *)((uint8_t *)req + sizeof(*req));
+    ent->addr    = (uint64_t)(uintptr_t)g_fb;
+    ent->length  = g_width * g_height * 4u;
+    ent->padding = 0;
+    uint32_t req_len = sizeof(*req) + sizeof(*ent);
+    if (gpu_cmd(req_len, sizeof(virtio_gpu_ctrl_hdr_t)) != 0) return -1;
+    return (gpu_resp_type() == VIRTIO_GPU_RESP_OK_NODATA) ? 0 : -2;
+}
+
+static int gpu_set_scanout(void) {
+    virtio_gpu_set_scanout_t *req =
+        (virtio_gpu_set_scanout_t *)(g_cmd_buf + CMD_REQ_OFF);
+    gpu_memset(req, 0, sizeof(*req));
+    req->hdr.type    = VIRTIO_GPU_CMD_SET_SCANOUT;
+    req->r.x = 0; req->r.y = 0;
+    req->r.width = g_width; req->r.height = g_height;
+    req->scanout_id  = 0;
+    req->resource_id = VIRTIO_GPU_XFORM_RESID;
+    if (gpu_cmd(sizeof(*req), sizeof(virtio_gpu_ctrl_hdr_t)) != 0) return -1;
+    return (gpu_resp_type() == VIRTIO_GPU_RESP_OK_NODATA) ? 0 : -2;
+}
+
+/* ---- per-frame present ---- */
+
+int virtio_gpu_flush_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
+    if (g_count == 0 || !g_fb) return -1;
+    /* clip to scanout */
+    if (x >= g_width || y >= g_height) return 0;
+    if (x + w > g_width)  w = g_width - x;
+    if (y + h > g_height) h = g_height - y;
+    if (w == 0 || h == 0) return 0;
+
+    /* TRANSFER_TO_HOST_2D: copy backing rect into host resource */
+    virtio_gpu_transfer_to_host_2d_t *t =
+        (virtio_gpu_transfer_to_host_2d_t *)(g_cmd_buf + CMD_REQ_OFF);
+    gpu_memset(t, 0, sizeof(*t));
+    t->hdr.type    = VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D;
+    t->r.x = x; t->r.y = y; t->r.width = w; t->r.height = h;
+    t->offset      = (uint64_t)(y * g_width + x) * 4u;
+    t->resource_id = VIRTIO_GPU_XFORM_RESID;
+    if (gpu_cmd(sizeof(*t), sizeof(virtio_gpu_ctrl_hdr_t)) != 0) return -2;
+    if (gpu_resp_type() != VIRTIO_GPU_RESP_OK_NODATA) return -3;
+
+    /* RESOURCE_FLUSH: present the rect on screen */
+    virtio_gpu_resource_flush_t *f =
+        (virtio_gpu_resource_flush_t *)(g_cmd_buf + CMD_REQ_OFF);
+    gpu_memset(f, 0, sizeof(*f));
+    f->hdr.type    = VIRTIO_GPU_CMD_RESOURCE_FLUSH;
+    f->r.x = x; f->r.y = y; f->r.width = w; f->r.height = h;
+    f->resource_id = VIRTIO_GPU_XFORM_RESID;
+    if (gpu_cmd(sizeof(*f), sizeof(virtio_gpu_ctrl_hdr_t)) != 0) return -4;
+    return (gpu_resp_type() == VIRTIO_GPU_RESP_OK_NODATA) ? 0 : -5;
+}
+
+/* ---- accessors ---- */
+uint32_t virtio_gpu_device_count(void) { return g_count; }
+uint32_t virtio_gpu_width(void)  { return g_width; }
+uint32_t virtio_gpu_height(void) { return g_height; }
+void    *virtio_gpu_framebuffer(void) { return g_fb; }
+
+/* ---- bring-up ---- */
+
+void virtio_gpu_init(void) {
+    g_count = 0;
+    const pci_device_t *found = pci_find_by_id(VIRTIO_VENDOR_ID, VIRTIO_GPU_DEVICE_ID);
+    if (!found) {
+        serial_write("[virtio-gpu] no device (1af4:1050)\n");
+        return;
+    }
+    pci_device_t pci = *found;
+    serial_write("[virtio-gpu] device found, attaching modern transport\n");
+
+    if (virtio_modern_attach(&pci, &g_dev) != 0) {
+        serial_write("[virtio-gpu] transport attach failed\n");
+        return;
+    }
+
+    virtio_modern_reset(&g_dev);
+    uint64_t host = virtio_modern_get_features(&g_dev);
+    /* only require VERSION_1; we use no optional gpu features */
+    uint64_t want = host & (1ULL << VIRTIO_F_VERSION_1);
+    if (virtio_modern_set_features(&g_dev, want) != 0) {
+        serial_write("[virtio-gpu] feature negotiation failed\n");
+        virtio_modern_fail(&g_dev);
+        return;
+    }
+
+    if (virtio_modern_setup_queue(&g_dev, GPU_CTRLQ, &g_ctrlq,
+                                  &g_ctrlq_notify_off) != 0) {
+        serial_write("[virtio-gpu] controlq setup failed\n");
+        virtio_modern_fail(&g_dev);
+        return;
+    }
+    virtio_modern_set_driver_ok(&g_dev);
+
+    /* shared command bounce page */
+    x86_64_phys_addr_t cmd_phys = arch_x86_64_pmm_alloc_pages(1);
+    if (cmd_phys == 0) { virtio_modern_fail(&g_dev); return; }
+    g_cmd_buf = (uint8_t *)(uintptr_t)cmd_phys;
+    gpu_memset(g_cmd_buf, 0, 4096);
+
+    if (gpu_get_display_info() != 0) {
+        serial_write("[virtio-gpu] get_display_info failed\n");
+        virtio_modern_fail(&g_dev);
+        return;
+    }
+    /* clamp to a sane default if firmware reported nothing */
+    if (g_width == 0 || g_height == 0) { g_width = 1280; g_height = 800; }
+
+    /* allocate the linear BGRA backing store */
+    uint64_t fb_bytes = (uint64_t)g_width * g_height * 4u;
+    g_fb_pages = (uint32_t)((fb_bytes + 4095u) / 4096u);
+    x86_64_phys_addr_t fb_phys = arch_x86_64_pmm_alloc_pages(g_fb_pages);
+    if (fb_phys == 0) {
+        serial_write("[virtio-gpu] framebuffer alloc failed\n");
+        virtio_modern_fail(&g_dev);
+        return;
+    }
+    g_fb = (uint8_t *)(uintptr_t)fb_phys;
+    gpu_memset(g_fb, 0, g_fb_pages * 4096u);
+
+    if (gpu_create_2d() != 0 || gpu_attach_backing() != 0 ||
+        gpu_set_scanout() != 0) {
+        serial_write("[virtio-gpu] 2D pipeline setup failed\n");
+        virtio_modern_fail(&g_dev);
+        return;
+    }
+
+    g_count = 1;
+    serial_write("[virtio-gpu] 2D pipeline ready\n");
+}

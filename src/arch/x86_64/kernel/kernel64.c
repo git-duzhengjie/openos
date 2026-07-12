@@ -17,6 +17,7 @@
 #include "blockdev.h"
 #include "pci.h"
 #include "virtio_net.h"
+#include "virtio_gpu.h"
 /* M1.3 网络协议栈入口（netstack.c） */
 extern void net_init(void);
 extern void net_tick(uint32_t elapsed_ms);
@@ -50,6 +51,7 @@ extern void net_print_info(void);
 #include "../include/cpufreq64.h"
 #include "../include/cpufreq_selftest64.h"
 #include "../include/gfx_selftest64.h"
+#include "../include/virtio_gpu_selftest64.h"
 #include "../include/smp_selftest64.h"
 #include "../include/lapic64.h"  /* G.7g-1: lapic_timer_calibrate */
 #include "../include/sched_prio_selftest64.h"
@@ -159,6 +161,11 @@ void arch_x86_64_early_init(const openos_bootinfo_t *bootinfo) {
      * 之后即可通过 virtio_net_send / virtio_net_poll_recv 收发以太网帧。 */
     virtio_net_init();
     virtio_net_dump();
+    /* Step M6.4: virtio-gpu 2D 驱动。查找 1af4:1050（modern-only），
+     * 走 modern PCI transport 建立 controlq，跑 GET_DISPLAY_INFO ->
+     * CREATE_2D -> ATTACH_BACKING -> SET_SCANOUT 建立 2D 管线。
+     * 无设备时安全跳过（device_count == 0）。 */
+    virtio_gpu_init();
     /* Step M1.3: 真实网络协议栈（Ethernet + ARP + IPv4 + ICMP + UDP）。
      * 挂载到 virtio-net 之上，注册 eth0，配置静态 IP(10.0.2.15)，
      * 之后可响应 ARP、被 ping、主动 ping、收发 UDP。 */
@@ -767,6 +774,11 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
      * preempt path region. Non-fatal. */
     framebuffer_init();
     (void)arch_x86_64_gfx_selftest_run();
+
+    /* Step M6.4: virtio-gpu 2D driver selftest. Exercises the driver public
+     * surface + present path when a virtio-gpu-pci device is attached; passes
+     * as a no-op on GOP-only boots (graceful degradation). Non-fatal. */
+    (void)arch_x86_64_virtio_gpu_selftest_run();
 
     /* Step G.3a: parse ACPI tables (RSDP via EFI cfg table -> XSDT -> MADT)
      * to enumerate CPUs and IO-APICs. Must run BEFORE apic_selftest so the

@@ -716,6 +716,7 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         kernel/cpufreq64.c \
         kernel/cpufreq_selftest64.c \
         kernel/gfx_selftest64.c \
+        kernel/virtio_gpu_selftest64.c \
         kernel/smp64.c \
         kernel/smp_selftest64.c \
         kernel/percpu64.c \
@@ -746,7 +747,9 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         kernel/usermode64.c \
         kernel/early_console64.c \
         kernel/pci64.c \
-        kernel/virtio_net64.c; do
+        kernel/virtio_net64.c \
+        kernel/virtio_modern64.c \
+        kernel/virtio_gpu64.c; do
         obj="$ARCH64_BUILD/$(basename "${cfile%.c}").o"
         gcc $ARCH64_CFLAGS -c "$ARCH64_SRC/$cfile" -o "$obj"
     done
@@ -866,6 +869,7 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         "$ARCH64_BUILD/cpufreq64.o" \
         "$ARCH64_BUILD/cpufreq_selftest64.o" \
         "$ARCH64_BUILD/gfx_selftest64.o" \
+        "$ARCH64_BUILD/virtio_gpu_selftest64.o" \
         "$ARCH64_BUILD/smp64.o" \
         "$ARCH64_BUILD/smp_selftest64.o" \
         "$ARCH64_BUILD/percpu64.o" \
@@ -901,6 +905,8 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         "$ARCH64_BUILD/early_console64.o" \
         "$ARCH64_BUILD/pci64.o" \
         "$ARCH64_BUILD/virtio_net64.o" \
+        "$ARCH64_BUILD/virtio_modern64.o" \
+        "$ARCH64_BUILD/virtio_gpu64.o" \
         "$ARCH64_BUILD/arch_ops.o" \
         "$ARCH64_BUILD/platform_ops.o" \
         "$ARCH64_BUILD/device.o" \
