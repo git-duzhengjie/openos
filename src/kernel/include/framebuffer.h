@@ -104,4 +104,9 @@ void framebuffer_draw_line(int x0, int y0, int x1, int y1, uint32_t color);
 void framebuffer_test_pattern(void);
 void framebuffer_print_info(void);
 
+/* present 接口（M6.5）：GOP 后端 no-op，virtio-gpu 后端 TRANSFER+FLUSH */
+int framebuffer_present_needed(void);
+int framebuffer_present_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h);
+int framebuffer_present(void);
+
 #endif /* OPENOS_FRAMEBUFFER_H */

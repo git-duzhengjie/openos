@@ -6,6 +6,7 @@
  * ============================================================ */
 
 #include "framebuffer.h"
+#include "serial.h"
 
 /* ------------------------------------------------------------
  * early_console64 GOP info —— 布局与 early_framebuffer64_info_t
@@ -33,6 +34,19 @@ typedef struct {
 
 extern const early_fb_info_t *early_framebuffer64_get_info(void);
 
+/* ------------------------------------------------------------
+ * virtio-gpu 后端桥接（virtio_gpu64.c）。
+ * 不 include virtio_gpu.h，仅 extern 少量 accessor，避免头文件
+ * 依赖链拖入其它类型定义。virtio_gpu_init() 在 kernel64 早期
+ * boot（framebuffer_init 之前）执行，故此处探测结果稳定。
+ * ------------------------------------------------------------ */
+extern uint32_t virtio_gpu_device_count(void);
+extern uint32_t virtio_gpu_width(void);
+extern uint32_t virtio_gpu_height(void);
+extern void    *virtio_gpu_framebuffer(void);
+extern int      virtio_gpu_flush_rect(uint32_t x, uint32_t y,
+                                      uint32_t w, uint32_t h);
+
 /* internal state */
 static framebuffer_info_t g_fb_info;
 static framebuffer_caps_t g_fb_caps;
@@ -41,9 +55,55 @@ static uint32_t g_fb_width = 0;
 static uint32_t g_fb_height = 0;
 static uint32_t g_fb_pitch_px = 0;
 static int g_fb_ready = 0;
+static int g_fb_present_needed = 0;  /* 1 = virtio-gpu 后端需显式 present */
 
 void framebuffer_init(void)
 {
+    /* -------- 优先尝试 virtio-gpu 后端 --------
+     * virtio_gpu_init() 已在 kernel64 早期 boot（本函数之前）执行。
+     * 若设备存在且 2D 管线就绪，将绘制目标指向其 host-backed
+     * backing store，GUI 层像往常一样直写像素；gui_flush_rect
+     * 额外触发 framebuffer_present() 将脏矩形 TRANSFER+FLUSH 到
+     * host，从而让整个桌面经 virtio-gpu present。 */
+    if (virtio_gpu_device_count() > 0) {
+        void *bb = virtio_gpu_framebuffer();
+        uint32_t vw = virtio_gpu_width();
+        uint32_t vh = virtio_gpu_height();
+        if (bb && vw > 0 && vh > 0) {
+            g_fb_base = (volatile uint32_t *)bb;
+            g_fb_width = vw;
+            g_fb_height = vh;
+            g_fb_pitch_px = vw;               /* backing store 紧密行距 */
+            g_fb_present_needed = 1;
+
+            g_fb_caps.backend = FRAMEBUFFER_BACKEND_VIRTIO_GPU;
+            g_fb_caps.name = "virtio-gpu";
+            g_fb_caps.flags = FRAMEBUFFER_CAP_LINEAR | FRAMEBUFFER_CAP_SOFTWARE_2D | FRAMEBUFFER_CAP_ALPHA_BLEND | FRAMEBUFFER_CAP_ROW_BLIT | FRAMEBUFFER_CAP_RECT_BLIT;
+            g_fb_caps.max_width = vw;
+            g_fb_caps.max_height = vh;
+            g_fb_caps.preferred_bpp = 32;
+
+            g_fb_info.width = vw;
+            g_fb_info.height = vh;
+            g_fb_info.pitch = vw * 4;
+            g_fb_info.bpp = 32;
+            g_fb_info.bytes_per_pixel = 4;
+            g_fb_info.phys_addr = (uint32_t)((uint64_t)bb & 0xFFFFFFFF);
+            g_fb_info.virt_addr = (uint32_t)((uint64_t)bb & 0xFFFFFFFF);
+            g_fb_info.size = vw * 4 * vh;
+            g_fb_info.available = 1;
+            g_fb_info.mode_set = 1;
+            g_fb_info.driver_name = "virtio-gpu";
+            g_fb_info.caps = g_fb_caps;
+
+            g_fb_ready = 1;
+            serial_write("[framebuffer] backend=virtio-gpu (present-mode)\n");
+            return;
+        }
+    }
+
+    /* -------- 回退到 UEFI GOP 后端 -------- */
+    g_fb_present_needed = 0;
     const early_fb_info_t *fb = early_framebuffer64_get_info();
     if (!fb || fb->base == 0 || fb->width == 0 || fb->height == 0) {
         g_fb_ready = 0;
@@ -76,6 +136,7 @@ void framebuffer_init(void)
     g_fb_info.caps = g_fb_caps;
 
     g_fb_ready = 1;
+    serial_write("[framebuffer] backend=UEFI GOP (direct-write)\n");
 }
 
 int framebuffer_is_available(void)
@@ -316,4 +377,35 @@ void framebuffer_test_pattern(void)
 void framebuffer_print_info(void)
 {
     /* optional serial dump; keep minimal */
+}
+
+/* ------------------------------------------------------------
+ * present 接口（M6.5）
+ *
+ * GOP 后端：直写 VRAM，present 为 no-op。
+ * virtio-gpu 后端：需将 backing store 脏矩形 TRANSFER_TO_HOST_2D
+ *                + RESOURCE_FLUSH 推送到 host scanout。
+ * ------------------------------------------------------------ */
+int framebuffer_present_needed(void)
+{
+    return g_fb_present_needed;
+}
+
+int framebuffer_present_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
+{
+    if (!g_fb_ready || !g_fb_present_needed) {
+        return 0;  /* GOP 后端无需 present */
+    }
+    if (w == 0 || h == 0) {
+        return 0;
+    }
+    return virtio_gpu_flush_rect(x, y, w, h);
+}
+
+int framebuffer_present(void)
+{
+    if (!g_fb_ready || !g_fb_present_needed) {
+        return 0;
+    }
+    return virtio_gpu_flush_rect(0, 0, g_fb_width, g_fb_height);
 }

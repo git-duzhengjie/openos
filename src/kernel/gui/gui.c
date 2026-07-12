@@ -2119,6 +2119,13 @@ static void gui_flush_rect(const gui_rect_t *r) {
             g_gui_accel.flush_rows++;
         }
     }
+
+    /* M6.5：virtio-gpu 后端需将脏矩形显式 present 到 host scanout；
+     * GOP 后端下 framebuffer_present_rect() 为 no-op（内部快路径返回）。 */
+    if (framebuffer_present_needed()) {
+        framebuffer_present_rect((uint32_t)x0, (uint32_t)y0,
+                                 (uint32_t)(x1 - x0), (uint32_t)(y1 - y0));
+    }
 }
 
 static void gui_flush_backbuffer(void) {
