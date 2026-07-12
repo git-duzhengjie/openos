@@ -329,6 +329,28 @@ static inline long openos64_getppid(void) {
     return openos64_syscall0(OPENOS64_SYS_GETPPID);
 }
 
+/* M6.11: process credential syscalls (mirror src/kernel/include/syscall.h).
+ * getuid/getgid return the REAL ids; geteuid/getegid return the EFFECTIVE
+ * ids that drive permission checks. setuid/setgid/seteuid/setegid apply the
+ * POSIX privilege rules in-kernel and return 0 on success, -1 on EPERM. */
+#define OPENOS64_SYS_GETUID   276ULL
+#define OPENOS64_SYS_SETUID   277ULL
+#define OPENOS64_SYS_GETGID   278ULL
+#define OPENOS64_SYS_SETGID   279ULL
+#define OPENOS64_SYS_GETEUID  482ULL
+#define OPENOS64_SYS_GETEGID  483ULL
+#define OPENOS64_SYS_SETEUID  484ULL
+#define OPENOS64_SYS_SETEGID  485ULL
+
+static inline long openos64_getuid(void)  { return openos64_syscall0(OPENOS64_SYS_GETUID);  }
+static inline long openos64_getgid(void)  { return openos64_syscall0(OPENOS64_SYS_GETGID);  }
+static inline long openos64_geteuid(void) { return openos64_syscall0(OPENOS64_SYS_GETEUID); }
+static inline long openos64_getegid(void) { return openos64_syscall0(OPENOS64_SYS_GETEGID); }
+static inline long openos64_setuid(uint32_t uid)  { return openos64_syscall1(OPENOS64_SYS_SETUID,  (uint64_t)uid); }
+static inline long openos64_setgid(uint32_t gid)  { return openos64_syscall1(OPENOS64_SYS_SETGID,  (uint64_t)gid); }
+static inline long openos64_seteuid(uint32_t uid) { return openos64_syscall1(OPENOS64_SYS_SETEUID, (uint64_t)uid); }
+static inline long openos64_setegid(uint32_t gid) { return openos64_syscall1(OPENOS64_SYS_SETEGID, (uint64_t)gid); }
+
 static inline void openos64_exit(int code) __attribute__((noreturn));
 static inline void openos64_exit(int code) {
     (void)openos64_syscall1(OPENOS64_SYS_EXIT, (uint64_t)(uint32_t)code);

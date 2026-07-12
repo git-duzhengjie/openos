@@ -39,6 +39,29 @@ static const uint8_t shell_profile[] =
     "PATH=/bin\n"
     "PROMPT=openos64> \n";
 
+/* M6.11.2: user account database, classic /etc/passwd format:
+ *   name:passwd:uid:gid:gecos:home:shell
+ * The passwd field is 'x' meaning the hash lives in /etc/shadow (below).
+ * Two accounts ship by default: root (uid 0) and an unprivileged
+ * interactive user 'openos' (uid 1000). login(1) parses this table. */
+static const uint8_t etc_passwd[] =
+    "root:x:0:0:root:/root:/bin/sh\n"
+    "openos:x:1000:1000:OpenOS User:/home/openos:/bin/sh\n";
+
+/* M6.11.2: group database, classic /etc/group format:
+ *   name:passwd:gid:members(csv) */
+static const uint8_t etc_group[] =
+    "root:x:0:\n"
+    "openos:x:1000:openos\n";
+
+/* M6.11.2: shadow password file, classic /etc/shadow format:
+ *   name:hash:...  The hash column is 'sha256$<hex>' of the account
+ *   password. Defaults: root password 'root', openos password 'openos'.
+ *   login(1) recomputes SHA256 of the typed password and compares. */
+static const uint8_t etc_shadow[] =
+    "root:sha256$4813494d137e1631bba301d5acab6e7bb7aa74ce1185d456565ef51d737677b2:::::::\n"
+    "openos:sha256$57d5a8f1e6e6c32cbb3922f5d8440e785e9e6e68428af678810b367dcb4936d1:::::::\n";
+
 /* Step C：x86_64 用户态 read regression 专用文件。
  * 内容刻意与 /etc/motd 不同，便于在串口/VGA 中肉眼区分。 */
 static const uint8_t hello_txt[] =
@@ -48,6 +71,10 @@ static const x86_64_initrd_file_t initrd_files[] = {
     { .name = "/init", .data = init_script, .size = sizeof(init_script) - 1u, .mode = 0755u },
     { .name = "/etc/motd", .data = motd, .size = sizeof(motd) - 1u, .mode = 0644u },
     { .name = "/etc/profile", .data = shell_profile, .size = sizeof(shell_profile) - 1u, .mode = 0644u },
+    /* M6.11.2: user/group/shadow account databases parsed by login(1). */
+    { .name = "/etc/passwd", .data = etc_passwd, .size = sizeof(etc_passwd) - 1u, .mode = 0644u },
+    { .name = "/etc/group",  .data = etc_group,  .size = sizeof(etc_group)  - 1u, .mode = 0644u },
+    { .name = "/etc/shadow", .data = etc_shadow, .size = sizeof(etc_shadow) - 1u, .mode = 0600u },
     { .name = "/hello.txt", .data = hello_txt, .size = sizeof(hello_txt) - 1u, .mode = 0644u },
     /* H.2: ring3 demo ELF。kernel64.c 通过 initrd_find("/bin/hello64")
      * 拿到 image 后喂给 arch_x86_64_elf64_load_image。 */
