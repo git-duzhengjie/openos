@@ -51,6 +51,7 @@ extern void net_print_info(void);
 #include "../include/power_selftest64.h"
 #include "../include/cpufreq64.h"
 #include "../include/cpufreq_selftest64.h"
+#include "../include/cred_selftest64.h"
 #include "../include/gfx_selftest64.h"
 #include "../include/virtio_gpu_selftest64.h"
 #include "../include/smp_selftest64.h"
@@ -784,6 +785,13 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
      * Non-fatal. */
     (void)arch_x86_64_cpufreq_init();
     (void)arch_x86_64_cpufreq_selftest_run();
+
+    /* Step M6.11.1: verify the per-process POSIX credential set (real/
+     * effective/saved uid+gid) and the setuid/setgid privilege rules. The
+     * test drives the API against the current PCB and restores the pristine
+     * root identity before returning, so the live kernel PCB is untouched.
+     * Non-fatal. */
+    (void)arch_x86_64_cred_selftest_run();
 
     /* Step M6.3: verify the framebuffer row-blit acceleration primitive
      * (framebuffer_blit_row). framebuffer_init() is idempotent and only wires

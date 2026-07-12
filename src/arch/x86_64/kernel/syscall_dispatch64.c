@@ -2001,6 +2001,15 @@ uint64_t arch_x86_64_syscall_dispatch_common(uint64_t num,
     case SYS_GETPPID:     return (uint64_t)arch_x86_64_proc_current_ppid();
     case SYS_GETUID:      return (uint64_t)arch_x86_64_proc_current_uid();
     case SYS_GETGID:      return (uint64_t)arch_x86_64_proc_current_gid();
+    /* M6.11.1: full credential syscalls. GETUID/GETGID above return the
+     * real ids; the effective ids drive permission checks. setuid/setgid
+     * apply POSIX privilege rules in proc64.c and return -EPERM on abuse. */
+    case SYS_GETEUID:     return (uint64_t)arch_x86_64_proc_current_euid();
+    case SYS_GETEGID:     return (uint64_t)arch_x86_64_proc_current_egid();
+    case SYS_SETUID:      return (uint64_t)(int64_t)arch_x86_64_proc_setuid((uint32_t)a0);
+    case SYS_SETGID:      return (uint64_t)(int64_t)arch_x86_64_proc_setgid((uint32_t)a0);
+    case SYS_SETEUID:     return (uint64_t)(int64_t)arch_x86_64_proc_seteuid((uint32_t)a0);
+    case SYS_SETEGID:     return (uint64_t)(int64_t)arch_x86_64_proc_setegid((uint32_t)a0);
     case SYS_YIELD:       return do_yield();
     case SYS_WAIT:        return do_wait_common(0, a0, 0);
     case SYS_WAITPID:     return do_wait_common(a0, a1, 1);

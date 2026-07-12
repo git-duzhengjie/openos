@@ -57,6 +57,16 @@ typedef struct x86_64_proc {
     uint32_t ppid;
     uint32_t uid;
     uint32_t gid;
+    /* M6.11.1: full POSIX-style credential set. uid/gid above are the
+     * real IDs (ruid/rgid); the effective IDs (euid/egid) drive every
+     * permission check, and the saved IDs (suid/sgid) let a program that
+     * temporarily dropped privilege restore it. On slot 0 (kernel) all
+     * are 0 (root). fork() copies the whole set; setuid/setgid mutate
+     * them under the privilege rules enforced in syscall_dispatch64.c. */
+    uint32_t euid;
+    uint32_t egid;
+    uint32_t suid;
+    uint32_t sgid;
     int32_t  exit_code;
     x86_64_proc_state_t state;
     char     name[OPENOS_X86_64_PROC_NAME_MAX];
@@ -296,6 +306,19 @@ uint32_t arch_x86_64_proc_current_tid(void);
 uint32_t arch_x86_64_proc_current_ppid(void);
 uint32_t arch_x86_64_proc_current_uid(void);
 uint32_t arch_x86_64_proc_current_gid(void);
+/* M6.11.1: effective / saved credential accessors + mutators. The
+ * effective IDs drive permission checks; setuid/setgid apply POSIX
+ * privilege rules (root may set anything; a non-root process may only
+ * switch its effective ID to its real or saved ID). Return 0 on
+ * success, -1 (EPERM) when the rule is violated. */
+uint32_t arch_x86_64_proc_current_euid(void);
+uint32_t arch_x86_64_proc_current_egid(void);
+uint32_t arch_x86_64_proc_current_suid(void);
+uint32_t arch_x86_64_proc_current_sgid(void);
+int      arch_x86_64_proc_setuid(uint32_t uid);
+int      arch_x86_64_proc_setgid(uint32_t gid);
+int      arch_x86_64_proc_seteuid(uint32_t euid);
+int      arch_x86_64_proc_setegid(uint32_t egid);
 uint32_t arch_x86_64_proc_alloc_child_pid(x86_64_proc_t *parent);
 
 /* γ.2.a — allocate an independent PCB slot for the fork child. Parent is

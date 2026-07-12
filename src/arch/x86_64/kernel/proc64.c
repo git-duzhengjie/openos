@@ -157,6 +157,11 @@ void arch_x86_64_proc_init(void) {
     proc_table[0].ppid = 0;
     proc_table[0].uid = 0;
     proc_table[0].gid = 0;
+    /* M6.11.1: kernel PCB is root across the full credential set. */
+    proc_table[0].euid = 0;
+    proc_table[0].egid = 0;
+    proc_table[0].suid = 0;
+    proc_table[0].sgid = 0;
     proc_table[0].exit_code = 0;
     proc_table[0].state = OPENOS_X86_64_PROC_RUNNING;
     proc_copy_name(proc_table[0].name, "kernel");
@@ -196,6 +201,12 @@ uint32_t arch_x86_64_proc_spawn_user(const char *name) {
     p->ppid = proc_table[current_index_get()].pid;
     p->uid = 0;
     p->gid = 0;
+    /* M6.11.1: freshly spawned procs start as root; a login/exec flow
+     * lowers privilege later via setuid/setgid. */
+    p->euid = 0;
+    p->egid = 0;
+    p->suid = 0;
+    p->sgid = 0;
     p->exit_code = 0;
     p->state = OPENOS_X86_64_PROC_RUNNING;
     proc_copy_name(p->name, name);
@@ -318,6 +329,66 @@ uint32_t arch_x86_64_proc_current_tid(void)  { return proc_table[current_index_g
 uint32_t arch_x86_64_proc_current_ppid(void) { return proc_table[current_index_get()].ppid; }
 uint32_t arch_x86_64_proc_current_uid(void)  { return proc_table[current_index_get()].uid; }
 uint32_t arch_x86_64_proc_current_gid(void)  { return proc_table[current_index_get()].gid; }
+uint32_t arch_x86_64_proc_current_euid(void) { return proc_table[current_index_get()].euid; }
+uint32_t arch_x86_64_proc_current_egid(void) { return proc_table[current_index_get()].egid; }
+uint32_t arch_x86_64_proc_current_suid(void) { return proc_table[current_index_get()].suid; }
+uint32_t arch_x86_64_proc_current_sgid(void) { return proc_table[current_index_get()].sgid; }
+
+/* M6.11.1: setuid(2). POSIX rule set:
+ *  - A privileged process (euid == 0) sets real, effective and saved
+ *    uid all to the target (a full, irreversible identity change once
+ *    privilege is gone).
+ *  - An unprivileged process may only set its effective uid to its
+ *    real uid or its saved uid; anything else is EPERM.
+ * Returns 0 on success, -1 on EPERM. */
+int arch_x86_64_proc_setuid(uint32_t uid) {
+    x86_64_proc_t *p = &proc_table[current_index_get()];
+    if (p->euid == 0u) {
+        p->uid = uid; p->euid = uid; p->suid = uid;
+        return 0;
+    }
+    if (uid == p->uid || uid == p->suid) {
+        p->euid = uid;
+        return 0;
+    }
+    return -1;
+}
+
+/* M6.11.1: setgid(2), mirror of setuid for the group id. */
+int arch_x86_64_proc_setgid(uint32_t gid) {
+    x86_64_proc_t *p = &proc_table[current_index_get()];
+    if (p->euid == 0u) {
+        p->gid = gid; p->egid = gid; p->sgid = gid;
+        return 0;
+    }
+    if (gid == p->gid || gid == p->sgid) {
+        p->egid = gid;
+        return 0;
+    }
+    return -1;
+}
+
+/* M6.11.1: seteuid(2). Root may set any effective uid; a non-root
+ * process may switch its effective uid only to its real or saved uid.
+ * The saved uid is left unchanged (unlike setuid). */
+int arch_x86_64_proc_seteuid(uint32_t euid) {
+    x86_64_proc_t *p = &proc_table[current_index_get()];
+    if (p->euid == 0u || euid == p->uid || euid == p->suid) {
+        p->euid = euid;
+        return 0;
+    }
+    return -1;
+}
+
+/* M6.11.1: setegid(2), mirror of seteuid for the group id. */
+int arch_x86_64_proc_setegid(uint32_t egid) {
+    x86_64_proc_t *p = &proc_table[current_index_get()];
+    if (p->euid == 0u || egid == p->gid || egid == p->sgid) {
+        p->egid = egid;
+        return 0;
+    }
+    return -1;
+}
 
 struct x86_64_address_space *arch_x86_64_proc_current_get_as(void) {
     return proc_table[current_index_get()].as;
@@ -380,6 +451,11 @@ x86_64_proc_t *arch_x86_64_proc_fork_alloc_child(x86_64_proc_t *parent_pcb) {
     c->ppid = parent_pcb->pid;
     c->uid  = parent_pcb->uid;
     c->gid  = parent_pcb->gid;
+    /* M6.11.1: fork() copies the entire credential set verbatim. */
+    c->euid = parent_pcb->euid;
+    c->egid = parent_pcb->egid;
+    c->suid = parent_pcb->suid;
+    c->sgid = parent_pcb->sgid;
     c->exit_code = 0;
     c->state = OPENOS_X86_64_PROC_RUNNING;
     proc_copy_name(c->name, parent_pcb->name);
@@ -536,6 +612,11 @@ x86_64_proc_t *arch_x86_64_proc_clone_thread(x86_64_proc_t *parent_pcb,
     c->ppid = parent_pcb->pid;
     c->uid  = parent_pcb->uid;
     c->gid  = parent_pcb->gid;
+    /* M6.11.1: fork() copies the entire credential set verbatim. */
+    c->euid = parent_pcb->euid;
+    c->egid = parent_pcb->egid;
+    c->suid = parent_pcb->suid;
+    c->sgid = parent_pcb->sgid;
     c->exit_code = 0;
     c->state = OPENOS_X86_64_PROC_RUNNING;
     proc_copy_name(c->name, parent_pcb->name);

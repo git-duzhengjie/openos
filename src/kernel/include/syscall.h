@@ -223,6 +223,10 @@
 #define SYS_OPK_INSTALL   479  /* M5.4c: a0=image_ptr a1=image_size a2=root_ptr -> 0/负错误码（安装 .opk 包到可写 ramfs） */
 #define SYS_POWER         480  /* M6.1: a0=op(0=shutdown/1=reboot/2=query) -> query返回能力位；shutdown/reboot 成功不返回 */
 #define SYS_CPUINFO       481  /* M6.2: a0=user buf ptr a1=buf size -> 0/负；拷贝 CPU 频率/温度快照（只读，不改 P-state） */
+#define SYS_GETEUID       482  /* M6.11.1: (no args) -> effective uid（权限检查用；GETUID 返回 real uid） */
+#define SYS_GETEGID       483  /* M6.11.1: (no args) -> effective gid */
+#define SYS_SETEUID       484  /* M6.11.1: a0=euid -> 0/负(EPERM)。root 任意；非 root 仅可切到 real/saved uid */
+#define SYS_SETEGID       485  /* M6.11.1: a0=egid -> 0/负(EPERM)。镜像 SETEUID */
 #define SYS_GUI_ADD_TABLEVIEW 400
 #define SYS_GUI_SET_TABLEVIEW_ROW 401
 #define SYS_GUI_GET_TABLEVIEW_ROW 402
