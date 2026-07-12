@@ -968,9 +968,18 @@ int arch_x86_64_syscall_selftest_run(void) {
          * Only treat -1 as a hard failure when a user process context exists. */
         uint64_t prev = do_syscall(SYS_SBRK, page, 0u, 0u);
         if (prev == (uint64_t)-1) {
-            if (arch_x86_64_proc_current() == (void *)0) {
+            /* SYS_SBRK grows the *user-space* heap (U=1 pages) in the caller's
+             * own address space. This kernel-side selftest runs before any ring3
+             * process exists, so there is no user address space to grow and the
+             * call legitimately returns -1. Detect that by the absence of a user
+             * address space -- NOT by proc_current(), which always returns the
+             * kernel slot-0 PCB and is therefore never NULL (that made this
+             * SKIP branch unreachable and turned the benign early-boot case into
+             * a false FAIL). The real sbrk/malloc validation lives in the ring3
+             * libc/opk demo. */
+            if (arch_x86_64_proc_current_get_as() == (void *)0) {
                 early_console64_write("[x86_64][selftest] SKIP M4.1b sbrk "
-                                      "(no ring3 ctx; user-heap tested in libc demo)\n");
+                                      "(no user addr-space; user-heap tested in libc demo)\n");
             } else {
                 early_console64_write("[x86_64][selftest] FAIL M4.1b sbrk grow failed\n");
                 return 45;
