@@ -52,6 +52,7 @@ extern void net_print_info(void);
 #include "../include/cpufreq64.h"
 #include "../include/cpufreq_selftest64.h"
 #include "../include/cred_selftest64.h"
+#include "../include/login_selftest64.h"
 #include "../include/gfx_selftest64.h"
 #include "../include/virtio_gpu_selftest64.h"
 #include "../include/smp_selftest64.h"
@@ -792,6 +793,12 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
      * root identity before returning, so the live kernel PCB is untouched.
      * Non-fatal. */
     (void)arch_x86_64_cred_selftest_run();
+
+    /* Step M6.11.3: verify the login/session flow (authenticate against the
+     * initrd /etc/passwd + /etc/shadow, then drop privilege and become a
+     * session leader). The test snapshots and restores the pristine slot-0
+     * root identity, so the live kernel PCB is untouched. Non-fatal. */
+    (void)arch_x86_64_login_selftest_run();
 
     /* Step M6.3: verify the framebuffer row-blit acceleration primitive
      * (framebuffer_blit_row). framebuffer_init() is idempotent and only wires

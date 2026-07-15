@@ -716,6 +716,9 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         kernel/cpufreq64.c \
         kernel/cpufreq_selftest64.c \
         kernel/cred_selftest64.c \
+        kernel/account_db64.c \
+        kernel/login64.c \
+        kernel/login_selftest64.c \
         kernel/security64.c \
         kernel/gfx_selftest64.c \
         kernel/virtio_gpu_selftest64.c \
@@ -872,6 +875,9 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         "$ARCH64_BUILD/cpufreq64.o" \
         "$ARCH64_BUILD/cpufreq_selftest64.o" \
         "$ARCH64_BUILD/cred_selftest64.o" \
+        "$ARCH64_BUILD/account_db64.o" \
+        "$ARCH64_BUILD/login64.o" \
+        "$ARCH64_BUILD/login_selftest64.o" \
         "$ARCH64_BUILD/security64.o" \
         "$ARCH64_BUILD/gfx_selftest64.o" \
         "$ARCH64_BUILD/virtio_gpu_selftest64.o" \
