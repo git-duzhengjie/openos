@@ -67,26 +67,26 @@ _get_rip:
     subq %r9, %rax                      /* rax = KERNEL_VIRT_OFFSET (vaddr - phys) */
     movq %rax, %r10                     /* r10 stays as the offset for the rest of _start64 */
 
-    leaq boot64_pml4(%rip), %rax
+    movabsq $boot64_pml4, %rax
     subq %r10, %rax
     movq %rax, %r11                     /* r11 = phys(pml4) */
 
-    leaq boot64_pdpt_hi(%rip), %rax
+    movabsq $boot64_pdpt_hi, %rax
     subq %r10, %rax
     movq %rax, %r12                     /* r12 = phys(pdpt_hi) */
 
-    leaq boot64_pd_hi(%rip), %rax
+    movabsq $boot64_pd_hi, %rax
     subq %r10, %rax
     movq %rax, %r13                     /* r13 = phys(pd_hi)   */
 
-    leaq boot64_pdpt_lo(%rip), %rax
+    movabsq $boot64_pdpt_lo, %rax
     subq %r10, %rax
     movq %rax, %r14                     /* r14 = phys(pdpt_lo) */
 
     /* Phys of identity PDs (rbx points to pd_lo0; pd_lo1..3 follow at
      * fixed +4 KiB / +8 KiB / +12 KiB offsets since they are contiguous
      * .bss entries declared in order above). */
-    leaq boot64_pd_lo0(%rip), %rax
+    movabsq $boot64_pd_lo0, %rax
     subq %r10, %rax
     movq %rax, %rbx                     /* rbx = phys(pd_lo0) */
 
