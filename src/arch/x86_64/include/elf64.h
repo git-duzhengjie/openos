@@ -112,19 +112,105 @@ static inline uint64_t elf64_get_entry(const uint8_t *buffer)
 }
 
 static inline efi_status_t elf64_load_segments(efi_system_table64_t *system_table,
-                                                const uint8_t *buffer, uint64_t size)
+                                                const uint8_t *buffer, uint64_t size,
+                                                uint64_t *out_reloc_delta)
 {
     const elf64_ehdr_t *ehdr = (const elf64_ehdr_t *)buffer;
     const elf64_phdr_t *phdrs;
     uint64_t i;
     efi_status_t status;
     uint32_t memory_type = 0x00000002U; /* EfiLoaderCode */
+    uint64_t reloc_delta = 0; /* phys offset applied if we relocate */
+
+    if (out_reloc_delta) *out_reloc_delta = 0;
 
     if (!elf64_validate(buffer, size)) {
         return EFI_LOAD_ERROR;
     }
 
     phdrs = (const elf64_phdr_t *)(buffer + ehdr->phoff);
+
+    /* -----------------------------------------------------------------
+     * M6.11.3-fix: reserve the WHOLE kernel physical span as ONE
+     * contiguous block, instead of per-segment AllocateAddress (which,
+     * once the image grew past a certain size, could fail for a higher
+     * segment and silently fall back to AnyPages — scattering that
+     * segment to a random physical page while entry64.S's boot page
+     * tables assume all PT_LOAD segments sit contiguously from
+     * _start64's phys base. That mismatch made the kernel read rodata
+     * (embedded ELFs, jump tables) from a blank page → bogus function
+     * pointer → RIP flew to 0x000a0004 right after the higher-half jump.
+     *
+     * Strategy: compute [min_paddr, max_paddr+memsz), 2MiB-align the
+     * base (entry64.S requires 2MiB alignment via `andq $-0x200000`),
+     * AllocateAddress the entire span at ONCE (not per-segment). If the
+     * linked base is occupied by firmware, fall back to a SINGLE
+     * AllocateAnyPages of the same 2MiB-aligned span and RELOCATE every
+     * segment by the same delta. This is safe because entry64.S derives
+     * kernel_phys_base from its own runtime RIP (`phys(_start64) =
+     * vaddr - r10`) and hard-maps pd_hi from there, so it self-heals to
+     * whatever contiguous base we picked. We publish the delta via
+     * *out_reloc_delta so the caller can add it to the entry point.
+     * Allocating as ONE block preserves the contiguity invariant the
+     * boot page tables assume.
+     * --------------------------------------------------------------- */
+    {
+        uint64_t min_paddr = ~0ULL;
+        uint64_t max_end   = 0;
+        for (i = 0; i < ehdr->phnum; ++i) {
+            const elf64_phdr_t *ph = &phdrs[i];
+            if (ph->type != ELF64_PT_LOAD) continue;
+            uint64_t p = (ph->paddr != 0) ? ph->paddr : ph->vaddr;
+            uint64_t e = p + ph->memsz;
+            if (p < min_paddr) min_paddr = p;
+            if (e > max_end)   max_end   = e;
+        }
+        if (min_paddr == ~0ULL) {
+            return EFI_LOAD_ERROR; /* no PT_LOAD */
+        }
+        /* 2MiB-align base down; align total span up to 2MiB */
+        uint64_t span_base = min_paddr & ~0x1FFFFFULL;
+        uint64_t span_end  = (max_end + 0x1FFFFFULL) & ~0x1FFFFFULL;
+        uint64_t span_pages = (span_end - span_base) >> 12;
+        uint64_t span_addr = span_base;
+
+        status = system_table->boot_services->allocate_pages(
+            1, /* AllocateAddress */ memory_type, span_pages, &span_addr);
+        if (status == EFI_SUCCESS) {
+            reloc_delta = 0;
+            uefi64_serial_write("[UEFI][elf] reserved kernel span (fixed) base=");
+            uefi64_serial_write_hex64(span_base);
+            uefi64_serial_write(" end=");
+            uefi64_serial_write_hex64(span_end);
+            uefi64_serial_write(" pages=");
+            uefi64_serial_write_hex64(span_pages);
+            uefi64_serial_write("\n");
+        } else {
+            /* Linked base occupied -> relocate. Over-allocate by one 2MiB
+             * slack page so we can 2MiB-align the AnyPages result upward. */
+            uint64_t any_pages = span_pages + (0x200000ULL >> 12);
+            uint64_t any_addr  = 0;
+            status = system_table->boot_services->allocate_pages(
+                0, /* AllocateAnyPages */ memory_type, any_pages, &any_addr);
+            if (status != EFI_SUCCESS) {
+                uefi64_serial_write("[UEFI][elf] AnyPages fallback FAILED pages=");
+                uefi64_serial_write_hex64(any_pages);
+                uefi64_serial_write(" status=");
+                uefi64_serial_write_hex64(status);
+                uefi64_serial_write(" -- FATAL\n");
+                return status;
+            }
+            uint64_t new_base = (any_addr + 0x1FFFFFULL) & ~0x1FFFFFULL;
+            reloc_delta = new_base - span_base;
+            uefi64_serial_write("[UEFI][elf] linked base occupied; RELOCATED. any_addr=");
+            uefi64_serial_write_hex64(any_addr);
+            uefi64_serial_write(" new_base=");
+            uefi64_serial_write_hex64(new_base);
+            uefi64_serial_write(" delta=");
+            uefi64_serial_write_hex64(reloc_delta);
+            uefi64_serial_write("\n");
+        }
+    }
 
     for (i = 0; i < ehdr->phnum; ++i) {
         const elf64_phdr_t *ph = &phdrs[i];
@@ -134,58 +220,10 @@ static inline efi_status_t elf64_load_segments(efi_system_table64_t *system_tabl
             continue;
         }
 
-        /* UEFI 下使用 PhysAddr 加载（内核高半区 vaddr=0xFFFFFFFF80000000 需
-         * paddr=0x200000 才能被 UEFI identity map 访问）。在 boot64.asm
-         * 启用分页后高半区 vaddr 会被映射到该物理页。 */
-        uint64_t load_addr = (ph->paddr != 0) ? ph->paddr : ph->vaddr;
-        uint64_t aligned_addr = load_addr & ~0xFFFULL;
-        uint64_t aligned_size = ((load_addr - aligned_addr + ph->memsz + 0xFFFULL) & ~0xFFFULL);
-        uint64_t pages = aligned_size >> 12;
-
-        /* 分配内存 - 先试 AllocateAddress（保留 ELF 原定 paddr），失败则
-         * 回退 AllocateAnyPages。为了内核 boot64.asm 该都在开分页前只依赖
-         * UEFI identity map，AnyPages 后的地址仍能被访问。
-         *
-         * NOTE: For PT_LOAD segments with filesz=0 (e.g. .bss split out
-         * via PHDRS in linker64.ld), the physical landing spot does not
-         * carry any file payload — the kernel's boot page tables already
-         * map the virtual range, and entry64.S zero-fills via virt addr.
-         * So AnyPages fallback is harmless for those. For non-bss
-         * segments (.text/.rodata/.data) AllocateAddress must succeed
-         * or the kernel's hard-coded page tables would deref bogus phys.
-         */
-        uint64_t requested_addr = aligned_addr;
-        status = system_table->boot_services->allocate_pages(
-            1, /* AllocateAddress */
-            memory_type,
-            pages,
-            &aligned_addr);
-        if (status != EFI_SUCCESS) {
-            uefi64_serial_write("[UEFI][elf] AllocateAddress FAILED vaddr=");
-            uefi64_serial_write_hex64(ph->vaddr);
-            uefi64_serial_write(" req=");
-            uefi64_serial_write_hex64(requested_addr);
-            uefi64_serial_write(" pages=");
-            uefi64_serial_write_hex64(pages);
-            uefi64_serial_write(" status=");
-            uefi64_serial_write_hex64(status);
-            uefi64_serial_write(" → fallback AllocateAnyPages\n");
-            /* 回退：AnyPages，让 UEFI 选位置 */
-            aligned_addr = requested_addr; /* reset (impl may clobber) */
-            status = system_table->boot_services->allocate_pages(
-                0, /* AllocateAnyPages */
-                memory_type,
-                pages,
-                &aligned_addr);
-            if (status != EFI_SUCCESS) {
-                uefi64_serial_write("[UEFI][elf] AllocateAnyPages FAILED status=");
-                uefi64_serial_write_hex64(status);
-                uefi64_serial_write("\n");
-                return status;
-            }
-            /* AnyPages 下 load_addr 不再是原始 paddr，调整 dest */
-            load_addr = aligned_addr + (load_addr & 0xFFFULL);
-        }
+        /* Physical memory for the whole image is already reserved above.
+         * Each segment lands at its linked paddr + reloc_delta (contiguity
+         * invariant preserved), so we just zero memsz then copy filesz. */
+        uint64_t load_addr = ((ph->paddr != 0) ? ph->paddr : ph->vaddr) + reloc_delta;
 
         /* 清零 bss 部分 */
         dest = (uint8_t *)(uintptr_t)load_addr;
@@ -199,6 +237,7 @@ static inline efi_status_t elf64_load_segments(efi_system_table64_t *system_tabl
         }
     }
 
+    if (out_reloc_delta) *out_reloc_delta = reloc_delta;
     return EFI_SUCCESS;
 }
 

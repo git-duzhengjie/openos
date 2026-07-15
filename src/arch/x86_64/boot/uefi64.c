@@ -142,14 +142,16 @@ static void uefi64_load_kernel(efi_system_table64_t *system_table,
     uefi64_serial_write("[UEFI] kernel64.elf loaded to memory\n");
 
     /* Load ELF64 segments */
-    status = elf64_load_segments(system_table, kernel_buffer, file_size);
+    uint64_t reloc_delta = 0;
+    status = elf64_load_segments(system_table, kernel_buffer, file_size, &reloc_delta);
     if (status != EFI_SUCCESS) {
         uefi64_serial_write("[UEFI] ERROR: ELF64 segment load failed\n");
         return;
     }
 
-    /* Get entry point */
-    uefi64_handoff.kernel_entry = elf64_get_entry(kernel_buffer);
+    /* Get entry point (physical). If segments were relocated, the boot
+     * jump still runs under identity map, so add the same phys delta. */
+    uefi64_handoff.kernel_entry = elf64_get_entry(kernel_buffer) + reloc_delta;
     uefi64_serial_write("[UEFI] kernel entry at: ");
     uefi64_serial_write_hex64(uefi64_handoff.kernel_entry);
     uefi64_serial_write("\n");
