@@ -1,10 +1,10 @@
 # openos 待开发功能清单
 
-> 更新时间：2026-07-12
+> 更新时间：2026-07-15
 >
 > 当前状态：openos 已具备 32 位 x86 原型内核能力，能够启动、显示、输入、调度、运行基础用户程序，并具备基础 syscall、VFS、ramfs/tmpfs、shell、GUI Terminal 等模块。浏览器路线已切换为 OpenOS 自研轻量浏览器，Chromium 官方内核迁移冻结为历史备选。
 >
-> 最近完成：**M6 里程碑全部收官（系统资源 + 图形加速 + 安全加固）** —— M6.1 ACPI 电源（关机/重启）、M6.2 CPU 频率/温度观测层、M6.3 整行/矩形 blit 软件加速、M6.4 virtio-gpu modern PCI transport + 2D 管线、M6.5 framebuffer 双后端自动选择（virtio-gpu present / GOP direct-write）、M6.6 硬件光标 cursorq、M6.7 EDID 显示能力协商、M6.8 多 scanout 镜像、M6.9 virtio-input 键鼠驱动、**M6.10 安全加固 6/6（CPU 能力探测 + W^X + SMEP + SMAP + 栈 canary + ASLR，commit `ecfc876`）**。另本轮复验确认：整套 TCP/IP 网络栈（以太网/ARP/IPv4/ICMP/UDP/TCP/DHCP/DNS/HTTP + virtio-net）早在 M1.x 完成并实机 pcap 验证，位于 `src/kernel/net/netstack.c`（2093 行），零回归（DHCP/PING/DNS/HTTP/TCP 五连测全 PASS，43 个真实网络包走通整条协议栈）；修复 M4.1b sbrk 假故障（commit `31b7842`）。
+> 最近完成：**M6.11 多用户与会话开工**——M6.11.1 进程凭证体系（POSIX uid/gid/euid/egid/suid/sgid + setuid/setgid/seteuid/setegid，commit `f88d9ff`）、M6.11.2 账户数据库（/etc/passwd+group+shadow，SHA256 哈希，commit `d760827`）。**重大底层修复：UEFI 重定位 triple fault 根除**（commit `f94378f`）——entry64 换 CR3 前 RIP 为物理地址时，`leaq sym(%rip)` 已直接产出运行时物理地址，代码却又多减一次 virt-to-phys offset 导致 pml4 物理地址算成越界垃圾→ identity map 缺失 → #PF→#DF→ triple fault；五处页表地址全改 `movabsq $sym`+`subq %r10`；修复后串口输出 18行→418行，prio/preempt selftest PASS，GUI 桌面起来（调试探针已清理 commit `48b6b9f`）。\n>\n> M6 里程碑全部收官（系统资源 + 图形加速 + 安全加固）—— M6.1 ACPI 电源、M6.2 CPU 频率/温度观测、M6.3 blit 软件加速、M6.4 virtio-gpu 2D、M6.5 framebuffer 双后端、M6.6 硬件光标、M6.7 EDID、M6.8 多 scanout、M6.9 virtio-input、**M6.10 安全加固 6/6（commit `ecfc876`）**。TCP/IP 全栈零回归（`src/kernel/net/netstack.c` 2093 行）；M4.1b sbrk 假故障修复（commit `31b7842`）。
 >
 > 当前推荐下一步：M6 已全部收官（M6.1–M6.10）。建议推进 **M6.11 多用户与会话**（完整 uid/gid 体系 + 登录管理 + 权限隔离）与 **M6.12 系统日志子系统**（dmesg / journald 风格）；或回头收口 H 系列 x86_64 ring3 进阶（H.5b.2+ 独立地址空间 + CR3 切换、fork、wait/waitpid、ELF 解释器、动态库）。任何后续工作均需保持 Stages 1-30 SMP=1/4 双矩阵全绿基线不退化。
 
@@ -1807,7 +1807,10 @@
   - [x] **M6.10.4 SMAP**（commit `ecfc876`）：CR4.bit21 置位。粗粒度用户内存访问收口——`syscall_sysret64.S` 汇编入口用 STAC 打开、dispatch 返回后 CLAC 关闭 user-access 窗口（一处改动覆盖 32+ 处散落用户指针访问），由全局标志 `arch_x86_64_smap_on` 门控（非 SMAP CPU 跳过 STAC/CLAC 避免 #UD，完美向后兼容）；STAC/CLAC 用 `.byte` 硬编码不依赖汇编器特性。**双构建实测铁证**：`+smep,+smap` CPU 启动 CR4=0x300668，全 syscall 用户内存路径（文件读写、signal trampoline、net 收发缓冲）PASS 零 #PF 零 guest_error；`qemu64`（无 SMAP）门控跳过、selftest 全绿进桌面、向后兼容 PASS
   - [x] **M6.10.5 栈 canary（栈保护）**：TSC 熵源生成栈 canary，每次启动值不同
   - [x] **M6.10.6 ASLR**：栈基址随机化，实测栈 gap 三次启动全不同
-- [ ] M6.11：多用户与会话（完整 uid/gid 体系 + 登录管理 + 权限隔离）
+- [~] M6.11：多用户与会话（完整 uid/gid 体系 + 登录管理 + 权限隔离）
+  - [x] **M6.11.1 进程凭证体系**（commit `f88d9ff`）：PCB 扩展 POSIX 凭证集 uid/gid(real)+euid/egid(effective)+suid/sgid(saved)；实现 setuid/setgid/seteuid/setegid 严格 POSIX 特权规则；新增 syscall GETEUID/GETEGID/SETEUID/SETEGID(482-485) 并接线 SETUID/SETGID；fork 完整继承凭证；cred_selftest64 六阶段实机 PASS
+  - [x] **M6.11.2 账户数据库**（commit `d760827`）：/etc/passwd + /etc/group + /etc/shadow seed 进 ramfs；默认 root(uid0)+openos(uid1000)，shadow 存 SHA256 哈希；24 个 initrd 文件全 seed 成功启动健康
+  - [ ] **M6.11.3 login/session**：登录流程 + 会话管理 + 权限隔离（进行中）
 - [ ] M6.12：系统日志 / dmesg / journald 风格日志子系统
 
 > 推荐攻关顺序：**M1.1 PCI → M1.2 virtio-net → M1.3/M1.4 TCP/IP 栈 → M1.5 真实上网**。此路线打通后 OpenOS 才真正跨入现代 OS 门槛；M2/M4 可并行推进。
