@@ -40,6 +40,8 @@
 #include "../include/ramfs64.h" /* M5.4d: dentry_t/inode_t + vfs_readdir for SYS_READDIR */
 #include "../include/power64.h"  /* M6.1: ACPI shutdown / reboot */
 #include "../include/cpufreq64.h" /* M6.2: CPU frequency / thermal snapshot */
+#include "../include/account_db64.h" /* M6.11.3: passwd/shadow parser */
+#include "../include/login64.h"      /* M6.11.3: login / session establishment */
 #include "../include/opk_install.h" /* M5.4c: .opk 包安装器 */
 /* M5.4c: kernel-side .opk installer bridge (opk_install_kernel.c) */
 extern int opk_install_to_ramfs(const uint8_t *image, uint32_t image_size,
@@ -305,6 +307,48 @@ static uint64_t do_readdir(uint64_t path_ptr, uint64_t index, uint64_t out_ptr) 
     for (; i + 1 < (int)sizeof(out->name) && de->name[i]; i++) out->name[i] = de->name[i];
     out->name[i] = 0;
     return 1;
+}
+
+/*
+ * SYS_LOGIN (M6.11.4): authenticate user and start session.
+ *   a0 = username (user ptr), a1 = password (user ptr), a2 = x86_64_passwd_entry_t* (out).
+ * Returns x86_64_login_result_t (0=OK, negative=error code).
+ */
+static uint64_t do_login(uint64_t name_ptr, uint64_t pw_ptr, uint64_t out_ptr) {
+    if (name_ptr == 0 || pw_ptr == 0) return (uint64_t)X86_64_LOGIN_EINVAL;
+
+    /* Copy username/password from user space to kernel stack */
+    char name[256];
+    char password[512];
+    int i = 0;
+    for (; i + 1 < (int)sizeof(name); i++) {
+        if (!validate_user_buf(name_ptr + i, 1)) break;
+        name[i] = *(char *)(uintptr_t)(name_ptr + i);
+        if (name[i] == 0) break;
+    }
+    name[i] = 0;
+    i = 0;
+    for (; i + 1 < (int)sizeof(password); i++) {
+        if (!validate_user_buf(pw_ptr + i, 1)) break;
+        password[i] = *(char *)(uintptr_t)(pw_ptr + i);
+        if (password[i] == 0) break;
+    }
+    password[i] = 0;
+
+    /* Authenticate and start session */
+    x86_64_passwd_entry_t pw;
+    x86_64_login_result_t rc = arch_x86_64_login(name, password, &pw);
+    if (rc != X86_64_LOGIN_OK) return (uint64_t)rc;
+
+    /* Copy passwd entry back to user space */
+    if (out_ptr != 0 && validate_user_buf(out_ptr, sizeof(x86_64_passwd_entry_t))) {
+        x86_64_passwd_entry_t *out = (x86_64_passwd_entry_t *)(uintptr_t)out_ptr;
+        x86_64_passwd_entry_t *k = &pw;
+        /* Safe: field sizes match exactly, no pointers */
+        for (int j = 0; j < (int)sizeof(x86_64_passwd_entry_t); j++)
+            ((char *)out)[j] = ((char *)k)[j];
+    }
+    return (uint64_t)rc;
 }
 
 static uint64_t do_close(uint64_t fd) {
@@ -2010,6 +2054,7 @@ uint64_t arch_x86_64_syscall_dispatch_common(uint64_t num,
     case SYS_SETGID:      return (uint64_t)(int64_t)arch_x86_64_proc_setgid((uint32_t)a0);
     case SYS_SETEUID:     return (uint64_t)(int64_t)arch_x86_64_proc_seteuid((uint32_t)a0);
     case SYS_SETEGID:     return (uint64_t)(int64_t)arch_x86_64_proc_setegid((uint32_t)a0);
+    case SYS_LOGIN:       return do_login(a0, a1, a2);
     case SYS_YIELD:       return do_yield();
     case SYS_WAIT:        return do_wait_common(0, a0, 0);
     case SYS_WAITPID:     return do_wait_common(a0, a1, 1);

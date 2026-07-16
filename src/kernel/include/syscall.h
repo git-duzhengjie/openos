@@ -227,6 +227,7 @@
 #define SYS_GETEGID       483  /* M6.11.1: (no args) -> effective gid */
 #define SYS_SETEUID       484  /* M6.11.1: a0=euid -> 0/负(EPERM)。root 任意；非 root 仅可切到 real/saved uid */
 #define SYS_SETEGID       485  /* M6.11.1: a0=egid -> 0/负(EPERM)。镜像 SETEUID */
+#define SYS_LOGIN         486  /* M6.11.4: a0=name*, a1=password*, a2=passwd_entry_t* -> login_result_t（0=OK, 负=err） */
 #define SYS_GUI_ADD_TABLEVIEW 400
 #define SYS_GUI_SET_TABLEVIEW_ROW 401
 #define SYS_GUI_GET_TABLEVIEW_ROW 402

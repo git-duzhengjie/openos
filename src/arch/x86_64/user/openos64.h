@@ -351,6 +351,26 @@ static inline long openos64_setgid(uint32_t gid)  { return openos64_syscall1(OPE
 static inline long openos64_seteuid(uint32_t uid) { return openos64_syscall1(OPENOS64_SYS_SETEUID, (uint64_t)uid); }
 static inline long openos64_setegid(uint32_t gid) { return openos64_syscall1(OPENOS64_SYS_SETEGID, (uint64_t)gid); }
 
+/* M6.11.4: login / session establishment.
+ * openos64_login() authenticates (name,password) against /etc/passwd+/etc/shadow
+ * and, on success, establishes a session (setsid + drop to the account's gid/uid).
+ * Returns the login_result_t code: 0 = OK, negative = error. On OK, *out is filled
+ * with the account's passwd entry (mirrors kernel x86_64_passwd_entry_t layout). */
+#define OPENOS64_SYS_LOGIN    486ULL
+#define OPENOS64_ACCT_NAME_MAX 32u
+#define OPENOS64_ACCT_PATH_MAX 64u
+typedef struct openos64_passwd_entry {
+    char     name[OPENOS64_ACCT_NAME_MAX];
+    unsigned uid;
+    unsigned gid;
+    char     home[OPENOS64_ACCT_PATH_MAX];
+    char     shell[OPENOS64_ACCT_PATH_MAX];
+} openos64_passwd_entry_t;
+static inline long openos64_login(const char *name, const char *password, openos64_passwd_entry_t *out) {
+    return openos64_syscall3(OPENOS64_SYS_LOGIN, (uint64_t)(uintptr_t)name,
+                             (uint64_t)(uintptr_t)password, (uint64_t)(uintptr_t)out);
+}
+
 static inline void openos64_exit(int code) __attribute__((noreturn));
 static inline void openos64_exit(int code) {
     (void)openos64_syscall1(OPENOS64_SYS_EXIT, (uint64_t)(uint32_t)code);

@@ -1022,7 +1022,14 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
      * returns we inspect usermode_has_pending_exec(): if set, we reload
      * the new image and re-enter ring3 with the same proc slot. Bounded
      * loop (max 4 rounds) to make a runaway execve chain panic-safe. */
-#if defined(M6_CPUINFO_DIAG)
+#if defined(M6_LOGIN_DIAG)
+    /* M6.11.4 diag: jump straight to /bin/login with a known-good credential
+     * (openos / openos) to exercise the SYS_LOGIN end-to-end path from ring3:
+     * authenticate against /etc/passwd+/etc/shadow, then setsid+setgid+setuid
+     * drop. Single ring3 process, reliable under single-core QEMU. Enabled
+     * only for -DM6_LOGIN_DIAG builds; normal builds keep launcher. */
+    const char *initial_path = "/bin/login";
+#elif defined(M6_CPUINFO_DIAG)
     /* M6.2d diag: jump straight to the CPU frequency / thermal self-test
      * (SYS_CPUINFO end-to-end). Single ring3 process, read-only, reliable
      * under single-core QEMU. Enabled only for -DM6_CPUINFO_DIAG builds. */
@@ -1126,6 +1133,17 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
                 (const char *)0,
             };
             arch_x86_64_usermode_set_args(1, initial_argv);
+#if defined(M6_LOGIN_DIAG)
+            /* M6.11.4 diag: argv = { "/bin/login", "openos", "openos" } to
+             * drive the ring3 login tool with a known-good credential. */
+            static const char *login_diag_argv[4] = {
+                "/bin/login",
+                "openos",
+                "openos",
+                (const char *)0,
+            };
+            arch_x86_64_usermode_set_args(3, login_diag_argv);
+#endif
 
             /*
              * H.5a: seed an initial envp for the very first user image so

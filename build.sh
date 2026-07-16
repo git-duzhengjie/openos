@@ -396,7 +396,16 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
     if [ "$M6_CPUINFO_DIAG" != "0" ]; then
         M6_CPUINFO_DIAG_DEF="-DM6_CPUINFO_DIAG -DM5_FAST_BOOT"
     fi
-    ARCH64_CFLAGS="-m64 -mcmodel=kernel -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-80387 -mno-avx -ffreestanding -nostdlib -Wall -Wextra -O2 -fno-pic -fno-pie -fno-PIE -fno-stack-protector -fno-builtin -DGUI_EARLY_VERIFY $M5_RING3_DEF $M5_FAST_BOOT_DEF $M5_OPKG_DIAG_DEF $M6_POWER_DIAG_DEF $M6_CPUINFO_DIAG_DEF -I$ARCH64_SRC/include -Isrc/kernel/include -Isrc/kernel"
+    # M6.11.4 diag: M6_LOGIN_DIAG (default OFF) boots straight into /bin/login
+    # with a known-good credential (openos/openos), exercising SYS_LOGIN
+    # end-to-end: authenticate against /etc/passwd+/etc/shadow, then
+    # setsid+setgid+setuid drop. Implies fast-boot. Use ONLY for login diag.
+    M6_LOGIN_DIAG="${M6_LOGIN_DIAG:-0}"
+    M6_LOGIN_DIAG_DEF=""
+    if [ "$M6_LOGIN_DIAG" != "0" ]; then
+        M6_LOGIN_DIAG_DEF="-DM6_LOGIN_DIAG -DM5_FAST_BOOT"
+    fi
+    ARCH64_CFLAGS="-m64 -mcmodel=kernel -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-80387 -mno-avx -ffreestanding -nostdlib -Wall -Wextra -O2 -fno-pic -fno-pie -fno-PIE -fno-stack-protector -fno-builtin -DGUI_EARLY_VERIFY $M5_RING3_DEF $M5_FAST_BOOT_DEF $M5_OPKG_DIAG_DEF $M6_POWER_DIAG_DEF $M6_CPUINFO_DIAG_DEF $M6_LOGIN_DIAG_DEF -I$ARCH64_SRC/include -Isrc/kernel/include -Isrc/kernel"
     ARCH64_ASFLAGS="-m64 -mcmodel=kernel -mno-red-zone -fno-pic -fno-pie -fno-PIE -I$ARCH64_SRC/include -Isrc/kernel/include"
     ARCH64_USER_CFLAGS="-m64 -mcmodel=large -ffreestanding -nostdlib -Wall -Wextra -O2 -fno-pic -fno-pie -fno-PIE -fno-stack-protector -fno-builtin -I$ARCH64_SRC/user"
     ARCH64_USER_ASFLAGS="-m64 -mcmodel=large -fno-pic -fno-pie -fno-PIE -I$ARCH64_SRC/user"
@@ -507,6 +516,26 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
     readelf -h "$ARCH64_BIN_BUILD/fs_demo.elf" | grep -q 'Machine:.*X86-64'
     nm "$ARCH64_BIN_BUILD/fs_demo.elf" | grep -q ' openos64_main$'
     python3 _embed_elf.py "$ARCH64_BIN_BUILD/fs_demo.elf" "$ARCH64_SRC/include/embed_fs_demo.h" fs_demo_elf
+
+    echo "[1b3b/5] Building x86_64 /bin/login ELF (M6.11.4 login/session syscall end-to-end)..."
+    # Reuses the libc subset .o already compiled above.
+    gcc $ARCH64_USER_CFLAGS -I"$ARCH64_SRC/user" -c "$ARCH64_SRC/user/login64.c" -o "$ARCH64_USER_BUILD/login64.o"
+    ld $ARCH64_USER_LDFLAGS -o "$ARCH64_BIN_BUILD/login.elf" \
+        "$ARCH64_USER_BUILD/start.o" \
+        "$ARCH64_USER_BUILD/crt0.o" \
+        "$ARCH64_USER_BUILD/libc_string.o" \
+        "$ARCH64_USER_BUILD/libc_stdlib.o" \
+        "$ARCH64_USER_BUILD/libc_stdio.o" \
+        "$ARCH64_USER_BUILD/libc_ctype.o" \
+        "$ARCH64_USER_BUILD/libc_errno.o" \
+        "$ARCH64_USER_BUILD/libc_assert.o" \
+        "$ARCH64_USER_BUILD/libc_libc_write.o" \
+        "$ARCH64_USER_BUILD/libc_libc_sbrk.o" \
+        "$ARCH64_USER_BUILD/login64.o"
+    readelf -h "$ARCH64_BIN_BUILD/login.elf" | grep -q 'Class:.*ELF64'
+    readelf -h "$ARCH64_BIN_BUILD/login.elf" | grep -q 'Machine:.*X86-64'
+    nm "$ARCH64_BIN_BUILD/login.elf" | grep -q ' openos64_main$'
+    python3 _embed_elf.py "$ARCH64_BIN_BUILD/login.elf" "$ARCH64_SRC/include/embed_login.h" login_elf
 
     echo "[1b4/5] Building x86_64 /bin/opk_demo ELF (M5.4c .opk install end-to-end)..."
     # Reuses the libc subset .o already compiled above.
