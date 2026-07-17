@@ -16,6 +16,7 @@ set SERIAL="E:\openos\logs\run.ser"
   -drive if=pflash,format=raw,unit=1,file=%OVMF_VARS% ^
   -drive file=%IMG%,format=raw,media=disk,if=ide,index=0 ^
   -device virtio-gpu-pci ^
+  -display gtk,grab-on-hover=on ^
   -boot c ^
   -serial file:%SERIAL% ^
   -no-reboot
