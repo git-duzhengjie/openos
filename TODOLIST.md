@@ -1912,5 +1912,14 @@
   - [ ] USB 层：HID 设备拔出/插入事件传递到 input_core
   - [ ] I²C 层：ACPI GPE 事件监听（可选，优先级低）
 
-> **实施顺序**：**M8-A（1-2 天）→ M8-B（2-3 天）→ M8-C（3-5 天）→ M8-D（3-5 天，其中 D.4 I²C HID 是真机大头）**。每个 milestone 完成后跑 Stages 1-30 SMP=1/4 双矩阵 + gfx-selftest + input-selftest 三条基线，无回归再合入 main。
+- [ ] **M8-E：输入抽象层（IAL，触屏/手机地基）**
+  - [ ] M8-E.1 统一事件结构 `input_event_t` + 环形队列实现（参考 Linux evdev 语义）
+  - [ ] M8-E.2 生产端改造：USB 鼠标/tablet/键盘 → `input_report()` 事件总线
+  - [ ] M8-E.3 消费端改造：gui.c / lockscreen.c → `input_poll_event()` 循环，移除 `g_mouse` 直接依赖
+  - [ ] M8-E.4 `sys_input_read()` 系统调用（用户态读取事件流，为 gestured/录制铺路）
+  - [ ] M8-E.5 input-selftest 注入合成事件验证 FIFO/溢出/SYN 完整性
+  - [ ] 详细路线文档已归档：`docs/mobile-touch-roadmap.md`（含 M9~M12 触屏/手机形态五阶段）
+
+> **实施顺序**：**M8-A（1-2 天）→ M8-B（2-3 天）→ M8-C（3-5 天）→ M8-D（3-5 天）→ M8-E（2-3 天）**。每个 milestone 完成后跑 Stages 1-30 SMP=1/4 双矩阵 + gfx-selftest + input-selftest 三条基线，无回归再合入 main。
+> 👉 M8-E 是触屏/手机形态的地基，完成后 M9（触屏 GUI）→ M10（全屏应用）→ M11（ARM64）→ M12（移动特性）路线已在 `docs/mobile-touch-roadmap.md` 中完整拆解。
 
