@@ -673,7 +673,14 @@ typedef struct xhci_dev {
     uint32_t    ep_in_cycle;
     uint8_t    *hid_buf;      /* HID report DMA 缓冲 */
     uint64_t    hid_buf_phys;
-    /* 全局事件泵分发的待取 report（每设备一个待取槽）*/
+    /* 全局事件泵分发的待取 report 环形队列（每设备一个）
+     * pump 一次可能消费多个事件，若用单槽会互相覆盖导致丢失，
+     * 因此采用队列缓冲（16 深度足够覆盖 tablet 高速移动突发）。 */
+    #define HID_RPT_QUEUE_LEN 16
+    struct { uint8_t data[64]; uint32_t len; } rpt_queue[HID_RPT_QUEUE_LEN];
+    volatile uint32_t rpt_head;   /* pump 写入位置 */
+    volatile uint32_t rpt_tail;   /* poll 读取位置 */
+    /* 兼容旧接口的单槽（未来可移除，先保留以免破坏其它引用）*/
     uint8_t     rpt_data[64];
     uint32_t    rpt_len;      /* 待取 report 字节数 */
     volatile int rpt_ready;   /* 1=有新 report 待 poll 取走 */
@@ -1086,7 +1093,12 @@ static void xhci_enum_ports(void) {
  * ============================================================ */
 
 #define XHCI_HID_IS(d)  ((d)->used && (d)->dev_class == 3 && \
-                         ((d)->proto == 1 || (d)->proto == 2))
+                         ((d)->proto == 1 || (d)->proto == 2 || \
+                          ((d)->proto == 0 && (d)->vid == 0x0627 && (d)->pid == 0x0001)))
+
+/* 判断是否为 QEMU USB Tablet（绝对坐标，非 boot 协议） */
+#define XHCI_IS_TABLET(d) ((d)->used && (d)->dev_class == 3 && (d)->proto == 0 && \
+                           (d)->vid == 0x0627 && (d)->pid == 0x0001)
 
 /* 把第 idx 个 HID 设备映射到 g_devs 下标；返回 -1 表示越界。 */
 static int xhci_hid_index(uint32_t idx) {
@@ -1111,6 +1123,16 @@ uint32_t xhci_hid_device_count(void) {
 uint32_t xhci_hid_device_proto(uint32_t idx) {
     int i = xhci_hid_index(idx);
     return (i < 0) ? 0 : g_devs[i].proto;
+}
+
+uint32_t xhci_hid_device_vid(uint32_t idx) {
+    int i = xhci_hid_index(idx);
+    return (i < 0) ? 0 : (uint32_t)g_devs[i].vid;
+}
+
+uint32_t xhci_hid_device_pid(uint32_t idx) {
+    int i = xhci_hid_index(idx);
+    return (i < 0) ? 0 : (uint32_t)g_devs[i].pid;
 }
 
 uint32_t xhci_hid_device_report_len(uint32_t idx) {
@@ -1248,8 +1270,11 @@ int xhci_hid_configure(uint32_t idx) {
     xhci_ring_cmd_doorbell();
     if (xhci_wait_cmd_complete(cmd, &cc, &cslot) != 0) return -4;
 
-    /* 5) SET_PROTOCOL(boot=0)：bmReqType=0x21 Class|Interface，bReq=0x0B */
-    (void)xhci_ep0_transfer(d, 0x21, 0x0B, 0, d->iface_num, 0, 0);
+    /* 5) SET_PROTOCOL(boot=0)：bmReqType=0x21 Class|Interface，bReq=0x0B
+     *    仅对 boot 协议设备 (proto==1/2) 发送；QEMU tablet (proto==0) 不支持 boot 协议。 */
+    if (d->proto == 1 || d->proto == 2) {
+        (void)xhci_ep0_transfer(d, 0x21, 0x0B, 0, d->iface_num, 0, 0);
+    }
 
     /* 6) 投递首个 Normal TRB 等待 report */
     xhci_hid_arm(d);
@@ -1529,11 +1554,24 @@ static void xhci_pump_events(void) {
         uint32_t want_dci = (d->ep_in_addr & 0x0F) * 2 + 1;
         if (eep != want_dci) continue;             /* 非该设备 Interrupt-IN */
 
-        /* 实际长度 = 期望长度 - residual，拷入设备 report 缓冲 */
+        /* 实际长度 = 期望长度 - residual，入队（环形队列）*/
         uint32_t rlen = d->ep_in_mps ? d->ep_in_mps : 8;
-        if (rlen > sizeof(d->rpt_data)) rlen = sizeof(d->rpt_data);
+        if (rlen > sizeof(d->rpt_queue[0].data)) rlen = sizeof(d->rpt_queue[0].data);
         uint32_t n = (rlen > (uint32_t)resid) ? (rlen - (uint32_t)resid) : 0;
-        if (n > sizeof(d->rpt_data)) n = sizeof(d->rpt_data);
+        if (n > sizeof(d->rpt_queue[0].data)) n = sizeof(d->rpt_queue[0].data);
+
+        uint32_t head = d->rpt_head;
+        uint32_t next = (head + 1) % HID_RPT_QUEUE_LEN;
+        if (next == d->rpt_tail) {
+            /* 队满（消费者太慢）：丢弃最旧的一帧，tail 前进一步 */
+            d->rpt_tail = (d->rpt_tail + 1) % HID_RPT_QUEUE_LEN;
+        }
+        for (uint32_t i = 0; i < n; i++) d->rpt_queue[head].data[i] = d->hid_buf[i];
+        d->rpt_queue[head].len = n;
+        __asm__ volatile("" ::: "memory");
+        d->rpt_head = next;
+
+        /* 兼容旧接口：也写一份到单槽（逐步废弃）*/
         for (uint32_t i = 0; i < n; i++) d->rpt_data[i] = d->hid_buf[i];
         d->rpt_len   = n;
         d->rpt_ready = 1;
@@ -1575,6 +1613,18 @@ int xhci_hid_poll(uint32_t idx, uint8_t *out_buf, uint32_t out_cap) {
     /* 排空事件环，按 slot 分发到各设备缓冲（不偷其它设备事件）；
      * pump 内部会对消费掉的 TRB 位置补投新 TRB 并敲门铃。 */
     xhci_pump_events();
+
+    /* 优先从环形队列取（避免高速移动时同一 tick 内多帧 report 互相覆盖） */
+    if (d->rpt_tail != d->rpt_head) {
+        uint32_t tail = d->rpt_tail;
+        uint32_t n = d->rpt_queue[tail].len;
+        if (n > out_cap) n = out_cap;
+        for (uint32_t i = 0; i < n; i++) out_buf[i] = d->rpt_queue[tail].data[i];
+        d->rpt_tail = (tail + 1) % HID_RPT_QUEUE_LEN;
+        /* 队列取空后同步清除旧标志，保持一致性 */
+        if (d->rpt_tail == d->rpt_head) d->rpt_ready = 0;
+        return (int)n;
+    }
 
     if (!d->rpt_ready) return 0;           /* 本设备无新 report */
     uint32_t n = d->rpt_len;

@@ -288,6 +288,7 @@ void mouse_set_absolute_position(int x, int y, uint8_t buttons) {
     mouse_set_position(x, y);
     g_mouse.buttons = buttons;
     g_mouse.absolute_mode = 1;
+    g_mouse.present = 1;
 }
 
 void mouse_set_absolute_position_with_wheel(int x, int y, uint8_t buttons, int wheel) {
@@ -295,6 +296,7 @@ void mouse_set_absolute_position_with_wheel(int x, int y, uint8_t buttons, int w
     g_mouse.buttons = buttons;
     g_mouse.wheel += wheel;
     g_mouse.absolute_mode = 1;
+    g_mouse.present = 1;
 }
 
 void mouse_print_info(void) {

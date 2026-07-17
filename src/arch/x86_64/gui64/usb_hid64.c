@@ -51,7 +51,8 @@ extern int  gui_should_capture_key_code_with_modifiers(int key, uint32_t modifie
 typedef struct {
     int      used;
     uint32_t xhci_idx;              /* 对应 xhci_hid_device 序号 */
-    uint32_t proto;                 /* 1=键盘 2=鼠标 */
+    uint32_t proto;                 /* 1=键盘 2=鼠标 0=tablet */
+    int      is_tablet;             /* 1=QEMU USB Tablet（绝对坐标） */
     uint32_t report_len;
     uint8_t  last[8];               /* 上一帧 report，用于差分 */
 } usb_hid_dev_t;
@@ -162,6 +163,42 @@ static void hid_handle_mouse(usb_hid_dev_t *h, const uint8_t *rpt, uint32_t len)
     (void)h;
 }
 
+/* Tablet report：绝对坐标（0..0x7FFF）+ 按钮 + 滚轮。QEMU usb-tablet 固定布局（6字节）：
+ * [0]=buttons  [1]=X_lo  [2]=X_hi  [3]=Y_lo  [4]=Y_hi  [5]=wheel
+ * 需要把 tablet 的 0..0x7FFF 范围缩放到当前屏幕分辨率（由 GUI 通过 mouse_set_bounds 维护）。
+ */
+static void hid_handle_tablet(usb_hid_dev_t *h, const uint8_t *rpt, uint32_t len) {
+    if (len < 5) return;
+    uint8_t btn = rpt[0] & 0x07;
+    int raw_x   = (int)rpt[1] | ((int)rpt[2] << 8);  /* 0..0x7FFF */
+    int raw_y   = (int)rpt[3] | ((int)rpt[4] << 8);
+    int wheel   = (len >= 6) ? (int)(signed char)rpt[5] : 0;
+
+    /* 从鼠标状态里取当前屏幕尺寸并缩放。QEMU tablet 的坐标范围是 0..0x7FFF。 */
+    mouse_state_t *ms = mouse_get_state();
+    int max_x = ms->max_x > 0 ? ms->max_x : 639;
+    int max_y = ms->max_y > 0 ? ms->max_y : 479;
+    int sx = (raw_x * max_x) / 0x7FFF;
+    int sy = (raw_y * max_y) / 0x7FFF;
+    /* 调试：前3次报告打印细节 */
+    static int _dbg_cnt = 0;
+    if (_dbg_cnt < 3) {
+        _dbg_cnt++;
+        extern void early_console64_write(const char*);
+        extern void early_console64_write_hex64(unsigned long long);
+        early_console64_write("[tablet] raw=("); early_console64_write_hex64((unsigned long long)raw_x);
+        early_console64_write(","); early_console64_write_hex64((unsigned long long)raw_y);
+        early_console64_write(") max=("); early_console64_write_hex64((unsigned long long)max_x);
+        early_console64_write(","); early_console64_write_hex64((unsigned long long)max_y);
+        early_console64_write(") -> ("); early_console64_write_hex64((unsigned long long)sx);
+        early_console64_write(","); early_console64_write_hex64((unsigned long long)sy);
+        early_console64_write(") btn="); early_console64_write_hex64((unsigned long long)btn);
+        early_console64_write("\n");
+    }
+    mouse_set_absolute_position_with_wheel(sx, sy, btn, wheel);
+    (void)h;
+}
+
 /* 初始化：遍历 xHCI HID 设备，配置端点。 */
 void usb_hid_init(void) {
     if (g_hid_inited) return;
@@ -172,7 +209,12 @@ void usb_hid_init(void) {
     HLOG("init: enumerating HID devices");
     for (uint32_t k = 0; k < n && k < USB_HID_MAX; k++) {
         uint32_t proto = xhci_hid_device_proto(k);
-        if (proto != 1 && proto != 2) continue;
+        uint32_t vid   = xhci_hid_device_vid(k);
+        uint32_t pid   = xhci_hid_device_pid(k);
+        int is_tablet  = (proto == 0 && vid == 0x0627 && pid == 0x0001) ? 1 : 0;
+
+        /* 接受 boot 键盘/鼠标，或 QEMU tablet（非 boot 协议但已知报告格式）。 */
+        if (!(proto == 1 || proto == 2 || is_tablet)) continue;
         if (xhci_hid_configure(k) != 0) {
             HLOG("configure FAILED");
             continue;
@@ -182,10 +224,17 @@ void usb_hid_init(void) {
         h->used       = 1;
         h->xhci_idx   = k;
         h->proto      = proto;
+        h->is_tablet  = is_tablet;
         h->report_len = xhci_hid_device_report_len(k);
         for (int j = 0; j < 8; j++) h->last[j] = 0;
-        if (proto == 1) HLOG("keyboard configured (Interrupt-IN armed)");
-        else            HLOG("mouse configured (Interrupt-IN armed)");
+        if (proto == 1) {
+            HLOG("keyboard configured (Interrupt-IN armed)");
+        } else if (is_tablet) {
+            HLOG("tablet configured (absolute coords, Interrupt-IN armed)");
+            /* 不改 bounds：GUI 已按屏幕尺寸设置 max_x/max_y，hid_handle_tablet 做缩放 */
+        } else {
+            HLOG("mouse configured (Interrupt-IN armed)");
+        }
     }
 }
 
@@ -210,6 +259,9 @@ void usb_hid_poll(void) {
             if (h->proto == 1) {
                 if (!logged_kbd) { HLOG("first keyboard report received"); logged_kbd = 1; }
                 hid_handle_keyboard(h, buf, (uint32_t)m);
+            } else if (h->is_tablet) {
+                if (!logged_mouse) { HLOG("first tablet report received"); logged_mouse = 1; }
+                hid_handle_tablet(h, buf, (uint32_t)m);
             } else {
                 if (!logged_mouse) { HLOG("first mouse report received"); logged_mouse = 1; }
                 hid_handle_mouse(h, buf, (uint32_t)m);

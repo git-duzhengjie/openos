@@ -28,6 +28,17 @@
 /* 阶段二：RAMFS 磁盘快照持久化接口（实现于 x86_64 gui64/ramfs64.c） */
 extern int ramfs_snapshot_save(void);
 extern int ramfs_snapshot_load(void);
+
+/* virtio-gpu 硬件光标接口（实现于 x86_64 kernel/virtio_gpu64.c）
+ * 用于向宿主 QEMU 上传光标位图，替代默认的方块占位符 */
+extern uint32_t virtio_gpu_cursor_available(void);
+extern int virtio_gpu_set_cursor(const uint32_t *src, uint32_t src_w, uint32_t src_h,
+                                 uint32_t hot_x, uint32_t hot_y);
+extern int virtio_gpu_move_cursor(uint32_t x, uint32_t y);
+extern int virtio_gpu_hide_cursor(void);
+static int g_hw_cursor_ready = 0;
+static int g_hw_cursor_last_x = -1;
+static int g_hw_cursor_last_y = -1;
 extern int spawn_user_process(const char *path, char *const argv[]);
 extern uint32_t sched_time_ms(void);
 
@@ -1904,6 +1915,71 @@ static void gui_cursor_restore_fb(void) {
         framebuffer_present_rect((uint32_t)sx, (uint32_t)sy,
                                  (uint32_t)(ex - sx), (uint32_t)(ey - sy));
     }
+}
+
+/* --- virtio-gpu hardware cursor: upload arrow bitmap to host ---
+ * Motivation: usb-tablet + virtio-gpu 组合下，QEMU 默认不知道 guest 光标
+ * 位图，会画一个占位方块。上传 32x32 BGRA 位图后，方块被替换为真实箭头。
+ * 位图形状与 gui_cursor_draw_fb 的软光标保持一致，热点为 (0,0)。 */
+static void gui_hw_cursor_plot(uint32_t *buf, int stride, int x, int y, uint32_t bgra) {
+    if (x < 0 || y < 0 || x >= stride || y >= stride) return;
+    buf[y * stride + x] = bgra;
+}
+static void gui_hw_cursor_line(uint32_t *buf, int stride,
+                               int x0, int y0, int x1, int y1, uint32_t bgra) {
+    int dx =  ((x1 - x0) >= 0) ? (x1 - x0) : -(x1 - x0);
+    int dy = -(((y1 - y0) >= 0) ? (y1 - y0) : -(y1 - y0));
+    int sx = (x0 < x1) ? 1 : -1;
+    int sy = (y0 < y1) ? 1 : -1;
+    int err = dx + dy;
+    for (;;) {
+        gui_hw_cursor_plot(buf, stride, x0, y0, bgra);
+        if (x0 == x1 && y0 == y1) break;
+        int e2 = 2 * err;
+        if (e2 >= dy) { err += dy; x0 += sx; }
+        if (e2 <= dx) { err += dx; y0 += sy; }
+    }
+}
+static void gui_hw_cursor_ensure_init(void) {
+    if (g_hw_cursor_ready) return;
+    if (virtio_gpu_cursor_available() == 0) {
+        /* GOP 后端或 virtio-gpu 未成功初始化时不做处理 */
+        return;
+    }
+    /* 32x32 BGRA 位图，A=0 表示透明。VIRTIO_GPU_FORMAT_B8G8R8A8_UNORM */
+    static uint32_t bmp[32 * 32];
+    for (int i = 0; i < 32 * 32; i++) bmp[i] = 0;
+    const uint32_t BLACK = 0xFF000000u; /* B G R A（little-endian 存储时字节序为 B,G,R,A） */
+    const uint32_t WHITE = 0xFFFFFFFFu;
+    /* 黑色描边（与软光标一致） */
+    gui_hw_cursor_line(bmp, 32, 0, 0,  0, 15, BLACK);
+    gui_hw_cursor_line(bmp, 32, 0, 0, 10, 10, BLACK);
+    gui_hw_cursor_line(bmp, 32, 0, 15, 4, 11, BLACK);
+    gui_hw_cursor_line(bmp, 32, 4, 11, 10, 10, BLACK);
+    /* 白色内部填充 */
+    gui_hw_cursor_line(bmp, 32, 1, 2, 1, 12, WHITE);
+    gui_hw_cursor_line(bmp, 32, 1, 2, 8,  9, WHITE);
+    gui_hw_cursor_line(bmp, 32, 2, 12, 4, 10, WHITE);
+    /* 上传到 host，热点为 (0,0)（箭头尖端） */
+    if (virtio_gpu_set_cursor(bmp, 32, 32, 0, 0) == 0) {
+        g_hw_cursor_ready = 1;
+    }
+}
+static void gui_hw_cursor_update(int x, int y) {
+    if (!g_hw_cursor_ready) return;
+    if (x == g_hw_cursor_last_x && y == g_hw_cursor_last_y) return;
+    if (x < 0) x = 0;
+    if (y < 0) y = 0;
+    virtio_gpu_move_cursor((uint32_t)x, (uint32_t)y);
+    g_hw_cursor_last_x = x;
+    g_hw_cursor_last_y = y;
+}
+
+/* 对外公开接口：供锁屏等非主循环场景主动推动硬件光标（上传位图 + 同步位置）。
+ * 否则锁屏循环不跑 gui_process_mouse_events，QEMU 拿不到 guest 光标位图，宿主就会回退到方块占位。 */
+void gui_hw_cursor_tick(int x, int y) {
+    gui_hw_cursor_ensure_init();
+    gui_hw_cursor_update(x, y);
 }
 
 static void gui_cursor_draw_fb(void) {
@@ -6541,6 +6617,11 @@ static void gui_poll_mouse(void) {
     g_gui.mouse_x = ms.x;
     g_gui.mouse_y = ms.y;
     g_gui.last_mouse_buttons = ms.buttons;
+
+    /* 将光标位置同步到 virtio-gpu 硬件光标，避免宿主方块占位。
+     * 首次调用时将 32x32 箭头位图上传到 QEMU。 */
+    gui_hw_cursor_ensure_init();
+    gui_hw_cursor_update(ms.x, ms.y);
 }
 
 void gui_init(void) {
@@ -6564,10 +6645,12 @@ void gui_init(void) {
     g_gui.mouse_x = 512;
     g_gui.mouse_y = 384;
     g_gui.mouse_poll_divider = 0;
-    /* Default on shows the OpenOS software cursor inside the GUI.
-     * Use `cursor off` to hide it when the host cursor is preferred.
+    /* Default off in usb-tablet absolute mode: QEMU host already shows a
+     * cursor at the tablet position (SDL/GTK ignore show-cursor=off in
+     * absolute pointer mode). Rely on the host cursor to avoid a double
+     * cursor. Use `cursor on` to re-enable the OpenOS software cursor.
      */
-    g_gui.cursor_visible = 1;
+    g_gui.cursor_visible = 0;
     g_gui.cursor_drawn = 0;
     g_gui.cursor_fb_x = 0;
     g_gui.cursor_fb_y = 0;

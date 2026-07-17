@@ -22,6 +22,7 @@
 #include "string.h"
 #include "types.h"
 #include "login64.h"
+#include "mouse.h"
 
 /* early_console64_write：把锁屏日志走串口，便于无显环境调试 */
 extern void early_console64_write(const char *s);
@@ -194,6 +195,19 @@ void lockscreen_run(void)
          * 注意：此循环每 5ms 跑一次，切勿在此无限流地写串口日志，
          * 否则串口 I/O 会吃满时间片、饿死 usb_hid_poll，反而导致输入进不来。 */
         usb_hid_poll();
+
+        /* 推动 virtio-gpu 硬件光标（锁屏阶段不跑 gui_process_mouse_events，
+         * 若不主动同步，QEMU 拿不到 guest 光标位图，宿主会回退到方块占位）。 */
+        {
+            mouse_state_t ms;
+            mouse_snapshot_and_clear_delta(&ms);
+            if (ms.present) {
+                gui_hw_cursor_tick(ms.x, ms.y);
+            } else {
+                /* 即使鼠标未报告位置，也先上传位图（首帧），避免初始方块 */
+                gui_hw_cursor_tick(0, 0);
+            }
+        }
 
         /* 消费所有排队事件 */
         while (gui_event_pop(&ev)) {

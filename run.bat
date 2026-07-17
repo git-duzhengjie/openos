@@ -2,6 +2,8 @@
 REM ============================================================
 REM openos - Windows native QEMU launcher (GUI mode)
 REM M7 params: -vga none + xHCI(usb-tablet+usb-kbd) + virtio-gpu (no PS/2)
+REM Note: usb-tablet uses absolute coords, no grab needed; QEMU tablet is
+REM       identified by VID=0x0627 PID=0x0001 and parsed with fixed report layout
 REM Login: user=openos  password=openos
 REM ============================================================
 
@@ -19,7 +21,7 @@ set SERIAL="E:\openos\logs\run.ser"
   -device qemu-xhci,id=xhci ^
   -device usb-tablet,bus=xhci.0 ^
   -device usb-kbd,bus=xhci.0 ^
-  -display gtk ^
+  -display sdl ^
   -boot c ^
   -serial file:%SERIAL% ^
   -no-reboot

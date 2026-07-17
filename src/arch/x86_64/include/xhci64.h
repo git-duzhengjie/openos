@@ -62,6 +62,10 @@ uint32_t xhci_hid_device_count(void);
 /* 取第 idx 个 HID 设备的 boot protocol：1=键盘 2=鼠标 0=非法/其它。 */
 uint32_t xhci_hid_device_proto(uint32_t idx);
 
+/* 取第 idx 个 HID 设备的 USB VID / PID（用于识别 QEMU tablet 等非 boot 设备）。 */
+uint32_t xhci_hid_device_vid(uint32_t idx);
+uint32_t xhci_hid_device_pid(uint32_t idx);
+
 /* 取第 idx 个 HID 设备的 Interrupt-IN 端点 report 长度（字节）。 */
 uint32_t xhci_hid_device_report_len(uint32_t idx);
 

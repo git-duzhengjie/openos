@@ -62,7 +62,15 @@ const char* tls_record_type_name(uint8_t type) { (void)type; return ""; }
  *    这里仅保留 GUI 仍会调用、但 x86_64 尚无对应硬件的桩。
  * ============================================================ */
 void input_flush_events(void) {}
-int  usb_tablet_poll(mouse_state_t *out) { (void)out; return 0; }
+
+/* GUI 主循环调用 usb_tablet_poll(width,height) 来驱动 USB tablet 报告。
+ * 我们把它转发到 x86_64 的 usb_hid_poll()：后者会消费键盘/鼠标/tablet
+ * Interrupt-IN 事件，并通过 mouse_set_absolute_position_with_wheel /
+ * keyboard_inject 注入到 GUI 共享状态。
+ * 注意：signature 与 gui64_stubs.c 之前的旧桩不同 —— C 不做参数检查，
+ * gui.c 用两个 int 参数调用，这里忽略即可。 */
+extern void usb_hid_poll(void);
+void usb_tablet_poll(int w, int h) { (void)w; (void)h; usb_hid_poll(); }
 void input_flush(void) {}
 
 /* ============================================================

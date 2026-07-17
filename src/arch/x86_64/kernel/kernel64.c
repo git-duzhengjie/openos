@@ -77,8 +77,7 @@ extern void window_manager_poll(void);
 extern void framebuffer_init(void);  /* UEFI GOP 后端初始化 (framebuffer64.c) */
 extern void virtio_input_init(void);  /* virtio-input 键鼠驱动初始化 (virtio_input64.c) */
 extern void virtio_input_poll(void);  /* virtio-input eventq 轮询注入 GUI */
-extern int  arch_x86_64_mouse_install(void);  /* PS/2 鼠标接入 (mouse64.c) */
-extern int  arch_x86_64_keyboard_install(void);  /* PS/2 键盘接入 (keyboard64.c) */
+/* M7.3: PS/2 已废弃，键鼠改由 xHCI + USB HID (usb_hid64.c) 提供 */
 extern void gui_invalidate_all(void);  /* 标记整屏为脏，下一帧全屏重绘 */
 #include "../include/tss64.h"
 #include "../include/usermode64.h"
@@ -990,18 +989,11 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
              * 最底部（桌面重绘范围之外）的内核日志文字彻底覆盖掉。 */
             gui_invalidate_all();
             window_manager_poll();
-            /* 桂载 PS/2 鼠标：注册 IRQ12 网关 + IOAPIC 路由 + 设备使能。
-             * desktop 已起来，gui_poll() 通过 mouse_snapshot_and_clear_delta()
-             * 消费光标位置；这里把真实驱动接进中断系统。 */
-            if (arch_x86_64_mouse_install() != 0) {
-                early_console64_write("[x86_64][gui] WARN mouse install failed; desktop runs without pointer\n");
-            }
-            /* 挂载 PS/2 键盘：注册 IRQ1 网关 + IOAPIC 路由 + 控制器使能。
-             * gui_post_key_code_with_modifiers() 把按键喂给桌面/窗口。 */
-            if (arch_x86_64_keyboard_install() != 0) {
-                early_console64_write("[x86_64][gui] WARN keyboard install failed; desktop runs without keys\n");
-            }
-            __asm__ __volatile__("sti");  /* 开中断，让 IRQ12 能进来 */
+            /* M7.3: PS/2 键鼠驱动已废弃。键鼠输入现由 xHCI 主控 + USB HID
+             * (usb_hid64.c) 提供：kernel 早期已 xhci_init/xhci_selftest 并
+             * usb_hid_init() 完成 usb-kbd / usb-tablet 端点配置，主循环通过
+             * usb_hid_poll() 消费 Interrupt-IN 传输事件并投递到 gui/desktop。 */
+            __asm__ __volatile__("sti");  /* 开中断（xHCI/APIC 时钟等） */
 
             /* 开机锁屏门闸：桌面已就绪、键鼠已 install、中断已开，
              * 此处阻塞等待用户输入正确密码（默认 openos）才放行进桌面。
@@ -1010,9 +1002,17 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
                 extern void lockscreen_run(void);
                 lockscreen_run();
             }
-            for (;;) {
-                window_manager_poll();
-                __asm__ __volatile__("hlt");
+            /* 锁屏返回后：整屏重绘，覆盖锁屏残影，进入桌面主循环。 */
+            gui_invalidate_all();
+            early_console64_write("[x86_64][gui] lockscreen unlocked, entering desktop main loop\n");
+            {
+                extern void usb_hid_poll(void);
+                for (;;) {
+                    usb_hid_poll();          /* M7.3: 消费 xHCI HID 事件（键鼠输入） */
+                    window_manager_poll();
+                    /* 不能 hlt：xHCI 完成事件目前未产生 CPU 中断，hlt 会永远睡下去 */
+                    __asm__ __volatile__("pause");
+                }
             }
         }
         early_console64_write("[x86_64][gui] (early) desktop start FAILED, continue to ring3 test\n");

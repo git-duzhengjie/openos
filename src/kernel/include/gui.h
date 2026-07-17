@@ -797,4 +797,7 @@ void gui_screen_fill_rect(int x, int y, int w, int h, uint32_t color);
 void gui_screen_draw_border(int x, int y, int w, int h, int thickness, uint32_t color);
 void gui_screen_present(void);
 
+/* 供锁屏等非主循环场景推动 virtio-gpu 硬件光标（上传位图+同步位置） */
+void gui_hw_cursor_tick(int x, int y);
+
 #endif /* OPENOS_GUI_H */
