@@ -429,8 +429,8 @@ void gui_terminal_putc(char ch) {
     gui_terminal_view_t *view = &g_gui.terminal.view;
     uint32_t old_x, old_y;
     int body_dirty = 0;
-    if (!g_gui.initialized || !g_gui.terminal.enabled) { serial_write("[TPUTC] reject init/enabled\n"); return; }
-    if (view->cols == 0 || view->rows == 0) { serial_write("[TPUTC] reject cols/rows==0\n"); return; }
+    if (!g_gui.initialized || !g_gui.terminal.enabled) return;
+    if (view->cols == 0 || view->rows == 0) return;
     if (view->has_selection && ch != 0x03 && ch != 0x16) gui_terminal_clear_selection();
 
     old_x = view->cursor_x;
