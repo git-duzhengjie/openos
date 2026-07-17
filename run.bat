@@ -1,7 +1,7 @@
 @echo off
 REM ============================================================
 REM openos - Windows native QEMU launcher (GUI mode)
-REM Golden params: -vga none + PS/2 kbd/mouse + virtio-gpu
+REM M7 params: -vga none + xHCI(usb-tablet+usb-kbd) + virtio-gpu (no PS/2)
 REM Login: user=openos  password=openos
 REM ============================================================
 
@@ -16,7 +16,10 @@ set SERIAL="E:\openos\logs\run.ser"
   -drive if=pflash,format=raw,unit=1,file=%OVMF_VARS% ^
   -drive file=%IMG%,format=raw,media=disk,if=ide,index=0 ^
   -device virtio-gpu-pci ^
-  -display gtk,grab-on-hover=on ^
+  -device qemu-xhci,id=xhci ^
+  -device usb-tablet,bus=xhci.0 ^
+  -device usb-kbd,bus=xhci.0 ^
+  -display gtk ^
   -boot c ^
   -serial file:%SERIAL% ^
   -no-reboot
