@@ -69,6 +69,22 @@ uint32_t xhci_hid_device_pid(uint32_t idx);
 /* 取第 idx 个 HID 设备的 Interrupt-IN 端点 report 长度（字节）。 */
 uint32_t xhci_hid_device_report_len(uint32_t idx);
 
+/* HID 设备细分类型（供 usb_hid64.c 手势映射层使用） */
+typedef enum {
+    XHCI_HID_TYPE_UNKNOWN     = 0,
+    XHCI_HID_TYPE_BOOT_KEYBD  = 1,    /* proto=1 boot keyboard */
+    XHCI_HID_TYPE_BOOT_MOUSE  = 2,    /* proto=2 boot mouse */
+    XHCI_HID_TYPE_TABLET      = 3,    /* QEMU usb-tablet / 数位板（绝对坐标 + 按键） */
+    XHCI_HID_TYPE_TOUCHSCREEN = 4,    /* 单点触屏（Digitizer / TouchScreen） */
+    XHCI_HID_TYPE_MULTITOUCH  = 5,    /* 多点触屏（预留 M8-C） */
+} xhci_hid_type_t;
+
+/* 取第 idx 个 HID 设备的细分类型（在 usb_hid_init 时确定）。 */
+xhci_hid_type_t xhci_hid_device_type(uint32_t idx);
+
+/* 设置第 idx 个 HID 设备的细分类型（供 usb_hid64.c 探测后回填）。 */
+void xhci_hid_device_set_type(uint32_t idx, xhci_hid_type_t type);
+
 /* 为第 idx 个 HID 设备配置 Interrupt-IN 端点：
  *   建 Transfer Ring → Configure Endpoint 命令 → SET_PROTOCOL(boot)
  *   → 投递首个 Normal TRB 等待 report。

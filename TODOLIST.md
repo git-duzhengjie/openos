@@ -1821,3 +1821,96 @@
 
 > 推荐攻关顺序：**M1.1 PCI → M1.2 virtio-net → M1.3/M1.4 TCP/IP 栈 → M1.5 真实上网**。此路线打通后 OpenOS 才真正跨入现代 OS 门槛；M2/M4 可并行推进。
 
+---
+
+## M8：触屏兼容（Touchscreen 支持，兼顾 QEMU + 真机）
+
+> 目标：让 OpenOS 桌面既能被鼠标/键盘操作，也能被触屏（单点/多点）操作。真机目标覆盖两类主流触屏：**USB HID Touchscreen**（外接触摸显示器 / 大多数触屏一体机）与 **I²C HID Touchscreen**（Surface / 主流触屏笔记本内置）。QEMU 侧用 `usb-tablet` / `usb-mtouch` 做回归测试。
+>
+> 设计原则：
+> 1. **输入抽象**：新增触点事件流 `touch_frame_t`，与鼠标事件同层但独立；单点触屏默认映射为鼠标以保持向后兼容。
+> 2. **手势状态机**：Tap/LongPress/Drag/Swipe/Pinch 在内核态识别，产出高层事件供 GUI 消费。
+> 3. **触屏友好 UI**：图标 ≥ 44px、边缘手势、虚拟键盘 OSK，锁屏优先支持。
+> 4. **真机可跑**：驱动分层清晰，USB HID 与 I²C HID 共用上层协议解析器。
+
+### M8-A：单点触屏 MVP（USB HID Single-touch → 鼠标映射）
+
+- [ ] **M8-A.1 HID Usage 识别扩展**
+  - [ ] `usb_hid64.c` 新增识别 Usage Page `0x0D`（Digitizer）+ Usage `0x04`（Touch Screen）/ `0x02`（Pen）
+  - [ ] 保留现有 `usb-tablet`(VID=0x0627 PID=0x0001) 白名单，作为 fallback 匹配
+  - [ ] 在 HID 描述符探测阶段区分 mouse / tablet / touchscreen 三类设备，输出到 klog
+- [ ] **M8-A.2 Single-touch report 解析**
+  - [ ] 解析标准 Digitizer report：Tip Switch(1bit) + In Range(1bit) + X/Y(16bit each) + 可选 Pressure
+  - [ ] 复用 `mouse_set_absolute_position_with_wheel` 通路：Tip Down→左键按下事件，Tip Up→左键释放事件
+  - [ ] 触点抬起后**保持光标位置**（不清零，符合触屏语义）
+- [ ] **M8-A.3 QEMU 回归测试**
+  - [ ] `run.bat` 保持 `usb-tablet` 可用；新增 `run_touch_diag.bat` 使用 `-device usb-mtouch`（若 QEMU 版本支持）作为触屏专用配置
+  - [ ] 桌面单击、双击、拖拽三种场景全部可复现
+  - [ ] 锁屏输入密码可通过触点（首点触发键盘焦点）+ 键盘完成
+- [ ] **M8-A.4 klog 观测点**
+  - [ ] `[touch] device up vid=%x pid=%x type=%s`（single/multi）
+  - [ ] `[touch] frame tip=%d x=%d y=%d`（verbose 级别，默认关闭）
+
+### M8-B：手势识别引擎（内核态状态机）
+
+- [ ] **M8-B.1 新增手势模块骨架**
+  - [ ] `src/kernel/gui/gesture.c` + `gesture.h`
+  - [ ] 定义 `gesture_event_t`：`GESTURE_TAP / LONG_PRESS / DRAG_BEGIN / DRAG_MOVE / DRAG_END / SWIPE_{L,R,U,D} / PINCH`
+  - [ ] 提供 `gesture_feed(touch_frame_t*)` 入口，输出 `gesture_event_t` 到 GUI 事件队列
+- [ ] **M8-B.2 基础手势状态机（单指）**
+  - [ ] **Tap**：按下→抬起 < 200ms 且总位移 < 8px → 发 `TAP`，注入鼠标左键单击
+  - [ ] **Long Press**：按下 > 500ms 且不动 → 发 `LONG_PRESS`，注入鼠标右键单击（替代右键菜单）
+  - [ ] **Drag**：按下后位移 > 8px → `DRAG_BEGIN` + 一系列 `DRAG_MOVE`，抬起时 `DRAG_END`
+- [ ] **M8-B.3 边缘 Swipe 手势**
+  - [ ] 从屏幕左/右/上/下边缘 32px 内起手 + 向内 swipe > 80px → 发 `SWIPE_*`
+  - [ ] 预留 GUI 消费点：底边 swipe→切换窗口，顶边 swipe→任务栏切换
+- [ ] **M8-B.4 手势 selftest**
+  - [ ] `gesture_selftest64.c`：模拟触点序列注入，验证四类手势判定正确率与阈值边界
+
+### M8-C：多点触摸（Multi-touch，含通用 HID Report Descriptor 解析器）
+
+- [ ] **M8-C.1 输入子系统重构**
+  - [ ] `mouse64.c` 拆分：抽出 `input_core.c`（统一事件总线 + `present` 位图）
+  - [ ] 新增 `touch64.c`：管理最多 10 个 `touch_point_t` 槽位，contact_id 唯一
+  - [ ] `mouse.c` 保留鼠标专属逻辑；touch→mouse 映射走 input_core 桥接
+- [ ] **M8-C.2 通用 HID Report Descriptor 解析器**
+  - [ ] 实现 `hid_parser64.c`：解析 Usage Page/Usage/Report Size/Report Count/Logical Min/Max/Collection
+  - [ ] 输出 `hid_field_t[]` 字段表（offset/size/usage/logical range），驱动按字段取值而非硬编码偏移
+  - [ ] 单元测试用 Win7 触屏 sample descriptor 作为 fixture 覆盖
+- [ ] **M8-C.3 Multi-touch report 解析**
+  - [ ] 支持 Windows Precision Touchpad / Win7 触屏标准协议
+  - [ ] 每帧 Contact Count + N × (Contact ID + Tip Switch + X + Y) 结构解析
+  - [ ] 触点生命周期管理：新触点分配槽位，contact_id 相同则更新，Tip Up 后回收槽位
+- [ ] **M8-C.4 双指手势**
+  - [ ] **Two-finger scroll**：双指同向平移 → 注入滚轮事件
+  - [ ] **Pinch**：双指距离变化 > 20% → `PINCH_IN` / `PINCH_OUT`（预留窗口缩放/图片查看器）
+- [ ] **M8-C.5 QEMU + 真机验证**
+  - [ ] QEMU：`-device usb-mtouch` 验证 2-4 点
+  - [ ] 真机（外接 USB 触屏）：预留 verify 脚本，记录 vid/pid 兼容矩阵到文档
+
+### M8-D：触屏友好 UI 与真机 I²C HID 触屏
+
+- [ ] **M8-D.1 虚拟键盘 OSK**
+  - [ ] `src/kernel/gui/osk.c` + `osk.h`：QWERTY 布局，按键 ≥ 44×44px
+  - [ ] 锁屏优先支持：检测无键盘时自动弹出 OSK；密码框获焦时弹出，失焦收起
+  - [ ] 终端窗口触屏模式也可弹 OSK（次要目标）
+- [ ] **M8-D.2 桌面图标 & 控件触屏自适应**
+  - [ ] 检测输入设备类型（有触屏无鼠标 → touch 模式；两者兼有 → hybrid）
+  - [ ] touch 模式下桌面图标尺寸放大到 ≥ 64×64px，滚动条加粗
+  - [ ] 命中测试放宽（点击容差 ±4px）
+- [ ] **M8-D.3 边缘手势 UX 接线**
+  - [ ] 底边 swipe up → 显示/隐藏任务栏
+  - [ ] 左/右边 swipe → 切换活动窗口
+  - [ ] 顶边 swipe down → 关闭当前窗口（可选）
+- [ ] **M8-D.4 I²C HID 触屏驱动（真机 Surface / 触屏笔记本）**
+  - [ ] 实现 `i2c64.c`：Intel LPSS / Designware I²C 主控驱动（PCI + MMIO）
+  - [ ] ACPI DSDT 解析：识别 `PNP0C50`（HID over I²C）设备、读取 HID Descriptor Address
+  - [ ] `i2c_hid64.c`：实现 HID over I²C 协议（Get HID Descriptor / Get Report Descriptor / Interrupt 事件读取）
+  - [ ] 复用 M8-C.2 的通用 HID Report Descriptor 解析器
+  - [ ] 真机验证矩阵：Surface Go / Thinkpad X1 Yoga / 常见触屏笔电（记录 klog dump）
+- [ ] **M8-D.5 输入设备热插拔**
+  - [ ] USB 层：HID 设备拔出/插入事件传递到 input_core
+  - [ ] I²C 层：ACPI GPE 事件监听（可选，优先级低）
+
+> **实施顺序**：**M8-A（1-2 天）→ M8-B（2-3 天）→ M8-C（3-5 天）→ M8-D（3-5 天，其中 D.4 I²C HID 是真机大头）**。每个 milestone 完成后跑 Stages 1-30 SMP=1/4 双矩阵 + gfx-selftest + input-selftest 三条基线，无回归再合入 main。
+

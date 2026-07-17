@@ -649,6 +649,7 @@ typedef struct xhci_dev {
     uint32_t speed;       /* PORTSC speed 字段 */
     uint8_t  dev_class;   /* bInterfaceClass */
     uint8_t  proto;       /* bInterfaceProtocol（1=键盘 2=鼠标）*/
+    uint8_t  hid_type;    /* xhci_hid_type_t：细分 tablet/touchscreen（M8-A 回填） */
     uint8_t  config_val;  /* bConfigurationValue */
     uint8_t  iface_num;   /* bInterfaceNumber */
     uint8_t  ep_in_addr;  /* Interrupt IN 端点地址（含方向位）*/
@@ -1140,6 +1141,19 @@ uint32_t xhci_hid_device_report_len(uint32_t idx) {
     if (i < 0) return 0;
     uint32_t mps = g_devs[i].ep_in_mps;
     return (mps && mps <= 64) ? mps : 8;
+}
+
+/* ---- M8-A：HID 设备细分类型查询/回填 ---- */
+xhci_hid_type_t xhci_hid_device_type(uint32_t idx) {
+    int i = xhci_hid_index(idx);
+    if (i < 0) return XHCI_HID_TYPE_UNKNOWN;
+    return (xhci_hid_type_t)g_devs[i].hid_type;
+}
+
+void xhci_hid_device_set_type(uint32_t idx, xhci_hid_type_t type) {
+    int i = xhci_hid_index(idx);
+    if (i < 0) return;
+    g_devs[i].hid_type = (uint8_t)type;
 }
 
 /* 前向声明：configure 需要先于 arm 定义位置被引用 */

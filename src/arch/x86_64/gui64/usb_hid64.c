@@ -51,10 +51,13 @@ extern int  gui_should_capture_key_code_with_modifiers(int key, uint32_t modifie
 typedef struct {
     int      used;
     uint32_t xhci_idx;              /* 对应 xhci_hid_device 序号 */
-    uint32_t proto;                 /* 1=键盘 2=鼠标 0=tablet */
-    int      is_tablet;             /* 1=QEMU USB Tablet（绝对坐标） */
+    uint32_t proto;                 /* 1=键盘 2=鼠标 0=其他 */
+    uint32_t hid_type;              /* xhci_hid_type_t（M8-A 新增，细分 tablet/touchscreen）*/
     uint32_t report_len;
-    uint8_t  last[8];               /* 上一帧 report，用于差分 */
+    /* 触屏专用状态（跟踪 Tip 按下弹起边沿）*/
+    uint8_t  ts_prev_tip;           /* 上一帧 Tip Switch（接触与否）*/
+    int      ts_last_x, ts_last_y;  /* Tip Up 后保持的坐标 */
+    uint8_t  last[8];               /* 上一帧 report（键盘差分用）*/
 } usb_hid_dev_t;
 
 static usb_hid_dev_t g_hid[USB_HID_MAX];
@@ -180,30 +183,59 @@ static void hid_handle_tablet(usb_hid_dev_t *h, const uint8_t *rpt, uint32_t len
     int max_y = ms->max_y > 0 ? ms->max_y : 479;
     int sx = (raw_x * max_x) / 0x7FFF;
     int sy = (raw_y * max_y) / 0x7FFF;
-    /* 调试：前3次报告打印细节 */
-    static int _dbg_cnt = 0;
-    if (_dbg_cnt < 3) {
-        _dbg_cnt++;
-        extern void early_console64_write(const char*);
-        extern void early_console64_write_hex64(unsigned long long);
-        early_console64_write("[tablet] raw=("); early_console64_write_hex64((unsigned long long)raw_x);
-        early_console64_write(","); early_console64_write_hex64((unsigned long long)raw_y);
-        early_console64_write(") max=("); early_console64_write_hex64((unsigned long long)max_x);
-        early_console64_write(","); early_console64_write_hex64((unsigned long long)max_y);
-        early_console64_write(") -> ("); early_console64_write_hex64((unsigned long long)sx);
-        early_console64_write(","); early_console64_write_hex64((unsigned long long)sy);
-        early_console64_write(") btn="); early_console64_write_hex64((unsigned long long)btn);
-        early_console64_write("\n");
-    }
     mouse_set_absolute_position_with_wheel(sx, sy, btn, wheel);
     (void)h;
 }
 
-/* 初始化：遍历 xHCI HID 设备，配置端点。 */
+/* ---- M8-A：单点触屏 report 解析 ----
+ * 触屏与 tablet 的区别：
+ *   - tablet：无 tip switch，hover 时也上报坐标，button 下→左键
+ *   - touchscreen：必须 Tip Switch 为 1 才存在接触；Tip Up 后坐标保持（不回零）
+ *
+ * QEMU usb-tablet 可以当单点触屏用：把 rpt[0].bit0（左键）当作 Tip Switch。
+ * 真机 HID Touchscreen 同样使用 6 字节布局作为 fallback（M8-C 将改为 HID Descriptor 驱动）。
+ */
+static void hid_handle_touchscreen(usb_hid_dev_t *h, const uint8_t *rpt, uint32_t len) {
+    if (len < 5) return;
+    uint8_t tip = rpt[0] & 0x01;                      /* Tip Switch */
+    int raw_x   = (int)rpt[1] | ((int)rpt[2] << 8);
+    int raw_y   = (int)rpt[3] | ((int)rpt[4] << 8);
+
+    mouse_state_t *ms = mouse_get_state();
+    int max_x = ms->max_x > 0 ? ms->max_x : 639;
+    int max_y = ms->max_y > 0 ? ms->max_y : 479;
+    int sx, sy;
+    if (tip) {
+        sx = (raw_x * max_x) / 0x7FFF;
+        sy = (raw_y * max_y) / 0x7FFF;
+        h->ts_last_x = sx;
+        h->ts_last_y = sy;
+    } else {
+        /* Tip Up：保持上次坐标，避免光标回到 (0,0) */
+        sx = h->ts_last_x;
+        sy = h->ts_last_y;
+    }
+
+    /* Tip 状态→鼠标左键（方案：触屏单点直接映射为左键） */
+    uint8_t btn = tip ? 0x01 : 0x00;
+    mouse_set_absolute_position_with_wheel(sx, sy, btn, 0);
+
+    h->ts_prev_tip = tip;
+}
+
+/* 初始化：遍历 xHCI HID 设备，推断类型并配置端点。M8-A：
+ *   - boot 键盘/鼠标（proto 1/2）：沿用旧逻辑
+ *   - QEMU tablet（VID=0627 PID=0001，proto=0）：HID_TYPE_TABLET
+ *   - 其他 HID（proto=0，class=3，HID subclass）：默认作为 HID_TYPE_TOUCHSCREEN 尝试（真机触屏兜底）
+ */
 void usb_hid_init(void) {
     if (g_hid_inited) return;
     g_hid_inited = 1;
-    for (int i = 0; i < USB_HID_MAX; i++) g_hid[i].used = 0;
+    for (int i = 0; i < USB_HID_MAX; i++) {
+        g_hid[i].used = 0;
+        g_hid[i].ts_prev_tip = 0;
+        g_hid[i].ts_last_x = 320; g_hid[i].ts_last_y = 240;
+    }
 
     uint32_t n = xhci_hid_device_count();
     HLOG("init: enumerating HID devices");
@@ -211,10 +243,29 @@ void usb_hid_init(void) {
         uint32_t proto = xhci_hid_device_proto(k);
         uint32_t vid   = xhci_hid_device_vid(k);
         uint32_t pid   = xhci_hid_device_pid(k);
-        int is_tablet  = (proto == 0 && vid == 0x0627 && pid == 0x0001) ? 1 : 0;
+        uint32_t type  = XHCI_HID_TYPE_UNKNOWN;
 
-        /* 接受 boot 键盘/鼠标，或 QEMU tablet（非 boot 协议但已知报告格式）。 */
-        if (!(proto == 1 || proto == 2 || is_tablet)) continue;
+        if (proto == 1) {
+            type = XHCI_HID_TYPE_BOOT_KEYBD;
+        } else if (proto == 2) {
+            type = XHCI_HID_TYPE_BOOT_MOUSE;
+        } else if (proto == 0) {
+            /* M8-A 扩展：已知白名单 + 兜底触屏 */
+            if (vid == 0x0627 && pid == 0x0001) {
+#ifdef OPENOS_TOUCH_TEST
+                /* 编译时开关：把 QEMU tablet 强制当作触屏用，在 QEMU 环境下验证 M8-A 触屏代码路径 */
+                type = XHCI_HID_TYPE_TOUCHSCREEN;
+#else
+                type = XHCI_HID_TYPE_TABLET;
+#endif
+            } else {
+                /* 未匹配任何已知设备 → 假定为单点触屏（真机触屏常见 proto=0 subclass=0/1） */
+                type = XHCI_HID_TYPE_TOUCHSCREEN;
+            }
+        } else {
+            continue; /* 不支持的 HID 子类 */
+        }
+
         if (xhci_hid_configure(k) != 0) {
             HLOG("configure FAILED");
             continue;
@@ -224,14 +275,17 @@ void usb_hid_init(void) {
         h->used       = 1;
         h->xhci_idx   = k;
         h->proto      = proto;
-        h->is_tablet  = is_tablet;
+        h->hid_type   = type;
         h->report_len = xhci_hid_device_report_len(k);
         for (int j = 0; j < 8; j++) h->last[j] = 0;
-        if (proto == 1) {
+        xhci_hid_device_set_type(k, (xhci_hid_type_t)type);
+
+        if (type == XHCI_HID_TYPE_BOOT_KEYBD) {
             HLOG("keyboard configured (Interrupt-IN armed)");
-        } else if (is_tablet) {
+        } else if (type == XHCI_HID_TYPE_TABLET) {
             HLOG("tablet configured (absolute coords, Interrupt-IN armed)");
-            /* 不改 bounds：GUI 已按屏幕尺寸设置 max_x/max_y，hid_handle_tablet 做缩放 */
+        } else if (type == XHCI_HID_TYPE_TOUCHSCREEN) {
+            HLOG("touchscreen configured (tip-switch, Interrupt-IN armed)");
         } else {
             HLOG("mouse configured (Interrupt-IN armed)");
         }
@@ -241,14 +295,7 @@ void usb_hid_init(void) {
 /* polling：被内核主循环周期调用，非阻塞取 report 并注入 GUI。 */
 void usb_hid_poll(void) {
     if (!g_hid_inited) return;
-    static int logged_kbd = 0, logged_mouse = 0;
-    static unsigned long hb = 0;
-    if ((hb++ & 0x3FF) == 0) {
-        extern void early_console64_write_hex64(unsigned long long);
-        extern void early_console64_write(const char*);
-        early_console64_write("[hid-hb] poll#"); early_console64_write_hex64(hb);
-        early_console64_write("\n");
-    }
+    static int logged_kbd = 0, logged_ptr = 0;
     uint8_t buf[8];
     for (int i = 0; i < USB_HID_MAX; i++) {
         usb_hid_dev_t *h = &g_hid[i];
@@ -256,15 +303,24 @@ void usb_hid_poll(void) {
         for (int guard = 0; guard < 8; guard++) {
             int m = xhci_hid_poll(h->xhci_idx, buf, sizeof(buf));
             if (m <= 0) break;
-            if (h->proto == 1) {
+            switch (h->hid_type) {
+            case XHCI_HID_TYPE_BOOT_KEYBD:
                 if (!logged_kbd) { HLOG("first keyboard report received"); logged_kbd = 1; }
                 hid_handle_keyboard(h, buf, (uint32_t)m);
-            } else if (h->is_tablet) {
-                if (!logged_mouse) { HLOG("first tablet report received"); logged_mouse = 1; }
+                break;
+            case XHCI_HID_TYPE_TABLET:
+                if (!logged_ptr) { HLOG("first tablet report received"); logged_ptr = 1; }
                 hid_handle_tablet(h, buf, (uint32_t)m);
-            } else {
-                if (!logged_mouse) { HLOG("first mouse report received"); logged_mouse = 1; }
+                break;
+            case XHCI_HID_TYPE_TOUCHSCREEN:
+                if (!logged_ptr) { HLOG("first touchscreen report received"); logged_ptr = 1; }
+                hid_handle_touchscreen(h, buf, (uint32_t)m);
+                break;
+            case XHCI_HID_TYPE_BOOT_MOUSE:
+            default:
+                if (!logged_ptr) { HLOG("first mouse report received"); logged_ptr = 1; }
                 hid_handle_mouse(h, buf, (uint32_t)m);
+                break;
             }
         }
     }
