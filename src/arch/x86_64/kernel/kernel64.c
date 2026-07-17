@@ -2,6 +2,8 @@
 #include "../include/address_space64.h"
 #include "../include/compat32.h"
 #include "../include/early_console64.h"
+#include "../include/klog64.h"
+#include "../include/klog_selftest64.h"
 #include "../include/elf64_loader.h"
 #include "../include/fdtable64.h"
 #include "../include/percpu64.h"
@@ -53,6 +55,7 @@ extern void net_print_info(void);
 #include "../include/cpufreq_selftest64.h"
 #include "../include/cred_selftest64.h"
 #include "../include/login_selftest64.h"
+#include "../include/klog_selftest64.h"
 #include "../include/gfx_selftest64.h"
 #include "../include/virtio_gpu_selftest64.h"
 #include "../include/smp_selftest64.h"
@@ -115,6 +118,13 @@ void arch_x86_64_early_init(const openos_bootinfo_t *bootinfo) {
     arch_x86_64_percpu_install_gs(0);
     arch_x86_64_idt_init();
     early_console64_init();
+    klog_init();  /* M6.12: initialise klog before first early_console_write */
+    early_console64_write("[x86_64] klog ring buffer initialised (64KB)\n");
+    /* M6.12: run klog selftest early since it only needs klog+early_console.
+     * The old kernel_stage() location further down never gets reached in
+     * headless single-core diagnostics because preempt-selftest deliberately
+     * halts before it. Running here guarantees CI coverage. */
+    (void)arch_x86_64_klog_selftest_run();
     early_console64_write("[x86_64] arch_ops=");
     early_console64_write(openos_arch_ops_name());
     early_console64_write(" platform_ops=");
@@ -800,6 +810,8 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
      * root identity, so the live kernel PCB is untouched. Non-fatal. */
     (void)arch_x86_64_login_selftest_run();
 
+    /* Step M6.12: klog selftest already ran at boot-early; no-op here. */
+
     /* Step M6.3: verify the framebuffer row-blit acceleration primitive
      * (framebuffer_blit_row). framebuffer_init() is idempotent and only wires
      * up the already-existing UEFI GOP framebuffer, so calling it here is safe
@@ -1029,6 +1041,12 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
      * drop. Single ring3 process, reliable under single-core QEMU. Enabled
      * only for -DM6_LOGIN_DIAG builds; normal builds keep launcher. */
     const char *initial_path = "/bin/login";
+#elif defined(M6_DMESG_DIAG)
+    /* M6.12 diag: jump straight to /bin/dmesg to exercise SYS_KLOG end-to-end
+     * from ring3. The klog ring is pre-populated with all early boot messages
+     * courtesy of the early_console64_write() tee; running dmesg here should
+     * dump the entire kernel boot log to STDOUT (which the console mirrors). */
+    const char *initial_path = "/bin/dmesg";
 #elif defined(M6_CPUINFO_DIAG)
     /* M6.2d diag: jump straight to the CPU frequency / thermal self-test
      * (SYS_CPUINFO end-to-end). Single ring3 process, read-only, reliable
@@ -1143,6 +1161,18 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
                 (const char *)0,
             };
             arch_x86_64_usermode_set_args(3, login_diag_argv);
+#endif
+#if defined(M6_DMESG_DIAG)
+            /* M6.12 diag: argv = { "/bin/dmesg", "-n", "20" } to keep output
+             * bounded and finish within QEMU timeout. Full dump would exceed
+             * the ring capacity anyway (only tail ~500 entries survive). */
+            static const char *dmesg_diag_argv[4] = {
+                "/bin/dmesg",
+                "-n",
+                "20",
+                (const char *)0,
+            };
+            arch_x86_64_usermode_set_args(3, dmesg_diag_argv);
 #endif
 
             /*

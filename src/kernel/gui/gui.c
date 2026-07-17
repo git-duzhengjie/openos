@@ -1896,6 +1896,14 @@ static void gui_cursor_restore_fb(void) {
         }
     }
     g_gui.cursor_drawn = 0;
+
+    /* M6.11 fix: virtio-gpu 后端下，恢复旧光标位置的背景同样直写
+     * front framebuffer，必须 present 才能让旧光标从 host scanout 消失，
+     * 否则光标移动会留下拖影。GOP 后端下为 no-op。 */
+    if (framebuffer_present_needed() && ex > sx && ey > sy) {
+        framebuffer_present_rect((uint32_t)sx, (uint32_t)sy,
+                                 (uint32_t)(ex - sx), (uint32_t)(ey - sy));
+    }
 }
 
 static void gui_cursor_draw_fb(void) {
@@ -1914,12 +1922,66 @@ static void gui_cursor_draw_fb(void) {
     g_gui.cursor_drawn = 1;
     g_gui.cursor_fb_x = x;
     g_gui.cursor_fb_y = y;
+
+    /* M6.11 fix: virtio-gpu 后端下，光标是直接写 front framebuffer 的，
+     * 前面的 gui_flush_backbuffer 无法覆盖光标像素，必须在这里显式
+     * present 光标区域才能刷到 host scanout；GOP 后端下 present_needed
+     * 返回 0，此处为 no-op，front framebuffer 即屏幕直接可见。 */
+    if (framebuffer_present_needed()) {
+        int px0 = x - 2;
+        int py0 = y - 2;
+        int px1 = x + 14;
+        int py1 = y + 18;
+        if (px0 < 0) px0 = 0;
+        if (py0 < 0) py0 = 0;
+        if (px1 > (int)g_gui.width)  px1 = (int)g_gui.width;
+        if (py1 > (int)g_gui.height) py1 = (int)g_gui.height;
+        if (px1 > px0 && py1 > py0) {
+            framebuffer_present_rect((uint32_t)px0, (uint32_t)py0,
+                                     (uint32_t)(px1 - px0), (uint32_t)(py1 - py0));
+        }
+    }
 }
 
 static void gui_cursor_present_fast(void) {
+    int px0, py0, px1, py1;
+    int ox0, oy0, ox1, oy1;
     if (!gui_compositor_active()) return;
+
+    /* 记录旧光标绘制区（restore 前），用于 present 合并 */
+    ox0 = g_gui.cursor_fb_x - 2;
+    oy0 = g_gui.cursor_fb_y - 2;
+    ox1 = g_gui.cursor_fb_x + 14;
+    oy1 = g_gui.cursor_fb_y + 18;
+    if (!g_gui.cursor_drawn) { ox0 = oy0 = ox1 = oy1 = 0; }
+
     gui_cursor_restore_fb();
     gui_cursor_draw_fb();
+
+    /* M6.11: virtio-gpu 后端下，软件光标直接写 guest framebuffer 后
+     * 必须显式 present 才能刷到 host scanout；GOP 后端下为 no-op。
+     * present 区域取旧位置 restore 区与新位置 draw 区的并集。 */
+    if (framebuffer_present_needed()) {
+        px0 = g_gui.mouse_x - 2;
+        py0 = g_gui.mouse_y - 2;
+        px1 = g_gui.mouse_x + 14;
+        py1 = g_gui.mouse_y + 18;
+        /* 与旧区域求并集 */
+        if (ox1 > ox0) {
+            if (ox0 < px0) px0 = ox0;
+            if (oy0 < py0) py0 = oy0;
+            if (ox1 > px1) px1 = ox1;
+            if (oy1 > py1) py1 = oy1;
+        }
+        if (px0 < 0) px0 = 0;
+        if (py0 < 0) py0 = 0;
+        if (px1 > (int)g_gui.width)  px1 = (int)g_gui.width;
+        if (py1 > (int)g_gui.height) py1 = (int)g_gui.height;
+        if (px1 > px0 && py1 > py0) {
+            framebuffer_present_rect((uint32_t)px0, (uint32_t)py0,
+                                     (uint32_t)(px1 - px0), (uint32_t)(py1 - py0));
+        }
+    }
 }
 
 static void gui_rect_union_inplace(gui_rect_t *dst, const gui_rect_t *src) {
@@ -6377,6 +6439,20 @@ static void gui_poll_mouse(void) {
         usb_tablet_poll((int)g_gui.width, (int)g_gui.height);
     }
     mouse_snapshot_and_clear_delta(&ms);
+    {
+        static uint32_t s_dbg_div = 0;
+        if ((s_dbg_div++ & 0x3fu) == 0u) {
+            serial_write("[gui-mouse] present=");
+            serial_write_hex((uint32_t)ms.present);
+            serial_write(" x=");
+            serial_write_hex((uint32_t)ms.x);
+            serial_write(" y=");
+            serial_write_hex((uint32_t)ms.y);
+            serial_write(" btn=");
+            serial_write_hex((uint32_t)ms.buttons);
+            serial_write("\n");
+        }
+    }
     if (!ms.present) return;
 
     if (ms.x < 0) ms.x = 0;

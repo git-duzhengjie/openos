@@ -42,6 +42,7 @@
 #include "../include/cpufreq64.h" /* M6.2: CPU frequency / thermal snapshot */
 #include "../include/account_db64.h" /* M6.11.3: passwd/shadow parser */
 #include "../include/login64.h"      /* M6.11.3: login / session establishment */
+#include "../include/klog64.h"       /* M6.12:  kernel log ring buffer + SYS_KLOG */
 #include "../include/opk_install.h" /* M5.4c: .opk 包安装器 */
 /* M5.4c: kernel-side .opk installer bridge (opk_install_kernel.c) */
 extern int opk_install_to_ramfs(const uint8_t *image, uint32_t image_size,
@@ -349,6 +350,54 @@ static uint64_t do_login(uint64_t name_ptr, uint64_t pw_ptr, uint64_t out_ptr) {
             ((char *)out)[j] = ((char *)k)[j];
     }
     return (uint64_t)rc;
+}
+
+/*
+ * SYS_KLOG (M6.12): query kernel log ring buffer.
+ *   a0 = cmd (KLOG_CMD_READ_ALL / _TAIL / _FROM / _STATS / _CLEAR)
+ *   a1 = arg (tail_count for _TAIL, start_seq for _FROM)
+ *   a2 = user buffer pointer
+ *   a3 = user buffer size
+ * Returns bytes written (>=0) or negative errno.
+ */
+static uint64_t do_klog(uint64_t cmd, uint64_t arg, uint64_t buf_ptr, uint64_t buf_size) {
+    switch (cmd) {
+    case KLOG_CMD_STATS: {
+        if (buf_ptr == 0 || buf_size < sizeof(klog_stats_t)) return (uint64_t)(int64_t)-1;
+        if (!validate_user_buf(buf_ptr, sizeof(klog_stats_t))) return (uint64_t)(int64_t)-1;
+        klog_stats_t st;
+        klog_get_stats(&st);
+        char *dst = (char *)(uintptr_t)buf_ptr;
+        const char *src = (const char *)&st;
+        for (size_t i = 0; i < sizeof(st); ++i) dst[i] = src[i];
+        return sizeof(st);
+    }
+    case KLOG_CMD_CLEAR: {
+        if (arch_x86_64_proc_current_euid() != 0) return (uint64_t)(int64_t)-1;
+        klog_clear();
+        return 0;
+    }
+    case KLOG_CMD_READ_ALL:
+    case KLOG_CMD_READ_TAIL:
+    case KLOG_CMD_READ_FROM: {
+        if (buf_ptr == 0 || buf_size == 0) return (uint64_t)(int64_t)-1;
+        if (buf_size > (1u << 20)) buf_size = (1u << 20);
+        if (!validate_user_buf(buf_ptr, (size_t)buf_size)) return (uint64_t)(int64_t)-1;
+        static char bounce[32u << 10];
+        size_t take = (buf_size < sizeof(bounce)) ? (size_t)buf_size : sizeof(bounce);
+        size_t n = 0;
+        bool ok = false;
+        if (cmd == KLOG_CMD_READ_ALL)       ok = klog_read_from(0, bounce, take, &n);
+        else if (cmd == KLOG_CMD_READ_FROM) ok = klog_read_from((uint32_t)arg, bounce, take, &n);
+        else                                ok = klog_read_tail((uint32_t)arg, bounce, take, &n);
+        if (!ok) return (uint64_t)(int64_t)-1;
+        char *dst = (char *)(uintptr_t)buf_ptr;
+        for (size_t i = 0; i < n; ++i) dst[i] = bounce[i];
+        return (uint64_t)n;
+    }
+    default:
+        return (uint64_t)(int64_t)-1;
+    }
 }
 
 static uint64_t do_close(uint64_t fd) {
@@ -2055,6 +2104,7 @@ uint64_t arch_x86_64_syscall_dispatch_common(uint64_t num,
     case SYS_SETEUID:     return (uint64_t)(int64_t)arch_x86_64_proc_seteuid((uint32_t)a0);
     case SYS_SETEGID:     return (uint64_t)(int64_t)arch_x86_64_proc_setegid((uint32_t)a0);
     case SYS_LOGIN:       return do_login(a0, a1, a2);
+    case SYS_KLOG:        return do_klog(a0, a1, a2, a3);
     case SYS_YIELD:       return do_yield();
     case SYS_WAIT:        return do_wait_common(0, a0, 0);
     case SYS_WAITPID:     return do_wait_common(a0, a1, 1);

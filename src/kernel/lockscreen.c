@@ -1,21 +1,27 @@
 /**
- * 开机锁屏 —— 单用户密码验证门闸（全屏实现）
+ * 开机锁屏 —— 多用户密码验证门闸（全屏实现，M6.11.5 接线）
  *
  * 见 include/lockscreen.h 的设计说明。核心流程：
- *   1. 全屏绘制锁屏背景 + 中央密码输入区（不走窗口系统）。
- *   2. 自己消费 gui_event_pop() 的键盘事件（字符 / Backspace / Enter）。
- *   3. 回车 → SHA256(salt + 输入) → 与硬编码摘要常量时间比较。
- *   4. 命中则返回（放行进桌面）；否则清空输入并提示错误。
+ *   1. 全屏绘制锁屏背景 + 中央"用户名 + 密码"双输入区（不走窗口系统）。
+ *   2. 自己消费 gui_event_pop() 的键盘事件（字符 / Backspace / Enter / Tab）。
+ *   3. Tab 在用户名/密码框间切换焦点；回车触发校验。
+ *   4. 校验走 arch_x86_64_login_authenticate()：/etc/passwd 查账户 +
+ *      /etc/shadow 的 SHA256(password) 与 sha256$<hex> 常量时间比对。
+ *      —— 与 login(1) / SYS_LOGIN 走同一套凭证后端，真正支持多用户解锁。
+ *   5. 命中则返回（放行进桌面）；否则清空密码并提示错误。
+ *
+ * 注意：锁屏是"门闸放行"语义，只认证不降权（不 setsid/setuid），
+ * 避免污染内核 slot-0 PCB 的凭证。降权由后续真正的用户会话负责。
  *
  * 锁屏是桌面启动前的门闸：整屏遮罩，用户看不到也点不到桌面，
- * 直到密码正确才 return。
+ * 直到密码正确才 return。默认账户 openos / openos。
  */
 #include "lockscreen.h"
 #include "gui.h"
-#include "sha256.h"
 #include "framebuffer.h"
 #include "string.h"
 #include "types.h"
+#include "login64.h"
 
 /* early_console64_write：把锁屏日志走串口，便于无显环境调试 */
 extern void early_console64_write(const char *s);
@@ -32,30 +38,23 @@ extern void usb_hid_poll(void);
 extern void arch_x86_64_delay_ms(unsigned int ms);
 
 /* ------------------------------------------------------------------
- * 密码契约（编译期硬编码）
+ * 凭证后端（M6.11.5）
  *
- * salt   = "openos-lock-v1:"
- * 明文   = "openos"（默认开机密码）
- * digest = SHA256("openos-lock-v1:openos")
- *        = b4962b268df5206f2577d2accf79ae52153970729f518972a2a6ad1983b8219e
+ * 不再硬编码单一密码摘要：校验直接调 arch_x86_64_login_authenticate()，
+ * 该函数查 /etc/passwd 定位账户、取 /etc/shadow 的 sha256$<hex>，
+ * 重算 SHA256(输入密码) 后常量时间比对。与 login(1)/SYS_LOGIN 同源。
  *
- * 修改密码：重算 SHA256(salt + 新密码) 并替换 LOCK_HASH 即可，
- * 明文永不出现在二进制里。
+ * 锁屏只认证不降权，避免污染内核 slot-0 PCB。
  * ------------------------------------------------------------------ */
-static const char LOCK_SALT[] = "openos-lock-v1:";
 
-static const uint8_t LOCK_HASH[SHA256_DIGEST_SIZE] = {
-    0xb4, 0x96, 0x2b, 0x26, 0x8d, 0xf5, 0x20, 0x6f,
-    0x25, 0x77, 0xd2, 0xac, 0xcf, 0x79, 0xae, 0x52,
-    0x15, 0x39, 0x70, 0x72, 0x9f, 0x51, 0x89, 0x72,
-    0xa2, 0xa6, 0xad, 0x19, 0x83, 0xb8, 0x21, 0x9e
-};
-
-/* 输入缓冲（最长 63 字符） */
-#define LOCK_PW_MAX 63
-static char    g_lock_pw[LOCK_PW_MAX + 1];
+/* 输入缓冲（用户名 / 密码，各最长 63 字符） */
+#define LOCK_FIELD_MAX 63
+static char    g_lock_user[LOCK_FIELD_MAX + 1];
+static int     g_lock_user_len = 0;
+static char    g_lock_pw[LOCK_FIELD_MAX + 1];
 static int     g_lock_pw_len = 0;
-static int     g_lock_wrong  = 0;   /* 是否显示"密码错误"提示 */
+static int     g_lock_focus  = 0;   /* 0=用户名框，1=密码框 */
+static int     g_lock_wrong  = 0;   /* 是否显示"验证失败"提示 */
 
 /* 配色（0x00RRGGBB） */
 #define LOCK_BG_TOP     0x0F2027u   /* 背景 */
@@ -69,30 +68,17 @@ static int     g_lock_wrong  = 0;   /* 是否显示"密码错误"提示 */
 #define LOCK_ERR        0xFF6B6Bu   /* 错误提示 */
 #define LOCK_DOT        0xE8F1F2u   /* 密码掩码点 */
 
-/* strlen 的本地实现 */
-static uint32_t lock_strlen(const char *s)
+/* 校验输入是否为正确凭证：调用 arch_x86_64_login_authenticate()，
+ * 查 /etc/passwd + /etc/shadow 后端完成账户定位与密码比对。
+ * 返回 1=OK，0=失败。 */
+static int lock_verify(const char *name, const char *password)
 {
-    uint32_t n = 0;
-    if (!s) return 0;
-    while (s[n]) n++;
-    return n;
-}
+    x86_64_passwd_entry_t pw;
+    int rc;
 
-/* 校验输入是否为正确密码：SHA256(salt + input) == LOCK_HASH */
-static int lock_verify(const char *input)
-{
-    sha256_ctx_t ctx;
-    uint8_t digest[SHA256_DIGEST_SIZE];
-    int ok;
-
-    sha256_init(&ctx);
-    sha256_update(&ctx, (const uint8_t *)LOCK_SALT, lock_strlen(LOCK_SALT));
-    sha256_update(&ctx, (const uint8_t *)input, lock_strlen(input));
-    sha256_final(&ctx, digest);
-
-    ok = sha256_ct_equal(digest, LOCK_HASH);
-    memset(digest, 0, sizeof(digest));
-    return ok;
+    rc = arch_x86_64_login_authenticate(name, password, &pw);
+    memset(&pw, 0, sizeof(pw));   /* 抹掉敏感残留 */
+    return (rc == X86_64_LOGIN_OK) ? 1 : 0;
 }
 
 /* 全屏绘制一帧锁屏画面 */
@@ -102,17 +88,18 @@ static void lock_render(void)
     int sh = gui_screen_height();
     int i;
 
-    /* 面板尺寸 */
+    /* 面板尺寸（变高以容纳双输入框） */
     int pw = 460;
-    int ph = 240;
+    int ph = 300;
     int px = (sw - pw) / 2;
     int py = (sh - ph) / 2;
 
-    /* 输入框 */
+    /* 输入框公共几何 */
     int bw = pw - 80;
-    int bh = 44;
+    int bh = 40;
     int bx = px + 40;
-    int by = py + 110;
+    int uby = py + 96;              /* 用户名框 y */
+    int pby = uby + bh + 34;        /* 密码框 y */
 
     if (sw <= 0 || sh <= 0) { sw = 1280; sh = 800; }
 
@@ -133,34 +120,42 @@ static void lock_render(void)
     gui_screen_draw_border(px, py, pw, ph, 2, LOCK_PANEL_BDR);
 
     /* 3) 标题 */
-    gui_draw_text(px + 40, py + 30, "OpenOS  \xe7\xb3\xbb\xe7\xbb\x9f\xe5\xb7\xb2\xe9\x94\x81\xe5\xae\x9a", LOCK_TEXT);
-    gui_draw_text(px + 40, py + 60, "Enter password to unlock", LOCK_HINT);
+    gui_draw_text(px + 40, py + 28, "OpenOS  \xe7\xb3\xbb\xe7\xbb\x9f\xe5\xb7\xb2\xe9\x94\x81\xe5\xae\x9a", LOCK_TEXT);
+    gui_draw_text(px + 40, py + 56, "Sign in to unlock  (Tab to switch)", LOCK_HINT);
 
-    /* 4) 输入框 */
-    gui_screen_fill_rect(bx, by, bw, bh, LOCK_BOX_BG);
-    gui_screen_draw_border(bx, by, bw, bh, 2, LOCK_BOX_BDR);
+    /* 4) 用户名框 */
+    gui_screen_fill_rect(bx, uby, bw, bh, LOCK_BOX_BG);
+    gui_screen_draw_border(bx, uby, bw, bh, (g_lock_focus == 0) ? 3 : 2,
+                           (g_lock_focus == 0) ? LOCK_DOT : LOCK_BOX_BDR);
+    if (g_lock_user_len == 0) {
+        gui_draw_text(bx + 14, uby + bh / 2 - 8, "username", LOCK_HINT);
+    } else {
+        gui_draw_text(bx + 14, uby + bh / 2 - 8, g_lock_user, LOCK_TEXT);
+    }
 
-    /* 5) 密码掩码点 */
+    /* 5) 密码框（掩码点） */
+    gui_screen_fill_rect(bx, pby, bw, bh, LOCK_BOX_BG);
+    gui_screen_draw_border(bx, pby, bw, bh, (g_lock_focus == 1) ? 3 : 2,
+                           (g_lock_focus == 1) ? LOCK_DOT : LOCK_BOX_BDR);
     {
         int dot_r = 4;
         int gap   = 18;
         int dx    = bx + 16;
-        int dy    = by + bh / 2 - dot_r;
-        for (i = 0; i < g_lock_pw_len && i < LOCK_PW_MAX; i++) {
+        int dy    = pby + bh / 2 - dot_r;
+        for (i = 0; i < g_lock_pw_len && i < LOCK_FIELD_MAX; i++) {
             gui_screen_fill_rect(dx, dy, dot_r * 2, dot_r * 2, LOCK_DOT);
             dx += gap;
         }
-        /* 空输入时显示占位提示 */
         if (g_lock_pw_len == 0) {
-            gui_draw_text(bx + 14, by + bh / 2 - 8, "password", LOCK_HINT);
+            gui_draw_text(bx + 14, pby + bh / 2 - 8, "password", LOCK_HINT);
         }
     }
 
     /* 6) 提示行 */
     if (g_lock_wrong) {
-        gui_draw_text(bx, by + bh + 16, "Wrong password, try again", LOCK_ERR);
+        gui_draw_text(bx, pby + bh + 16, "Login failed, try again", LOCK_ERR);
     } else {
-        gui_draw_text(bx, by + bh + 16, "Default password: openos   (Enter to unlock)", LOCK_HINT);
+        gui_draw_text(bx, pby + bh + 16, "Default: openos / openos   (Enter to unlock)", LOCK_HINT);
     }
 
     /* 7) present */
@@ -172,9 +167,14 @@ void lockscreen_run(void)
     gui_event_t ev;
     int need_redraw = 1;
 
-    g_lock_pw_len = 0;
-    g_lock_wrong  = 0;
-    g_lock_pw[0]  = '\0';
+    g_lock_pw_len   = 0;
+    g_lock_wrong    = 0;
+    g_lock_pw[0]    = '\0';
+    /* 预填默认账户 openos，初始焦点落在密码框方便直接输入 */
+    g_lock_user_len = 6;
+    g_lock_user[0]='o'; g_lock_user[1]='p'; g_lock_user[2]='e';
+    g_lock_user[3]='n'; g_lock_user[4]='o'; g_lock_user[5]='s'; g_lock_user[6]='\0';
+    g_lock_focus    = 1;
 
     early_console64_write("[lockscreen] starting (fullscreen), waiting for password\n");
 
@@ -205,35 +205,57 @@ void lockscreen_run(void)
                 int k = ev.key;
 
                 if (k == GUI_KEY_ENTER || k == '\n' || k == '\r') {
-                    /* 回车：校验（主键盘 Enter 经 scancode 表映射为 0x0A，小键盘 Enter 为 GUI_KEY_ENTER=13，两者都接受） */
-                    g_lock_pw[g_lock_pw_len] = '\0';
-                    if (lock_verify(g_lock_pw)) {
-                        early_console64_write("[lockscreen] password OK, unlocking\n");
+                    /* 回车：认证（主键盘 Enter 经 scancode 表映射为 0x0A，小键盘 Enter 为 GUI_KEY_ENTER=13，两者都接受） */
+                    g_lock_user[g_lock_user_len] = '\0';
+                    g_lock_pw[g_lock_pw_len]     = '\0';
+                    if (lock_verify(g_lock_user, g_lock_pw)) {
+                        early_console64_write("[lockscreen] auth OK, unlocking\n");
                         /* 抹掉明文残留 */
                         memset(g_lock_pw, 0, sizeof(g_lock_pw));
                         g_lock_pw_len = 0;
                         gui_set_lockscreen_capture(0);   /* 关闭门闸，交回焦点给桌面 */
                         return;
                     }
-                    early_console64_write("[lockscreen] wrong password\n");
+                    early_console64_write("[lockscreen] auth failed\n");
                     g_lock_wrong  = 1;
                     g_lock_pw_len = 0;
                     g_lock_pw[0]  = '\0';
                     need_redraw   = 1;
+                } else if (k == GUI_KEY_TAB) {
+                    /* Tab：切换焦点 */
+                    g_lock_focus = (g_lock_focus == 0) ? 1 : 0;
+                    need_redraw  = 1;
                 } else if (k == GUI_KEY_BACKSPACE) {
-                    /* 退格 */
-                    if (g_lock_pw_len > 0) {
-                        g_lock_pw_len--;
-                        g_lock_pw[g_lock_pw_len] = '\0';
-                        need_redraw = 1;
+                    /* 退格：作用于当前焦点字段 */
+                    if (g_lock_focus == 0) {
+                        if (g_lock_user_len > 0) {
+                            g_lock_user_len--;
+                            g_lock_user[g_lock_user_len] = '\0';
+                            need_redraw = 1;
+                        }
+                    } else {
+                        if (g_lock_pw_len > 0) {
+                            g_lock_pw_len--;
+                            g_lock_pw[g_lock_pw_len] = '\0';
+                            need_redraw = 1;
+                        }
                     }
                 } else if (k >= 0x20 && k < 0x7F) {
-                    /* 可见字符 */
-                    if (g_lock_pw_len < LOCK_PW_MAX) {
-                        g_lock_pw[g_lock_pw_len++] = (char)k;
-                        g_lock_pw[g_lock_pw_len] = '\0';
-                        g_lock_wrong = 0;
-                        need_redraw  = 1;
+                    /* 可见字符：写入当前焦点字段 */
+                    if (g_lock_focus == 0) {
+                        if (g_lock_user_len < LOCK_FIELD_MAX) {
+                            g_lock_user[g_lock_user_len++] = (char)k;
+                            g_lock_user[g_lock_user_len] = '\0';
+                            g_lock_wrong = 0;
+                            need_redraw  = 1;
+                        }
+                    } else {
+                        if (g_lock_pw_len < LOCK_FIELD_MAX) {
+                            g_lock_pw[g_lock_pw_len++] = (char)k;
+                            g_lock_pw[g_lock_pw_len] = '\0';
+                            g_lock_wrong = 0;
+                            need_redraw  = 1;
+                        }
                     }
                 }
             }

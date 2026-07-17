@@ -20,6 +20,7 @@
 #include "../include/embed_opkg_selftest.h"/* M5.4d: package-manager e2e self-test */
 #include "../include/embed_cpuinfo_selftest.h" /* M6.2d: CPU freq/thermal e2e self-test */
 #include "../include/embed_login.h"          /* M6.11.4: /bin/login ring3 login/session tool */
+#include "../include/embed_dmesg.h"          /* M6.12:   /bin/dmesg ring3 klog viewer */
 #include "../include/embed_launcher.h"     /* H.3: initial /bin/launcher  */
 #include "../include/embed_ifconfig64.h"   /* M1.5.3: /bin/ifconfig net tool */
 #include "../include/embed_ping64.h"       /* M1.5.3: /bin/ping net tool */
@@ -111,6 +112,8 @@ static const x86_64_initrd_file_t initrd_files[] = {
     /* M6.11.4: /bin/login authenticates a user via SYS_LOGIN and drops to the
      * account's gid/uid (setsid + setgid + setuid). Ring3 login/session proof. */
     { .name = "/bin/login", .data = login_elf, .size = (x86_64_size_t)login_elf_size, .mode = 0755u },
+    /* M6.12: /bin/dmesg prints or clears the kernel ring log via SYS_KLOG (487). */
+    { .name = "/bin/dmesg", .data = dmesg_elf, .size = (x86_64_size_t)dmesg_elf_size, .mode = 0755u },
     /* M1.5.3: userland network tools backed by the live virtio-net TCP/IP
      * stack (SYS_NETINFO/PING/DNSLOOKUP). */
     { .name = "/bin/ifconfig", .data = ifconfig64_elf, .size = (x86_64_size_t)ifconfig64_elf_size, .mode = 0755u },

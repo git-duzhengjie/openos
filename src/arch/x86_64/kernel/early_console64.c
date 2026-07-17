@@ -1,4 +1,5 @@
 #include "../include/early_console64.h"
+#include "../include/klog64.h"
 #include "font8x8_basic.h"
 
 #define EARLY_COM1_PORT 0x3F8u
@@ -341,9 +342,13 @@ void early_console64_write(const char *text) {
     if (!text) {
         return;
     }
-    while (*text) {
-        early_console64_putc(*text++);
+    const char *p = text;
+    while (*p) {
+        early_console64_putc(*p++);
     }
+    /* M6.12: tee the whole string into klog ring buffer. klog_emit
+     * trims trailing \r\n and is reentrancy-safe. */
+    klog_emit(KLOG_INFO, KLOG_FAC_KERNEL, text);
 }
 
 void early_console64_write_hex64(uint64_t value) {

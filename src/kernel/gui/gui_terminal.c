@@ -295,8 +295,39 @@ void gui_terminal_init(void) {
     gui_window_t *term;
     uint32_t cols;
     uint32_t rows;
+    int win_x;
+    int win_y;
+    int win_w;
+    int win_h;
+    int taskbar_h;
+    int min_h;
     if (g_gui.terminal.window) return;
-    term = gui_create_window(24, 420, (int)g_gui.width - 48, (int)g_gui.height - 448, i18n_t(I18N_KEY_WIN_TERMINAL));
+
+    /* M6.11 fix: 终端窗口尺寸自适应屏幕分辨率。
+     * 旧代码硬编码 y=420 / h=height-448，在 640x480 下窗口高度仅 32px，
+     * 内容区 rows 算为 0，导致终端只剩标题栏。改为按屏幕高度
+     * 比例布局，并保证内容区至少有足够行数。 */
+    taskbar_h = 24;
+    win_x = 24;
+    win_w = (int)g_gui.width - 48;
+    if (win_w < 160) win_w = (int)g_gui.width;
+
+    /* 终端窗口高度取屏幕可用高度（扣除底部任务栏）的约 45%，
+     * 但不少于 min_h（保证至少 5 行内容）。 */
+    min_h = GUI_TITLE_HEIGHT + 10 + 5 * (GUI_CHAR_H + 1);
+    win_h = ((int)g_gui.height - taskbar_h) * 45 / 100;
+    if (win_h < min_h) win_h = min_h;
+
+    /* 窗口底边距离任务栏留 8px 缝隙，据此反推 y 坐标。 */
+    win_y = (int)g_gui.height - taskbar_h - 8 - win_h;
+    if (win_y < 8) win_y = 8;
+    /* 若 y 被 clamp 后窗口仍超出任务栏，压缩高度以适配屏幕。 */
+    if (win_y + win_h > (int)g_gui.height - taskbar_h - 8) {
+        win_h = (int)g_gui.height - taskbar_h - 8 - win_y;
+        if (win_h < min_h) win_h = min_h;
+    }
+
+    term = gui_create_window(win_x, win_y, win_w, win_h, i18n_t(I18N_KEY_WIN_TERMINAL));
     if (!term) return;
     term->flags |= GUI_WINDOW_FLAG_TERMINAL;
     term->bg_color = gui_rgb(10, 14, 22);

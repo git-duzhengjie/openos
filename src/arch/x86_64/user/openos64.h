@@ -371,6 +371,30 @@ static inline long openos64_login(const char *name, const char *password, openos
                              (uint64_t)(uintptr_t)password, (uint64_t)(uintptr_t)out);
 }
 
+/* M6.12: kernel log ring buffer query (SYS_KLOG).
+ * cmd: 0=READ_ALL, 1=READ_TAIL(arg=count), 2=READ_FROM(arg=seq),
+ *      3=STATS(buf=klog_stats*), 4=CLEAR (requires uid=0).
+ * Returns bytes written / stats size / 0 on success, negative on error. */
+#define OPENOS64_SYS_KLOG          487ULL
+#define OPENOS64_KLOG_READ_ALL       0
+#define OPENOS64_KLOG_READ_TAIL      1
+#define OPENOS64_KLOG_READ_FROM      2
+#define OPENOS64_KLOG_STATS          3
+#define OPENOS64_KLOG_CLEAR          4
+typedef struct openos64_klog_stats {
+    uint32_t seq_next;
+    uint32_t seq_oldest;
+    uint32_t total_emitted;
+    uint32_t total_dropped;
+    uint32_t buffer_used;
+    uint32_t buffer_size;
+} openos64_klog_stats_t;
+static inline long openos64_klog(unsigned cmd, unsigned arg, void *buf, unsigned size) {
+    return openos64_syscall4(OPENOS64_SYS_KLOG,
+                             (uint64_t)cmd, (uint64_t)arg,
+                             (uint64_t)(uintptr_t)buf, (uint64_t)size);
+}
+
 static inline void openos64_exit(int code) __attribute__((noreturn));
 static inline void openos64_exit(int code) {
     (void)openos64_syscall1(OPENOS64_SYS_EXIT, (uint64_t)(uint32_t)code);

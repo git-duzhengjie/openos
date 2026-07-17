@@ -88,6 +88,19 @@ void arch_x86_64_mouse_irq12_handler(void) {
 
     unsigned char data = mouse_inb(PS2_DATA);
 
+    /* DIAG: dump first 32 raw bytes + packet_idx to catch resync deadlock */
+    {
+        static unsigned int diag_n = 0;
+        if (diag_n < 32) {
+            diag_n++;
+            early_console64_write("[mouse] DIAG idx=");
+            early_console64_write_hex64((uint64_t)g_packet_idx);
+            early_console64_write(" data=0x");
+            early_console64_write_hex64((uint64_t)data);
+            early_console64_write("\n");
+        }
+    }
+
     int packet_len = g_has_wheel ? 4 : 3;
 
     /* byte 0 must have the 'always 1' bit (0x08) set; else resync */
@@ -196,6 +209,14 @@ void mouse_init(void) {
     mouse_outb(PS2_CMD, 0x60);          /* write config byte */
     ps2_wait_input();
     mouse_outb(PS2_DATA, status);
+
+    /* DIAG: read the config byte back to confirm bit1 (mouse IRQ) stuck */
+    ps2_wait_input();
+    mouse_outb(PS2_CMD, 0x20);
+    unsigned char cfg_rb = mouse_read();
+    early_console64_write("[x86_64][mouse] DIAG cfg_readback=0x");
+    early_console64_write_hex64((uint64_t)cfg_rb);
+    early_console64_write("\n");
 
     /* 3. reset the mouse and use default settings */
     mouse_write(0xFF);                   /* reset */

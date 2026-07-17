@@ -1,10 +1,10 @@
 # openos 待开发功能清单
 
-> 更新时间：2026-07-15
+> 更新时间：2026-07-17
 >
 > 当前状态：openos 已具备 32 位 x86 原型内核能力，能够启动、显示、输入、调度、运行基础用户程序，并具备基础 syscall、VFS、ramfs/tmpfs、shell、GUI Terminal 等模块。浏览器路线已切换为 OpenOS 自研轻量浏览器，Chromium 官方内核迁移冻结为历史备选。
 >
-> 最近完成：**M6.11.4 SYS_LOGIN 完成**——系统调用 486 内核分发 + 用户态 `openos64_login()` 封装 + ring3 `/bin/login` 程序，端到端 openos 认证 PASS 且降权到 uid/gid=1000。**M6.11.3 login/session 完成**——账户库解析器 `account_db64`（/etc/passwd+/etc/shadow 无堆解析）+ 认证器 `login64`（SHA256(password) 与 shadow `sha256$<hex>` 比对）+ 会话建立（setsid→setgid→setuid 降权，顺序保证特权规则），`login_selftest64` 六阶段实机 PASS 且快照/恢复 slot-0 root 身份无污染，无 boot/GUI 回归。**M6.11 多用户与会话开工**——M6.11.1 进程凭证体系（POSIX uid/gid/euid/egid/suid/sgid + setuid/setgid/seteuid/setegid，commit `f88d9ff`）、M6.11.2 账户数据库（/etc/passwd+group+shadow，SHA256 哈希，commit `d760827`）。**重大底层修复：UEFI 重定位 triple fault 根除**（commit `f94378f`）——entry64 换 CR3 前 RIP 为物理地址时，`leaq sym(%rip)` 已直接产出运行时物理地址，代码却又多减一次 virt-to-phys offset 导致 pml4 物理地址算成越界垃圾→ identity map 缺失 → #PF→#DF→ triple fault；五处页表地址全改 `movabsq $sym`+`subq %r10`；修复后串口输出 18行→418行，prio/preempt selftest PASS，GUI 桌面起来（调试探针已清理 commit `48b6b9f`）。\n>\n> M6 里程碑全部收官（系统资源 + 图形加速 + 安全加固）—— M6.1 ACPI 电源、M6.2 CPU 频率/温度观测、M6.3 blit 软件加速、M6.4 virtio-gpu 2D、M6.5 framebuffer 双后端、M6.6 硬件光标、M6.7 EDID、M6.8 多 scanout、M6.9 virtio-input、**M6.10 安全加固 6/6（commit `ecfc876`）**。TCP/IP 全栈零回归（`src/kernel/net/netstack.c` 2093 行）；M4.1b sbrk 假故障修复（commit `31b7842`）。
+> 最近完成：**M6.12 系统日志子系统完成**——`klog64` 64KB 环形缓冲（seq 单调 + irq-off spinlock + FIFO 回绕 + 防重入 tee）+ `early_console` 零侵入 tee 集成 + `SYS_KLOG=487` 系统调用（bounce buffer 保证用户拷贝安全，CLEAR 需 euid=0）+ 用户态 `/bin/dmesg`（-n/-s/-c/-h）+ `klog-selftest` 六阶段全绿 + ring3 端到端验证（M6_DMESG_DIAG 通道 SYS_KLOG 成功拉取）；GUI 桌面**鼠标光标不显示**与**终端窗口只剩标题栏**两个长期问题一并修复（gui_cursor_draw_fb/restore_fb 补 present + 终端窗口尺寸从硬编码改为按屏幕高度 45% 自适应，适配 640×480 低分辨率）。**M6.11.4 SYS_LOGIN 完成**——系统调用 486 内核分发 + 用户态 `openos64_login()` 封装 + ring3 `/bin/login` 程序，端到端 openos 认证 PASS 且降权到 uid/gid=1000。**M6.11.3 login/session 完成**——账户库解析器 `account_db64`（/etc/passwd+/etc/shadow 无堆解析）+ 认证器 `login64`（SHA256(password) 与 shadow `sha256$<hex>` 比对）+ 会话建立（setsid→setgid→setuid 降权，顺序保证特权规则），`login_selftest64` 六阶段实机 PASS 且快照/恢复 slot-0 root 身份无污染，无 boot/GUI 回归。**M6.11 多用户与会话开工**——M6.11.1 进程凭证体系（POSIX uid/gid/euid/egid/suid/sgid + setuid/setgid/seteuid/setegid，commit `f88d9ff`）、M6.11.2 账户数据库（/etc/passwd+group+shadow，SHA256 哈希，commit `d760827`）。**重大底层修复：UEFI 重定位 triple fault 根除**（commit `f94378f`）——entry64 换 CR3 前 RIP 为物理地址时，`leaq sym(%rip)` 已直接产出运行时物理地址，代码却又多减一次 virt-to-phys offset 导致 pml4 物理地址算成越界垃圾→ identity map 缺失 → #PF→#DF→ triple fault；五处页表地址全改 `movabsq $sym`+`subq %r10`；修复后串口输出 18行→418行，prio/preempt selftest PASS，GUI 桌面起来（调试探针已清理 commit `48b6b9f`）。\n>\n> M6 里程碑全部收官（系统资源 + 图形加速 + 安全加固）—— M6.1 ACPI 电源、M6.2 CPU 频率/温度观测、M6.3 blit 软件加速、M6.4 virtio-gpu 2D、M6.5 framebuffer 双后端、M6.6 硬件光标、M6.7 EDID、M6.8 多 scanout、M6.9 virtio-input、**M6.10 安全加固 6/6（commit `ecfc876`）**。TCP/IP 全栈零回归（`src/kernel/net/netstack.c` 2093 行）；M4.1b sbrk 假故障修复（commit `31b7842`）。
 >
 > 当前推荐下一步：M6 已全部收官（M6.1–M6.10）。建议推进 **M6.11 多用户与会话**（完整 uid/gid 体系 + 登录管理 + 权限隔离）与 **M6.12 系统日志子系统**（dmesg / journald 风格）；或回头收口 H 系列 x86_64 ring3 进阶（H.5b.2+ 独立地址空间 + CR3 切换、fork、wait/waitpid、ELF 解释器、动态库）。任何后续工作均需保持 Stages 1-30 SMP=1/4 双矩阵全绿基线不退化。
 
@@ -1811,7 +1811,13 @@
   - [x] **M6.11.1 进程凭证体系**（commit `f88d9ff`）：PCB 扩展 POSIX 凭证集 uid/gid(real)+euid/egid(effective)+suid/sgid(saved)；实现 setuid/setgid/seteuid/setegid 严格 POSIX 特权规则；新增 syscall GETEUID/GETEGID/SETEUID/SETEGID(482-485) 并接线 SETUID/SETGID；fork 完整继承凭证；cred_selftest64 六阶段实机 PASS
   - [x] **M6.11.2 账户数据库**（commit `d760827`）：/etc/passwd + /etc/group + /etc/shadow seed 进 ramfs；默认 root(uid0)+openos(uid1000)，shadow 存 SHA256 哈希；24 个 initrd 文件全 seed 成功启动健康
   - [x] **M6.11.3 login/session**（commit 见下）：账户库解析器 `account_db64`（/etc/passwd + /etc/shadow 无堆解析）+ 认证器 `login64`（SHA256(password) 与 shadow `sha256$<hex>` 比对）+ 会话建立（setsid 成为会话领导后 setgid→setuid 降权，顺序保证特权规则）；`login_selftest64` 六阶段实机 PASS（root/openos 正确认证、错误密码 BAD_PASSWORD、未知用户 NO_USER、NULL 参数 EINVAL、start_session 降权+sid==pid），快照/恢复 slot-0 root 身份不污染；无 boot/prio/preempt/GUI 回归
-- [ ] M6.12：系统日志 / dmesg / journald 风格日志子系统
+- [x] **M6.12：系统日志 / dmesg 风格日志子系统 ✅**
+  - [x] **M6.12.1 klog 环形缓冲核心**：`klog64.[ch]` 64KB ring buffer + 单调 seq + irq-off spinlock + FIFO 回绕 + `total_dropped` 统计；`klog_emit`/`klog_read`/`klog_read_tail`/`klog_stats`/`klog_clear` 五个核心 API；防重入标志 `g_klog_reentry` 避免 klog→early_console→klog 死递归
+  - [x] **M6.12.2 early_console tee**：`early_console64.c` 集成 klog tee，所有现有 `[x86_64][xxx]` 内核日志**零侵入**自动进 klog，无需改任何调用点
+  - [x] **M6.12.3 SYS_KLOG=487 系统调用**：`syscall_dispatch64.c::do_klog` 分发（CMD_READ/READ_TAIL/READ_FROM_SEQ/STATS/CLEAR），32KB bounce buffer 保证用户拷贝安全（先拷内核栈再写用户 buf，避免持 klog 锁时触发 page fault），CLEAR 需 euid=0 权限
+  - [x] **M6.12.4 用户态 dmesg(1)**：`user/dmesg64.c` 完整参数解析（`-n<N>` 拉最新 N 条、`-s<sz>` 缓冲区大小、`-c` 读后清空、`-h` 帮助）
+  - [x] **M6.12.5 klog-selftest 六阶段**：`klog_selftest64.c` 覆盖 seq 单调 / tail read / from-seq resume / stats / wrap eviction / clear 六个场景，早期启动跑，`[x86_64][klog-selftest] PASS`
+  - [x] **端到端 diag 验证**：`M6_DMESG_DIAG=1` 通道 ring3 加载 `/bin/dmesg`，SYS_KLOG=487 用户态成功拉取内核日志（`<6>[seq] msg` 格式），headless 基线（`run_diag_gpu.sh`）与默认 ring3 通路（M6_LOGIN_DIAG）零回归
 
 > 推荐攻关顺序：**M1.1 PCI → M1.2 virtio-net → M1.3/M1.4 TCP/IP 栈 → M1.5 真实上网**。此路线打通后 OpenOS 才真正跨入现代 OS 门槛；M2/M4 可并行推进。
 
