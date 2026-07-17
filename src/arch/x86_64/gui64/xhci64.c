@@ -1216,9 +1216,11 @@ int xhci_hid_configure(uint32_t idx) {
     uint32_t ep_num = d->ep_in_addr & 0x0F;
     uint32_t dci    = ep_num * 2 + 1;
 
-    /* 3) 构建 Input Context：清零 → A0(slot)+A[dci] */
+    /* 3) 构建 Input Context：清零 → A0(slot)+A[dci]
+     * 注意 Input Context 布局：idx0=ICC, idx1=Slot, idx(dci+1)=EP[dci] Context。
+     * 需要清零到 (dci+2)*cs 才能覆盖真正的 EP 槽。 */
     uint8_t *ic = d->in_ctx;
-    for (uint32_t i = 0; i < (dci + 1) * cs; i++) ic[i] = 0;
+    for (uint32_t i = 0; i < (dci + 2) * cs; i++) ic[i] = 0;
     uint32_t *icc = xhci_ctx_at(ic, 0, cs);
     icc[1] = (1u << 0) | (1u << dci);      /* Add: Slot Context + EP_IN */
 
@@ -1228,8 +1230,9 @@ int xhci_hid_configure(uint32_t idx) {
     slot[0] = (dslot[0] & ~(0x1Fu << 27)) | (dci << 27);
     slot[1] = dslot[1];
 
-    /* EP_IN Context：Interrupt IN（EPType=7），CErr=3 */
-    uint32_t *ep  = xhci_ctx_at(ic, dci, cs);
+    /* EP_IN Context：Interrupt IN（EPType=7），CErr=3
+     * Input Ctx 中 EP 槽位 = dci+1（ICC 占 idx0，Slot 占 idx1） */
+    uint32_t *ep  = xhci_ctx_at(ic, dci + 1, cs);
     uint32_t mps  = d->ep_in_mps ? d->ep_in_mps : 8;
     uint32_t itv  = d->ep_in_interval ? d->ep_in_interval : 7;
     ep[0] = (itv << 16);
