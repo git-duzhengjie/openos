@@ -24,6 +24,14 @@ typedef enum aarch64_exception_type {
 
 void aarch64_exception_init(void);
 void aarch64_exception_dispatch(aarch64_trap_frame_t *frame);
+
+/* IRQ dispatch layer (M11-C.3). */
+typedef void (*aarch64_irq_handler_fn_t)(uint32_t intid, void *cookie);
+int      aarch64_irq_register(uint32_t intid, aarch64_irq_handler_fn_t handler, void *cookie);
+uint32_t aarch64_irq_total_count(void);
+uint32_t aarch64_irq_count_for(uint32_t intid);
+uint32_t aarch64_irq_spurious_count(void);
+void     aarch64_irq_simulate(uint32_t intid);
 void aarch64_panic(const char *reason);
 
 extern char aarch64_exception_vector_table[];

@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include "bootinfo.h"
+#include "aarch64_dtb.h"
 
 #define AARCH64_QEMU_VIRT_GICD_BASE      0x08000000ULL
 #define AARCH64_QEMU_VIRT_GICC_BASE      0x08010000ULL
@@ -21,6 +22,7 @@ typedef struct aarch64_dtb_info {
 typedef struct aarch64_platform_state {
     uint64_t dtb_base;
     uint32_t timer_frequency_hz;
+    uint32_t timer_irq;
     int gic_ready;
     int timer_ready;
     int psci_ready;
@@ -37,6 +39,9 @@ int aarch64_psci_system_reset(void);
 aarch64_dtb_info_t aarch64_dtb_probe(uint64_t dtb_base);
 void aarch64_platform_init(uint64_t dtb_base);
 const aarch64_platform_state_t *aarch64_platform_get_state(void);
+const aarch64_dtb_parser_t *aarch64_platform_dtb_parser(void);
+const aarch64_dtb_memory_info_t *aarch64_platform_dtb_memory(void);
+const aarch64_dtb_chosen_info_t *aarch64_platform_dtb_chosen(void);
 const openos_bootinfo_t *aarch64_platform_bootinfo_from_dtb(uint64_t dtb_base);
 
 #endif /* OPENOS_ARCH_AARCH64_PLATFORM_H */

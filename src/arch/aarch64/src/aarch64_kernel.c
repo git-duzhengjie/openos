@@ -3,6 +3,7 @@
 #include "aarch64_initrd.h"
 #include "aarch64_memory.h"
 #include "aarch64_platform.h"
+#include "aarch64_selftest.h"
 #include "aarch64_shell.h"
 #include "aarch64_uart.h"
 #include "aarch64_usermode.h"
@@ -49,6 +50,9 @@ void aarch64_kernel_main(unsigned long dtb) {
     } else {
         aarch64_uart_write("A5.6: failed to mount aarch64 initrd\n");
     }
+
+    /* M11-Z: aarch64 platform selftest (DTB / GICv3 / Timer IRQ / I2C / GT911). */
+    (void)aarch64_platform_selftest_run();
 
     for (;;) {
         __asm__ volatile ("wfe");

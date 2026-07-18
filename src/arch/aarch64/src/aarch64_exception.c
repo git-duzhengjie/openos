@@ -1,6 +1,71 @@
 #include "aarch64_exception.h"
 
 #include "aarch64_uart.h"
+#include "aarch64_gicv3.h"
+
+#define AARCH64_ESR_EC_SHIFT 26u
+#define AARCH64_ESR_EC_MASK  0x3fu
+#define AARCH64_ESR_EC_SVC64 0x15u
+#define AARCH64_INSN_SIZE    4u
+
+#define AARCH64_IRQ_TABLE_SIZE 128u
+
+typedef struct aarch64_irq_slot {
+    aarch64_irq_handler_fn_t handler;
+    void *cookie;
+    uint32_t count;
+} aarch64_irq_slot_t;
+
+static aarch64_irq_slot_t g_aarch64_irq_table[AARCH64_IRQ_TABLE_SIZE];
+static uint32_t           g_aarch64_irq_total;
+static uint32_t           g_aarch64_irq_spurious;
+
+int aarch64_irq_register(uint32_t intid,
+                         aarch64_irq_handler_fn_t handler,
+                         void *cookie)
+{
+    if (intid >= AARCH64_IRQ_TABLE_SIZE || handler == 0) {
+        return -1;
+    }
+    g_aarch64_irq_table[intid].handler = handler;
+    g_aarch64_irq_table[intid].cookie = cookie;
+    return 0;
+}
+
+uint32_t aarch64_irq_total_count(void)
+{
+    return g_aarch64_irq_total;
+}
+
+uint32_t aarch64_irq_count_for(uint32_t intid)
+{
+    if (intid >= AARCH64_IRQ_TABLE_SIZE) {
+        return 0;
+    }
+    return g_aarch64_irq_table[intid].count;
+}
+
+uint32_t aarch64_irq_spurious_count(void)
+{
+    return g_aarch64_irq_spurious;
+}
+
+/* Software trigger for selftest / initial bring-up (no real IRQ). */
+void aarch64_irq_simulate(uint32_t intid)
+{
+    if (intid >= AARCH64_IRQ_TABLE_SIZE) {
+        g_aarch64_irq_spurious++;
+        return;
+    }
+    aarch64_irq_slot_t *slot = &g_aarch64_irq_table[intid];
+    if (slot->handler == 0) {
+        g_aarch64_irq_spurious++;
+        return;
+    }
+    slot->count++;
+    g_aarch64_irq_total++;
+    slot->handler(intid, slot->cookie);
+}
 
 #define AARCH64_ESR_EC_SHIFT 26u
 #define AARCH64_ESR_EC_MASK  0x3fu
@@ -110,7 +175,25 @@ void aarch64_exception_dispatch(aarch64_trap_frame_t *frame)
     case AARCH64_EXC_IRQ_CURRENT_SPX:
     case AARCH64_EXC_IRQ_LOWER_AARCH64:
     case AARCH64_EXC_IRQ_LOWER_AARCH32:
+    {
+        uint32_t iar = aarch64_gicv3_ack_irq();
+        uint32_t intid = iar & 0xFFFFFFu;
+        if (intid >= 1020u) {
+            /* Spurious. */
+            g_aarch64_irq_spurious++;
+            (void)aarch64_gicv3_eoi_irq(intid);
+            return;
+        }
+        if (intid < AARCH64_IRQ_TABLE_SIZE && g_aarch64_irq_table[intid].handler) {
+            g_aarch64_irq_table[intid].count++;
+            g_aarch64_irq_total++;
+            g_aarch64_irq_table[intid].handler(intid, g_aarch64_irq_table[intid].cookie);
+        } else {
+            g_aarch64_irq_spurious++;
+        }
+        (void)aarch64_gicv3_eoi_irq(intid);
         return;
+    }
     default:
         aarch64_log_exception(frame);
         aarch64_panic("unhandled exception");

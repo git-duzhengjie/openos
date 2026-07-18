@@ -1949,4 +1949,16 @@
   - [x] M10.8 M8-F.6 通知超时自动淡出 → `nc_tick(now_ms)` 接 `pit64` 100Hz tick + `nc_push_notification_ttl` + `fade_duration_ms` 插值透明度 + `stat_notif_expired/evicted` + `nc-fade-selftest` 8 阶段 **PASS**
   - [x] M10.9 双 selftest：`app-stack-selftest` 8 阶段 + `app-lifecycle-selftest` 8 阶段 PASS
 
+- [x] **M11：ARM64 移植（mobile-touch-roadmap M11-A/B/C/D）**
+  - [x] M11-A 构建系统：`bash build.sh aarch64` 交叉链 + linker script + boot.S + `-mstrict-align`
+  - [x] M11-B UEFI 引导替代方案：QEMU virt `-kernel <ELF>` 直接引导（AAVMF/GOP 路径推迟到真机需求出现）
+  - [x] M11-C.1 DTB 解析：`aarch64_dtb.c/h` FDT 头校验 + 深度解析（memory / /chosen / initrd / model）
+  - [x] M11-C.2 GICv3 驱动：`aarch64_gicv3.c/h` distributor + redistributor + ICC_* 系统寄存器 + enable/ack/eoi API
+  - [x] M11-C.3 Timer IRQ 挂 GICv3：EL1 physical timer PPI INTID 30 + IRQ 分发层 `aarch64_irq_register/simulate` + 128 槽路由表
+  - [x] M11-D.1 I2C 抽象：`aarch64_i2c_bus.c/h` 通用 ops + `write/read_reg16` + 内存回放 stub 控制器（selftest 用）
+  - [x] M11-D.2 GT911 驱动：`aarch64_gt911.c/h` product-id probe + 状态字 buffer_ready + 5 点 track_id/x/y/size 解码 + 帧结束清位
+  - [x] M11-D.3 触点上报走 M8-E `input_report()` 事件总线：INPUT_EV_ABS + INPUT_TOUCH_CONTACT + INPUT_EV_SYN 帧尾 + 复用 `input_core.c`
+  - [x] M11-Z 五阶段 selftest：`aarch64_platform_selftest_run()` DTB/GICv3/TimerIRQ/I2C/GT911 → QEMU virt gic-version=3 冒烟 5/5 PASS
+  - [ ] M11-真机：AAVMF UEFI 二次引导 / 真板卡 GICv3 IRQ 打点 / GT911 真硬件 reset 时序（推迟到目标硬件到手）
+
 

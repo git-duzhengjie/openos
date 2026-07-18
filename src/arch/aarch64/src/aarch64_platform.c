@@ -1,8 +1,37 @@
 #include "aarch64_platform.h"
 #include "aarch64_bootinfo.h"
 #include "aarch64_uart.h"
+#include "aarch64_dtb.h"
+#include "aarch64_gicv3.h"
+
+/* Cached DTB parser state (populated by platform_init, consumed by selftest). */
+static aarch64_dtb_parser_t          g_aarch64_dtb_parser;
+static aarch64_dtb_memory_info_t     g_aarch64_dtb_memory;
+static aarch64_dtb_chosen_info_t     g_aarch64_dtb_chosen;
+static uint8_t                       g_aarch64_dtb_parse_ok;
+
+const aarch64_dtb_parser_t *aarch64_platform_dtb_parser(void)
+{
+    return g_aarch64_dtb_parse_ok ? &g_aarch64_dtb_parser : (const aarch64_dtb_parser_t *)0;
+}
+
+const aarch64_dtb_memory_info_t *aarch64_platform_dtb_memory(void)
+{
+    return g_aarch64_dtb_parse_ok ? &g_aarch64_dtb_memory : (const aarch64_dtb_memory_info_t *)0;
+}
+
+const aarch64_dtb_chosen_info_t *aarch64_platform_dtb_chosen(void)
+{
+    return g_aarch64_dtb_parse_ok ? &g_aarch64_dtb_chosen : (const aarch64_dtb_chosen_info_t *)0;
+}
 
 #define FDT_MAGIC 0xd00dfeedU
+
+/* EL1 physical (non-secure) timer PPI on ARMv8 GIC:
+ *   INTID 30 = CNTP (physical secure or non-secure per config)
+ *   QEMU virt routes EL1 phys timer to INTID 30. */
+#define AARCH64_TIMER_PPI_INTID  30u
+#define AARCH64_TIMER_PRIORITY   0xA0u
 
 static aarch64_platform_state_t g_aarch64_platform_state;
 
@@ -14,22 +43,18 @@ static uint32_t aarch64_be32_to_cpu(uint32_t value)
            ((value & 0xff000000U) >> 24);
 }
 
-static void aarch64_mmio_write32(uint64_t address, uint32_t value)
-{
-    volatile uint32_t *reg = (volatile uint32_t *)(uintptr_t)address;
-    *reg = value;
-}
-
 void aarch64_gic_init(void)
 {
-    /* Minimal GICv2 bring-up for QEMU virt: keep all SPIs disabled for now,
-     * enable distributor and CPU interface so later IRQ routing can be added
-     * without changing platform_ops wiring. */
-    aarch64_mmio_write32(AARCH64_QEMU_VIRT_GICD_BASE + 0x000, 0x0U);
-    aarch64_mmio_write32(AARCH64_QEMU_VIRT_GICC_BASE + 0x004, 0xffU);
-    aarch64_mmio_write32(AARCH64_QEMU_VIRT_GICC_BASE + 0x000, 0x1U);
-    aarch64_mmio_write32(AARCH64_QEMU_VIRT_GICD_BASE + 0x000, 0x1U);
-    g_aarch64_platform_state.gic_ready = 1;
+    /* Prefer GICv3 (QEMU virt default since v2.10). */
+    int rc = aarch64_gicv3_init(AARCH64_GICV3_GICD_BASE_DEFAULT,
+                                AARCH64_GICV3_GICR_BASE_DEFAULT);
+    g_aarch64_platform_state.gic_ready = (rc == 0) ? 1 : 0;
+
+    if (rc == 0) {
+        aarch64_uart_write("A5.4: GICv3 ready\n");
+    } else {
+        aarch64_uart_write("A5.4: GICv3 init failed\n");
+    }
 }
 
 void aarch64_timer_init(void)
@@ -37,6 +62,13 @@ void aarch64_timer_init(void)
     uint32_t frequency = aarch64_timer_read_frequency();
     g_aarch64_platform_state.timer_frequency_hz = frequency;
     g_aarch64_platform_state.timer_ready = (frequency != 0U);
+
+    /* Route EL1 physical timer PPI to the GIC (INTID 30). */
+    if (g_aarch64_platform_state.gic_ready) {
+        (void)aarch64_gicv3_enable_irq(AARCH64_TIMER_PPI_INTID,
+                                       AARCH64_TIMER_PRIORITY);
+        g_aarch64_platform_state.timer_irq = AARCH64_TIMER_PPI_INTID;
+    }
 }
 
 uint64_t aarch64_timer_read_counter(void)
@@ -111,9 +143,17 @@ void aarch64_platform_init(uint64_t dtb_base)
     aarch64_dtb_info_t dtb = aarch64_dtb_probe(dtb_base);
     g_aarch64_platform_state.dtb_ready = dtb.valid;
 
+    /* Deep DTB parse (memory range, /chosen bootargs, initrd, model). */
+    g_aarch64_dtb_parse_ok = 0;
+    if (dtb.valid && aarch64_dtb_parser_init(&g_aarch64_dtb_parser, dtb_base) == 0) {
+        (void)aarch64_dtb_parse_memory(&g_aarch64_dtb_parser, &g_aarch64_dtb_memory);
+        (void)aarch64_dtb_parse_chosen(&g_aarch64_dtb_parser, &g_aarch64_dtb_chosen);
+        g_aarch64_dtb_parse_ok = 1;
+    }
+
     aarch64_psci_init();
-    aarch64_timer_init();
     aarch64_gic_init();
+    aarch64_timer_init();
 
     aarch64_uart_write("A5.4: ARM platform init ");
     aarch64_uart_write(g_aarch64_platform_state.dtb_ready ? "DTB OK" : "DTB unavailable");

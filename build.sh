@@ -278,7 +278,7 @@ if [ "$BUILD_ARCH" = "aarch64" ]; then
     mkdir -p "$AARCH64_BUILD" "$AARCH64_USER_BUILD" "$AARCH64_USER_BIN"
     rm -f "$AARCH64_BUILD"/*.o "$AARCH64_BUILD"/*.elf "$AARCH64_BUILD"/*.bin \
           "$AARCH64_USER_BUILD"/*.o "$AARCH64_USER_BIN"/*.elf
-    AARCH64_CFLAGS="$AARCH64_CC_TARGET_FLAGS -ffreestanding -nostdlib -Wall -Wextra -O2 -mgeneral-regs-only -fno-stack-protector -fno-builtin -fno-pic -fno-pie -I$AARCH64_SRC/include -Isrc/kernel/include"
+    AARCH64_CFLAGS="$AARCH64_CC_TARGET_FLAGS -ffreestanding -nostdlib -Wall -Wextra -O2 -mgeneral-regs-only -mstrict-align -fno-stack-protector -fno-builtin -fno-pic -fno-pie -I$AARCH64_SRC/include -Isrc/kernel/include"
     AARCH64_USER_CFLAGS="$AARCH64_CC_TARGET_FLAGS -ffreestanding -nostdlib -Wall -Wextra -O2 -fno-stack-protector -fno-builtin -fno-pic -fno-pie -I$AARCH64_SRC/include"
     AARCH64_USER_LDFLAGS="-Ttext=0x400000 -nostdlib"
 
@@ -313,6 +313,12 @@ if [ "$BUILD_ARCH" = "aarch64" ]; then
     "$AARCH64_CC" $AARCH64_CFLAGS -c "$AARCH64_SRC/src/aarch64_elf64.c" -o "$AARCH64_BUILD/aarch64_elf64.o"
     "$AARCH64_CC" $AARCH64_CFLAGS -c "$AARCH64_SRC/src/aarch64_usermode.c" -o "$AARCH64_BUILD/aarch64_usermode.o"
     "$AARCH64_CC" $AARCH64_CFLAGS -c "$AARCH64_SRC/src/aarch64_platform.c" -o "$AARCH64_BUILD/aarch64_platform.o"
+    "$AARCH64_CC" $AARCH64_CFLAGS -c "$AARCH64_SRC/src/aarch64_dtb.c" -o "$AARCH64_BUILD/aarch64_dtb.o"
+    "$AARCH64_CC" $AARCH64_CFLAGS -c "$AARCH64_SRC/src/aarch64_gicv3.c" -o "$AARCH64_BUILD/aarch64_gicv3.o"
+    "$AARCH64_CC" $AARCH64_CFLAGS -c "$AARCH64_SRC/src/aarch64_i2c_bus.c" -o "$AARCH64_BUILD/aarch64_i2c_bus.o"
+    "$AARCH64_CC" $AARCH64_CFLAGS -c "$AARCH64_SRC/src/aarch64_gt911.c" -o "$AARCH64_BUILD/aarch64_gt911.o"
+    "$AARCH64_CC" $AARCH64_CFLAGS -c "$AARCH64_SRC/src/aarch64_selftest.c" -o "$AARCH64_BUILD/aarch64_selftest.o"
+    "$AARCH64_CC" $AARCH64_CFLAGS -I"src/kernel/include" -c "src/kernel/input/input_core.c" -o "$AARCH64_BUILD/input_core.o"
     "$AARCH64_CC" $AARCH64_CFLAGS -c "$AARCH64_SRC/src/aarch64_initrd.c" -o "$AARCH64_BUILD/aarch64_initrd.o"
     "$AARCH64_CC" $AARCH64_CFLAGS -c "$AARCH64_SRC/src/aarch64_vfs.c" -o "$AARCH64_BUILD/aarch64_vfs.o"
     "$AARCH64_CC" $AARCH64_CFLAGS -c "$AARCH64_SRC/src/aarch64_shell.c" -o "$AARCH64_BUILD/aarch64_shell.o"
@@ -330,6 +336,12 @@ if [ "$BUILD_ARCH" = "aarch64" ]; then
         "$AARCH64_BUILD/aarch64_elf64.o" \
         "$AARCH64_BUILD/aarch64_usermode.o" \
         "$AARCH64_BUILD/aarch64_platform.o" \
+        "$AARCH64_BUILD/aarch64_dtb.o" \
+        "$AARCH64_BUILD/aarch64_gicv3.o" \
+        "$AARCH64_BUILD/aarch64_i2c_bus.o" \
+        "$AARCH64_BUILD/aarch64_gt911.o" \
+        "$AARCH64_BUILD/aarch64_selftest.o" \
+        "$AARCH64_BUILD/input_core.o" \
         "$AARCH64_BUILD/aarch64_initrd.o" \
         "$AARCH64_BUILD/aarch64_vfs.o" \
         "$AARCH64_BUILD/aarch64_shell.o" \
@@ -344,7 +356,8 @@ if [ "$BUILD_ARCH" = "aarch64" ]; then
     echo "  BIN: $AARCH64_BUILD/openos-aarch64.bin"
     echo "  USER: $AARCH64_USER_BIN/hello64.elf"
     if command -v "$AARCH64_QEMU" >/dev/null 2>&1; then
-        echo "  Smoke run: $AARCH64_QEMU -M virt -cpu cortex-a57 -nographic -kernel $AARCH64_BUILD/openos-aarch64.elf"
+        echo "  Smoke run: $AARCH64_QEMU -M virt,gic-version=3 -cpu cortex-a57 -nographic -kernel $AARCH64_BUILD/openos-aarch64.elf"
+        echo "  Smoke DTB: $AARCH64_QEMU -M virt,gic-version=3 -cpu cortex-a57 -nographic -kernel $AARCH64_BUILD/openos-aarch64.bin"
     else
         echo "  QEMU not found; install qemu-system-aarch64 or set AARCH64_QEMU to run smoke boot."
     fi
