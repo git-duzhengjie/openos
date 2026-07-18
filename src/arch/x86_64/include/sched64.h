@@ -75,7 +75,7 @@ void arch_x86_64_sched_print_status(void);
 #define OPENOS_X86_64_SCHED_MAX_KTHREADS 32u
 /* D1-H1: bumped 8K -> 16K to A/B-test kthread stack overflow hypothesis
  * (stage-16 sporadic #GP with rsp landing in 0xFFFFFFFF9000_xxxx heap range) */
-#define OPENOS_X86_64_SCHED_KSTACK_BYTES 65536u
+#define OPENOS_X86_64_SCHED_KSTACK_BYTES 131072u /* 128KB: preempt-selftest hits ~86KB peak on M8+M9+M10 stacks; 64KB gave #GP at IRQ0 iretq */
 
 uint32_t arch_x86_64_sched_spawn_kthread(x86_64_thread_entry_t entry, void *arg);
 uint32_t arch_x86_64_sched_yield(void);

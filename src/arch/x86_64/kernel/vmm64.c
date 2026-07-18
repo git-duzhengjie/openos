@@ -3,7 +3,7 @@
 #include "../include/pmm64.h"
 #include "../include/vmm64.h"
 
-#define VMM64_EARLY_IDENTITY_SIZE (512ULL * 1024ULL * 1024ULL)
+#define VMM64_EARLY_IDENTITY_SIZE (1ULL * 1024ULL * 1024ULL * 1024ULL)  /* 1 GiB: cover typical QEMU/dev-hw RAM. UEFI already identity-mapped [0..4G) with 2MiB pages; we replicate 1 GiB with 4KiB pages (each vmm64_tables slot maps 2 MiB, need ~512 tables). Enough for -m 1024. Real hardware with >1G RAM will need huge-page path in future.  */
 #define VMM64_EARLY_KERNEL_MAP_SIZE (64ULL * 1024ULL * 1024ULL)
 
 /*

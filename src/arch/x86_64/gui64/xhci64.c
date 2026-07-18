@@ -1778,7 +1778,10 @@ int xhci_msc_control(uint32_t idx, uint8_t bmReqType, uint8_t bReq,
 int xhci_selftest(void) {
     XLOG("=== xHCI selftest begin ===");
     if (xhci_init() != 0) {
-        XLOG("selftest FAIL: init error");
+        if (!xhci_present())
+            XLOG("selftest SKIP: no controller");
+        else
+            XLOG("selftest FAIL: init error");
         return -1;
     }
     XLOG_NN("selftest: max_ports="); XDEC(g_xhci.max_ports);

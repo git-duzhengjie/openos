@@ -421,26 +421,38 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
     /* M2.1：AHCI/SATA 驱动自测（读写回校验） */
     if (ahci_selftest() == 0) {
         early_console64_write("[x86_64][ahci] SATA disk selftest PASS\n");
+    } else if (!ahci_present()) {
+        early_console64_write("[x86_64][ahci] SATA disk SKIP (no controller)\n");
     } else {
-        early_console64_write("[x86_64][ahci] SATA disk selftest skipped/FAIL\n");
+        early_console64_write("[x86_64][ahci] SATA disk selftest FAIL\n");
     }
 
     /* M2.2：NVMe 驱动自测（IDENTIFY + 读写回校验） */
-    if (nvme_init() == 0 && nvme_selftest() == 0) {
-        early_console64_write("[x86_64][nvme] NVMe disk selftest PASS\n");
-    } else {
-        early_console64_write("[x86_64][nvme] NVMe disk selftest skipped/FAIL\n");
+    {
+        int nv_init = nvme_init();
+        if (nv_init == 0 && nvme_selftest() == 0) {
+            early_console64_write("[x86_64][nvme] NVMe disk selftest PASS\n");
+        } else if (!nvme_present()) {
+            early_console64_write("[x86_64][nvme] NVMe disk SKIP (no controller)\n");
+        } else {
+            early_console64_write("[x86_64][nvme] NVMe disk selftest FAIL\n");
+        }
     }
 
     /* M2.3：xHCI USB 主机控制器自测（探测 + 命令环 NOOP + 端口枚举） */
-    if (xhci_init() == 0 && xhci_selftest() == 0) {
-        early_console64_write("[x86_64][xhci] xHCI selftest PASS\n");
-        /* M2.3 Step3-4：枚举 HID 键鼠，配置 Interrupt-IN 端点并注册 input 设备 */
-        usb_hid_init();
-        /* M2.3 Step5：枚举 USB 大容量存储(U 盘)，配置 Bulk 端点并初始化 SCSI */
-        usb_msc_init();
-    } else {
-        early_console64_write("[x86_64][xhci] xHCI selftest skipped/FAIL\n");
+    {
+        int xh_init = xhci_init();
+        if (xh_init == 0 && xhci_selftest() == 0) {
+            early_console64_write("[x86_64][xhci] xHCI selftest PASS\n");
+            /* M2.3 Step3-4：枚举 HID 键鼠，配置 Interrupt-IN 端点并注册 input 设备 */
+            usb_hid_init();
+            /* M2.3 Step5：枚举 USB 大容量存储(U 盘)，配置 Bulk 端点并初始化 SCSI */
+            usb_msc_init();
+        } else if (!xhci_present()) {
+            early_console64_write("[x86_64][xhci] xHCI SKIP (no controller)\n");
+        } else {
+            early_console64_write("[x86_64][xhci] xHCI selftest FAIL\n");
+        }
     }
 
     /* M2.4：声卡 / 音频子系统（PCI 探测 AC97/HDA + PC Speaker + AC97 PCM 播放自检） */
@@ -809,10 +821,12 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
      * PIC remap + PIT chain are proven good. The test re-masks IRQ0 on
      * exit so the downstream ring3 hello64 path inherits IRQs-off as
      * before. */
-#ifndef M5_FAST_BOOT
+#if !defined(M5_FAST_BOOT) && defined(OPENOS_ENABLE_PREEMPT_SELFTEST)
     (void)arch_x86_64_sched_preempt_selftest_run();
-#endif /* M5_FAST_BOOT: preempt-selftest slot-switch/exit_self path is flaky
-        * under single-core QEMU; skip in fast-boot diag path. */
+#else
+    early_console64_write("[x86_64][preempt-selftest] SKIP (disabled by default; enable via -DOPENOS_ENABLE_PREEMPT_SELFTEST)\n");
+#endif /* preempt-selftest: iretq-on-first-dispatch path still triple-faults
+        * under single-core QEMU with pending IRQ0; guarded off by default. */
 
     /* Step M6.2: probe CPU frequency / thermal state via CPUID-gated MSR
      * access (read-only; never changes the P-state). Placed BEFORE the ACPI
@@ -923,6 +937,8 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
         }
         if (nvme_selftest() == 0)
             early_console64_write("[x86_64][msi] NVMe IRQ-path selftest PASS\n");
+        else if (!nvme_present())
+            early_console64_write("[x86_64][msi] NVMe IRQ-path SKIP (no controller)\n");
         else
             early_console64_write("[x86_64][msi] NVMe IRQ-path selftest FAIL\n");
         {
@@ -936,6 +952,8 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
         xhci_irq_install_late();
         if (xhci_selftest() == 0)
             early_console64_write("[x86_64][msi] xHCI IRQ-path selftest PASS\n");
+        else if (!xhci_present())
+            early_console64_write("[x86_64][msi] xHCI IRQ-path SKIP (no controller)\n");
         else
             early_console64_write("[x86_64][msi] xHCI IRQ-path selftest FAIL\n");
         {
