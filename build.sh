@@ -787,6 +787,8 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         kernel/touch_ui_selftest64.c \
         kernel/input_selftest64.c \
         kernel/notif_center_selftest64.c \
+        kernel/app_stack_selftest64.c \
+        kernel/app_lifecycle_selftest64.c \
         kernel/gui_metrics_selftest64.c \
         kernel/gui_input_bridge_selftest64.c \
         kernel/security64.c \
@@ -856,6 +858,10 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         src/kernel/gui/osk.c \
         src/kernel/gui/touch_ui.c \
         src/kernel/gui/notif_center.c \
+        src/kernel/app/app_stack.c \
+        src/kernel/app/app_manifest.c \
+        src/kernel/app/app_launcher.c \
+        src/kernel/app/gui_mode.c \
         src/kernel/gui/gui_metrics.c \
         src/kernel/gui/gui_input_bridge.c \
         src/kernel/input/input_core.c \
@@ -965,6 +971,8 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         "$ARCH64_BUILD/touch_ui_selftest64.o" \
         "$ARCH64_BUILD/input_selftest64.o" \
         "$ARCH64_BUILD/notif_center_selftest64.o" \
+        "$ARCH64_BUILD/app_stack_selftest64.o" \
+        "$ARCH64_BUILD/app_lifecycle_selftest64.o" \
         "$ARCH64_BUILD/gui_metrics_selftest64.o" \
         "$ARCH64_BUILD/gui_input_bridge_selftest64.o" \
         "$ARCH64_BUILD/security64.o" \
@@ -1022,6 +1030,10 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         "$ARCH64_BUILD/osk.o" \
         "$ARCH64_BUILD/touch_ui.o" \
         "$ARCH64_BUILD/notif_center.o" \
+        "$ARCH64_BUILD/app_stack.o" \
+        "$ARCH64_BUILD/app_manifest.o" \
+        "$ARCH64_BUILD/app_launcher.o" \
+        "$ARCH64_BUILD/gui_mode.o" \
         "$ARCH64_BUILD/gui_metrics.o" \
         "$ARCH64_BUILD/gui_input_bridge.o" \
         "$ARCH64_BUILD/input_core.o" \

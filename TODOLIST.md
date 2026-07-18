@@ -1938,3 +1938,15 @@
 > **实施顺序**：**M8-A（1-2 天）→ M8-B（2-3 天）→ M8-C（3-5 天）→ M8-D（3-5 天）→ M8-E（2-3 天）**。每个 milestone 完成后跑 Stages 1-30 SMP=1/4 双矩阵 + gfx-selftest + input-selftest 三条基线，无回归再合入 main。
 > 👉 M8-E 是触屏/手机形态的地基，完成后 M9（触屏 GUI）→ M10（全屏应用）→ M11（ARM64）→ M12（移动特性）路线已在 `docs/mobile-touch-roadmap.md` 中完整拆解。
 
+- [x] **M10：全屏应用栈（mobile-touch-roadmap M10-A/B/C/E）**
+  - [x] M10.1 `app_stack.h/.c`：8 槽静态栈 + LRU seq + INIT/RESUMED/PAUSED/DESTROYED 状态机
+  - [x] M10.2 `app_manifest.h/.c`：硬编码 3 条内建应用（terminal / dmesg / hello64），字段 name/label/path/icon/perm/hooks；真解析留 M11
+  - [x] M10.3 生命周期钩子：on_launch / on_resume / on_pause / on_destroy 由 launcher 层触发（app_stack 内部只做状态迁移 + 统计）
+  - [x] M10.4 `app_launcher.h/.c`：`app_launch(name)` / `app_exit()` / `app_switcher_show/hide/select()`；ELF 后端接口 `app_launcher_bind_backend()`（内建 app pid=-1，ELF app 由 backend 返回 pid）
+  - [x] M10.5 `gui_mode.h/.c`：DESKTOP/FULLSCREEN 模式抽象 + listener 回调（默认 DESKTOP，零回归）
+  - [ ] M10.6 app_switcher overlay UI 渲染（三指上滑触发；本期只做状态位，UI 渲染留后续与 gui_metrics 联动）
+  - [ ] M10.7 M8-E.4 `sys_input_read()` 系统调用（补票，等 hello64 用户程序对接）
+  - [ ] M10.8 M8-F.6 通知超时自动淡出（补票，接 pit64 tick）
+  - [x] M10.9 双 selftest：`app-stack-selftest` 8 阶段 + `app-lifecycle-selftest` 8 阶段 PASS
+
+
