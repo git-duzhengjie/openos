@@ -13,6 +13,7 @@
  * ============================================================================ */
 #include "touch_ui.h"
 #include "osk.h"
+#include "notif_center.h"
 #include "gesture.h"
 #include "gui.h"
 
@@ -31,6 +32,7 @@ void touch_ui_init(int screen_w, int screen_h) {
     /* 清零统计 */
     for (uint32_t i = 0; i < sizeof(g_stats); i++) ((uint8_t *)&g_stats)[i] = 0;
     osk_init(screen_w, screen_h);
+    nc_init(screen_w, screen_h);
     gesture_init(screen_w, screen_h);
     gesture_set_listener(touch_ui_listener_, 0);
     g_touch_ui_ready = 1;
@@ -50,10 +52,18 @@ void touch_ui_on_gesture(const gesture_event_t *ev) {
 
     switch (ev->type) {
     case GESTURE_TYPE_TAP: {
-        /* Tap 先交给 OSK；未命中则透传（外部走 mouse click 兼容路径） */
+        /* Tap 优先级：OSK > 通知中心/快速面板 > 透传 */
         g_stats.taps_forwarded++;
         int consumed = osk_handle_tap(ev->x, ev->y);
-        if (consumed) g_stats.taps_consumed_by_osk++;
+        if (consumed) {
+            g_stats.taps_consumed_by_osk++;
+            break;
+        }
+        /* 通知中心 / 快速面板命中处理 */
+        consumed = nc_handle_tap(ev->x, ev->y);
+        if (consumed) {
+            g_stats.taps_consumed_by_nc++;
+        }
         break;
     }
     case GESTURE_TYPE_SWIPE_UP:
@@ -63,12 +73,14 @@ void touch_ui_on_gesture(const gesture_event_t *ev) {
         g_stats.last_action = TOUCH_UI_ACT_TOGGLE_OSK;
         break;
     case GESTURE_TYPE_SWIPE_DOWN:
-        /* 顶边下滑 → 通知中心（打桩） */
+        /* 顶边下滑 → 通知中心 */
+        nc_notif_toggle();
         g_stats.notif_center++;
         g_stats.last_action = TOUCH_UI_ACT_NOTIF_CENTER;
         break;
     case GESTURE_TYPE_SWIPE_LEFT:
-        /* 右边滑入向左 → 快速面板（打桩） */
+        /* 右边滑入向左 → 快速面板 */
+        nc_quick_toggle();
         g_stats.quick_panel++;
         g_stats.last_action = TOUCH_UI_ACT_QUICK_PANEL;
         break;

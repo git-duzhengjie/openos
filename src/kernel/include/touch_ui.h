@@ -35,6 +35,7 @@ typedef struct touch_ui_stats {
     uint32_t back;
     uint32_t taps_forwarded;      /* TAP 事件透传给 OSK/桌面 */
     uint32_t taps_consumed_by_osk;
+    uint32_t taps_consumed_by_nc; /* M8-F: 通知中心/快速面板消费 */
     uint32_t total_events;
     touch_ui_action_t last_action;
 } touch_ui_stats_t;

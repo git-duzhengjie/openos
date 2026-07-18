@@ -11,6 +11,7 @@
 #include "../include/early_console64.h"
 #include "../../../kernel/include/touch_ui.h"
 #include "../../../kernel/include/osk.h"
+#include "../../../kernel/include/notif_center.h"
 #include "../../../kernel/include/gesture.h"
 
 #include <stdint.h>
@@ -63,10 +64,13 @@ bool arch_x86_64_touch_ui_selftest_run(void)
     emit_(GESTURE_TYPE_SWIPE_DOWN, 320, 5);
     TUI_ST_CHECK(st->notif_center == 1, "notif_center != 1");
     TUI_ST_CHECK(st->last_action == TOUCH_UI_ACT_NOTIF_CENTER, "last_action != NOTIF");
+    /* M8-F: SWIPE_DOWN 现在会真实弹出通知中心，为不影响后续 TAP 测试，手动隐藏 */
+    nc_notif_hide();
 
     /* 4) SWIPE_LEFT -> quick_panel */
     emit_(GESTURE_TYPE_SWIPE_LEFT, 630, 240);
     TUI_ST_CHECK(st->quick_panel == 1, "quick_panel != 1");
+    nc_quick_hide();
 
     /* 5) SWIPE_RIGHT -> back */
     emit_(GESTURE_TYPE_SWIPE_RIGHT, 10, 240);

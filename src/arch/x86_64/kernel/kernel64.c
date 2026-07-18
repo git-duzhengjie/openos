@@ -9,6 +9,7 @@
 #include "../include/osk_selftest64.h"
 #include "../include/touch_ui_selftest64.h"
 #include "../include/input_selftest64.h"
+#include "../include/notif_center_selftest64.h"
 #include "../include/elf64_loader.h"
 #include "../include/fdtable64.h"
 #include "../include/percpu64.h"
@@ -134,6 +135,7 @@ void arch_x86_64_early_init(const openos_bootinfo_t *bootinfo) {
     (void)arch_x86_64_osk_selftest_run();
     (void)arch_x86_64_touch_ui_selftest_run();
     (void)arch_x86_64_input_selftest_run();
+    (void)arch_x86_64_notif_center_selftest_run();
     early_console64_write("[x86_64] arch_ops=");
     early_console64_write(openos_arch_ops_name());
     early_console64_write(" platform_ops=");

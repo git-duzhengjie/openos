@@ -8,6 +8,7 @@
 #include "gui.h"
 #include "gui_user.h"
 #include "osk.h"
+#include "notif_center.h"
 #include "framebuffer.h"
 #include "mouse.h"
 #include "gesture.h"
@@ -10797,6 +10798,8 @@ static void gui_render_scene(void) {
     gui_desktop_draw_start_menu();
     gui_ctxmenu_draw();
     /* M8-D: 将虚拟键盘作为最顶层 overlay 渲染（仅在 visible=1 时生效） */
+    /* M8-F: 通知中心 / 快速面板 overlay */
+    nc_render();
     osk_render();
 }
 

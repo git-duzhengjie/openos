@@ -1904,8 +1904,8 @@
   - [x] `touch_ui_selftest64` 9 阶段 PASS
 - [x] **M8-D.3 边缘手势 UX 接线**
   - [x] 底边 swipe up → OSK toggle（已上线）
-  - [x] 顶边 swipe down → 通知中心（打桩 stat，UI 推到 M8-F）
-  - [x] 右边 swipe left → 快速面板（打桩）
+  - [x] 顶边 swipe down → 通知中心（M8-F 已上线，真 UI）
+  - [x] 右边 swipe left → 快速面板（M8-F 已上线，真 UI）
   - [x] 左边 swipe right → 返回/关闭前台（打桩）
 - [ ] **M8-D.4 I²C HID 触屏驱动（真机 Surface / 触屏笔记本）**
   - [ ] 实现 `i2c64.c`：Intel LPSS / Designware I²C 主控驱动（PCI + MMIO）
@@ -1925,6 +1925,15 @@
   - [ ] M8-E.4 `sys_input_read()` 系统调用（用户态读取事件流，为 gestured/录制铺路，推迟到 M10 应用运行时）
   - [x] M8-E.5 input-selftest 注入合成事件验证 FIFO/订阅/溢出 drop-oldest/取消订阅/热插拔占位/手势 tee 完整性（8 阶段 PASS）
   - [ ] 详细路线文档已归档：`docs/mobile-touch-roadmap.md`（含 M9~M12 触屏/手机形态五阶段）
+
+- [x] **M8-F：通知中心 + 快速面板 UI**
+  - [x] M8-F.1 `notif_center.c/.h`：单例 overlay，通知列表 + 快速开关 6 项（Wi-Fi/BT/Airplane/Brightness/Volume/Rotation），零堆分配、纯整数几何
+  - [x] M8-F.2 与 M8-D touch_ui 集成：SWIPE_DOWN→`nc_notif_toggle()`、SWIPE_LEFT→`nc_quick_toggle()`；TAP 分派优先级 OSK > NC > 桌面透传
+  - [x] M8-F.3 命中测试与关闭策略：面板外 tap 自动关闭、关闭按钮命中、开关格子逐项 toggle 并累加 stats
+  - [x] M8-F.4 渲染挂到 `gui_render()` 末尾（OSK 之前，保持键盘最顶层）
+  - [x] M8-F.5 `notif_center_selftest64` 集成 selftest + 内置 8 阶段 `nc_selftest()` PASS
+  - [ ] M8-F.6 通知超时自动淡出（推迟到 M10 应用运行时）
+  - [ ] M8-F.7 快速开关联动真实驱动（Wi-Fi/BT/亮度/音量，推迟到对应驱动上线）
 
 > **实施顺序**：**M8-A（1-2 天）→ M8-B（2-3 天）→ M8-C（3-5 天）→ M8-D（3-5 天）→ M8-E（2-3 天）**。每个 milestone 完成后跑 Stages 1-30 SMP=1/4 双矩阵 + gfx-selftest + input-selftest 三条基线，无回归再合入 main。
 > 👉 M8-E 是触屏/手机形态的地基，完成后 M9（触屏 GUI）→ M10（全屏应用）→ M11（ARM64）→ M12（移动特性）路线已在 `docs/mobile-touch-roadmap.md` 中完整拆解。
