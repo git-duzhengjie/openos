@@ -12,6 +12,21 @@
  * ============================================================ */
 
 #include "mouse.h"
+#include "input_core.h"
+
+/* ---- M8-E: Input Abstraction Layer tee helpers ---- */
+static uint16_t g_mouse_ps2_dev_id = 0;
+static uint16_t g_mouse_usb_dev_id = 0;
+static uint8_t  g_last_buttons_ps2 = 0;
+static uint8_t  g_last_buttons_usb = 0;
+
+static void ial_tee_buttons(uint16_t dev_id, uint8_t *last, uint8_t curr) {
+    uint8_t diff = *last ^ curr;
+    if (diff & 0x01) input_report_key(dev_id, INPUT_KEY_MOUSE_LEFT,   (curr & 0x01) ? 1 : 0, 0);
+    if (diff & 0x02) input_report_key(dev_id, INPUT_KEY_MOUSE_RIGHT,  (curr & 0x02) ? 1 : 0, 0);
+    if (diff & 0x04) input_report_key(dev_id, INPUT_KEY_MOUSE_MIDDLE, (curr & 0x04) ? 1 : 0, 0);
+    *last = curr;
+}
 
 /* ---- serial log helper (provided by early_console64) ---- */
 extern void early_console64_write(const char *s);
@@ -153,6 +168,23 @@ void arch_x86_64_mouse_irq12_handler(void) {
 
     g_mouse.absolute_mode = 0;
     g_mouse.packet_count++;
+
+    /* M8-E: tee to IAL (PS/2 mouse). */
+    if (g_mouse_ps2_dev_id == 0) {
+        g_mouse_ps2_dev_id = input_device_register(INPUT_DEV_MOUSE_PS2, "ps2-mouse");
+    }
+    if (ddx) input_report_rel(g_mouse_ps2_dev_id, INPUT_REL_X, ddx, 0);
+    if (ddy) input_report_rel(g_mouse_ps2_dev_id, INPUT_REL_Y, ddy, 0);
+    {
+        int wh = 0;
+        if (g_has_wheel) {
+            wh = (int)(g_packet[3] & 0x0F);
+            if (wh & 0x08) wh |= 0xFFFFFFF0;
+        }
+        if (wh) input_report_rel(g_mouse_ps2_dev_id, INPUT_REL_WHEEL, wh, 0);
+    }
+    ial_tee_buttons(g_mouse_ps2_dev_id, &g_last_buttons_ps2, (uint8_t)(flags & 0x07));
+    input_report_syn(g_mouse_ps2_dev_id, 0);
 }
 
 /* ---- USB HID 鼠标相对移动注入（供 usb_hid64.c 调用）----
@@ -175,6 +207,16 @@ void mouse_inject_relative(int dx, int dy, uint8_t buttons, int wheel) {
 
     g_mouse.absolute_mode = 0;
     g_mouse.packet_count++;
+
+    /* M8-E: tee to IAL as REL + wheel + button transitions. */
+    if (g_mouse_usb_dev_id == 0) {
+        g_mouse_usb_dev_id = input_device_register(INPUT_DEV_MOUSE_USB, "usb-mouse");
+    }
+    if (dx) input_report_rel(g_mouse_usb_dev_id, INPUT_REL_X, dx, 0);
+    if (dy) input_report_rel(g_mouse_usb_dev_id, INPUT_REL_Y, dy, 0);
+    if (wheel) input_report_rel(g_mouse_usb_dev_id, INPUT_REL_WHEEL, wheel, 0);
+    ial_tee_buttons(g_mouse_usb_dev_id, &g_last_buttons_usb, buttons & 0x07);
+    input_report_syn(g_mouse_usb_dev_id, 0);
 }
 
 /* ---- mouse_init: PS/2 controller + mouse enable sequence ---- */
@@ -289,6 +331,14 @@ void mouse_set_absolute_position(int x, int y, uint8_t buttons) {
     g_mouse.buttons = buttons;
     g_mouse.absolute_mode = 1;
     g_mouse.present = 1;
+
+    /* M8-E: tee to IAL as ABS event + button transitions. */
+    if (g_mouse_usb_dev_id == 0) {
+        g_mouse_usb_dev_id = input_device_register(INPUT_DEV_TABLET_USB, "usb-tablet");
+    }
+    input_report_abs(g_mouse_usb_dev_id, x, y, 0, 0);
+    ial_tee_buttons(g_mouse_usb_dev_id, &g_last_buttons_usb, buttons);
+    input_report_syn(g_mouse_usb_dev_id, 0);
 }
 
 void mouse_set_absolute_position_with_wheel(int x, int y, uint8_t buttons, int wheel) {
@@ -297,6 +347,15 @@ void mouse_set_absolute_position_with_wheel(int x, int y, uint8_t buttons, int w
     g_mouse.wheel += wheel;
     g_mouse.absolute_mode = 1;
     g_mouse.present = 1;
+
+    /* M8-E: tee to IAL as ABS + wheel + button transitions. */
+    if (g_mouse_usb_dev_id == 0) {
+        g_mouse_usb_dev_id = input_device_register(INPUT_DEV_TABLET_USB, "usb-tablet");
+    }
+    input_report_abs(g_mouse_usb_dev_id, x, y, 0, 0);
+    if (wheel) input_report_rel(g_mouse_usb_dev_id, INPUT_REL_WHEEL, wheel, 0);
+    ial_tee_buttons(g_mouse_usb_dev_id, &g_last_buttons_usb, buttons);
+    input_report_syn(g_mouse_usb_dev_id, 0);
 }
 
 void mouse_print_info(void) {

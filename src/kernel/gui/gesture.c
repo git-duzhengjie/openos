@@ -19,6 +19,25 @@
  *                     tip=0 → emit SWIPE_* if edge criterion met, else DRAG_END
  */
 #include "../include/gesture.h"
+#include "../include/input_core.h"
+
+/* dev_id assigned lazily by gs_emit() on first event. */
+static uint16_t g_gesture_dev_id = 0;
+
+static uint32_t gs_gesture_code_map(gesture_type_t t) {
+    switch (t) {
+    case GESTURE_TYPE_TAP:         return INPUT_GESTURE_TAP;
+    case GESTURE_TYPE_LONG_PRESS:  return INPUT_GESTURE_LONG_PRESS;
+    case GESTURE_TYPE_DRAG_BEGIN:  return INPUT_GESTURE_DRAG_BEGIN;
+    case GESTURE_TYPE_DRAG_MOVE:   return INPUT_GESTURE_DRAG_MOVE;
+    case GESTURE_TYPE_DRAG_END:    return INPUT_GESTURE_DRAG_END;
+    case GESTURE_TYPE_SWIPE_LEFT:  return INPUT_GESTURE_SWIPE_LEFT;
+    case GESTURE_TYPE_SWIPE_RIGHT: return INPUT_GESTURE_SWIPE_RIGHT;
+    case GESTURE_TYPE_SWIPE_UP:    return INPUT_GESTURE_SWIPE_UP;
+    case GESTURE_TYPE_SWIPE_DOWN:  return INPUT_GESTURE_SWIPE_DOWN;
+    default:                       return 0;
+    }
+}
 
 /* --------------------------- state ---------------------------- */
 
@@ -70,6 +89,25 @@ static void gs_emit(gesture_type_t t,
                     uint32_t dur_ms)
 {
     g_g.last_event = t;
+
+    /* M8-E: tee into Input Abstraction Layer BEFORE the listener check,
+     * so IAL subscribers observe every gesture even if no listener is
+     * registered (e.g. selftest / host-side unit tests). */
+    if (g_gesture_dev_id == 0) {
+        g_gesture_dev_id = input_device_register(INPUT_DEV_GESTURE, "gesture");
+    }
+    {
+        input_event_t iev;
+        iev.timestamp_ms = 0;
+        iev.dev_id       = g_gesture_dev_id;
+        iev.type         = INPUT_EV_GESTURE;
+        iev.code         = gs_gesture_code_map(t);
+        iev.value        = (int32_t)dur_ms;
+        iev.x            = x;
+        iev.y            = y;
+        input_report(&iev);
+    }
+
     if (!g_g.listener) return;
 
     gesture_event_t ev;
@@ -81,6 +119,23 @@ static void gs_emit(gesture_type_t t,
     ev.dx          = dx;
     ev.dy          = dy;
     ev.duration_ms = dur_ms;
+
+    /* M8-E: tee into Input Abstraction Layer (parallel with listener). */
+    if (g_gesture_dev_id == 0) {
+        g_gesture_dev_id = input_device_register(INPUT_DEV_GESTURE, "gesture");
+    }
+    {
+        input_event_t iev;
+        iev.timestamp_ms = 0;   /* gesture engine has no wall clock */
+        iev.dev_id       = g_gesture_dev_id;
+        iev.type         = INPUT_EV_GESTURE;
+        iev.code         = gs_gesture_code_map(t);
+        iev.value        = (int32_t)dur_ms;
+        iev.x            = x;
+        iev.y            = y;
+        input_report(&iev);
+    }
+
     g_g.listener(&ev, g_g.listener_user);
 }
 
