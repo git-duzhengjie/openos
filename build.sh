@@ -781,6 +781,7 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         kernel/login_selftest64.c \
         kernel/klog64.c \
         kernel/klog_selftest64.c \
+        kernel/gesture_selftest64.c \
         kernel/security64.c \
         kernel/gfx_selftest64.c \
         kernel/virtio_gpu_selftest64.c \
@@ -842,6 +843,7 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
     GUI64_CFLAGS="$ARCH64_CFLAGS -Isrc/kernel"
     for cfile in \
         src/kernel/gui/gui.c \
+        src/kernel/gui/gesture.c \
         src/kernel/gui/gui_browser.c \
         src/kernel/gui/gui_terminal.c \
         src/kernel/gui/gui_sticky.c \
@@ -942,6 +944,7 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         "$ARCH64_BUILD/login_selftest64.o" \
         "$ARCH64_BUILD/klog64.o" \
         "$ARCH64_BUILD/klog_selftest64.o" \
+        "$ARCH64_BUILD/gesture_selftest64.o" \
         "$ARCH64_BUILD/security64.o" \
         "$ARCH64_BUILD/gfx_selftest64.o" \
         "$ARCH64_BUILD/virtio_gpu_selftest64.o" \
@@ -991,6 +994,7 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         "$ARCH64_BUILD/x86_64_arch_ops.o" \
         "$ARCH64_BUILD/pc_uefi_platform_ops.o" \
         "$ARCH64_BUILD/gui.o" \
+        "$ARCH64_BUILD/gesture.o" \
         "$ARCH64_BUILD/gui_browser.o" \
         "$ARCH64_BUILD/gui_terminal.o" \
         "$ARCH64_BUILD/gui_sticky.o" \

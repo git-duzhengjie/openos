@@ -1853,19 +1853,19 @@
 
 ### M8-B：手势识别引擎（内核态状态机）
 
-- [ ] **M8-B.1 新增手势模块骨架**
-  - [ ] `src/kernel/gui/gesture.c` + `gesture.h`
-  - [ ] 定义 `gesture_event_t`：`GESTURE_TAP / LONG_PRESS / DRAG_BEGIN / DRAG_MOVE / DRAG_END / SWIPE_{L,R,U,D} / PINCH`
-  - [ ] 提供 `gesture_feed(touch_frame_t*)` 入口，输出 `gesture_event_t` 到 GUI 事件队列
-- [ ] **M8-B.2 基础手势状态机（单指）**
-  - [ ] **Tap**：按下→抬起 < 200ms 且总位移 < 8px → 发 `TAP`，注入鼠标左键单击
-  - [ ] **Long Press**：按下 > 500ms 且不动 → 发 `LONG_PRESS`，注入鼠标右键单击（替代右键菜单）
-  - [ ] **Drag**：按下后位移 > 8px → `DRAG_BEGIN` + 一系列 `DRAG_MOVE`，抬起时 `DRAG_END`
-- [ ] **M8-B.3 边缘 Swipe 手势**
-  - [ ] 从屏幕左/右/上/下边缘 32px 内起手 + 向内 swipe > 80px → 发 `SWIPE_*`
-  - [ ] 预留 GUI 消费点：底边 swipe→切换窗口，顶边 swipe→任务栏切换
-- [ ] **M8-B.4 手势 selftest**
-  - [ ] `gesture_selftest64.c`：模拟触点序列注入，验证四类手势判定正确率与阈值边界
+- [x] **M8-B.1 新增手势模块骨架**
+  - [x] `src/kernel/gui/gesture.c` + `gesture.h`
+  - [x] 定义 `gesture_event_t`：`GESTURE_TAP / LONG_PRESS / DRAG_BEGIN / DRAG_MOVE / DRAG_END / SWIPE_{L,R,U,D} / PINCH`
+  - [x] 提供 `gesture_feed(touch_frame_t*)` 入口，输出 `gesture_event_t` 到 GUI 事件队列
+- [x] **M8-B.2 基础手势状态机（单指）**
+  - [x] **Tap**：按下→抬起 < 200ms 且总位移 < 8px → 发 `TAP`，注入鼠标左键单击
+  - [x] **Long Press**：按下 > 500ms 且不动 → 发 `LONG_PRESS`，注入鼠标右键单击（替代右键菜单）
+  - [x] **Drag**：按下后位移 > 8px → `DRAG_BEGIN` + 一系列 `DRAG_MOVE`，抬起时 `DRAG_END`
+- [x] **M8-B.3 边缘 Swipe 手势**
+  - [x] 从屏幕左/右/上/下边缘 32px 内起手 + 向内 swipe > 80px → 发 `SWIPE_*`
+  - [ ] 预留 GUI 消费点：底边 swipe→切换窗口，顶边 swipe→任务栏切换（待 M8-D）
+- [x] **M8-B.4 手势 selftest**
+  - [x] `gesture_selftest64.c`：模拟触点序列注入，验证四类手势判定正确率与阈值边界（六阶段全部 PASS）
 
 ### M8-C：多点触摸（Multi-touch，含通用 HID Report Descriptor 解析器）
 

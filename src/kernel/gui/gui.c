@@ -9,6 +9,7 @@
 #include "gui_user.h"
 #include "framebuffer.h"
 #include "mouse.h"
+#include "gesture.h"
 #include "usb_tablet.h"
 #include "font.h"
 #include "serial.h"
@@ -6671,6 +6672,10 @@ int gui_start(uint32_t width, uint32_t height) {
 
     /* 闁稿繐鐗愰鏇犵磾椤曗偓缁卞爼寮介崶顏嗙彾闁伙絽濂旂拹鐔兼儑閻旈鏉介柛鎺戞妞存悂锟?*/
     mouse_set_bounds((int)g_gui.width, (int)g_gui.height);
+
+    /* M8-B: initialise the touch gesture engine with the actual screen size,
+     * so edge-swipe detection (32px threshold) uses the real framebuffer bounds. */
+    gesture_init((int)g_gui.width, (int)g_gui.height);
 
     g_gui.initialized = 1;
 

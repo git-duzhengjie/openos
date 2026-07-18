@@ -21,6 +21,10 @@
 #include "types.h"
 #include "xhci64.h"
 #include "mouse.h"
+#include "../../kernel/include/gesture.h"
+
+/* 内核时基（毫秒），供手势状态机使用 */
+extern uint64_t arch_x86_64_tsc_uptime_ms(void);
 
 #define USB_HID_MAX      XHCI_MAX_DEVS
 
@@ -219,6 +223,16 @@ static void hid_handle_touchscreen(usb_hid_dev_t *h, const uint8_t *rpt, uint32_
     /* Tip 状态→鼠标左键（方案：触屏单点直接映射为左键） */
     uint8_t btn = tip ? 0x01 : 0x00;
     mouse_set_absolute_position_with_wheel(sx, sy, btn, 0);
+
+    /* M8-B：把触屏帧灌入手势状态机（不影响上面的鼠标注入，向下兼容） */
+    {
+        touch_frame_t tf;
+        tf.x      = sx;
+        tf.y      = sy;
+        tf.tip    = tip;
+        tf.now_ms = (uint32_t)arch_x86_64_tsc_uptime_ms();
+        gesture_feed(&tf);
+    }
 
     h->ts_prev_tip = tip;
 }
