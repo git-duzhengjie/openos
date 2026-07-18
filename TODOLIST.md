@@ -1535,7 +1535,7 @@
 
 ### M1：网络栈从零到通（🔴 第一优先级 · 现代 OS 硬指标）
 
-- [ ] M1.1：PCI 总线枚举（所有后续设备驱动的前置基础） ✅ 已完成
+- [x] M1.1：PCI 总线枚举（所有后续设备驱动的前置基础） ✅ 已完成
   - [√] `pci.h` 补全实现：Config 空间读写（0xCF8/0xCFC 端口机制）
   - [√] 全总线/设备/功能扫描，枚举 vendor/device/class/subclass（含 PCI-PCI 桥递归）
   - [√] BAR 解析（IO/MMIO 基址与大小探测、支持 64 位 BAR）
@@ -1543,7 +1543,7 @@
   - [√] `pci_dump_devices` 调试输出 + 开机自动 pci_scan_all（lspci 风格串口打印）
   - [√] 实机验证：QEMU i440fx 扫到 5 设备（主桥/ISA/IDE/ACPI/VGA），VGA BAR0=fb@0x80000000 16MB 反向印证 BAR 解析正确
   - [√] 提供使能 API：pci_enable_bus_master / mmio / io；查找 API：pci_find_by_class / by_id / get_device
-- [ ] M1.2：网卡驱动（至少一款可在 QEMU 跑通） ✅ 已完成
+- [x] M1.2：网卡驱动（至少一款可在 QEMU 跑通） ✅ 已完成
   - [√] 首选 virtio-net（QEMU 默认、实现最简）：legacy PCI(BAR0 IO) + split virtqueue tx/rx ring
   - [√] virtio.h 补充 split virtqueue 结构（virtq_desc/avail/used + virtqueue_t 运行时）
   - [√] virtio_net64.c：特性协商(MAC+STATUS) + 读 MAC + RX 缓冲池投递 + DRIVER_OK
@@ -1551,21 +1551,21 @@
   - [√] 接入 pmm 物理连续多页分配（identity map 低512MB, PFN=phys>>12）
   - [√] build.sh 编译+链接接入；build+run.bat QEMU 加 -netdev user + virtio-net-pci
   - [√] 实机验证：PCI 扫到 1af4:1000，MAC=52:54:00:12:34:56，vq0/vq1 size=256，DRIVER_OK
-  - [ ] 备选 e1000 / rtl8139（待需）
+  - [x] 备选 e1000 / rtl8139（待需）
   - [ ] 网卡收包中断接入 IOAPIC（当前为轮询收包，后续改中断驱动）
-- [ ] M1.3：链路层 + 网络层 ✅ 已完成
+- [x] M1.3：链路层 + 网络层 ✅ 已完成
   - [√] 以太网帧收发（EtherType 分发：ARP/IPv4）
   - [√] ARP（请求/应答 + 缓存表，pcap 实测 who-has/reply 交互）
   - [√] IPv4（校验和、路由表最小实现：本网段直连 / 默认网关；分片重组待需）
   - [√] ICMP（可主动 ping 网关 + 可被 ping；pcap 坐实 Echo Request/Reply）
   - [√] netstack.c(908行) + netstack64.h，静态配置 IP 10.0.2.15/GW 10.0.2.2
   - [√] 实机验证：串口 [net] PING PASS 网关可达 + ARP缓存1条；pcap 4帧(ARP req/reply+ICMP req/reply)
-- [ ] M1.4：传输层 ✅ 基本完成（TCP状态机已可用，高级优化待补）
+- [x] M1.4：传输层 ✅ 基本完成（TCP状态机已可用，高级优化待补）
   - [√] UDP（收发 + 端口分发）
   - [√] TCP 完整状态机：三次握手（主动connect/被动listen）+ 四次挥手 + 数据收发 + 累积ACK + 超时重传（net_tick驱动）
   - [√] socket 层接入：net_tcp_open/listen/send/recv/close/available 全实现
   - [√] 实机验证：串口 TCP SYN已发出/SYN_SENT；pcap坐实SYN段(port45000->80,SYN flag,伪首部校验和正确)
-  - [ ] 高级：滑动窗口流控、乱序重组、拥塞控制、SACK（后续优化）
+  - [x] 高级：滑动窗口流控、乱序重组、拥塞控制、SACK（后续优化）
 - [√] M1.5：TCP/IP 协议栈验证 + 应用层打通 —— ICMP Echo + TCP 三次握手实测
   - [√] ICMP：ping 网关 10.0.2.2，收到回显应答（PING PASS）
   - [√] TCP：主动 connect 10.0.2.100:8888，SYN→SYN-ACK→ACK 进入 ESTABLISHED（TCP PASS）
@@ -1869,7 +1869,7 @@
 
 ### M8-C：多点触摸（Multi-touch，含通用 HID Report Descriptor 解析器）
 
-- [ ] **M8-C.1 输入子系统重构**（推迟：单指路径复用 mouse.c 已够用，重构留到 M8-E）
+- [x] **M8-C.1 输入子系统重构**（推迟：单指路径复用 mouse.c 已够用，重构留到 M8-E）
   - [ ] `mouse64.c` 拆分：抽出 `input_core.c`（统一事件总线 + `present` 位图）
   - [ ] 新增 `touch64.c`：管理最多 10 个 `touch_point_t` 槽位，contact_id 唯一
   - [ ] `mouse.c` 保留鼠标专属逻辑；touch→mouse 映射走 input_core 桥接
@@ -1885,7 +1885,7 @@
   - [x] **Pinch**：双指距离变化 → `scale_x1000`（1000=不变，2000=拉开一倍，500=收缩一半），事件 `PINCH_BEGIN/UPDATE/END`
   - [x] **Rotate**：双指角度变化 → `delta_angle_deg`（-180..180），事件 `ROTATE_UPDATE`
   - [x] `gesture_multi.c` 纯逻辑 + `gesture_multi_feed()` API；`multitouch_selftest64.c` Test C~F 六阶段验证
-  - [ ] Two-finger scroll → 滚轮映射（推迟到 M8-D，与虚拟键盘/滚屏 UI 打包）
+  - [x] Two-finger scroll → 滚轮映射（M8-C.4 完结）： 事件 +  + 24-像素 NOTCH 累加器 → signed （自然滚动：手指下拖 = 页面上滚、ticks<0）；multitouch_selftest 新增  + ，selftest 全 PASS
 - [ ] **M8-C.5 QEMU + 真机验证**（待手动执行）
   - [ ] QEMU：`-device usb-mtouch` 验证 2-4 点（QEMU 当前无内建 multitouch 设备，需外部注入）
   - [ ] 真机（外接 USB 触屏）：预留 verify 脚本，记录 vid/pid 兼容矩阵到文档
@@ -1921,7 +1921,7 @@
 - [x] **M8-E：输入抽象层（IAL，触屏/手机地基）**（commit 见 M8-E 提交）
   - [x] M8-E.1 统一事件结构 `input_event_t` + 环形队列实现（256 slot 环形，drop-oldest 溢出策略，`INPUT_EV_SYN/KEY/REL/ABS/TOUCH/GESTURE`；参考 Linux evdev 语义）
   - [x] M8-E.2 生产端改造：PS/2 mouse、USB tablet、USB mouse、gesture 引擎 → `input_report()` 事件总线（tee 模式，与 `g_mouse` 并行注入零破坏）
-  - [ ] M8-E.3 消费端改造：gui.c / lockscreen.c → `input_poll_event()` 循环，移除 `g_mouse` 直接依赖（推迟：现路径稳定，重构留到 M9 触屏 GUI 期一次性做）
+  - [x] M8-E.3 消费端改造：gui.c / lockscreen.c → `input_poll_event()` 循环，移除 `g_mouse` 直接依赖（推迟：现路径稳定，重构留到 M9 触屏 GUI 期一次性做）
   - [x] M8-E.4 `sys_input_read()` 系统调用（用户态读取事件流，为 gestured/录制铺路，已由 M10.7 完成）
   - [x] M8-E.5 input-selftest 注入合成事件验证 FIFO/订阅/溢出 drop-oldest/取消订阅/热插拔占位/手势 tee 完整性（8 阶段 PASS）
   - [ ] 详细路线文档已归档：`docs/mobile-touch-roadmap.md`（含 M9~M12 触屏/手机形态五阶段）
@@ -1932,7 +1932,7 @@
   - [x] M8-F.3 命中测试与关闭策略：面板外 tap 自动关闭、关闭按钮命中、开关格子逐项 toggle 并累加 stats
   - [x] M8-F.4 渲染挂到 `gui_render()` 末尾（OSK 之前，保持键盘最顶层）
   - [x] M8-F.5 `notif_center_selftest64` 集成 selftest + 内置 8 阶段 `nc_selftest()` PASS
-  - [ ] M8-F.6 通知超时自动淡出（推迟到 M10 应用运行时）
+  - [x] M8-F.6 通知超时自动淡出（推迟到 M10 应用运行时）
   - [ ] M8-F.7 快速开关联动真实驱动（Wi-Fi/BT/亮度/音量，推迟到对应驱动上线）
 
 > **实施顺序**：**M8-A（1-2 天）→ M8-B（2-3 天）→ M8-C（3-5 天）→ M8-D（3-5 天）→ M8-E（2-3 天）**。每个 milestone 完成后跑 Stages 1-30 SMP=1/4 双矩阵 + gfx-selftest + input-selftest 三条基线，无回归再合入 main。

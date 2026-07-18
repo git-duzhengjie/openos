@@ -238,6 +238,80 @@ static int test_multi_release(void) {
     return 0;
 }
 
+/* M8-C.4 Two-finger scroll:
+ *   Two fingers ~100 px apart, both drag downwards by 24 px per step.
+ *   Distance & angle stay ~constant, so scale_abs<80 & angle_abs<=5 hold.
+ *   Every 24 px accumulator produces one negative wheel tick (natural-scroll). */
+static int test_multi_scroll(void) {
+    gesture_multi_reset();
+    mt_reset();
+
+    gesture_multi_slot_t f[2];
+    f[0].present = 1; f[0].tip = 1; f[0].x = 100; f[0].y = 200;
+    f[1].present = 1; f[1].tip = 1; f[1].x = 200; f[1].y = 200;
+    gesture_multi_feed(f, 2);              /* begin */
+
+    /* Drag both fingers down by 24 px (center dy = +24) */
+    f[0].y = 224; f[1].y = 224;
+    gesture_multi_feed(f, 2);
+
+    /* Expect a SCROLL_UPDATE with wheel_ticks == -1 (natural-scroll) */
+    int have_scroll = 0;
+    int32_t ticks = 0;
+    for (int i = 0; i < g_m_n; i++) {
+        if (g_m_evs[i].type == GESTURE_MULTI_SCROLL_UPDATE) {
+            have_scroll = 1;
+            ticks = g_m_evs[i].wheel_ticks;
+        }
+    }
+    if (!have_scroll) return -1;
+    if (ticks != -1) return -1;
+
+    /* Second step: drag both up by 48 px (dy = -48) → wheel_ticks = +2 */
+    f[0].y = 176; f[1].y = 176;
+    gesture_multi_feed(f, 2);
+    int last_scroll_ticks = 0;
+    int found_second = 0;
+    for (int i = 0; i < g_m_n; i++) {
+        if (g_m_evs[i].type == GESTURE_MULTI_SCROLL_UPDATE) {
+            last_scroll_ticks = g_m_evs[i].wheel_ticks;
+            found_second = 1;
+        }
+    }
+    if (!found_second) return -1;
+    if (last_scroll_ticks != 2) return -1;
+
+    /* Diagnostic accessor should mirror last event's ticks */
+    if (gesture_multi_last_wheel_ticks() != 2) return -1;
+    return 0;
+}
+
+/* Ensure a small two-finger drift (below NOTCH threshold) does NOT emit
+ * a wheel tick but does produce a SCROLL_UPDATE with ticks==0. */
+static int test_multi_scroll_below_notch(void) {
+    gesture_multi_reset();
+    mt_reset();
+
+    gesture_multi_slot_t f[2];
+    f[0].present = 1; f[0].tip = 1; f[0].x = 100; f[0].y = 200;
+    f[1].present = 1; f[1].tip = 1; f[1].x = 200; f[1].y = 200;
+    gesture_multi_feed(f, 2);              /* begin */
+
+    f[0].y = 210; f[1].y = 210;            /* dy=+10, < NOTCH(24) */
+    gesture_multi_feed(f, 2);
+
+    int found = 0;
+    for (int i = 0; i < g_m_n; i++) {
+        if (g_m_evs[i].type == GESTURE_MULTI_SCROLL_UPDATE) {
+            if (g_m_evs[i].wheel_ticks != 0) return -1;
+            if (g_m_evs[i].scroll_dy != 10) return -1;
+            found = 1;
+        }
+    }
+    if (!found) return -1;
+    return 0;
+}
+
 /* ------------------------------------------------------------------
  * M8-A.1 selftest: hid_type_infer 分类逻辑
  * ------------------------------------------------------------------ */
@@ -306,6 +380,8 @@ int arch_x86_64_multitouch_selftest_run(void) {
     if (test_multi_pinch_close()!=0) { mt_log("[mt-selftest] FAIL: pinch_close\n");  rc = -1; }
     if (test_multi_rotate()    != 0) { mt_log("[mt-selftest] FAIL: rotate\n");       rc = -1; }
     if (test_multi_release()   != 0) { mt_log("[mt-selftest] FAIL: release\n");      rc = -1; }
+    if (test_multi_scroll()    != 0) { mt_log("[mt-selftest] FAIL: scroll\n");       rc = -1; }
+    if (test_multi_scroll_below_notch() != 0) { mt_log("[mt-selftest] FAIL: scroll_below_notch\n"); rc = -1; }
     if (rc == 0) mt_log("[x86_64][mt-selftest] PASS\n");
     return rc;
 }

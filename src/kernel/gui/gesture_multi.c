@@ -15,6 +15,12 @@ typedef struct {
     int32_t init_distance;
     int32_t init_angle_deg;
     int32_t last_scale_x1000;
+    /* M8-C.4 scroll bookkeeping */
+    int32_t last_cx;
+    int32_t last_cy;
+    int32_t scroll_accum_y;   /* pixel accumulator for wheel-notch conversion */
+    int32_t scroll_accum_x;
+    int32_t last_wheel_ticks;
     gesture_multi_type_t last_event;
 } multi_ctx_t;
 
@@ -86,6 +92,7 @@ void gesture_multi_set_listener(gesture_multi_listener_fn cb, void *user) {
 }
 gesture_multi_type_t gesture_multi_last_event_type(void) { return g_ctx.last_event; }
 int32_t gesture_multi_last_scale_x1000(void) { return g_ctx.last_scale_x1000; }
+int32_t gesture_multi_last_wheel_ticks(void) { return g_ctx.last_wheel_ticks; }
 
 static void emit(gesture_multi_event_t *ev) {
     g_ctx.last_event = ev->type;
@@ -137,6 +144,11 @@ void gesture_multi_feed(const gesture_multi_slot_t *slots, uint8_t slot_count) {
         g_ctx.init_distance = dist ? dist : 1;
         g_ctx.init_angle_deg = angle;
         g_ctx.last_scale_x1000 = 1000;
+        g_ctx.last_cx = ev.cx;
+        g_ctx.last_cy = ev.cy;
+        g_ctx.scroll_accum_x = 0;
+        g_ctx.scroll_accum_y = 0;
+        g_ctx.last_wheel_ticks = 0;
         ev.type = GESTURE_MULTI_PINCH_BEGIN;
         ev.initial_distance = g_ctx.init_distance;
         ev.scale_x1000 = 1000;
@@ -156,6 +168,55 @@ void gesture_multi_feed(const gesture_multi_slot_t *slots, uint8_t slot_count) {
         if (ev.delta_angle_deg > 3 || ev.delta_angle_deg < -3) {
             ev.type = GESTURE_MULTI_ROTATE_UPDATE;
             emit(&ev);
+        }
+
+        /* M8-C.4: two-finger scroll detection.
+         *   Condition: |scale - 1000| < 80 (≤8% distance change)  AND
+         *              |delta_angle| ≤ 5 degrees.
+         *   Center-point delta becomes scroll delta; every 24 accumulated
+         *   vertical px produces one wheel-notch tick (mouse-wheel style). */
+        int32_t scale_abs = ev.scale_x1000 > 1000 ? (ev.scale_x1000 - 1000)
+                                                  : (1000 - ev.scale_x1000);
+        int32_t angle_abs = ev.delta_angle_deg < 0 ? -ev.delta_angle_deg
+                                                   :  ev.delta_angle_deg;
+        int32_t dcx = ev.cx - g_ctx.last_cx;
+        int32_t dcy = ev.cy - g_ctx.last_cy;
+        g_ctx.last_cx = ev.cx;
+        g_ctx.last_cy = ev.cy;
+
+        if (scale_abs < 80 && angle_abs <= 5 && (dcx != 0 || dcy != 0)) {
+            g_ctx.scroll_accum_x += dcx;
+            g_ctx.scroll_accum_y += dcy;
+            /* Convert accumulated Y into signed wheel notches.
+             * Natural-scroll: dragging fingers *down* scrolls page *up*,
+             * so ticks = -accum/NOTCH. NOTCH = 24 px per notch. */
+            const int32_t NOTCH = 24;
+            int32_t ticks = 0;
+            while (g_ctx.scroll_accum_y >= NOTCH) {
+                g_ctx.scroll_accum_y -= NOTCH;
+                ticks -= 1;
+            }
+            while (g_ctx.scroll_accum_y <= -NOTCH) {
+                g_ctx.scroll_accum_y += NOTCH;
+                ticks += 1;
+            }
+            g_ctx.last_wheel_ticks = ticks;
+
+            gesture_multi_event_t sev;
+            for (size_t k = 0; k < sizeof(sev); k++) ((uint8_t*)&sev)[k] = 0;
+            sev.type = GESTURE_MULTI_SCROLL_UPDATE;
+            sev.f0_x = ev.f0_x; sev.f0_y = ev.f0_y;
+            sev.f1_x = ev.f1_x; sev.f1_y = ev.f1_y;
+            sev.cx = ev.cx; sev.cy = ev.cy;
+            sev.distance = ev.distance;
+            sev.initial_distance = g_ctx.init_distance;
+            sev.scale_x1000 = ev.scale_x1000;
+            sev.angle_deg = ev.angle_deg;
+            sev.delta_angle_deg = ev.delta_angle_deg;
+            sev.scroll_dx = dcx;
+            sev.scroll_dy = dcy;
+            sev.wheel_ticks = ticks;
+            emit(&sev);
         }
     }
 }

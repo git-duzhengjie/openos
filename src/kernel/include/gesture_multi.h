@@ -29,6 +29,12 @@ typedef enum {
     GESTURE_MULTI_PINCH_UPDATE,
     GESTURE_MULTI_PINCH_END,
     GESTURE_MULTI_ROTATE_UPDATE,
+    /* M8-C.4 Two-finger scroll: two fingers move together without
+     * significantly changing distance or angle. Center-point delta is
+     * reported as scroll_dx/scroll_dy in screen pixels. Wheel-notch
+     * accumulator (wheel_ticks) is a signed vertical count consumers
+     * can consume like a mouse wheel event. */
+    GESTURE_MULTI_SCROLL_UPDATE,
 } gesture_multi_type_t;
 
 typedef struct {
@@ -41,6 +47,9 @@ typedef struct {
     int32_t  scale_x1000;        /* fixed-point scale = 1000 * dist/init_dist */
     int32_t  angle_deg;          /* current absolute angle in degrees */
     int32_t  delta_angle_deg;    /* delta from initial angle (rotate) */
+    int32_t  scroll_dx;          /* two-finger scroll: center-point delta X (px) */
+    int32_t  scroll_dy;          /* two-finger scroll: center-point delta Y (px) */
+    int32_t  wheel_ticks;        /* signed wheel notches produced this event */
 } gesture_multi_event_t;
 
 typedef struct {
@@ -62,6 +71,7 @@ void gesture_multi_feed(const gesture_multi_slot_t *slots, uint8_t slot_count);
 /* Diagnostics. */
 gesture_multi_type_t gesture_multi_last_event_type(void);
 int32_t gesture_multi_last_scale_x1000(void);
+int32_t gesture_multi_last_wheel_ticks(void);
 
 #ifdef __cplusplus
 }
