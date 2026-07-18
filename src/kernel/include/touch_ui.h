@@ -15,6 +15,10 @@
 #define OPENOS_TOUCH_UI_H
 
 #include <stdint.h>
+#include "gesture.h"
+#include "gesture_multi.h"
+
+#include <stdint.h>
 
 /* 触屏边缘动作枚举（与 gesture 事件解耦，方便扩展键位映射） */
 typedef enum touch_ui_action {
@@ -36,6 +40,9 @@ typedef struct touch_ui_stats {
     uint32_t taps_forwarded;      /* TAP 事件透传给 OSK/桌面 */
     uint32_t taps_consumed_by_osk;
     uint32_t taps_consumed_by_nc; /* M8-F: 通知中心/快速面板消费 */
+    uint32_t taps_consumed_by_switcher; /* M10.6: 应用切换器消费 */
+    uint32_t switcher_open;       /* M10.6: 三指上滑打开次数 */
+    uint32_t switcher_select;     /* M10.6: 卡片选中次数 */
     uint32_t total_events;
     touch_ui_action_t last_action;
 } touch_ui_stats_t;
@@ -54,6 +61,10 @@ const touch_ui_stats_t *touch_ui_get_stats(void);
 
 /* 强制复位统计（selftest 各阶段隔离用） */
 void touch_ui_reset_stats(void);
+
+/* M10.6: 喂一帧多点 slots 给 gesture_multi + gesture3。
+ * 与 gesture_feed（单点）互补：多点由 kernel 主循环从 HID 帧转发。 */
+void touch_ui_feed_multi(const gesture_multi_slot_t *slots, uint8_t count);
 
 /* selftest 入口：返回 0 = PASS */
 int  touch_ui_selftest(void);

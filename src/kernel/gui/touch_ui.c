@@ -15,6 +15,9 @@
 #include "osk.h"
 #include "notif_center.h"
 #include "gesture.h"
+#include "gesture3.h"
+#include "app_switcher_ui.h"
+#include "app_launcher.h"
 #include "gui.h"
 
 /* -------- 内部状态 -------- */
@@ -28,14 +31,34 @@ static void touch_ui_listener_(const gesture_event_t *ev, void *ctx) {
     touch_ui_on_gesture(ev);
 }
 
+/* M10.6: 三指上滑 → 打开切换器 */
+static void touch_ui_g3_listener_(const gesture3_event_t *ev, void *ctx) {
+    (void)ctx;
+    if (!ev) return;
+    if (ev->type == GESTURE3_SWIPE_UP) {
+        app_sw_ui_open();
+        g_stats.switcher_open++;
+        g_stats.last_action = TOUCH_UI_ACT_APP_SWITCHER;
+    }
+}
+
 void touch_ui_init(int screen_w, int screen_h) {
     /* 清零统计 */
     for (uint32_t i = 0; i < sizeof(g_stats); i++) ((uint8_t *)&g_stats)[i] = 0;
     osk_init(screen_w, screen_h);
     nc_init(screen_w, screen_h);
+    app_sw_ui_init(screen_w, screen_h);
     gesture_init(screen_w, screen_h);
     gesture_set_listener(touch_ui_listener_, 0);
+    /* M10.6: 三指手势 */
+    gesture3_init(screen_w, screen_h);
+    gesture3_set_listener(touch_ui_g3_listener_, 0);
     g_touch_ui_ready = 1;
+}
+
+void touch_ui_feed_multi(const gesture_multi_slot_t *slots, uint8_t count) {
+    if (!g_touch_ui_ready) return;
+    gesture3_feed(slots, count);
 }
 
 const touch_ui_stats_t *touch_ui_get_stats(void) { return &g_stats; }
@@ -52,12 +75,31 @@ void touch_ui_on_gesture(const gesture_event_t *ev) {
 
     switch (ev->type) {
     case GESTURE_TYPE_TAP: {
-        /* Tap 优先级：OSK > 通知中心/快速面板 > 透传 */
+        /* Tap 优先级：OSK > 切换器 > 通知中心/快速面板 > 透传 */
         g_stats.taps_forwarded++;
         int consumed = osk_handle_tap(ev->x, ev->y);
         if (consumed) {
             g_stats.taps_consumed_by_osk++;
             break;
+        }
+        /* M10.6: 应用切换器命中 */
+        if (app_sw_ui_is_open()) {
+            int r = app_sw_ui_handle_tap(ev->x, ev->y);
+            if (r >= 0) {
+                /* 卡片命中：选中对应 app_stack index */
+                app_switcher_select(r);
+                g_stats.taps_consumed_by_switcher++;
+                g_stats.switcher_select++;
+                break;
+            }
+            if (r == -1) {
+                /* 面板内空白 → 已关闭，消费 */
+                g_stats.taps_consumed_by_switcher++;
+                break;
+            }
+            /* r == -2: 面板外，不消费；则主动关闭 switcher ，避免悬挂 */
+            app_sw_ui_close();
+            /* 不 continue break，继续给 NC/桌面一次机会 */
         }
         /* 通知中心 / 快速面板命中处理 */
         consumed = nc_handle_tap(ev->x, ev->y);

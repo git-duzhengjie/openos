@@ -1944,7 +1944,7 @@
   - [x] M10.3 生命周期钩子：on_launch / on_resume / on_pause / on_destroy 由 launcher 层触发（app_stack 内部只做状态迁移 + 统计）
   - [x] M10.4 `app_launcher.h/.c`：`app_launch(name)` / `app_exit()` / `app_switcher_show/hide/select()`；ELF 后端接口 `app_launcher_bind_backend()`（内建 app pid=-1，ELF app 由 backend 返回 pid）
   - [x] M10.5 `gui_mode.h/.c`：DESKTOP/FULLSCREEN 模式抽象 + listener 回调（默认 DESKTOP，零回归）
-  - [ ] M10.6 app_switcher overlay UI 渲染（三指上滑触发；本期只做状态位，UI 渲染留后续与 gui_metrics 联动）
+  - [x] M10.6 app_switcher overlay UI 渲染（三指上滑触发） → `app_switcher_ui.h/.c` + `gesture3.h/.c` + `touch_ui` 接线 + `app-switcher-selftest` 8 阶段实测 **PASS**；卡片布局 / hittest / 优先级链OSK>Switcher>NC>桌面 / 面板内空白自关 / 面板外不消费 均已验证
   - [ ] M10.7 M8-E.4 `sys_input_read()` 系统调用（补票，等 hello64 用户程序对接）
   - [ ] M10.8 M8-F.6 通知超时自动淡出（补票，接 pit64 tick）
   - [x] M10.9 双 selftest：`app-stack-selftest` 8 阶段 + `app-lifecycle-selftest` 8 阶段 PASS
