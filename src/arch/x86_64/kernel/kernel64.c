@@ -5,6 +5,7 @@
 #include "../include/klog64.h"
 #include "../include/klog_selftest64.h"
 #include "../include/gesture_selftest64.h"
+#include "../include/multitouch_selftest64.h"
 #include "../include/elf64_loader.h"
 #include "../include/fdtable64.h"
 #include "../include/percpu64.h"
@@ -126,6 +127,7 @@ void arch_x86_64_early_init(const openos_bootinfo_t *bootinfo) {
      * halts before it. Running here guarantees CI coverage. */
     (void)arch_x86_64_klog_selftest_run();
     (void)arch_x86_64_gesture_selftest_run();
+    (void)arch_x86_64_multitouch_selftest_run();
     early_console64_write("[x86_64] arch_ops=");
     early_console64_write(openos_arch_ops_name());
     early_console64_write(" platform_ops=");

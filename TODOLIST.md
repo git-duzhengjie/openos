@@ -1869,23 +1869,25 @@
 
 ### M8-C：多点触摸（Multi-touch，含通用 HID Report Descriptor 解析器）
 
-- [ ] **M8-C.1 输入子系统重构**
+- [ ] **M8-C.1 输入子系统重构**（推迟：单指路径复用 mouse.c 已够用，重构留到 M8-E）
   - [ ] `mouse64.c` 拆分：抽出 `input_core.c`（统一事件总线 + `present` 位图）
   - [ ] 新增 `touch64.c`：管理最多 10 个 `touch_point_t` 槽位，contact_id 唯一
   - [ ] `mouse.c` 保留鼠标专属逻辑；touch→mouse 映射走 input_core 桥接
-- [ ] **M8-C.2 通用 HID Report Descriptor 解析器**
-  - [ ] 实现 `hid_parser64.c`：解析 Usage Page/Usage/Report Size/Report Count/Logical Min/Max/Collection
-  - [ ] 输出 `hid_field_t[]` 字段表（offset/size/usage/logical range），驱动按字段取值而非硬编码偏移
-  - [ ] 单元测试用 Win7 触屏 sample descriptor 作为 fixture 覆盖
-- [ ] **M8-C.3 Multi-touch report 解析**
-  - [ ] 支持 Windows Precision Touchpad / Win7 触屏标准协议
-  - [ ] 每帧 Contact Count + N × (Contact ID + Tip Switch + X + Y) 结构解析
-  - [ ] 触点生命周期管理：新触点分配槽位，contact_id 相同则更新，Tip Up 后回收槽位
-- [ ] **M8-C.4 双指手势**
-  - [ ] **Two-finger scroll**：双指同向平移 → 注入滚轮事件
-  - [ ] **Pinch**：双指距离变化 > 20% → `PINCH_IN` / `PINCH_OUT`（预留窗口缩放/图片查看器）
-- [ ] **M8-C.5 QEMU + 真机验证**
-  - [ ] QEMU：`-device usb-mtouch` 验证 2-4 点
+- [x] **M8-C.2 通用 HID Report Descriptor 解析器**
+  - [x] 实现 `src/kernel/gui/hid_parser.c`：解析 Usage Page/Usage/Report Size/Report Count/Logical Min/Max/Collection
+  - [x] 输出 `hid_touch_layout_t` 字段表（bit_offset/bit_size/logical_min/max），驱动按字段取值而非硬编码偏移
+  - [x] 单元测试：合成 Digitizer 2-finger descriptor fixture（`multitouch_selftest64.c` Test A/B）
+- [x] **M8-C.3 Multi-touch report 解析**
+  - [x] 支持 Windows Precision Touch / Win7 触屏标准协议字段（Contact ID + Tip Switch + X + Y + Contact Count）
+  - [x] `hid_touch_report_parse()`：位精确抽取，处理 Report ID 前缀 + 有符号 logical range
+  - [x] 触点数据打包为 `hid_touch_sample_t`，为后续生命周期管理（M8-E 槽位分配器）提供数据源
+- [x] **M8-C.4 双指手势**
+  - [x] **Pinch**：双指距离变化 → `scale_x1000`（1000=不变，2000=拉开一倍，500=收缩一半），事件 `PINCH_BEGIN/UPDATE/END`
+  - [x] **Rotate**：双指角度变化 → `delta_angle_deg`（-180..180），事件 `ROTATE_UPDATE`
+  - [x] `gesture_multi.c` 纯逻辑 + `gesture_multi_feed()` API；`multitouch_selftest64.c` Test C~F 六阶段验证
+  - [ ] Two-finger scroll → 滚轮映射（推迟到 M8-D，与虚拟键盘/滚屏 UI 打包）
+- [ ] **M8-C.5 QEMU + 真机验证**（待手动执行）
+  - [ ] QEMU：`-device usb-mtouch` 验证 2-4 点（QEMU 当前无内建 multitouch 设备，需外部注入）
   - [ ] 真机（外接 USB 触屏）：预留 verify 脚本，记录 vid/pid 兼容矩阵到文档
 
 ### M8-D：触屏友好 UI 与真机 I²C HID 触屏
