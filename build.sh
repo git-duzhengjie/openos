@@ -872,6 +872,7 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         src/kernel/gui/gesture_multi.c \
         src/kernel/gui/gesture3.c \
         src/kernel/gui/hid_parser.c \
+        src/kernel/gui/hid_type_infer.c \
         src/kernel/gui/osk.c \
         src/kernel/gui/touch_ui.c \
         src/kernel/gui/notif_center.c \
@@ -1049,6 +1050,7 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         "$ARCH64_BUILD/gesture_multi.o" \
         "$ARCH64_BUILD/gesture3.o" \
         "$ARCH64_BUILD/hid_parser.o" \
+        "$ARCH64_BUILD/hid_type_infer.o" \
         "$ARCH64_BUILD/osk.o" \
         "$ARCH64_BUILD/touch_ui.o" \
         "$ARCH64_BUILD/notif_center.o" \

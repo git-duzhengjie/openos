@@ -1835,21 +1835,21 @@
 
 ### M8-A：单点触屏 MVP（USB HID Single-touch → 鼠标映射）
 
-- [ ] **M8-A.1 HID Usage 识别扩展**
-  - [ ] `usb_hid64.c` 新增识别 Usage Page `0x0D`（Digitizer）+ Usage `0x04`（Touch Screen）/ `0x02`（Pen）
-  - [ ] 保留现有 `usb-tablet`(VID=0x0627 PID=0x0001) 白名单，作为 fallback 匹配
-  - [ ] 在 HID 描述符探测阶段区分 mouse / tablet / touchscreen 三类设备，输出到 klog
-- [ ] **M8-A.2 Single-touch report 解析**
-  - [ ] 解析标准 Digitizer report：Tip Switch(1bit) + In Range(1bit) + X/Y(16bit each) + 可选 Pressure
-  - [ ] 复用 `mouse_set_absolute_position_with_wheel` 通路：Tip Down→左键按下事件，Tip Up→左键释放事件
-  - [ ] 触点抬起后**保持光标位置**（不清零，符合触屏语义）
-- [ ] **M8-A.3 QEMU 回归测试**
-  - [ ] `run.bat` 保持 `usb-tablet` 可用；新增 `run_touch_diag.bat` 使用 `-device usb-mtouch`（若 QEMU 版本支持）作为触屏专用配置
-  - [ ] 桌面单击、双击、拖拽三种场景全部可复现
-  - [ ] 锁屏输入密码可通过触点（首点触发键盘焦点）+ 键盘完成
-- [ ] **M8-A.4 klog 观测点**
-  - [ ] `[touch] device up vid=%x pid=%x type=%s`（single/multi）
-  - [ ] `[touch] frame tip=%d x=%d y=%d`（verbose 级别，默认关闭）
+- [x] **M8-A.1 HID Usage 识别扩展**
+  - [x] `usb_hid64.c` 新增识别 Usage Page `0x0D`（Digitizer）+ Usage `0x04`（Touch Screen）/ `0x02`（Pen）
+  - [x] 保留现有 `usb-tablet`(VID=0x0627 PID=0x0001) 白名单，作为 fallback 匹配
+  - [x] 在 HID 描述符探测阶段区分 mouse / tablet / touchscreen 三类设备，输出到 klog
+- [x] **M8-A.2 Single-touch report 解析**
+  - [x] 解析标准 Digitizer report：Tip Switch(1bit) + In Range(1bit) + X/Y(16bit each) + 可选 Pressure
+  - [x] 复用 `mouse_set_absolute_position_with_wheel` 通路：Tip Down→左键按下事件，Tip Up→左键释放事件
+  - [x] 触点抬起后**保持光标位置**（不清零，符合触屏语义）
+- [x] **M8-A.3 QEMU 回归测试**
+  - [x] `run.bat` 保持 `usb-tablet` 可用；新增 `run_touch_diag.bat` 使用 `-device usb-mtouch`（若 QEMU 版本支持）作为触屏专用配置
+  - [x] 桌面单击、双击、拖拽三种场景全部可复现
+  - [x] 锁屏输入密码可通过触点（首点触发键盘焦点）+ 键盘完成
+- [x] **M8-A.4 klog 观测点**
+  - [x] `[touch] device up vid=%x pid=%x type=%s`（single/multi）
+  - [x] `[touch] frame tip=%d x=%d y=%d`（verbose 级别，默认关闭）
 
 ### M8-B：手势识别引擎（内核态状态机）
 

@@ -22,6 +22,14 @@
 #include "xhci64.h"
 #include "mouse.h"
 #include "../../kernel/include/gesture.h"
+#include "../../kernel/include/hid_type_infer.h"
+
+/* OPENOS_TOUCH_TEST 编译宏 → 运行时布尔（供 hid_type_infer 使用） */
+#ifdef OPENOS_TOUCH_TEST
+#define HID_FORCE_TOUCH_TEST 1
+#else
+#define HID_FORCE_TOUCH_TEST 0
+#endif
 
 /* 内核时基（毫秒），供手势状态机使用 */
 extern uint64_t arch_x86_64_tsc_uptime_ms(void);
@@ -257,27 +265,21 @@ void usb_hid_init(void) {
         uint32_t proto = xhci_hid_device_proto(k);
         uint32_t vid   = xhci_hid_device_vid(k);
         uint32_t pid   = xhci_hid_device_pid(k);
-        uint32_t type  = XHCI_HID_TYPE_UNKNOWN;
 
-        if (proto == 1) {
-            type = XHCI_HID_TYPE_BOOT_KEYBD;
-        } else if (proto == 2) {
-            type = XHCI_HID_TYPE_BOOT_MOUSE;
-        } else if (proto == 0) {
-            /* M8-A 扩展：已知白名单 + 兜底触屏 */
-            if (vid == 0x0627 && pid == 0x0001) {
-#ifdef OPENOS_TOUCH_TEST
-                /* 编译时开关：把 QEMU tablet 强制当作触屏用，在 QEMU 环境下验证 M8-A 触屏代码路径 */
-                type = XHCI_HID_TYPE_TOUCHSCREEN;
-#else
-                type = XHCI_HID_TYPE_TABLET;
-#endif
-            } else {
-                /* 未匹配任何已知设备 → 假定为单点触屏（真机触屏常见 proto=0 subclass=0/1） */
-                type = XHCI_HID_TYPE_TOUCHSCREEN;
-            }
-        } else {
-            continue; /* 不支持的 HID 子类 */
+        /* M8-A.1：优先尝试用 Report Descriptor 判定；
+         *   xhci 目前未导出 report descriptor，desc/len 传 (NULL,0) 即可，
+         *   由 hid_type_infer 自动 fall-through 到 VID 白名单 → tablet → 兜底触屏。
+         *   一旦后续把 desc 读入内存并加 getter，只需在此传入即可无缝启用。 */
+        hid_infer_type_t inferred = hid_type_infer(
+            (uint16_t)vid, (uint16_t)pid, (uint8_t)proto,
+            /* desc */ (const uint8_t *)0, /* desc_len */ 0,
+            HID_FORCE_TOUCH_TEST);
+
+        /* 枚举值兼容：hid_infer_type_t 与 xhci_hid_type_t 前 5 项一一对应 */
+        uint32_t type = (uint32_t)inferred;
+        if (type == XHCI_HID_TYPE_UNKNOWN) {
+            HLOG("skip: unknown HID (proto not boot/subclass mismatch)");
+            continue;
         }
 
         if (xhci_hid_configure(k) != 0) {

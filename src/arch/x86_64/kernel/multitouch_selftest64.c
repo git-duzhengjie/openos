@@ -13,6 +13,7 @@
 #include "../include/multitouch_selftest64.h"
 #include "../include/early_console64.h"
 #include "../../../kernel/include/hid_parser.h"
+#include "../../../kernel/include/hid_type_infer.h"
 #include "../../../kernel/include/gesture_multi.h"
 
 #include <stdint.h>
@@ -237,10 +238,70 @@ static int test_multi_release(void) {
     return 0;
 }
 
+/* ------------------------------------------------------------------
+ * M8-A.1 selftest: hid_type_infer 分类逻辑
+ * ------------------------------------------------------------------ */
+static int test_hid_type_infer(void) {
+    /* 1. boot protocol 优先：proto=1 → KBD，proto=2 → MOUSE（即使 VID 是触屏）*/
+    if (hid_type_infer(0x27C6, 0x0101, 1, 0, 0, 0) != HID_INFER_BOOT_KEYBD) return -1;
+    if (hid_type_infer(0x046D, 0xC077, 2, 0, 0, 0) != HID_INFER_BOOT_MOUSE) return -1;
+
+    /* 2. 不支持的 proto → UNKNOWN */
+    if (hid_type_infer(0x0000, 0x0000, 3, 0, 0, 0) != HID_INFER_UNKNOWN) return -1;
+
+    /* 3. proto=0 + 已知触屏 VID 白名单 → TOUCHSCREEN */
+    if (hid_type_infer(0x27C6, 0x1234, 0, 0, 0, 0) != HID_INFER_TOUCHSCREEN) return -1; /* Goodix */
+    if (hid_type_infer(0x2AE0, 0x0001, 0, 0, 0, 0) != HID_INFER_TOUCHSCREEN) return -1; /* Focaltech */
+    if (hid_type_infer(0x222A, 0x0001, 0, 0, 0, 0) != HID_INFER_TOUCHSCREEN) return -1; /* ILITEK */
+
+    /* 4. QEMU tablet：默认 TABLET；force_touch_test=1 → TOUCHSCREEN */
+    if (hid_type_infer(0x0627, 0x0001, 0, 0, 0, 0) != HID_INFER_TABLET)      return -1;
+    if (hid_type_infer(0x0627, 0x0001, 0, 0, 0, 1) != HID_INFER_TOUCHSCREEN) return -1;
+
+    /* 5. proto=0 + 未知 VID + 无 desc → 兜底归为 TOUCHSCREEN */
+    if (hid_type_infer(0xDEAD, 0xBEEF, 0, 0, 0, 0) != HID_INFER_TOUCHSCREEN) return -1;
+
+    /* 6. Report Descriptor 探测：Usage Page (Digitizer) + Usage (Touch Screen) → TOUCHSCREEN */
+    static const uint8_t desc_touch[] = {
+        0x05, 0x0D,       /* Usage Page (Digitizer) */
+        0x09, 0x04,       /* Usage (Touch Screen) */
+        0xA1, 0x01,       /* Collection (Application) */
+        0xC0              /* End Collection */
+    };
+    /* 即使 VID=QEMU tablet，desc 优先级更高，应得 TOUCHSCREEN */
+    if (hid_type_infer(0x0627, 0x0001, 0, desc_touch, sizeof(desc_touch), 0)
+        != HID_INFER_TOUCHSCREEN) return -1;
+
+    /* 7. Report Descriptor 探测：Usage Page (Digitizer) + Usage (Pen) → TABLET */
+    static const uint8_t desc_pen[] = {
+        0x05, 0x0D,       /* Usage Page (Digitizer) */
+        0x09, 0x02,       /* Usage (Pen) */
+        0xA1, 0x01,
+        0xC0
+    };
+    if (hid_type_infer(0x27C6, 0x9999, 0, desc_pen, sizeof(desc_pen), 0)
+        != HID_INFER_TABLET) return -1;
+
+    /* 8. hid_desc_scan_digitizer: 非 Digitizer Page → UNKNOWN */
+    static const uint8_t desc_kbd[] = {
+        0x05, 0x01,       /* Usage Page (Generic Desktop) */
+        0x09, 0x06,       /* Usage (Keyboard) */
+        0xA1, 0x01, 0xC0
+    };
+    if (hid_desc_scan_digitizer(desc_kbd, sizeof(desc_kbd)) != HID_INFER_UNKNOWN) return -1;
+
+    /* 9. hid_vid_is_known_touch 直接验证 */
+    if (!hid_vid_is_known_touch(0x27C6)) return -1;
+    if ( hid_vid_is_known_touch(0x0000)) return -1;
+
+    return 0;
+}
+
 int arch_x86_64_multitouch_selftest_run(void) {
     int rc = 0;
     if (test_hid_parser()      != 0) { mt_log("[mt-selftest] FAIL: hid_parser\n");    rc = -1; }
     if (test_hid_report_parse()!= 0) { mt_log("[mt-selftest] FAIL: report_parse\n"); rc = -1; }
+    if (test_hid_type_infer()  != 0) { mt_log("[mt-selftest] FAIL: type_infer\n");   rc = -1; }
     if (test_multi_pinch_open()!= 0) { mt_log("[mt-selftest] FAIL: pinch_open\n");   rc = -1; }
     if (test_multi_pinch_close()!=0) { mt_log("[mt-selftest] FAIL: pinch_close\n");  rc = -1; }
     if (test_multi_rotate()    != 0) { mt_log("[mt-selftest] FAIL: rotate\n");       rc = -1; }
