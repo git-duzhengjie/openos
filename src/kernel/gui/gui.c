@@ -7,6 +7,7 @@
 
 #include "gui.h"
 #include "gui_user.h"
+#include "osk.h"
 #include "framebuffer.h"
 #include "mouse.h"
 #include "gesture.h"
@@ -10795,6 +10796,8 @@ static void gui_render_scene(void) {
      * remains the topmost transient popup. */
     gui_desktop_draw_start_menu();
     gui_ctxmenu_draw();
+    /* M8-D: 将虚拟键盘作为最顶层 overlay 渲染（仅在 visible=1 时生效） */
+    osk_render();
 }
 
 void gui_render(void) {

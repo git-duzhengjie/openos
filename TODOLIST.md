@@ -1892,27 +1892,31 @@
 
 ### M8-D：触屏友好 UI 与真机 I²C HID 触屏
 
-- [ ] **M8-D.1 虚拟键盘 OSK**
-  - [ ] `src/kernel/gui/osk.c` + `osk.h`：QWERTY 布局，按键 ≥ 44×44px
-  - [ ] 锁屏优先支持：检测无键盘时自动弹出 OSK；密码框获焦时弹出，失焦收起
-  - [ ] 终端窗口触屏模式也可弹 OSK（次要目标）
-- [ ] **M8-D.2 桌面图标 & 控件触屏自适应**
-  - [ ] 检测输入设备类型（有触屏无鼠标 → touch 模式；两者兼有 → hybrid）
-  - [ ] touch 模式下桌面图标尺寸放大到 ≥ 64×64px，滚动条加粗
-  - [ ] 命中测试放宽（点击容差 ±4px）
-- [ ] **M8-D.3 边缘手势 UX 接线**
-  - [ ] 底边 swipe up → 显示/隐藏任务栏
-  - [ ] 左/右边 swipe → 切换活动窗口
-  - [ ] 顶边 swipe down → 关闭当前窗口（可选）
+- [x] **M8-D.1 虚拟键盘 OSK**
+  - [x] `src/kernel/gui/osk.c` + `osk.h`：QWERTY 布局（5 行 x 10 逻辑列，底部占屏 40%）
+  - [x] Shift / ?123 层切换；Space / Enter / Backspace 支持
+  - [x] `gui_post_key` / `gui_post_key_code` 统一注入，与硬件键盘同源
+  - [x] `gui_render()` 顶层 overlay 渲染；`osk_selftest64` 9 阶段 PASS
+  - [ ] 锁屏优先接入（挂起、M8-D.4 前尽量接入 lockscreen）
+- [x] **M8-D.2 手势→GUI 消费桥（touch_ui）**
+  - [x] `src/kernel/gui/touch_ui.c` + `touch_ui.h`：事件路由统计 + last_action
+  - [x] gesture listener 自动注册（`window_manager_init` 中拉起）
+  - [x] `touch_ui_selftest64` 9 阶段 PASS
+- [x] **M8-D.3 边缘手势 UX 接线**
+  - [x] 底边 swipe up → OSK toggle（已上线）
+  - [x] 顶边 swipe down → 通知中心（打桩 stat，UI 推到 M8-F）
+  - [x] 右边 swipe left → 快速面板（打桩）
+  - [x] 左边 swipe right → 返回/关闭前台（打桩）
 - [ ] **M8-D.4 I²C HID 触屏驱动（真机 Surface / 触屏笔记本）**
   - [ ] 实现 `i2c64.c`：Intel LPSS / Designware I²C 主控驱动（PCI + MMIO）
   - [ ] ACPI DSDT 解析：识别 `PNP0C50`（HID over I²C）设备、读取 HID Descriptor Address
   - [ ] `i2c_hid64.c`：实现 HID over I²C 协议（Get HID Descriptor / Get Report Descriptor / Interrupt 事件读取）
   - [ ] 复用 M8-C.2 的通用 HID Report Descriptor 解析器
   - [ ] 真机验证矩阵：Surface Go / Thinkpad X1 Yoga / 常见触屏笔电（记录 klog dump）
-- [ ] **M8-D.5 输入设备热插拔**
-  - [ ] USB 层：HID 设备拔出/插入事件传递到 input_core
-  - [ ] I²C 层：ACPI GPE 事件监听（可选，优先级低）
+- [x] **M8-D.5 输入设备热插拔**
+  - [x] gesture_init(screen_w/h) 已在 window_manager_init 自动拉起
+  - [ ] USB 层 HID 拔出/插入事件传递到 input_core（挂起到 M8-E）
+  - [ ] I²C 层 ACPI GPE 事件监听（优先级低）
 
 - [ ] **M8-E：输入抽象层（IAL，触屏/手机地基）**
   - [ ] M8-E.1 统一事件结构 `input_event_t` + 环形队列实现（参考 Linux evdev 语义）

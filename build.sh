@@ -783,6 +783,8 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         kernel/klog_selftest64.c \
         kernel/gesture_selftest64.c \
         kernel/multitouch_selftest64.c \
+        kernel/osk_selftest64.c \
+        kernel/touch_ui_selftest64.c \
         kernel/security64.c \
         kernel/gfx_selftest64.c \
         kernel/virtio_gpu_selftest64.c \
@@ -847,6 +849,8 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         src/kernel/gui/gesture.c \
         src/kernel/gui/gesture_multi.c \
         src/kernel/gui/hid_parser.c \
+        src/kernel/gui/osk.c \
+        src/kernel/gui/touch_ui.c \
         src/kernel/gui/gui_browser.c \
         src/kernel/gui/gui_terminal.c \
         src/kernel/gui/gui_sticky.c \
@@ -949,6 +953,8 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         "$ARCH64_BUILD/klog_selftest64.o" \
         "$ARCH64_BUILD/gesture_selftest64.o" \
         "$ARCH64_BUILD/multitouch_selftest64.o" \
+        "$ARCH64_BUILD/osk_selftest64.o" \
+        "$ARCH64_BUILD/touch_ui_selftest64.o" \
         "$ARCH64_BUILD/security64.o" \
         "$ARCH64_BUILD/gfx_selftest64.o" \
         "$ARCH64_BUILD/virtio_gpu_selftest64.o" \
@@ -1001,6 +1007,8 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         "$ARCH64_BUILD/gesture.o" \
         "$ARCH64_BUILD/gesture_multi.o" \
         "$ARCH64_BUILD/hid_parser.o" \
+        "$ARCH64_BUILD/osk.o" \
+        "$ARCH64_BUILD/touch_ui.o" \
         "$ARCH64_BUILD/gui_browser.o" \
         "$ARCH64_BUILD/gui_terminal.o" \
         "$ARCH64_BUILD/gui_sticky.o" \

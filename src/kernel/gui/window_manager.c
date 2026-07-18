@@ -1,6 +1,8 @@
 #include "window_manager.h"
 #include "serial.h"
 #include "string.h"
+#include "gui.h"
+#include "touch_ui.h"
 
 typedef struct window_manager_state {
     int initialized;
@@ -35,6 +37,14 @@ void window_manager_init(void)
 {
     memset(&g_wm, 0, sizeof(g_wm));
     gui_init();
+    /* M8-D: 初始化触屏 UI（OSK + gesture listener）。 */
+    {
+        int w = gui_screen_width();
+        int h = gui_screen_height();
+        if (w <= 0) w = 640;
+        if (h <= 0) h = 480;
+        touch_ui_init(w, h);
+    }
     g_wm.initialized = 1;
 }
 
