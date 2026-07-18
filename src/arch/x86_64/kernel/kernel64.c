@@ -13,6 +13,8 @@
 #include "../include/app_stack_selftest64.h"
 #include "../include/app_lifecycle_selftest64.h"
 #include "../include/app_switcher_selftest64.h"
+#include "../include/sys_input_read_selftest64.h"
+#include "../include/nc_fade_selftest64.h"
 #include "../include/gui_metrics_selftest64.h"
 #include "../include/gui_input_bridge_selftest64.h"
 #include "../include/elf64_loader.h"
@@ -144,6 +146,8 @@ void arch_x86_64_early_init(const openos_bootinfo_t *bootinfo) {
     (void)arch_x86_64_app_stack_selftest_run();
     (void)arch_x86_64_app_lifecycle_selftest_run();
     (void)arch_x86_64_app_switcher_selftest_run();
+    (void)arch_x86_64_sys_input_read_selftest_run();
+    (void)arch_x86_64_nc_fade_selftest_run();
     (void)arch_x86_64_gui_metrics_selftest_run();
     (void)arch_x86_64_gui_input_bridge_selftest_run();
     early_console64_write("[x86_64] arch_ops=");

@@ -43,6 +43,7 @@
 #include "../include/account_db64.h" /* M6.11.3: passwd/shadow parser */
 #include "../include/login64.h"      /* M6.11.3: login / session establishment */
 #include "../include/klog64.h"       /* M6.12:  kernel log ring buffer + SYS_KLOG */
+#include "../../../kernel/include/input_core.h" /* M10.7: IAL user-space read */
 #include "../include/opk_install.h" /* M5.4c: .opk 包安装器 */
 /* M5.4c: kernel-side .opk installer bridge (opk_install_kernel.c) */
 extern int opk_install_to_ramfs(const uint8_t *image, uint32_t image_size,
@@ -398,6 +399,60 @@ static uint64_t do_klog(uint64_t cmd, uint64_t arg, uint64_t buf_ptr, uint64_t b
     default:
         return (uint64_t)(int64_t)-1;
     }
+}
+
+/*
+ * M10.7: SYS_INPUT_READ
+ *   a0 = user pointer to input_event_t[]
+ *   a1 = max_events (>=1)
+ *   a2 = flags (reserved, must be 0)
+ *   -> events_copied on success (>=0, 0 means no events available / non-blocking)
+ *   -> (uint64_t)-1 on argument error
+ *
+ * 语义：非阻塞地从内核 IAL 环形队列中拷贝事件到用户缓冲区，遵循 drop-oldest 策略。
+ *       仅拷贝 min(available, max_events)。零事件时立即返回 0（不阻塞）。
+ *       事件按写入顺序返回（FIFO）。用户态可周期性轮询。
+ */
+static uint64_t do_input_read(uint64_t buf_ptr, uint64_t max_events, uint64_t flags) {
+    if (buf_ptr == 0) return (uint64_t)-1;
+    if (max_events == 0 || max_events > 256) return (uint64_t)-1;
+    if (flags != 0) return (uint64_t)-1;
+    /* 溢出防护：max_events * sizeof(input_event_t) 不超过 64KB */
+    uint64_t total_bytes = max_events * (uint64_t)sizeof(input_event_t);
+    if (total_bytes == 0 || total_bytes > 65536) return (uint64_t)-1;
+    if (!validate_user_buf(buf_ptr, (size_t)total_bytes)) return (uint64_t)-1;
+
+    input_event_t *dst = (input_event_t *)(uintptr_t)buf_ptr;
+    uint32_t copied = 0;
+    for (uint32_t i = 0; i < (uint32_t)max_events; ++i) {
+        input_event_t ev;
+        if (!input_poll_event(&ev)) break;   /* queue empty */
+        dst[copied++] = ev;
+    }
+    return (uint64_t)copied;
+}
+
+/*
+ * M10.7 selftest hook: expose the same core logic as do_input_read() but
+ * skip validate_user_buf() (which requires a real user-mode page table).
+ * Selftest passes a kernel-resident buffer, so we bypass the user-check only.
+ * All other argument validation runs identically.
+ */
+uint64_t syscall_do_input_read_for_selftest(void *kbuf, uint64_t max_events, uint64_t flags) {
+    if (kbuf == 0) return (uint64_t)-1;
+    if (max_events == 0 || max_events > 256) return (uint64_t)-1;
+    if (flags != 0) return (uint64_t)-1;
+    uint64_t total_bytes = max_events * (uint64_t)sizeof(input_event_t);
+    if (total_bytes == 0 || total_bytes > 65536) return (uint64_t)-1;
+
+    input_event_t *dst = (input_event_t *)kbuf;
+    uint32_t copied = 0;
+    for (uint32_t i = 0; i < (uint32_t)max_events; ++i) {
+        input_event_t ev;
+        if (!input_poll_event(&ev)) break;
+        dst[copied++] = ev;
+    }
+    return (uint64_t)copied;
 }
 
 static uint64_t do_close(uint64_t fd) {
@@ -2105,6 +2160,7 @@ uint64_t arch_x86_64_syscall_dispatch_common(uint64_t num,
     case SYS_SETEGID:     return (uint64_t)(int64_t)arch_x86_64_proc_setegid((uint32_t)a0);
     case SYS_LOGIN:       return do_login(a0, a1, a2);
     case SYS_KLOG:        return do_klog(a0, a1, a2, a3);
+    case SYS_INPUT_READ:  return do_input_read(a0, a1, a2);
     case SYS_YIELD:       return do_yield();
     case SYS_WAIT:        return do_wait_common(0, a0, 0);
     case SYS_WAITPID:     return do_wait_common(a0, a1, 1);

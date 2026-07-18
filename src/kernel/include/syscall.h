@@ -229,6 +229,7 @@
 #define SYS_SETEGID       485  /* M6.11.1: a0=egid -> 0/负(EPERM)。镜像 SETEUID */
 #define SYS_LOGIN         486  /* M6.11.4: a0=name*, a1=password*, a2=passwd_entry_t* -> login_result_t（0=OK, 负=err） */
 #define SYS_KLOG          487  /* M6.12: a0=cmd, a1=arg, a2=user buf, a3=buf size -> bytes written/<0（内核日志环形缓冲区查询） */
+#define SYS_INPUT_READ    488  /* M10.7: a0=user input_event_t[] ptr, a1=max_events, a2=flags(reserved) -> events_copied/<0（非阻塞读取 IAL 事件流） */
 #define SYS_GUI_ADD_TABLEVIEW 400
 #define SYS_GUI_SET_TABLEVIEW_ROW 401
 #define SYS_GUI_GET_TABLEVIEW_ROW 402

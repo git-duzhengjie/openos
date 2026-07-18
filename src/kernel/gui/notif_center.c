@@ -14,6 +14,8 @@
 
 static nc_state_t g_nc;
 
+nc_state_t *nc_get_state(void) { return &g_nc; }
+
 static uint32_t nc_strlen_(const char *s) {
     uint32_t n = 0;
     while (s && s[n]) n++;
@@ -88,10 +90,63 @@ void nc_quick_hide(void)   { if ( g_nc.quick_panel_visible) g_nc.stat_quick_hidd
 void nc_quick_toggle(void) { if (g_nc.quick_panel_visible) nc_quick_hide(); else nc_quick_show(); }
 int  nc_quick_is_visible(void) { return g_nc.quick_panel_visible; }
 
+/* ============================ M10.8: tick 推进与淐出 ============================ */
+
+void nc_tick(uint32_t now_ms) {
+    g_nc.now_ms = now_ms;
+
+    int active_changed = 0;
+    for (uint32_t i = 0; i < NC_MAX_NOTIFICATIONS; i++) {
+        nc_notification_t *n = &g_nc.notifs[i];
+        if (!n->active) continue;
+        if (n->expire_ms == 0) continue;    /* 永不过期 */
+
+        /* 未到期：保持全不透 */
+        if (now_ms < n->expire_ms) {
+            n->alpha = 255;
+            continue;
+        }
+
+        /* 到期：开始淐出 */
+        if (n->fade_start_ms == 0) {
+            n->fade_start_ms = n->expire_ms;
+            g_nc.stat_notif_expired++;
+        }
+
+        uint32_t elapsed  = now_ms - n->fade_start_ms;
+        uint32_t duration = n->fade_duration_ms ? n->fade_duration_ms : 500;
+        if (elapsed >= duration) {
+            /* 淐出完成：自动移除 */
+            n->active = 0;
+            n->alpha  = 0;
+            g_nc.stat_notif_evicted++;
+            active_changed = 1;
+        } else {
+            /* alpha = 255 * (1 - elapsed/duration)，线性 */
+            uint32_t remain = duration - elapsed;
+            uint32_t a = (255u * remain) / duration;
+            if (a > 255) a = 255;
+            n->alpha = (uint8_t)a;
+        }
+    }
+
+    if (active_changed) {
+        g_nc.notif_count = 0;
+        for (uint32_t i = 0; i < NC_MAX_NOTIFICATIONS; i++) {
+            if (g_nc.notifs[i].active) g_nc.notif_count++;
+        }
+    }
+}
+
 /* ============================ 通知 push ============================ */
 
 void nc_push_notification(const char *app_name, const char *title, const char *content,
                           uint32_t timestamp_ms) {
+    nc_push_notification_ttl(app_name, title, content, timestamp_ms, 0, 0); /* 永不过期 */
+}
+
+void nc_push_notification_ttl(const char *app_name, const char *title, const char *content,
+                              uint32_t timestamp_ms, uint32_t ttl_ms, uint32_t fade_duration_ms) {
     /* 找一个空槽或最老槽 */
     uint32_t slot = 0;
     int found = 0;
@@ -110,6 +165,17 @@ void nc_push_notification(const char *app_name, const char *title, const char *c
     nc_strcpy_(g_nc.notifs[slot].content,  content,  NC_LABEL_MAX * 2);
     g_nc.notifs[slot].timestamp_ms = timestamp_ms;
     g_nc.notifs[slot].active = 1;
+    g_nc.notifs[slot].alpha  = 255;          /* 完全可见 */
+    g_nc.notifs[slot].fade_start_ms   = 0;   /* 未开始淐出 */
+    g_nc.notifs[slot].fade_duration_ms = fade_duration_ms ? fade_duration_ms : 500;
+    if (ttl_ms > 0) {
+        /* expire = 现在 + ttl。首次 push 时尚未 tick，使用 timestamp_ms 作近似；
+         * 下一次 nc_tick() 会自动校正为真实 now_ms。 */
+        g_nc.notifs[slot].expire_ms = g_nc.now_ms + ttl_ms;
+        if (g_nc.notifs[slot].expire_ms == 0) g_nc.notifs[slot].expire_ms = ttl_ms;
+    } else {
+        g_nc.notifs[slot].expire_ms = 0;       /* 永不过期 */
+    }
 
     /* 更新计数 */
     g_nc.notif_count = 0;
@@ -248,8 +314,6 @@ void nc_render(void) {
     nc_render_notif_center_();
     nc_render_quick_panel_();
 }
-
-const nc_state_t *nc_get_state(void) { return &g_nc; }
 
 /* ============================ selftest ============================ */
 

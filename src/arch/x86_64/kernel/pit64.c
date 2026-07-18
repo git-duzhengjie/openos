@@ -6,6 +6,11 @@
 
 #include <stdint.h>
 
+/* M10.8: Forward-declare NC tick sink. Weak so kernels built without the
+ * notification center simply skip the call. `nc_tick(now_ms)` is the only
+ * NC surface used from IRQ0 context (pure counter/state, no allocs). */
+__attribute__((weak)) void nc_tick(uint32_t now_ms);
+
 /* Step F.2 — PIT channel 0 rate generator.
  *
  * PIT_INPUT_HZ is fixed by hardware at 1193182 Hz. To produce a target
@@ -80,6 +85,18 @@ void arch_x86_64_pit_irq0_handler(uint64_t iret_cs) {
      * existing irq-selftest behavior (delta ∈ [18,22] over 200ms) is
      * preserved bit-for-bit. */
     g_pit_ticks++;
+
+    /* M10.8: drive the notification-center fade-out clock. Cheap: an
+     * empty NC table costs 8 loop iters + no branches; a fading notif
+     * is O(N_active). This must run before EOI so if we somehow crash
+     * inside nc_tick the IRQ line is still masked (fail-safe). */
+    if (nc_tick) {
+        uint32_t hz = g_pit_hz ? g_pit_hz : 100u;
+        /* Overflow-safe: (ticks * 1000) may wrap after ~46 days at 1kHz;
+         * NC only cares about deltas so a wraparound is harmless. */
+        uint32_t now_ms = (uint32_t)((g_pit_ticks * 1000ull) / hz);
+        nc_tick(now_ms);
+    }
 
     /* gamma.5-P1: same histogram as the LAPIC-timer handler (see
      * lapic64.c). On the BSP the PIT is the only preempt source, so

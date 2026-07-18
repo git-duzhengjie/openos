@@ -790,6 +790,8 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         kernel/app_stack_selftest64.c \
         kernel/app_lifecycle_selftest64.c \
         kernel/app_switcher_selftest64.c \
+        kernel/sys_input_read_selftest64.c \
+        kernel/nc_fade_selftest64.c \
         kernel/gui_metrics_selftest64.c \
         kernel/gui_input_bridge_selftest64.c \
         kernel/security64.c \
@@ -977,6 +979,8 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         "$ARCH64_BUILD/app_stack_selftest64.o" \
         "$ARCH64_BUILD/app_lifecycle_selftest64.o" \
         "$ARCH64_BUILD/app_switcher_selftest64.o" \
+        "$ARCH64_BUILD/sys_input_read_selftest64.o" \
+        "$ARCH64_BUILD/nc_fade_selftest64.o" \
         "$ARCH64_BUILD/gui_metrics_selftest64.o" \
         "$ARCH64_BUILD/gui_input_bridge_selftest64.o" \
         "$ARCH64_BUILD/security64.o" \

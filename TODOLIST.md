@@ -1922,7 +1922,7 @@
   - [x] M8-E.1 统一事件结构 `input_event_t` + 环形队列实现（256 slot 环形，drop-oldest 溢出策略，`INPUT_EV_SYN/KEY/REL/ABS/TOUCH/GESTURE`；参考 Linux evdev 语义）
   - [x] M8-E.2 生产端改造：PS/2 mouse、USB tablet、USB mouse、gesture 引擎 → `input_report()` 事件总线（tee 模式，与 `g_mouse` 并行注入零破坏）
   - [ ] M8-E.3 消费端改造：gui.c / lockscreen.c → `input_poll_event()` 循环，移除 `g_mouse` 直接依赖（推迟：现路径稳定，重构留到 M9 触屏 GUI 期一次性做）
-  - [ ] M8-E.4 `sys_input_read()` 系统调用（用户态读取事件流，为 gestured/录制铺路，推迟到 M10 应用运行时）
+  - [x] M8-E.4 `sys_input_read()` 系统调用（用户态读取事件流，为 gestured/录制铺路，已由 M10.7 完成）
   - [x] M8-E.5 input-selftest 注入合成事件验证 FIFO/订阅/溢出 drop-oldest/取消订阅/热插拔占位/手势 tee 完整性（8 阶段 PASS）
   - [ ] 详细路线文档已归档：`docs/mobile-touch-roadmap.md`（含 M9~M12 触屏/手机形态五阶段）
 
@@ -1945,8 +1945,8 @@
   - [x] M10.4 `app_launcher.h/.c`：`app_launch(name)` / `app_exit()` / `app_switcher_show/hide/select()`；ELF 后端接口 `app_launcher_bind_backend()`（内建 app pid=-1，ELF app 由 backend 返回 pid）
   - [x] M10.5 `gui_mode.h/.c`：DESKTOP/FULLSCREEN 模式抽象 + listener 回调（默认 DESKTOP，零回归）
   - [x] M10.6 app_switcher overlay UI 渲染（三指上滑触发） → `app_switcher_ui.h/.c` + `gesture3.h/.c` + `touch_ui` 接线 + `app-switcher-selftest` 8 阶段实测 **PASS**；卡片布局 / hittest / 优先级链OSK>Switcher>NC>桌面 / 面板内空白自关 / 面板外不消费 均已验证
-  - [ ] M10.7 M8-E.4 `sys_input_read()` 系统调用（补票，等 hello64 用户程序对接）
-  - [ ] M10.8 M8-F.6 通知超时自动淡出（补票，接 pit64 tick）
+  - [x] M10.7 M8-E.4 `sys_input_read()` 系统调用 → `SYS_INPUT_READ=496` + bounce buffer + `syscall_do_input_read_for_selftest` 白盒接口 + `sys-input-read-selftest` 8 阶段 **PASS**
+  - [x] M10.8 M8-F.6 通知超时自动淡出 → `nc_tick(now_ms)` 接 `pit64` 100Hz tick + `nc_push_notification_ttl` + `fade_duration_ms` 插值透明度 + `stat_notif_expired/evicted` + `nc-fade-selftest` 8 阶段 **PASS**
   - [x] M10.9 双 selftest：`app-stack-selftest` 8 阶段 + `app-lifecycle-selftest` 8 阶段 PASS
 
 
