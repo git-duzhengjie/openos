@@ -1537,6 +1537,16 @@
       - `vmm64.c` L175~259：`vmm_map_kernel` 内核映射叶子 = KERNEL_FLAGS（U=0），`as_map_user` 用户映射叶子 = USER_FLAGS（U=1），隔离在叶子级别收口
       - 效果：ring3 触到内核低地址叶子（U=0）会触发 #PF → 由 usermode `kfault` 计数器捕获；SMAP 独立防内核 U=1 越权访问
       - 证据：ELF loader 装载 + as-selftest clone + usermode iretq 返回全链路 `kfault_delta=0`（无内核泄漏面）
+  - [ ] **γ.5 P3 · user-preempt iretq #GP 修复（H.5c fork/wait/preempt-selftest 共同 blocker）**
+    - 现象：单核 QEMU 下，timer IRQ 抢占正在 ring3 执行的 user 任务时，IRQ 返回路径的 `iretq` 触发 #GP e=0x30，rip 落在 `irq0_iret` 附近
+    - 已知遮蔽：`preempt-selftest` 因此长期默认 SKIP（`OPENOS_ENABLE_PREEMPT_SELFTEST=1` 显式开启才跑）；H.5c fork-multi 触发路径同源（parent hlt 等待 child，child 一进 ring3 就被 preempt → iretq #GP 后卡住）
+    - 追凶结论（2026-07-19 A 路线诊断）：fork 3 个 child spawn 成功（proc idx=2/3/4，sched slot 8/9/A 全部 parked→ready），parent `sti; hlt` 后 tick 确实到达 IRQ0 但 iretq 回 ring3 失败，child 从未真正跑起来 `[fork-multi] child idx=X` 从未打印
+    - 修复方向：审计 `irq0_iret` 汇编 iret frame 布局（RIP/CS/RFLAGS/RSP/SS 五元组）、TSS rsp0 切换时机、`swapgs` 位置、`ring0→ring3` iretq 前 GDT selector 是否与 fork_capture 时布置一致
+    - 验收：`OPENOS_ENABLE_PREEMPT_SELFTEST=1` 默认启用且 PASS + hello_fork multi-child (N=3) 全部 exit + parent wait 收到 3 个 exit_code
+    - 依赖：H.5b.1~H.5b.4（√）；不依赖 SMP（应能在 UP 单核完全 PASS）
+  - [ ] **H.5c fork/wait/waitpid 收官**（等 γ.5 P3 落地）
+    - 现状：`sys_fork` + `sys_wait` + `sys_waitpid` 内核骨架 & fork_capture 已就位；单 child 场景能跑，multi-child (N=3) 因 iretq #GP 卡住
+    - 触发链：`hello_fork.c` `OPENOS64_FORK_N=3` → parent `sys_wait` 循环收割 → child ring3 preempt 需可正常返回
 
 ---
 
