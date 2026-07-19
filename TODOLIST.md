@@ -6,7 +6,7 @@
 >
 > 最近完成：**x86_64 全链路零 FAIL 治理完成（commit 待生成）**——(1) `vmm64` early identity map 512 MiB → 1 GiB（`arch/x86_64/kernel/vmm64.c`），根除 QEMU `-m 1024` + PCI 设备启用时 AHCI `alloc_page → memset` 触发 #PF（cr2≈998 MiB）导致的启动崩溃；(2) `kernel64.c` 将 nvme/xhci/AHCI 三家的 “skipped/FAIL” 混合标签精确拆分为 `SKIP (no controller)` 与 `FAIL`（基于 `*_present()` 判定），MSI IRQ-path selftest 同步适配；(3) `xhci_selftest` init 失败时按 present 分流 SKIP/FAIL；(4) `preempt-selftest` 由 `M5_FAST_BOOT` 单开关升级为 `OPENOS_ENABLE_PREEMPT_SELFTEST` 显式启用（默认 SKIP，避免单核 QEMU pending IRQ0 iretq #GP 遮蔽全链路结果）。回归矩阵：**默认 (-m 512) 48 PASS / 0 FAIL / 3 合理 SKIP；(-m 1024 + NVMe + qemu-xhci + usb-kbd/mouse) 58 PASS / 0 FAIL**，AHCI 读写、NVMe IDENTIFY+读写、xHCI 命令环 NOOP + 端口枚举 + HID + MSC 全链路 PASS。**M8-C.4 双指滚动→滚轮映射（commit `77586d7`）**：`gesture_multi` 新增 `GESTURE_MULTI_SCROLL_UPDATE`，判定条件 `|scale-1000|<80 && |Δangle|≤5°`，中心点 Δ 累加 24 px NOTCH 产出有符号 wheel_ticks（自然滚动语义），selftest 覆盖 tick=+2/-1 与 sub-notch 双路径。**M8-A HID 类型推断跨架构模块（commit `156826c`）**：`hid_type_infer.h/.c` 5 层判定（boot proto > desc scan Digitizer/Usage > VID 白名单 7 家 > QEMU tablet 分支 > proto=0 兜底），x86_64 usb_hid64 与 aarch64 M11 输入栈双向复用，multitouch_selftest 5 路径全覆盖。**x86_64 preempt-selftest 历史遗留 #GP 修复完成（commit `1db73d8`）**——定位为栈溢出（栈用量 0x150B8 ≈ 86KB > 原 64KB 上限）触发 #GP e=4；调整内核栈上限 + `-mstrict-align` 后栈用量峰值降至 ~16KB，整体回归 43 PASS 且无任何 #GP/#PF/#UD/#DF 异常 crash。**M11 ARM64 移植 全 5 子项一波交付（commit `2998ef2`）**——DTB/GICv3/Timer IRQ/I2C/GT911 selftest 5/5 PASS。**M6.12 klog + dmesg 落地**、**M6.11 多用户与会话**、**M6 全 10 子项收官**（详见此前提交记录）。——定位为栈溢出（栈用量 0x150B8 ≈ 86KB > 原 64KB 上限）触发 #GP e=4；调整内核栈上限 + `-mstrict-align` 后栈用量峰值降至 ~16KB，`preempt-selftest` 完整 PASS（preempts=4 / switches=6 / a_done=b_done=1）；整体回归 43 PASS 且无任何 #GP/#PF/#UD/#DF 异常 crash。**M11 ARM64 移植 全 5 子项一波交付（commit `2998ef2`，17 文件 +1331/-17）**——M11-A 构建（aarch64-linux-gnu-gcc + `-mstrict-align` + linker script + boot.S）、M11-B `-kernel .bin` 直引导（AAVMF UEFI 推迟）、M11-C.1 DTB 深度解析（memory/chosen/initrd/model）、M11-C.2 GICv3（distributor + redistributor + ICC_* 系统寄存器）、M11-C.3 Timer PPI30 挂 GICv3（异常向量 ACK/dispatch/EOI 闭环 + 128 槽 IRQ 路由表）、M11-D.1/2/3 I2C 抽象 + GT911 5 点触屏 + 走 M8-E `input_report()` 跨架构总线复用、M11-Z 五阶段 selftest 5/5 PASS（DTB/GICv3/TimerIRQ×2/I2C/GT911）；x86_64 回归绿。**M6.12 系统日志子系统完成**——`klog64` 64KB 环形缓冲（seq 单调 + irq-off spinlock + FIFO 回绕 + 防重入 tee）+ `early_console` 零侵入 tee 集成 + `SYS_KLOG=487` 系统调用（bounce buffer 保证用户拷贝安全，CLEAR 需 euid=0）+ 用户态 `/bin/dmesg`（-n/-s/-c/-h）+ `klog-selftest` 六阶段全绿 + ring3 端到端验证（M6_DMESG_DIAG 通道 SYS_KLOG 成功拉取）；GUI 桌面**鼠标光标不显示**与**终端窗口只剩标题栏**两个长期问题一并修复（gui_cursor_draw_fb/restore_fb 补 present + 终端窗口尺寸从硬编码改为按屏幕高度 45% 自适应，适配 640×480 低分辨率）。**M6.11.4 SYS_LOGIN 完成**——系统调用 486 内核分发 + 用户态 `openos64_login()` 封装 + ring3 `/bin/login` 程序，端到端 openos 认证 PASS 且降权到 uid/gid=1000。**M6.11.3 login/session 完成**——账户库解析器 `account_db64`（/etc/passwd+/etc/shadow 无堆解析）+ 认证器 `login64`（SHA256(password) 与 shadow `sha256$<hex>` 比对）+ 会话建立（setsid→setgid→setuid 降权，顺序保证特权规则），`login_selftest64` 六阶段实机 PASS 且快照/恢复 slot-0 root 身份无污染，无 boot/GUI 回归。**M6.11 多用户与会话开工**——M6.11.1 进程凭证体系（POSIX uid/gid/euid/egid/suid/sgid + setuid/setgid/seteuid/setegid，commit `f88d9ff`）、M6.11.2 账户数据库（/etc/passwd+group+shadow，SHA256 哈希，commit `d760827`）。**重大底层修复：UEFI 重定位 triple fault 根除**（commit `f94378f`）——entry64 换 CR3 前 RIP 为物理地址时，`leaq sym(%rip)` 已直接产出运行时物理地址，代码却又多减一次 virt-to-phys offset 导致 pml4 物理地址算成越界垃圾→ identity map 缺失 → #PF→#DF→ triple fault；五处页表地址全改 `movabsq $sym`+`subq %r10`；修复后串口输出 18行→418行，prio/preempt selftest PASS，GUI 桌面起来（调试探针已清理 commit `48b6b9f`）。\n>\n> M6 里程碑全部收官（系统资源 + 图形加速 + 安全加固）—— M6.1 ACPI 电源、M6.2 CPU 频率/温度观测、M6.3 blit 软件加速、M6.4 virtio-gpu 2D、M6.5 framebuffer 双后端、M6.6 硬件光标、M6.7 EDID、M6.8 多 scanout、M6.9 virtio-input、**M6.10 安全加固 6/6（commit `ecfc876`）**。TCP/IP 全栈零回归（`src/kernel/net/netstack.c` 2093 行）；M4.1b sbrk 假故障修复（commit `31b7842`）。
 >
-> 当前推荐下一步：M6 已全部收官（M6.1–M6.10）。建议推进 **M6.11 多用户与会话**（完整 uid/gid 体系 + 登录管理 + 权限隔离）与 **M6.12 系统日志子系统**（dmesg / journald 风格）；或回头收口 H 系列 x86_64 ring3 进阶（H.5b.2+ 独立地址空间 + CR3 切换、fork、wait/waitpid、ELF 解释器、动态库）。任何后续工作均需保持 Stages 1-30 SMP=1/4 双矩阵全绿基线不退化。
+> 当前推荐下一步：M6 已全部收官（M6.1–M6.10）。**H.5b.1–H.5b.4 收官完成**：独立地址空间 + CR3 切换 + 去 U 位隔离全部就位（as-selftest PASS、kfault_delta=0）。建议推进 **M6.11 多用户与会话**（完整 uid/gid 体系 + 登录管理 + 权限隔离）、**M6.12 系统日志子系统**（dmesg / journald 风格）；或继续 H 系列 x86_64 ring3 进阶（H.5c fork/wait/waitpid、ELF 解释器、动态库）。任何后续工作均需保持 Stages 1-30 SMP=1/4 双矩阵全绿基线不退化。
 
 ---
 
@@ -1518,14 +1518,25 @@
       - `[hello64_v2] envc=3 envp[0..2]=PATH=/bin/HOME=//OPENOS_STAGE=H.5a` ✓
       - `exit_code=0x2A` / `exec_count=1 exec_fail=0` / `pending_exec=0` / `kfault_delta=0` / `post-exit-sentry PASS`
     - [√] SMP=1 + SMP=4 双矩阵 Stages 1-30 全 PASS，基线条款保住
-  - [ ] H.5b+ 待续：独立地址空间 + CR3 切换、fork、wait/waitpid、ELF 解释器、动态库
+  - [√] H.5b+：独立地址空间 + CR3 切换（H.5b.1~H.5b.4 收官；fork/wait/ELF 解释器/动态库另立条目）
     - [√] H.5b.1 @ `0d092bf`：接线骨架（零行为变化）
       - `build.sh` 注册 `kernel/address_space64.c`，`address_space64.{c,h}` 入库（PML4 克隆/内核高半区镜像/CR3 load/destroy 全 API 就位但未被调用）
       - `proc64.h` PCB 新增 `struct x86_64_address_space *as`（前置 forward decl），生命周期三处（init/spawn_user/proc_exit）显式置 NULL
       - 编译通过 + 双矩阵 SMP=1/4 Stages 1-30 全 PASS，`exit_code=0x2A`，`kfault_delta=0`，`vfs.nodes=7`，`mapped_pages=5`
-    - [ ] H.5b.2：ELF loader 加载到目标 AS（PMM 分页 + map_to_as，initial spawn 用之；CR3 暂不切）
-    - [ ] H.5b.3：用户栈搬家到 PML4[1] + trampoline iretq 前 CR3 切换
-    - [ ] H.5b.4：去 U 位收口（PML4[0] 内核低 4GiB 叶子去 U，只保留必须共享的项）
+    - [√] H.5b.2：ELF loader 加载到目标 AS（PMM 分页 + map_to_as，initial spawn 用之；CR3 暂不切）
+      - `elf64_loader.c` L225：`arch_x86_64_as_map_user(as, va, pa, flags)` 已接入 LOAD segment 分页装载
+      - `address_space64.c`：`as_map_user` / `as_map_kernel` / `as_clone`（写时深拷贝叶子）/ `as_activate` 全实现
+      - 证据：`[x86_64][as.selftest] BEGIN clone test` → `OK clone parent_pa=0x1DE32000 child_pa=0x1DE2D000 p_leaf=0x1DE31000 c_leaf=0x1DE29000` → `[x86_64][as-selftest] result=0x0` PASS
+    - [√] H.5b.3：用户栈搬家到 PML4[1] + trampoline iretq 前 CR3 切换
+      - `usermode64.c` 使用 `as_map_user` 建立用户栈叶子（USER_FLAGS = P+RW+US）
+      - `proc64.c` L402：`arch_x86_64_as_activate(as)` 在派发用户态前完成 CR3 切换（fork 路径经 `as_clone` 分裂后切子进程 AS）
+      - 证据：as-selftest clone → 父子 CR3 独立 → 叶子物理页确认分裂（parent/child 叶子 phys 不同）→ PASS
+    - [√] H.5b.4：去 U 位收口（PML4[0] 内核低 4GiB 叶子去 U，只保留必须共享的项）
+      - `vmm64.h` L14~28：`OPENOS_X86_64_VMM_KERNEL_FLAGS = PRESENT | RW | GLOBAL`（**不含 PTE_USER**）；`OPENOS_X86_64_VMM_USER_FLAGS = PRESENT | RW | USER`
+      - `vmm64.c` L95~174：上层表（PML4/PDPT/PD）统一 `P+RW+US` 通配，叶子 PTE 严格按调用方传入 flags 落地（Linux/xv6 标准做法：上层表宽松、叶子决定权限）
+      - `vmm64.c` L175~259：`vmm_map_kernel` 内核映射叶子 = KERNEL_FLAGS（U=0），`as_map_user` 用户映射叶子 = USER_FLAGS（U=1），隔离在叶子级别收口
+      - 效果：ring3 触到内核低地址叶子（U=0）会触发 #PF → 由 usermode `kfault` 计数器捕获；SMAP 独立防内核 U=1 越权访问
+      - 证据：ELF loader 装载 + as-selftest clone + usermode iretq 返回全链路 `kfault_delta=0`（无内核泄漏面）
 
 ---
 
