@@ -100,7 +100,13 @@ x86_64_irq0:
      * gamma.5-P1: forward the interrupted CS to arch_x86_64_pit_irq0_handler
      * so BSP can also record ring3-vs-ring0 preempt hits (same story as the
      * LAPIC timer stub above). CS lives at (%rsp + 9*8 + 8) = 80(%rsp)
-     * after the 9 caller-saved pushes below. */
+     * after the 9 caller-saved pushes below.
+     *
+     * gamma.5-P3: save swapgs state to current_context->swapgs_needed so that
+     * context_switch can correctly restore it after a task switch. The CS
+     * RPL tells us if we came from user mode (RPL=3) or kernel mode (RPL=0).
+     * x86_64_context_t swapgs_needed offset: rip(0)+cs(8)+rflags(16)+rsp(24)+
+     * ss(32)+regs[12](96)+cr3(8) = 144 bytes from context start. */
     pushq %rax
     pushq %rcx
     pushq %rdx
@@ -111,7 +117,13 @@ x86_64_irq0:
     pushq %r10
     pushq %r11
     cld
-    movq 80(%rsp), %rdi
+    /* gamma.5-P3: set current_context->swapgs_needed based on CS.RPL
+     * x86_64_context_t swapgs_needed offset = 0x68 (see context_switch64.S) */
+    movq current_context(%rip), %rax
+    movq 80(%rsp), %rdi          /* load CS */
+    testb $3, %dil               /* check CS.RPL */
+    setnz %dl
+    movl %edx, 0x68(%rax)        /* set swapgs_needed = (CS.RPL != 0) */
     call arch_x86_64_pit_irq0_handler
     popq %r11
     popq %r10
@@ -154,6 +166,13 @@ x86_64_irq_lapic_timer:
     pushq %r10
     pushq %r11
     cld
+    /* gamma.5-P3: set current_context->swapgs_needed based on CS.RPL
+     * x86_64_context_t swapgs_needed offset = 0x68 (see context_switch64.S) */
+    movq current_context(%rip), %rax
+    movq 80(%rsp), %rdi          /* load CS */
+    testb $3, %dil               /* check CS.RPL */
+    setnz %dl
+    movl %edx, 0x68(%rax)        /* set swapgs_needed = (CS.RPL != 0) */
     /* gamma.5-P1: 1st arg = interrupted CS. */
     movq 80(%rsp), %rdi
     call arch_x86_64_lapic_timer_irq_handler
