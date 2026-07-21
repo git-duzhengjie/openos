@@ -33,6 +33,9 @@
 #include "pci.h"
 #include "virtio_net.h"
 #include "virtio_gpu.h"
+/* M8-D.4: I²C 驱动 */
+#include "../../kernel/drivers/i2c/i2c.h"
+#include "../../kernel/drivers/i2c-hid/i2c_hid.h"
 /* M1.3 网络协议栈入口（netstack.c） */
 extern void net_init(void);
 extern void net_tick(uint32_t elapsed_ms);
@@ -454,6 +457,13 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
             early_console64_write("[x86_64][xhci] xHCI selftest FAIL\n");
         }
     }
+
+    /* M8-D.4.1: Intel LPSS I²C 主控驱动初始化 */
+    i2c_lpss_init_all();
+    i2c_core_selftest();
+    /* M8-D.4: I²C HID 触屏驱动初始化 */
+    i2c_hid_global_init();
+    i2c_hid_selftest();
 
     /* M2.4：声卡 / 音频子系统（PCI 探测 AC97/HDA + PC Speaker + AC97 PCM 播放自检） */
     sound_init();

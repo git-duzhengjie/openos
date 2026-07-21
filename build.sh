@@ -910,6 +910,11 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         src/arch/x86_64/gui64/sound.c \
         src/arch/x86_64/gui64/ac97.c \
         src/kernel/drivers/blockdev.c \
+        src/kernel/drivers/i2c/i2c_core.c \
+        src/kernel/drivers/i2c/i2c_lpss.c \
+        src/kernel/drivers/i2c/i2c_selftest.c \
+        src/kernel/drivers/i2c-hid/i2c_hid.c \
+        src/kernel/drivers/i2c-hid/i2c_hid_selftest.c \
         src/arch/x86_64/gui64/blockdev_hw.c \
         src/kernel/net/netstack.c \
         src/arch/x86_64/gui64/fat32_64.c \
