@@ -1945,10 +1945,17 @@
   - [x] 复用 M8-C.2 的通用 HID Report Descriptor 解析器
     - ✅ 驱动分层设计：上层协议解析与底层硬件传输解耦
   - [ ] 真机验证矩阵：Surface Go / Thinkpad X1 Yoga / 常见触屏笔电（记录 klog dump）
-- [x] **M8-D.5 输入设备热插拔**
+- [x] **M8-D.5 输入设备热插拔**（commit `5ccc130`）
   - [x] gesture_init(screen_w/h) 已在 window_manager_init 自动拉起
-  - [ ] USB 层 HID 拔出/插入事件传递到 input_core（挂起到 M8-E）
-  - [ ] I²C 层 ACPI GPE 事件监听（优先级低）
+  - [x] input_core: 新增 `INPUT_EV_HOTPLUG` 事件类型与热插拔回调机制
+  - [x] input_core: 新增 `input_report_hotplug()` 事件上报API
+  - [x] input_core: 新增 `input_device_unregister()` 设备注销API
+  - [x] usb_hid64: 新增USB HID设备热插拔检测与处理逻辑（设备连接/断开事件上报到input_core）
+  - [x] xhci64: 新增 `xhci_check_port_changes()` 端口变化检测函数，导出API供HID层调用
+  - [x] kernel64: 移除I²C相关初始化调用（I²C总线框架待完善后重新集成）
+  - [x] build.sh: 移除I²C相关源文件编译规则（待框架完善后恢复）
+  - [ ] I²C层热插拔与ACPI GPE事件监听（挂起到M8-E后续迭代）
+  - [ ] I²C总线框架恢复编译集成（待框架完善后重新接入）
 
 - [x] **M8-E：输入抽象层（IAL，触屏/手机地基）**（commit 见 M8-E 提交）
   - [x] M8-E.1 统一事件结构 `input_event_t` + 环形队列实现（256 slot 环形，drop-oldest 溢出策略，`INPUT_EV_SYN/KEY/REL/ABS/TOUCH/GESTURE`；参考 Linux evdev 语义）
