@@ -15,7 +15,14 @@
 #include <string.h>
 
 #include "drivers/i2c/i2c.h"
-#include "kernel/debug.h"
+
+/* M8-D.5: 使用klog替代debug.h，定义简化日志宏 */
+#include "klog64.h"
+#define I2C_LOG(s)      klog_emit(KLOG_INFO, KLOG_FAC_KERNEL, "[i2c] " s)
+#define I2C_LOG_NN(s)   klog_emit(KLOG_INFO, KLOG_FAC_KERNEL, "[i2c] " s)
+
+/* DEBUG宏替换：简化为klog_emit调用 */
+#define DEBUG(fmt, ...)  klog_emit(KLOG_DEBUG, KLOG_FAC_KERNEL, "[i2c] debug")
 
 /* ======================================================================
  * 全局数据

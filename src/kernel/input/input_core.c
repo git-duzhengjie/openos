@@ -79,7 +79,10 @@ uint16_t input_device_register(input_dev_class_t klass, const char *name) {
         if (g_devs[i].dev_id != 0
             && g_devs[i].klass == klass
             && str_eq(g_devs[i].name, name)) {
-            g_devs[i].present = 1;
+            if (!g_devs[i].present) {
+                g_devs[i].present = 1;
+                input_report_hotplug_add(g_devs[i].dev_id, name, klass);
+            }
             return g_devs[i].dev_id;
         }
     }
@@ -92,6 +95,7 @@ uint16_t input_device_register(input_dev_class_t klass, const char *name) {
             g_devs[i].present     = 1;
             g_devs[i].event_count = 0;
             if (i > g_dev_count) g_dev_count = (uint16_t)i;
+            input_report_hotplug_add(g_devs[i].dev_id, name, klass);
             return g_devs[i].dev_id;
         }
     }
@@ -101,7 +105,10 @@ uint16_t input_device_register(input_dev_class_t klass, const char *name) {
 int input_device_unregister(uint16_t dev_id) {
     if (dev_id == 0 || dev_id > INPUT_MAX_DEVICES) return -1;
     if (g_devs[dev_id].dev_id == 0) return -1;
-    g_devs[dev_id].present = 0;
+    if (g_devs[dev_id].present) {
+        g_devs[dev_id].present = 0;
+        input_report_hotplug_remove(dev_id);
+    }
     return 0;
 }
 
@@ -229,6 +236,120 @@ void input_unsubscribe(int handle) {
     g_subs[i].fn     = NULL;
     g_subs[i].user   = NULL;
     g_subs[i].in_use = 0;
+}
+
+/* ---------------- hotplug ---------------- */
+
+/* Hotplug subscriber table. */
+#define INPUT_MAX_HOTPLUG_SUBSCRIBERS 8
+static struct {
+    input_hotplug_cb_t fn;
+    void              *user;
+    uint8_t            in_use;
+} g_hotplug_subs[INPUT_MAX_HOTPLUG_SUBSCRIBERS];
+
+void input_report_hotplug_add(uint16_t dev_id, const char *name, input_dev_class_t klass) {
+    if (!g_initialised) input_core_init();
+    if (dev_id == 0 || dev_id > INPUT_MAX_DEVICES) return;
+
+    input_device_t *dev = &g_devs[dev_id];
+    dev->present = 1;
+
+    /* Post hotplug event onto input bus. */
+    input_event_t ev = {0};
+    ev.timestamp_ms  = 0;
+    ev.dev_id        = dev_id;
+    ev.type          = INPUT_EV_HOTPLUG;
+    ev.code          = INPUT_HOTPLUG_ADD;
+    ev.value         = klass;
+    input_report(&ev);
+
+    /* Notify hotplug subscribers. */
+    input_hotplug_data_t hp_data = {klass, dev_id, name};
+    for (int i = 0; i < INPUT_MAX_HOTPLUG_SUBSCRIBERS; ++i) {
+        if (g_hotplug_subs[i].in_use && g_hotplug_subs[i].fn) {
+            g_hotplug_subs[i].fn(INPUT_HOTPLUG_ADD, &hp_data, g_hotplug_subs[i].user);
+        }
+    }
+}
+
+void input_report_hotplug_remove(uint16_t dev_id) {
+    if (!g_initialised) input_core_init();
+    if (dev_id == 0 || dev_id > INPUT_MAX_DEVICES) return;
+
+    input_device_t *dev = &g_devs[dev_id];
+    if (!dev->present) return;
+    dev->present = 0;
+
+    /* Post hotplug event onto input bus. */
+    input_event_t ev = {0};
+    ev.timestamp_ms  = 0;
+    ev.dev_id        = dev_id;
+    ev.type          = INPUT_EV_HOTPLUG;
+    ev.code          = INPUT_HOTPLUG_REMOVE;
+    ev.value         = dev->klass;
+    input_report(&ev);
+
+    /* Notify hotplug subscribers. */
+    input_hotplug_data_t hp_data = {dev->klass, dev_id, dev->name};
+    for (int i = 0; i < INPUT_MAX_HOTPLUG_SUBSCRIBERS; ++i) {
+        if (g_hotplug_subs[i].in_use && g_hotplug_subs[i].fn) {
+            g_hotplug_subs[i].fn(INPUT_HOTPLUG_REMOVE, &hp_data, g_hotplug_subs[i].user);
+        }
+    }
+}
+
+/* ---------------- device lookup ---------------- */
+
+uint16_t input_device_find_by_name(const char *name) {
+    if (!g_initialised) input_core_init();
+    if (!name) return 0;
+    for (int i = 1; i <= INPUT_MAX_DEVICES; ++i) {
+        if (g_devs[i].dev_id != 0 && g_devs[i].name && str_eq(g_devs[i].name, name)) {
+            return g_devs[i].dev_id;
+        }
+    }
+    return 0;
+}
+
+uint16_t input_device_find_by_class(input_dev_class_t klass) {
+    if (!g_initialised) input_core_init();
+    for (int i = 1; i <= INPUT_MAX_DEVICES; ++i) {
+        if (g_devs[i].dev_id != 0 && g_devs[i].klass == klass && g_devs[i].present) {
+            return g_devs[i].dev_id;
+        }
+    }
+    return 0;
+}
+
+int input_device_is_present(uint16_t dev_id) {
+    if (!g_initialised) input_core_init();
+    if (dev_id == 0 || dev_id > INPUT_MAX_DEVICES) return 0;
+    return g_devs[dev_id].present;
+}
+
+/* ---------------- hotplug subscription ---------------- */
+
+int input_hotplug_subscribe(input_hotplug_cb_t fn, void *user) {
+    if (!fn) return 0;
+    if (!g_initialised) input_core_init();
+    for (int i = 0; i < INPUT_MAX_HOTPLUG_SUBSCRIBERS; ++i) {
+        if (!g_hotplug_subs[i].in_use) {
+            g_hotplug_subs[i].fn     = fn;
+            g_hotplug_subs[i].user   = user;
+            g_hotplug_subs[i].in_use = 1;
+            return i + 1;
+        }
+    }
+    return 0;
+}
+
+void input_hotplug_unsubscribe(int handle) {
+    if (handle < 1 || handle > INPUT_MAX_HOTPLUG_SUBSCRIBERS) return;
+    int i = handle - 1;
+    g_hotplug_subs[i].fn     = NULL;
+    g_hotplug_subs[i].user   = NULL;
+    g_hotplug_subs[i].in_use = 0;
 }
 
 /* ---------------- stats ---------------- */

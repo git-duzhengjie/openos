@@ -1090,6 +1090,126 @@ static void xhci_enum_ports(void) {
 }
 
 /* ============================================================
+ * M8-D.5: USB 热插拔端口变化检测
+ * ============================================================ */
+
+/* 上次端口连接状态的快照，用于检测变化 */
+static uint32_t g_prev_port_mask = 0;
+
+/* 扫描所有端口，返回连接状态发生变化的端口位掩码。
+ * bit (n-1) 置位表示端口 n 的连接状态发生了变化。
+ * 同时清除 CSC（Connect Status Change）位。 */
+uint32_t xhci_check_port_changes(void) {
+    xhci_ctrl_t *x = &g_xhci;
+    if (!x->op) return 0;  /* xHCI 未初始化 */
+
+    uint32_t changed_mask = 0;
+    uint32_t curr_mask = 0;
+
+    for (uint32_t p = 1; p <= x->max_ports; p++) {
+        uint32_t off = XOP_PORTS + (p - 1) * XPORT_STRIDE + XPORT_PORTSC;
+        uint32_t sc = mmio_r32(x->op, off);
+
+        /* 检查 CSC（Connect Status Change）位 */
+        if (sc & PORTSC_CSC) {
+            changed_mask |= (1u << (p - 1));
+            /* 清除 CSC 位（RW1C）*/
+            mmio_w32(x->op, off, sc | PORTSC_CSC);
+        }
+
+        /* 记录当前连接状态 */
+        if (sc & PORTSC_CCS) {
+            curr_mask |= (1u << (p - 1));
+        }
+    }
+
+    /* 如果 CSC 没有置位，也检查与上次快照的差异
+     * （覆盖某些硬件不设置 CSC 的情况）*/
+    if (changed_mask == 0 && curr_mask != g_prev_port_mask) {
+        changed_mask = curr_mask ^ g_prev_port_mask;
+    }
+
+    g_prev_port_mask = curr_mask;
+    return changed_mask;
+}
+
+/* 查询指定端口的当前连接状态。
+ * 返回 1=已连接, 0=未连接, -1=端口号无效。 */
+int xhci_port_device_connected(uint32_t port) {
+    xhci_ctrl_t *x = &g_xhci;
+    if (!x->op || port == 0 || port > x->max_ports) return -1;
+    uint32_t off = XOP_PORTS + (port - 1) * XPORT_STRIDE + XPORT_PORTSC;
+    uint32_t sc = mmio_r32(x->op, off);
+    return (sc & PORTSC_CCS) ? 1 : 0;
+}
+
+/* 断开指定端口上的设备：释放 slot 资源，标记设备为未使用。
+ * 返回被断开设备的 hid_type（用于通知 input_core），-1 表示无设备。 */
+static int xhci_disconnect_port(uint32_t port) {
+    for (int i = 0; i < XHCI_MAX_DEVS; i++) {
+        xhci_dev_t *d = &g_devs[i];
+        if (d->used && d->port == port) {
+            int hid_type = (int)d->hid_type;
+            /* 禁用设备槽（发送 Disable Slot Command）*/
+            if (d->slot_id) {
+                /* 置 Input Context 的 Drop Context flag，清除所有端点 */
+                /* 简化实现：直接标记 used=0，slot 资源由后续枚举复用 */
+            }
+            d->used = 0;
+            d->rpt_ready = 0;
+            d->rpt_head = d->rpt_tail = 0;
+            g_xhci.connected--;
+            XLOG_NN("hotplug: disconnected port ");
+            XDEC(port);
+            serial_write(" slot="); XDEC(d->slot_id);
+            serial_write("\n");
+            return hid_type;
+        }
+    }
+    return -1;
+}
+
+/* 处理端口变化：对新增连接的端口执行设备枚举，对拔出的端口执行断开。
+ * 返回处理的端口变化数量。 */
+int xhci_process_port_change(uint32_t changed_mask) {
+    int processed = 0;
+    xhci_ctrl_t *x = &g_xhci;
+
+    for (uint32_t p = 1; p <= x->max_ports; p++) {
+        uint32_t bit = (1u << (p - 1));
+        if (!(changed_mask & bit)) continue;
+
+        uint32_t off = XOP_PORTS + (p - 1) * XPORT_STRIDE + XPORT_PORTSC;
+        uint32_t sc = mmio_r32(x->op, off);
+        int connected = (sc & PORTSC_CCS) ? 1 : 0;
+
+        if (connected) {
+            /* 设备插入：复位端口并枚举 */
+            XLOG_NN("hotplug: connect port "); XDEC(p); serial_write("\n");
+            uint32_t speed = (sc >> PORTSC_SPEED_SHIFT) & PORTSC_SPEED_MASK;
+            if (!(sc & PORTSC_PED)) {
+                if (xhci_reset_port(p) != 0) {
+                    XLOG("hotplug: port reset failed");
+                    continue;
+                }
+            }
+            xhci_dev_t *dev = xhci_enumerate_device(p, speed);
+            if (dev) {
+                XLOG_NN("hotplug: enumerated slot=");
+                XDEC(dev->slot_id);
+                serial_write(" class="); XDEC(dev->dev_class);
+                serial_write("\n");
+            }
+        } else {
+            /* 设备拔出：断开并释放资源 */
+            xhci_disconnect_port(p);
+        }
+        processed++;
+    }
+    return processed;
+}
+
+/* ============================================================
  * M2.3 Step3-4: HID 层 xHCI 传输原语（供 usb_hid64.c 调用）
  * ============================================================ */
 

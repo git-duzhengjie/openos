@@ -140,4 +140,16 @@ int xhci_msc_control(uint32_t idx, uint8_t bmReqType, uint8_t bReq,
  * （配置 Bulk 端点 + INQUIRY/READ CAPACITY）。由内核初始化调用。 */
 void usb_msc_init(void);
 
+/* M8-D.5: 热插拔端口变化检测 */
+/* 扫描所有端口，返回有连接状态变化的端口位掩码（bit n = port n+1 changed）。
+ * 同时清除 CSC（Connect Status Change）位。 */
+uint32_t xhci_check_port_changes(void);
+
+/* 查询指定端口的当前连接状态。返回 1=已连接, 0=未连接。 */
+int xhci_port_device_connected(uint32_t port);
+
+/* 处理端口变化：对新增连接的端口执行设备枚举，对拔出的端口执行断开。
+ * 返回处理的端口变化数量。 */
+int xhci_process_port_change(uint32_t changed_mask);
+
 #endif /* OPENOS_XHCI64_H */

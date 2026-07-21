@@ -14,7 +14,11 @@
 #include <stddef.h>
 
 #include "drivers/i2c/i2c.h"
-#include "kernel/debug.h"
+#include "intel_lpss_i2c.h"
+
+/* M8-D.5: 使用klog替代debug.h */
+#include "klog64.h"
+#define DEBUG(fmt, ...)  klog_emit(KLOG_DEBUG, KLOG_FAC_KERNEL, "[i2c-lpss] debug")
 
 /* ======================================================================
  * Intel LPSS I2C 寄存器定义
@@ -132,7 +136,7 @@
  * @brief Intel LPSS I2C 控制器私有数据
  */
 typedef struct intel_lpss_i2c_priv {
-    void __iomem *base;                 /* 寄存器基地址 */
+    void *base;                 /* 寄存器基地址 */
     uint32_t input_clk;                 /* 输入时钟频率 (Hz) */
     uint32_t bus_speed;                 /* 总线速度 (Hz) */
     uint8_t sda_hold;                   /* SDA 保持时间 (ns) */
@@ -410,6 +414,34 @@ static int intel_lpss_i2c_read_bytes(intel_lpss_i2c_priv_t *priv,
     }
 
     return len;
+}
+
+/* ======================================================================
+ * I²C 总线回调包装函数
+ * ====================================================================== */
+
+static int intel_lpss_i2c_master_write(i2c_bus_t *bus, uint16_t addr,
+                                       const uint8_t *buf, uint16_t len) {
+    if (!bus || !bus->priv) return -I2C_ERR_INVALID;
+    intel_lpss_i2c_priv_t *priv = (intel_lpss_i2c_priv_t *)bus->priv;
+    return intel_lpss_i2c_write_bytes(priv, addr, buf, len, 1);
+}
+
+static int intel_lpss_i2c_master_read(i2c_bus_t *bus, uint16_t addr,
+                                      uint8_t *buf, uint16_t len) {
+    if (!bus || !bus->priv) return -I2C_ERR_INVALID;
+    intel_lpss_i2c_priv_t *priv = (intel_lpss_i2c_priv_t *)bus->priv;
+    return intel_lpss_i2c_read_bytes(priv, addr, buf, len, 1);
+}
+
+static int intel_lpss_i2c_master_write_read(i2c_bus_t *bus, uint16_t addr,
+                                            const uint8_t *wbuf, uint16_t wlen,
+                                            uint8_t *rbuf, uint16_t rlen) {
+    if (!bus || !bus->priv) return -I2C_ERR_INVALID;
+    intel_lpss_i2c_priv_t *priv = (intel_lpss_i2c_priv_t *)bus->priv;
+    int ret = intel_lpss_i2c_write_bytes(priv, addr, wbuf, wlen, 0);
+    if (ret < 0) return ret;
+    return intel_lpss_i2c_read_bytes(priv, addr, rbuf, rlen, 1);
 }
 
 

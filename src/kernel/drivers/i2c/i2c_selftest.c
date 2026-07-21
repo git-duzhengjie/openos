@@ -18,8 +18,11 @@
 #include <string.h>
 
 #include "drivers/i2c/i2c.h"
-#include "kernel/debug.h"
+#include "klog64.h"
 #include "kernel/selftest.h"
+
+/* M8-D.5: 使用klog替代debug.h */
+#define DEBUG(fmt, ...)  klog_emit(KLOG_DEBUG, KLOG_FAC_KERNEL, "[i2c-st] debug")
 
 /* ======================================================================
  * 模拟 I2C 总线驱动（用于自测试）

@@ -7,10 +7,10 @@
  *   - 提取 I²C 总线地址和设备地址
  */
 #include "include/acpi_dsdt.h"
-#include "arch/x86_64/include/acpi64.h"
+#include "klog64.h"
+#include "acpi64.h"
 #include <stddef.h>
 #include <string.h>
-#include <stdio.h>
 
 /* 解析结果全局存储 */
 static acpi_dsdt_result_t g_dsdt_result;

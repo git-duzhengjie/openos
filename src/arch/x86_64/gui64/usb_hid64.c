@@ -23,6 +23,7 @@
 #include "mouse.h"
 #include "../../kernel/include/gesture.h"
 #include "../../kernel/include/hid_type_infer.h"
+#include "../../kernel/include/input_core.h"
 
 /* OPENOS_TOUCH_TEST 编译宏 → 运行时布尔（供 hid_type_infer 使用） */
 #ifdef OPENOS_TOUCH_TEST
@@ -74,6 +75,16 @@ typedef struct {
 
 static usb_hid_dev_t g_hid[USB_HID_MAX];
 static int           g_hid_inited = 0;
+
+/* M8-D.5: 每个xHCI设备槽对应的input_core设备ID（0=未注册） */
+static uint16_t      g_input_dev_id[USB_HID_MAX];
+
+/* M8-D.5: 热插拔扫描间隔控制（避免每次poll都扫描端口寄存器） */
+static uint32_t      g_hotplug_skip_count = 0;
+#define HOTPLUG_SCAN_INTERVAL 64  /* 每64次poll执行一次端口扫描 */
+
+/* M8-D.5: 热插拔扫描前向声明 */
+void usb_hid_hotplug_scan(void);
 
 /* ---- HID Usage ID (boot keyboard) -> ASCII 映射 ----
  * 覆盖 0x04..0x38 常用键；未覆盖返回 0（不上报）。 */
@@ -298,12 +309,16 @@ void usb_hid_init(void) {
 
         if (type == XHCI_HID_TYPE_BOOT_KEYBD) {
             HLOG("keyboard configured (Interrupt-IN armed)");
+            g_input_dev_id[k] = input_device_register(INPUT_DEV_KEYBOARD, "usb-keyboard");
         } else if (type == XHCI_HID_TYPE_TABLET) {
             HLOG("tablet configured (absolute coords, Interrupt-IN armed)");
+            g_input_dev_id[k] = input_device_register(INPUT_DEV_TABLET_USB, "usb-tablet");
         } else if (type == XHCI_HID_TYPE_TOUCHSCREEN) {
             HLOG("touchscreen configured (tip-switch, Interrupt-IN armed)");
+            g_input_dev_id[k] = input_device_register(INPUT_DEV_TOUCH_USB, "usb-touchscreen");
         } else {
             HLOG("mouse configured (Interrupt-IN armed)");
+            g_input_dev_id[k] = input_device_register(INPUT_DEV_MOUSE_USB, "usb-mouse");
         }
     }
 }
@@ -338,6 +353,104 @@ void usb_hid_poll(void) {
                 hid_handle_mouse(h, buf, (uint32_t)m);
                 break;
             }
+        }
+    }
+
+    /* M8-D.5: 周期性扫描端口变化，处理热插拔 */
+    if (++g_hotplug_skip_count >= HOTPLUG_SCAN_INTERVAL) {
+        g_hotplug_skip_count = 0;
+        usb_hid_hotplug_scan();
+    }
+}
+
+/* ============================================================
+ * M8-D.5: USB HID 热插拔扫描
+ * 检测xHCI端口变化，对新增/移除的HID设备同步到input_core
+ * ============================================================ */
+
+void usb_hid_hotplug_scan(void) {
+    if (!g_hid_inited) return;
+
+    /* 检测端口变化 */
+    uint32_t changed = xhci_check_port_changes();
+    if (changed == 0) return;
+
+    HLOG("hotplug: port change detected");
+
+    /* 让xHCI驱动处理端口变化（枚举新设备/断开拔出设备） */
+    xhci_process_port_change(changed);
+
+    /* 扫描所有已注册的HID设备，检查是否仍然连接 */
+    for (int i = 0; i < USB_HID_MAX; i++) {
+        if (!g_hid[i].used) continue;
+
+        /* 通过xHCI查询设备是否仍然存在 */
+        /* 设备被拔出后，xhci_disconnect_port 会清除 used 标志 */
+        /* 这里检查g_hid[i]对应的xHCI设备是否仍有效 */
+        uint32_t n = xhci_hid_device_count();
+        int found = 0;
+        for (uint32_t k = 0; k < n; k++) {
+            if (k == g_hid[i].xhci_idx) {
+                found = 1;
+                break;
+            }
+        }
+
+        if (!found) {
+            /* 设备已被拔出 */
+            HLOG("hotplug: device removed");
+            /* 通知input_core设备移除 */
+            if (g_input_dev_id[i] != 0) {
+                input_device_unregister(g_input_dev_id[i]);
+                g_input_dev_id[i] = 0;
+            }
+            g_hid[i].used = 0;
+            g_hid[i].ts_prev_tip = 0;
+        }
+    }
+
+    /* 检查是否有新设备插入：重新枚举未占用的HID设备槽 */
+    uint32_t n = xhci_hid_device_count();
+    for (uint32_t k = 0; k < n && k < USB_HID_MAX; k++) {
+        if (g_hid[k].used) continue;  /* 已占用 */
+
+        uint32_t proto = xhci_hid_device_proto(k);
+        uint32_t vid   = xhci_hid_device_vid(k);
+        uint32_t pid   = xhci_hid_device_pid(k);
+
+        hid_infer_type_t inferred = hid_type_infer(
+            (uint16_t)vid, (uint16_t)pid, (uint8_t)proto,
+            (const uint8_t *)0, 0, HID_FORCE_TOUCH_TEST);
+
+        uint32_t type = (uint32_t)inferred;
+        if (type == XHCI_HID_TYPE_UNKNOWN) continue;
+
+        if (xhci_hid_configure(k) != 0) continue;
+
+        usb_hid_dev_t *h = &g_hid[k];
+        h->used       = 1;
+        h->xhci_idx   = k;
+        h->proto      = proto;
+        h->hid_type   = type;
+        h->report_len = xhci_hid_device_report_len(k);
+        h->ts_prev_tip = 0;
+        h->ts_last_x = 320; h->ts_last_y = 240;
+        for (int j = 0; j < 8; j++) h->last[j] = 0;
+        xhci_hid_device_set_type(k, (xhci_hid_type_t)type);
+
+        /* 注册到input_core */
+        if (type == XHCI_HID_TYPE_BOOT_KEYBD) {
+            g_input_dev_id[k] = input_device_register(INPUT_DEV_KEYBOARD, "usb-keyboard");
+            HLOG("hotplug: keyboard registered");
+        } else if (type == XHCI_HID_TYPE_TABLET) {
+            g_input_dev_id[k] = input_device_register(INPUT_DEV_TABLET_USB, "usb-tablet");
+            HLOG("hotplug: tablet registered");
+        } else if (type == XHCI_HID_TYPE_TOUCHSCREEN) {
+            g_input_dev_id[k] = input_device_register(INPUT_DEV_TOUCH_USB, "usb-touchscreen");
+            HLOG("hotplug: touchscreen registered");
+        } else {
+            g_input_dev_id[k] = input_device_register(INPUT_DEV_MOUSE_USB, "usb-mouse");
+            HLOG("hotplug: mouse registered");
         }
     }
 }

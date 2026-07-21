@@ -35,7 +35,6 @@
 #include "virtio_gpu.h"
 /* M8-D.4: I²C 驱动 */
 #include "../../kernel/drivers/i2c/i2c.h"
-#include "../../kernel/drivers/i2c-hid/i2c_hid.h"
 /* M1.3 网络协议栈入口（netstack.c） */
 extern void net_init(void);
 extern void net_tick(uint32_t elapsed_ms);
@@ -458,26 +457,7 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
         }
     }
 
-    /* M8-D.4.1: Intel LPSS I²C 主控驱动初始化 */
-    i2c_lpss_init_all();
-    i2c_core_selftest();
-    /* M8-D.4: I²C HID 触屏驱动初始化 */
-    i2c_hid_global_init();
-    /* ACPI DSDT 枚举 PNP0C50 设备 */
-    int i2c_hid_acpi_count = i2c_hid_enumerate_acpi();
-    if (i2c_hid_acpi_count > 0) {
-        early_console64_write("[x86_64][i2c_hid] ACPI 枚举到 %d 个 PNP0C50 设备\n");
-        /* 初始化所有枚举到的 ACPI 设备 */
-        for (int i = 0; i < i2c_hid_acpi_count; i++) {
-            int ret = i2c_hid_init_from_acpi(i);
-            if (ret == 0) {
-                early_console64_write("[x86_64][i2c_hid] 设备 #%d 初始化成功\n");
-            }
-        }
-    } else {
-        early_console64_write("[x86_64][i2c_hid] 未发现 ACPI PNP0C50 设备，使用模拟模式\n");
-    }
-    i2c_hid_selftest();
+    /* M8-D.4: I2C HID 驱动暂时从编译中移除，待I2C总线框架完善后重新集成 */
 
     /* M2.4：声卡 / 音频子系统（PCI 探测 AC97/HDA + PC Speaker + AC97 PCM 播放自检） */
     sound_init();

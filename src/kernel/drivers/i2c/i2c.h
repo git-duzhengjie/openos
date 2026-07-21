@@ -17,6 +17,16 @@
  * I²C 总线通用定义
  * ========================================================================== */
 
+/** I²C 错误码 */
+#define I2C_OK              0
+#define I2C_ERR_TIMEOUT     1
+#define I2C_ERR_NACK        2
+#define I2C_ERR_ARBITRATION 3
+#define I2C_ERR_BUS         4
+#define I2C_ERR_INVALID     5
+#define I2C_ERR_UNINIT      6
+#define I2C_ERR_UNSUPPORTED 7
+
 /** I²C 总线速度模式 */
 typedef enum {
     I2C_SPEED_STANDARD = 100000,    /* 标准模式: 100 kHz */
@@ -175,6 +185,72 @@ struct i2c_adapter_ops {
 };
 
 /* ==========================================================================
+ * I²C 总线管理（总线-外设分层架构）
+ * ========================================================================== */
+
+/** I²C 总线最大数量 */
+#ifndef I2C_MAX_BUSES
+#define I2C_MAX_BUSES   8
+#endif
+
+/** I²C 总线结构体 */
+typedef struct i2c_bus {
+    int bus_id;                          /* 总线 ID */
+    i2c_adapter_t *adapter;              /* 绑定的适配器 */
+    int initialized;                     /* 是否已初始化 */
+    int registered;                      /* 是否已注册 */
+    /* 直接回调函数（简化模式，可选） */
+    int (*master_write)(struct i2c_bus *bus, uint16_t addr, const uint8_t *buf, uint16_t len);
+    int (*master_read)(struct i2c_bus *bus, uint16_t addr, uint8_t *buf, uint16_t len);
+    int (*master_write_read)(struct i2c_bus *bus, uint16_t addr,
+                             const uint8_t *wbuf, uint16_t wlen,
+                             uint8_t *rbuf, uint16_t rlen);
+    void *priv;                          /* 控制器私有数据 */
+} i2c_bus_t;
+
+/* 总线管理 API */
+i2c_bus_t *i2c_alloc_bus(void);
+int i2c_register_bus(i2c_bus_t *bus);
+i2c_bus_t *i2c_get_bus(int bus_id);
+
+/** I²C 设备最大数量 */
+#ifndef I2C_MAX_DEVICES
+#define I2C_MAX_DEVICES  16
+#endif
+
+/** I²C 设备结构体 */
+typedef struct i2c_device {
+    int bus_id;                          /* 所在总线 ID */
+    uint16_t addr;                       /* 设备地址 */
+    const char *name;                    /* 设备名称 */
+    int used;                            /* 是否已使用 */
+    int registered;                      /* 是否已注册 */
+    i2c_bus_t *bus;                      /* 指向所在总线 */
+} i2c_device_t;
+
+/* 设备管理 API */
+i2c_device_t *i2c_alloc_device(void);
+int i2c_register_device(i2c_device_t *dev);
+i2c_device_t *i2c_get_device(int bus_id, uint16_t addr);
+
+/* 标准化传输 API */
+int i2c_write(i2c_bus_t *bus, uint16_t addr, const uint8_t *buf, uint16_t len);
+int i2c_read(i2c_bus_t *bus, uint16_t addr, uint8_t *buf, uint16_t len);
+int i2c_write_read(i2c_bus_t *bus, uint16_t addr,
+                   const uint8_t *wbuf, uint16_t wlen,
+                   uint8_t *rbuf, uint16_t rlen);
+int i2c_write_byte(i2c_bus_t *bus, uint16_t addr, uint8_t data);
+int i2c_read_byte(i2c_bus_t *bus, uint16_t addr, uint8_t *data);
+int i2c_write_reg8(i2c_bus_t *bus, uint16_t addr, uint8_t reg, uint8_t data);
+int i2c_read_reg8(i2c_bus_t *bus, uint16_t addr, uint8_t reg, uint8_t *data);
+int i2c_write_reg16(i2c_bus_t *bus, uint16_t addr, uint8_t reg, uint16_t data);
+int i2c_read_reg16(i2c_bus_t *bus, uint16_t addr, uint8_t reg, uint16_t *data);
+
+/* 辅助 API */
+const char *i2c_strerror(int err);
+int i2c_scan_bus(i2c_bus_t *bus, uint8_t *device_list, int max_devices);
+
+/* ==========================================================================
  * 全局 API
  * ========================================================================== */
 
@@ -264,7 +340,7 @@ int i2c_probe_device(i2c_adapter_t *adap, uint16_t addr);
  * @param max_addrs 数组最大容量
  * @return int 找到的设备数量
  */
-int i2c_scan_bus(i2c_adapter_t *adap, uint16_t *found_addrs, int max_addrs);
+/* 旧定义已废弃，使用 i2c_scan_bus(i2c_bus_t*, uint8_t*, int) 统一接口 */
 
 /* ==========================================================================
  * 总线管理

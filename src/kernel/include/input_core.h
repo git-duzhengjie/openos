@@ -38,6 +38,7 @@ typedef enum {
     INPUT_EV_ABS     = 3,   /* absolute axis (x/y/pressure) */
     INPUT_EV_TOUCH   = 4,   /* multi-touch contact frame */
     INPUT_EV_GESTURE = 5,   /* high-level gesture event */
+    INPUT_EV_HOTPLUG = 6,   /* device hotplug event (plug/unplug) */
 } input_ev_type_t;
 
 /* KEY codes (subset; matches Linux evdev where practical) */
@@ -86,6 +87,19 @@ typedef enum {
     INPUT_DEV_GESTURE     = 7,   /* synthetic device: emits INPUT_EV_GESTURE */
     INPUT_DEV_MAX,
 } input_dev_class_t;
+
+/* Hotplug event sub-type (used in INPUT_EV_HOTPLUG code field). */
+typedef enum {
+    INPUT_HOTPLUG_ADD    = 1,   /* device connected */
+    INPUT_HOTPLUG_REMOVE = 2,   /* device disconnected */
+} input_hotplug_type_t;
+
+/* Hotplug event data structure */
+typedef struct {
+    input_dev_class_t dev_class;    /* device class */
+    uint16_t          dev_id;       /* registered device ID (if ADD) */
+    const char       *name;         /* device name (if ADD) */
+} input_hotplug_data_t;
 
 /* ---------------- event struct ---------------- */
 
@@ -146,6 +160,20 @@ void input_unsubscribe(int handle);
  * poll(); the ring is shared so poll() will observe events even without
  * any subscriber. */
 int  input_poll_event(input_event_t *out);
+
+/* Hotplug event reporting (called by bus drivers like USB/I²C). */
+void input_report_hotplug_add(uint16_t dev_id, const char *name, input_dev_class_t klass);
+void input_report_hotplug_remove(uint16_t dev_id);
+
+/* Device enumeration and lookup. */
+uint16_t input_device_find_by_name(const char *name);
+uint16_t input_device_find_by_class(input_dev_class_t klass);
+int input_device_is_present(uint16_t dev_id);
+
+/* Hotplug callback registration for device manager / GUI. */
+typedef void (*input_hotplug_cb_t)(input_hotplug_type_t type, const input_hotplug_data_t *data, void *user);
+int  input_hotplug_subscribe(input_hotplug_cb_t fn, void *user);
+void input_hotplug_unsubscribe(int handle);
 
 /* Diagnostics for selftest / dmesg. */
 uint32_t input_stat_events_produced(void);

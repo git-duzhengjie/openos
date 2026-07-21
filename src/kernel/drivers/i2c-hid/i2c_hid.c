@@ -9,14 +9,22 @@
 #include "i2c_hid.h"
 #include "../../include/input_core.h"
 #include "../../../arch/x86_64/include/klog64.h"
-#include "../../include/acpi.h"
 #include "../../include/acpi_dsdt.h"
+#include <stdint.h>
+#include <string.h>
+
+/* 日志宏 */
+#define DEBUG(fmt, ...) klog_emit(KLOG_DEBUG, KLOG_FAC_KERNEL, "[i2c-hid] debug")
+
+/* 小端转换宏 */
+#define le16_to_cpu(x) (x)
+#define le32_to_cpu(x) (x)
 
 /* 简单延时实现 */
 static void i2c_hid_mdelay(uint32_t ms)
 {
     volatile uint32_t i;
-    for (i = 0; i < ms * 1000000; i++) {
+    for (i = 0; i < ms * 1000; i++) {
         __asm__ volatile ("nop");
     }
 }
@@ -28,31 +36,42 @@ static void i2c_hid_mdelay(uint32_t ms)
 static i2c_hid_device_t g_i2c_hid_dev;
 static bool g_i2c_hid_initialized = false;
 
-/* ==========================================================================
- * I²C 寄存器读写 (调用通用 I2C 总线驱动)
- * ========================================================================== */
+/* I²C 寄存器读写 (调用通用 I2C 总线驱动)
+ * 使用总线-外设分层架构，通过 bus_id 查找总线对象 */
 
 static int i2c_hid_read_reg(i2c_hid_device_t *dev, uint16_t reg, uint8_t *buf, uint16_t len)
 {
     uint8_t reg_buf[2];
+    i2c_bus_t *bus;
+    
+    bus = i2c_get_bus(dev->bus_id);
+    if (!bus || !bus->master_write_read) {
+        return -I2C_ERR_UNINIT;
+    }
     
     reg_buf[0] = reg & 0xFF;
     reg_buf[1] = (reg >> 8) & 0xFF;
     
     /* 组合写读：写寄存器地址 (小端)，然后读数据 */
-    return i2c_write_read(dev->bus_id, dev->dev_addr, reg_buf, 2, buf, len);
+    return bus->master_write_read(bus, dev->dev_addr, reg_buf, 2, buf, len);
 }
 
 static int i2c_hid_write_reg(i2c_hid_device_t *dev, uint16_t reg, const uint8_t *buf, uint16_t len)
 {
     uint8_t tx_buf[2 + len];
+    i2c_bus_t *bus;
+    
+    bus = i2c_get_bus(dev->bus_id);
+    if (!bus || !bus->master_write) {
+        return -I2C_ERR_UNINIT;
+    }
     
     tx_buf[0] = reg & 0xFF;
     tx_buf[1] = (reg >> 8) & 0xFF;
     for (int i = 0; i < len; i++)
         tx_buf[i + 2] = buf[i];
     
-    return i2c_write(dev->bus_id, dev->dev_addr, tx_buf, len + 2);
+    return bus->master_write(bus, dev->dev_addr, tx_buf, len + 2);
 }
 
 /* ==========================================================================
@@ -258,7 +277,7 @@ int i2c_hid_init(int bus_id, uint16_t dev_addr)
     dev->height_px = 912;
     
     /* 注册 input 设备 */
-    dev->input_dev_id = input_create_device();
+    dev->input_dev_id = input_device_register(INPUT_DEV_TOUCH_USB, "i2c-hid-touch");
     if (dev->input_dev_id < 0) {
         DEBUG("I2C-HID: Failed to create input device\n");
         goto fail;
