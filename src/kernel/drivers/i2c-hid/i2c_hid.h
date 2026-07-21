@@ -10,7 +10,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#include "drivers/i2c/i2c.h"
+#include "../i2c/i2c.h"
 
 /* ==========================================================================
  * HID over I²C 寄存器定义
@@ -146,5 +146,34 @@ int i2c_hid_global_init(void);
  * @return int 0 全部通过，<0 失败
  */
 int i2c_hid_selftest(void);
+
+/* ==========================================================================
+ * ACPI 设备枚举接口
+ * ========================================================================== */
+
+/**
+ * @brief 枚举 ACPI DSDT 中所有 PNP0C50 设备
+ * 
+ * 解析 ACPI 命名空间，查找 HID over I²C 兼容设备（PNP0C50），
+ * 提取 I²C 总线地址、设备地址和 HID 描述符地址
+ * 
+ * @return int 发现的设备数量，<0 错误
+ */
+int i2c_hid_enumerate_acpi(void);
+
+/**
+ * @brief 通过 ACPI 索引初始化 I²C HID 设备
+ * 
+ * @param acpi_index ACPI 枚举中的设备索引（从 0 开始）
+ * @return int 0 成功，<0 错误
+ */
+int i2c_hid_init_from_acpi(uint32_t acpi_index);
+
+/**
+ * @brief 获取 ACPI 枚举的设备总数
+ * 
+ * @return uint32_t 设备总数
+ */
+uint32_t i2c_hid_get_acpi_device_count(void);
 
 #endif /* OPENOS_KERNEL_DRIVERS_I2C_HID_I2C_HID_H */

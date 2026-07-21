@@ -10,6 +10,7 @@
 #include "../../include/input_core.h"
 #include "../../../arch/x86_64/include/klog64.h"
 #include "../../include/acpi.h"
+#include "../../include/acpi_dsdt.h"
 
 /* 简单延时实现 */
 static void i2c_hid_mdelay(uint32_t ms)
@@ -40,11 +41,6 @@ static int i2c_hid_read_reg(i2c_hid_device_t *dev, uint16_t reg, uint8_t *buf, u
     
     /* 组合写读：写寄存器地址 (小端)，然后读数据 */
     return i2c_write_read(dev->bus_id, dev->dev_addr, reg_buf, 2, buf, len);
-    msgs[1].flags = I2C_M_RD;
-    msgs[1].len = len;
-    msgs[1].buf = buf;
-    
-    return i2c_transfer(dev->i2c_adap, msgs, 2);
 }
 
 static int i2c_hid_write_reg(i2c_hid_device_t *dev, uint16_t reg, const uint8_t *buf, uint16_t len)
@@ -361,4 +357,78 @@ int i2c_hid_selftest(void)
     DEBUG("========================================\n\n");
     
     return 0;
+}
+
+/* ==========================================================================
+ * ACPI 设备枚举接口实现
+ * ========================================================================== */
+
+/* ACPI 枚举状态 */
+static bool g_acpi_enumerated = false;
+static uint32_t g_acpi_device_count = 0;
+
+int i2c_hid_enumerate_acpi(void)
+{
+    if (g_acpi_enumerated) {
+        return g_acpi_device_count;
+    }
+    
+    /* 初始化 ACPI DSDT 解析器 */
+    int ret = acpi_dsdt_init();
+    if (ret < 0) {
+        DEBUG("[I2C-HID] ACPI DSDT 解析器初始化失败 (ret=%d)\n", ret);
+        DEBUG("[I2C-HID] 回退到模拟模式\n");
+        g_acpi_enumerated = true;
+        g_acpi_device_count = 0;
+        return 0;
+    }
+    
+    /* 获取枚举结果 */
+    g_acpi_device_count = acpi_dsdt_get_i2c_hid_count();
+    g_acpi_enumerated = true;
+    
+    DEBUG("[I2C-HID] ACPI 枚举完成: 发现 %d 个 PNP0C50 设备\n",
+           g_acpi_device_count);
+    
+    /* 打印设备信息 */
+    for (uint32_t i = 0; i < g_acpi_device_count; i++) {
+        const acpi_i2c_hid_device_t* dev = acpi_dsdt_get_i2c_hid_device(i);
+        if (dev) {
+            DEBUG("[I2C-HID]   设备 #%d: %s@%d (addr=0x%02X, desc=0x%08X)\n",
+                   i, dev->hid_id, dev->i2c_bus_number,
+                   dev->i2c_device_addr, dev->hid_descriptor_address);
+        }
+    }
+    
+    return g_acpi_device_count;
+}
+
+int i2c_hid_init_from_acpi(uint32_t acpi_index)
+{
+    if (!g_acpi_enumerated) {
+        i2c_hid_enumerate_acpi();
+    }
+    
+    const acpi_i2c_hid_device_t* acpi_dev = 
+        acpi_dsdt_get_i2c_hid_device(acpi_index);
+    
+    if (!acpi_dev) {
+        DEBUG("[I2C-HID] ACPI 设备 #%d 不存在\n", acpi_index);
+        return -1;
+    }
+    
+    DEBUG("[I2C-HID] 初始化 ACPI 设备 %s 总线 %d 地址 0x%02X\n",
+           acpi_dev->hid_id, acpi_dev->i2c_bus_number,
+           acpi_dev->i2c_device_addr);
+    
+    /* 使用 ACPI 提供的总线地址和设备地址初始化 */
+    return i2c_hid_init(acpi_dev->i2c_bus_number, acpi_dev->i2c_device_addr);
+}
+
+uint32_t i2c_hid_get_acpi_device_count(void)
+{
+    if (!g_acpi_enumerated) {
+        i2c_hid_enumerate_acpi();
+    }
+    return g_acpi_device_count;
 }

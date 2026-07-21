@@ -913,6 +913,7 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         src/kernel/drivers/i2c/i2c_core.c \
         src/kernel/drivers/i2c/i2c_lpss.c \
         src/kernel/drivers/i2c/i2c_selftest.c \
+        src/kernel/acpi_dsdt.c \
         src/kernel/drivers/i2c-hid/i2c_hid.c \
         src/kernel/drivers/i2c-hid/i2c_hid_selftest.c \
         src/arch/x86_64/gui64/blockdev_hw.c \
