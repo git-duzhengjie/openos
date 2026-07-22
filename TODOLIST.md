@@ -1,6 +1,6 @@
 # openos 待开发功能清单
 
-> 更新时间：2026-07-18
+> 更新时间：2026-07-22
 >
 > 当前状态：openos 已具备 32 位 x86 原型内核能力，能够启动、显示、输入、调度、运行基础用户程序，并具备基础 syscall、VFS、ramfs/tmpfs、shell、GUI Terminal 等模块。浏览器路线已切换为 OpenOS 自研轻量浏览器，Chromium 官方内核迁移冻结为历史备选。
 >
@@ -1537,7 +1537,7 @@
       - `vmm64.c` L175~259：`vmm_map_kernel` 内核映射叶子 = KERNEL_FLAGS（U=0），`as_map_user` 用户映射叶子 = USER_FLAGS（U=1），隔离在叶子级别收口
       - 效果：ring3 触到内核低地址叶子（U=0）会触发 #PF → 由 usermode `kfault` 计数器捕获；SMAP 独立防内核 U=1 越权访问
       - 证据：ELF loader 装载 + as-selftest clone + usermode iretq 返回全链路 `kfault_delta=0`（无内核泄漏面）
-  - [ ] **γ.5 P3 · user-preempt iretq #GP 修复（H.5c fork/wait/preempt-selftest 共同 blocker）**
+  - [x] **γ.5 P3 · user-preempt iretq #GP 修复（H.5c fork/wait/preempt-selftest 共同 blocker）**
     - 现象：单核 QEMU 下，timer IRQ 抢占正在 ring3 执行的 user 任务时，IRQ 返回路径的 `iretq` 触发 #GP e=0x30，rip 落在 `irq0_iret` 附近
     - 已知遮蔽：`preempt-selftest` 因此长期默认 SKIP（`OPENOS_ENABLE_PREEMPT_SELFTEST=1` 显式开启才跑）；H.5c fork-multi 触发路径同源（parent hlt 等待 child，child 一进 ring3 就被 preempt → iretq #GP 后卡住）
     - 追凶结论（2026-07-19 A 路线诊断）：fork 3 个 child spawn 成功（proc idx=2/3/4，sched slot 8/9/A 全部 parked→ready），parent `sti; hlt` 后 tick 确实到达 IRQ0 但 iretq 回 ring3 失败，child 从未真正跑起来 `[fork-multi] child idx=X` 从未打印
@@ -1934,7 +1934,7 @@
     - ✅ Intel LPSS寄存器定义、FIFO管理、总线配置、主模式传输实现
     - ✅ 标准错误码体系、跨硬件统一API设计
     - ✅ I²C框架自测试完成，覆盖总线注册、读写操作、寄存器操作、错误处理
-  - [ ] ACPI DSDT 解析：识别 `PNP0C50`（HID over I²C）设备、读取 HID Descriptor Address
+  - [x] ACPI DSDT 解析：识别 `PNP0C50`（HID over I²C）设备、读取 HID Descriptor Address
     - ✅ 驱动框架已预留ACPI枚举接口，后续可直接接入
   - [x] `i2c_hid64.c`：实现 HID over I²C 协议（Get HID Descriptor / Get Report Descriptor / Interrupt 事件读取）
     - ✅ I²C HID驱动与通用I²C总线框架完整对接
