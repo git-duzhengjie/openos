@@ -329,6 +329,10 @@ int i2c_hid_init(int bus_id, uint16_t dev_addr)
     
     dev->bus_id = bus_id;
     dev->dev_addr = dev_addr;
+    dev->input_dev_id = -1;
+    dev->irq_vector = -1;
+    dev->irq_enabled = false;
+    dev->use_interrupt = false;
     
     /* 读取 HID 描述符 */
     ret = i2c_hid_read_hid_descriptor(dev);
@@ -375,9 +379,18 @@ int i2c_hid_init(int bus_id, uint16_t dev_addr)
     
 fail:
     DEBUG("I2C-HID: Initialization failed\n");
+    /* Cleanup: disable interrupt if partially set up */
+    if (dev->irq_enabled) {
+        i2c_hid_disable_interrupt(dev);
+    }
+    /* Cleanup: unregister input device if registered */
     if (dev->input_dev_id >= 0) {
-        /* TODO: input_destroy_device(dev->input_dev_id); */
+        input_device_unregister((uint16_t)dev->input_dev_id);
         dev->input_dev_id = -1;
+    }
+    /* Cleanup: power off device */
+    if (dev->bus_id >= 0) {
+        i2c_hid_set_power(dev, false);
     }
     dev->initialized = false;
     return -1;
