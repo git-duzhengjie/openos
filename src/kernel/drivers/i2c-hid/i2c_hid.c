@@ -235,6 +235,87 @@ int i2c_hid_poll(i2c_hid_device_t *dev)
 }
 
 /* ==========================================================================
+ * 中断模式支持
+ * ========================================================================== */
+
+/* 全局设备指针，供 IRQ wrapper 函数访问 */
+static i2c_hid_device_t *g_irq_dev = NULL;
+
+/* IRQ wrapper - 调用 i2c_hid_irq_handler
+ * This function has the signature matching arch_x86_64_idt_register_irq
+ * void (*handler)(void) */
+static void i2c_hid_irq_wrapper(void)
+{
+    if (g_irq_dev && g_irq_dev->initialized) {
+        i2c_hid_irq_handler(g_irq_dev);
+    }
+}
+
+int i2c_hid_irq_handler(i2c_hid_device_t *dev)
+{
+    /* In interrupt mode, we read the input report the same way as poll.
+     * The difference is that this is triggered by the device's interrupt
+     * line (GPIO or ACPI GPE) rather than a timer-driven poll. */
+    return i2c_hid_poll(dev);
+}
+
+int i2c_hid_enable_interrupt(i2c_hid_device_t *dev, int irq_vector)
+{
+    if (!dev || !dev->initialized) {
+        DEBUG("I2C-HID: Cannot enable interrupt - device not initialized\n");
+        return -1;
+    }
+
+    if (dev->irq_enabled) {
+        DEBUG("I2C-HID: Interrupt already enabled on vector %d\n", dev->irq_vector);
+        return 0;
+    }
+
+    /* Register IRQ handler via IDT */
+    extern int arch_x86_64_idt_register_irq(uint8_t cpu_vector, void (*handler)(void));
+    int ret = arch_x86_64_idt_register_irq((uint8_t)irq_vector,
+                                            i2c_hid_irq_wrapper);
+    if (ret) {
+        DEBUG("I2C-HID: Failed to register IRQ handler for vector %d\n", irq_vector);
+        return ret;
+    }
+
+    /* Configure IOAPIC to route GSI to this vector */
+    extern void arch_x86_64_ioapic_set_redir(uint8_t gsi, uint8_t vector,
+                                              uint8_t dest_lapic_id);
+    extern void arch_x86_64_ioapic_unmask(uint8_t gsi);
+    /* GSI equals vector for legacy IRQs; route to BSP (LAPIC ID 0) */
+    arch_x86_64_ioapic_set_redir((uint8_t)irq_vector, (uint8_t)irq_vector, 0);
+    arch_x86_64_ioapic_unmask((uint8_t)irq_vector);
+
+    g_irq_dev = dev;
+    dev->irq_vector = irq_vector;
+    dev->irq_enabled = true;
+    dev->use_interrupt = true;
+
+    DEBUG("I2C-HID: Interrupt enabled on vector %d\n", irq_vector);
+    return 0;
+}
+
+int i2c_hid_disable_interrupt(i2c_hid_device_t *dev)
+{
+    if (!dev || !dev->irq_enabled)
+        return 0;
+
+    /* Mask the IRQ at IOAPIC level */
+    extern void arch_x86_64_ioapic_mask(uint8_t gsi);
+    arch_x86_64_ioapic_mask((uint8_t)dev->irq_vector);
+
+    dev->irq_enabled = false;
+    dev->use_interrupt = false;
+    dev->irq_vector = -1;
+    g_irq_dev = NULL;
+
+    DEBUG("I2C-HID: Interrupt disabled, falling back to poll mode\n");
+    return 0;
+}
+
+/* ==========================================================================
  * 初始化
  * ========================================================================== */
 

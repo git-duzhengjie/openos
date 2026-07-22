@@ -89,6 +89,11 @@ typedef struct {
     /* input 子系统集成 */
     int input_dev_id;                  /* input 设备 ID (<0 = 未注册) */
     
+    /* 中断支持 */
+    int irq_vector;                    /* 中断向量号 (<0 = 未使用中断) */
+    bool irq_enabled;                  /* 中断是否已启用 */
+    bool use_interrupt;                /* 是否使用中断模式 (false=轮询) */
+    
     bool initialized;                  /* 是否已初始化 */
 } i2c_hid_device_t;
 
@@ -112,6 +117,37 @@ int i2c_hid_init(int bus_id, uint16_t dev_addr);
  * @return int 0 成功，<0 错误
  */
 int i2c_hid_poll(i2c_hid_device_t *dev);
+
+/**
+ * @brief 中断处理函数 (从 IRQ handler 调用)
+ *
+ * 在中断模式下，当设备触发中断时调用此函数。
+ * 读取输入报告并上报到 input 子系统。
+ *
+ * @param dev I²C HID 设备
+ * @return int 0 成功，<0 错误
+ */
+int i2c_hid_irq_handler(i2c_hid_device_t *dev);
+
+/**
+ * @brief 启用中断模式
+ *
+ * 注册 IRQ handler，切换从中轮询模式到中断模式。
+ * 需要 GPIO 或 ACPI GPE 中断已配置。
+ *
+ * @param dev I²C HID 设备
+ * @param irq_vector 中断向量号
+ * @return int 0 成功，<0 错误
+ */
+int i2c_hid_enable_interrupt(i2c_hid_device_t *dev, int irq_vector);
+
+/**
+ * @brief 禁用中断模式，回退到轮询
+ *
+ * @param dev I²C HID 设备
+ * @return int 0 成功，<0 错误
+ */
+int i2c_hid_disable_interrupt(i2c_hid_device_t *dev);
 
 /**
  * @brief 检查 I²C HID 设备是否存在 (ACPI PNP0C50)
