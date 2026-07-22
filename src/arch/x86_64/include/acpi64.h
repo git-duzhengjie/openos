@@ -131,6 +131,99 @@ int arch_x86_64_acpi_resolve_lapic_nmi(uint8_t apic_id,
                                        uint8_t *out_lint,
                                        uint16_t *out_flags);
 
+/* ================================================================
+ * M8-D.5+: FADT 解析与 GPE 事件支持
+ * ================================================================
+ *
+ * FADT (Fixed ACPI Description Table, sig "FADT" / "APIC" 前缀 "FACP")
+ *   - 提供 PM1a/b_EVT/CNT, PM2_CNT, GPE0/1_BLK 等寄存器块的地址和长度
+ *   - 是 GPE 事件处理的前提
+ *
+ * GPE (General Purpose Event)
+ *   - GPE0_BLK 是一组通过 ACPI SCI 中断上报的通用事件位
+ *   - 每个位对应一个 GPE 号 (0..GPE0_BLK_LEN*8-1)
+ *   - 常见用途：I²C HID 设备中断、热插拔、电源按钮等
+ *   - GPE 寄存器布局：EN -> STS -> DIS (各占 GPE0_BLK_LEN/2 字节)
+ */
+
+/* FADT 中与 GPE/PM 相关的寄存器块描述 */
+typedef struct {
+    uint32_t valid;            /* 1 once FADT parsed */
+    uint16_t pm1a_evt_blk;     /* PM1a Event Register Block */
+    uint16_t pm1b_evt_blk;     /* PM1b Event Register Block */
+    uint16_t pm1a_cnt_blk;     /* PM1a Control Register Block */
+    uint16_t pm1b_cnt_blk;     /* PM1b Control Register Block */
+    uint16_t pm2_cnt_blk;      /* PM2 Control Register Block */
+    uint16_t gpe0_blk;         /* GPE0 Register Block */
+    uint16_t gpe1_blk;         /* GPE1 Register Block */
+    uint8_t  pm1_evt_len;      /* PM1 Event Register Length */
+    uint8_t  pm1_cnt_len;      /* PM1 Control Register Length */
+    uint8_t  pm2_cnt_len;      /* PM2 Control Register Length */
+    uint8_t  gpe0_blk_len;     /* GPE0 Block Length (bytes, total of EN+STS) */
+    uint8_t  gpe1_blk_len;     /* GPE1 Block Length */
+    uint8_t  gpe1_base;        /* GPE1 Base (first GPE number in GPE1) */
+    uint8_t  sci_int;          /* SCI interrupt vector (GSI) */
+    uint8_t  acpi_enable;      /* ACPI Enable value for SMI_CMD */
+    uint8_t  acpi_disable;     /* ACPI Disable value for SMI_CMD */
+    uint32_t smi_cmd;          /* SMI Command Port */
+    uint8_t  acpi_enabled;     /* 1 if ACPI mode is active */
+} acpi_fadt_info_t;
+
+/* GPE handler callback type
+ *   gpe_number: the GPE index that fired
+ *   context:    user-provided context pointer
+ * Returns 0 on success, non-zero to indicate handler error.
+ */
+typedef int (*acpi_gpe_handler_t)(uint32_t gpe_number, void *context);
+
+#define ACPI_MAX_GPE_HANDLERS  32
+
+/* GPE handler entry */
+typedef struct {
+    uint32_t            gpe_number;
+    acpi_gpe_handler_t  handler;
+    void               *context;
+    uint8_t             enabled;
+} acpi_gpe_handler_entry_t;
+
+/* Initialize FADT parsing and GPE subsystem */
+int arch_x86_64_acpi_fadt_init(void);
+
+/* Get FADT info */
+const acpi_fadt_info_t *arch_x86_64_acpi_fadt_info(void);
+
+/* Install a GPE handler for a specific GPE number */
+int arch_x86_64_acpi_gpe_install_handler(uint32_t gpe_number,
+                                          acpi_gpe_handler_t handler,
+                                          void *context);
+
+/* Remove a GPE handler */
+int arch_x86_64_acpi_gpe_remove_handler(uint32_t gpe_number);
+
+/* Enable a specific GPE (write EN register) */
+int arch_x86_64_acpi_gpe_enable(uint32_t gpe_number);
+
+/* Disable a specific GPE */
+int arch_x86_64_acpi_gpe_disable(uint32_t gpe_number);
+
+/* Clear GPE status (write STS register to clear) */
+int arch_x86_64_acpi_gpe_clear_status(uint32_t gpe_number);
+
+/* Dispatch all pending GPE events (call from SCI handler) */
+void arch_x86_64_acpi_gpe_dispatch(void);
+
+/* General table lookup via XSDT/RSDT (signature-based)
+ * Returns pointer to the table header, or NULL if not found.
+ */
+const void *arch_x86_64_acpi_find_table(const char *signature);
+
+/* DSDT table parser for I2C HID device enumeration (M8-D.5)
+ * Scans the ACPI DSDT namespace for PNP0C50 HID over I2C devices,
+ * extracting their bus address and interrupt resources. Must be
+ * called AFTER FADT initialization completes.
+ */
+int acpi_dsdt_init(void);
+
 #ifdef __cplusplus
 }
 #endif

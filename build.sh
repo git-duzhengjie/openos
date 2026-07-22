@@ -783,6 +783,7 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         kernel/ioapic64.c \
         kernel/apic_selftest64.c \
         kernel/acpi64.c \
+        kernel/acpi_dsdt.c \
         kernel/acpi_selftest64.c \
         kernel/power64.c \
         kernel/power_selftest64.c \
@@ -973,6 +974,7 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         "$ARCH64_BUILD/ioapic64.o" \
         "$ARCH64_BUILD/apic_selftest64.o" \
         "$ARCH64_BUILD/acpi64.o" \
+        "$ARCH64_BUILD/acpi_dsdt.o" \
         "$ARCH64_BUILD/acpi_selftest64.o" \
         "$ARCH64_BUILD/power64.o" \
         "$ARCH64_BUILD/power_selftest64.o" \

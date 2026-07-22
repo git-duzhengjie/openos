@@ -35,6 +35,8 @@
 #include "virtio_gpu.h"
 /* M8-D.4: I²C 驱动 */
 #include "../../kernel/drivers/i2c/i2c.h"
+/* M8-D.5: ACPI DSDT parser for I2C HID enumeration */
+#include "../include/acpi64.h"
 /* M1.3 网络协议栈入口（netstack.c） */
 extern void net_init(void);
 extern void net_tick(uint32_t elapsed_ms);
@@ -882,6 +884,12 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
      * the legacy 8042 pulse (reboot) / QEMU debug-exit (shutdown). */
     (void)arch_x86_64_power_init();
     (void)arch_x86_64_power_selftest_run();
+
+    /* Step M8-D.5: parse DSDT table to enumerate I2C HID devices. This uses
+     * the FADT-discovered DSDT pointer to find PNP0C50 devices and extract
+     * their bus address and interrupt resources. Failure is non-fatal.
+     * Must run AFTER power_init() so FADT is fully parsed. */
+    (void)acpi_dsdt_init();
 #ifdef M6_POWER_DIAG
     /* M6.1 end-to-end: actually trigger ACPI S5 soft-off. On QEMU this makes
      * the VM power off cleanly (exit rc 0) instead of hanging until timeout,
