@@ -337,6 +337,41 @@ static int parse_hid_object(acpi_aml_context_t *ctx, char *hid_out, size_t max_l
             hid_out[max_len - 1] = '\0';
             return 0;
         }
+    } else if (*p == AML_OP_DWORD || *p == AML_OP_WORD || *p == AML_OP_BYTE ||
+               *p == AML_OP_ZERO || *p == AML_OP_ONE || *p == AML_OP_ONES ||
+               *p == AML_OP_QWORD) {
+        /* Integer-encoded EISA ID. ACPI encodes PNP0C50 etc as 32-bit
+         * compressed EISA IDs: 7 bits per char (5 chars) + 3 bits mfr code.
+         * Format: bits[31:26]=c1, [25:20]=c2, [19:14]=c3, [13:8]=c4, [7:1]=c5, [0]=0
+         * Each char: 0x40..0x5F maps to 'A'..'Z', 0x30..0x39 maps to '0'..'9' */
+        uint64_t val = acpi_aml_parse_integer(ctx);
+        uint32_t eid = (uint32_t)val;
+        char c1 = (char)(((eid >> 26) & 0x1F) + 0x40);
+        char c2 = (char)(((eid >> 21) & 0x1F) + 0x40);
+        char c3 = (char)(((eid >> 16) & 0x1F) + 0x40);
+        char c4 = (char)(((eid >> 11) & 0x1F) + 0x40);
+        char c5 = (char)(((eid >> 6)  & 0x1F) + 0x40);
+        /* Build string: c1c2c3 followed by hex product number */
+        uint16_t product = (uint16_t)(eid & 0xFFFF);
+        /* For EISA ID: c1c2c3 are letters, c4c5 + product form the ID */
+        /* Standard decoding: 3 letters + 4 hex digits */
+        /* Fix: EISA ID is 7 chars: 3 letters + 4 hex digits */
+        char eisa[8];
+        eisa[0] = (((eid >> 26) & 0x1F) + 0x40);
+        eisa[1] = (((eid >> 21) & 0x1F) + 0x40);
+        eisa[2] = (((eid >> 16) & 0x1F) + 0x40);
+        /* Product number: 4 hex digits from lower 16 bits */
+        uint8_t hi = (eid >> 8) & 0xFF;
+        uint8_t lo = eid & 0xFF;
+        eisa[3] = (hi >> 4) < 10 ? '0' + (hi >> 4) : 'A' + (hi >> 4) - 10;
+        eisa[4] = (hi & 0xF) < 10 ? '0' + (hi & 0xF) : 'A' + (hi & 0xF) - 10;
+        eisa[5] = (lo >> 4) < 10 ? '0' + (lo >> 4) : 'A' + (lo >> 4) - 10;
+        eisa[6] = (lo & 0xF) < 10 ? '0' + (lo & 0xF) : 'A' + (lo & 0xF) - 10;
+        eisa[7] = '\0';
+        (void)c1; (void)c2; (void)c3; (void)c4; (void)c5; (void)product;
+        strncpy(hid_out, eisa, max_len);
+        hid_out[max_len - 1] = '\0';
+        return 0;
     }
     return -1;
 }
@@ -380,13 +415,18 @@ static int process_device_object(acpi_aml_context_t *ctx, const char *dev_name)
     memset(&dev_ctx, 0, sizeof(dev_ctx));
     strncpy(dev_ctx.name, dev_name, sizeof(dev_ctx.name));
     strncpy(dev_ctx.hid, "UNKNOWN", sizeof(dev_ctx.hid));
-    /* Skip PkgLength to get to device body */
+    /* Skip PkgLength to get to device body.
+     * PkgLength covers: PkgLength encoding + Name + body.
+     * So body starts at ctx->aml_ptr + pkg_bytes + name_len (4 bytes).
+     * body length = data_len - pkg_bytes - 4 */
     size_t data_len;
     int pkg_bytes = aml_parse_pkg_length(ctx->aml_ptr, ctx->aml_end, &data_len);
     if (pkg_bytes == 0) return -1;
     ctx->aml_ptr += pkg_bytes;
+    /* Skip the 4-byte device name (already known via dev_name) */
+    ctx->aml_ptr += 4;
     const uint8_t *body_start = ctx->aml_ptr;
-    const uint8_t *body_end = body_start + data_len;
+    const uint8_t *body_end = body_start + data_len - pkg_bytes - 4;
     if (body_end > ctx->aml_end) body_end = ctx->aml_end;
     /* Push this device onto scope stack */
     scope_push(dev_name);
@@ -404,12 +444,18 @@ static int process_device_object(acpi_aml_context_t *ctx, const char *dev_name)
             if (p >= body_ctx.aml_end) break;
             opcode = *p;
             if (opcode == AML_OP_DEVICE) {
-                /* Nested Device */
+                /* Nested Device: same logic as top-level Device */
                 p++;
-                char child_name[ACPI_DSDT_MAX_NAME_LEN];
-                body_ctx.aml_ptr = p;
-                if (acpi_aml_parse_name(&body_ctx, child_name, sizeof(child_name)) == 0) {
-                    process_device_object(&body_ctx, child_name);
+                size_t dev_len;
+                int dev_pkg = aml_parse_pkg_length(p, body_ctx.aml_end, &dev_len);
+                if (dev_pkg > 0) {
+                    const uint8_t *dev_name_start = p + dev_pkg;
+                    body_ctx.aml_ptr = dev_name_start;
+                    char child_name[ACPI_DSDT_MAX_NAME_LEN];
+                    if (acpi_aml_parse_name(&body_ctx, child_name, sizeof(child_name)) == 0) {
+                        process_device_object(&body_ctx, child_name);
+                    }
+                    body_ctx.aml_ptr = p + dev_len;
                 }
                 continue;
             }
@@ -419,14 +465,22 @@ static int process_device_object(acpi_aml_context_t *ctx, const char *dev_name)
         }
         if (opcode == AML_OP_SCOPE) {
             p++;
-            /* Skip PkgLength */
+            /* Scope inside Device body: same logic as top-level Scope */
             size_t scope_len;
             int scope_pkg = aml_parse_pkg_length(p, body_ctx.aml_end, &scope_len);
             if (scope_pkg > 0) {
-                p += scope_pkg;
-                walk_namespace(p, scope_len, &body_ctx);
+                const uint8_t *scope_body_start = p + scope_pkg;
+                body_ctx.aml_ptr = scope_body_start;
+                char scope_name[ACPI_DSDT_MAX_NAME_LEN];
+                if (acpi_aml_parse_name(&body_ctx, scope_name, sizeof(scope_name)) == 0) {
+                    size_t name_bytes = (size_t)(body_ctx.aml_ptr - scope_body_start);
+                    size_t body_len = scope_len - scope_pkg - name_bytes;
+                    scope_push(scope_name);
+                    walk_namespace(body_ctx.aml_ptr, body_len, &body_ctx);
+                    scope_pop();
+                }
+                body_ctx.aml_ptr = p + scope_len;
             }
-            body_ctx.aml_ptr = p;
             continue;
         }
         if (opcode == AML_OP_NAME) {
@@ -517,12 +571,24 @@ static int walk_namespace(const uint8_t *start, size_t len,
             if (p >= ctx.aml_end) break;
             opcode = *p;
             if (opcode == AML_OP_DEVICE) {
-                /* Device object: 0x5B 0x82 + PkgLength + Name */
+                /* Device object: 0x5B 0x82 + PkgLength + Name + body
+                 * PkgLength covers everything after 0x82, including the
+                 * PkgLength encoding itself and the Name.
+                 * After process_device_object returns, aml_ptr has been
+                 * advanced past PkgLength + Name, but only through the
+                 * body. We need to advance to the end of the Device. */
                 p++;
-                char dev_name[ACPI_DSDT_MAX_NAME_LEN];
-                ctx.aml_ptr = p;
-                if (acpi_aml_parse_name(&ctx, dev_name, sizeof(dev_name)) == 0) {
-                    process_device_object(&ctx, dev_name);
+                size_t dev_len;
+                int dev_pkg = aml_parse_pkg_length(p, ctx.aml_end, &dev_len);
+                if (dev_pkg > 0) {
+                    const uint8_t *dev_name_start = p + dev_pkg;
+                    ctx.aml_ptr = dev_name_start;
+                    char dev_name[ACPI_DSDT_MAX_NAME_LEN];
+                    if (acpi_aml_parse_name(&ctx, dev_name, sizeof(dev_name)) == 0) {
+                        process_device_object(&ctx, dev_name);
+                    }
+                    /* Advance to end of this Device object */
+                    ctx.aml_ptr = p + dev_len;
                 }
                 continue;
             }
@@ -533,18 +599,28 @@ static int walk_namespace(const uint8_t *start, size_t len,
         }
         if (opcode == AML_OP_SCOPE) {
             p++;
-            /* Scope: 0x10 + PkgLength + Name */
+            /* Scope: 0x10 + PkgLength + Name + body
+             * PkgLength covers everything after the opcode, including
+             * the PkgLength encoding itself and the Name.
+             * So body starts at p + pkg_bytes + name_len, and body
+             * length = scope_len - pkg_bytes - name_len */
             size_t scope_len;
             int scope_pkg = aml_parse_pkg_length(p, ctx.aml_end, &scope_len);
             if (scope_pkg > 0) {
-                p += scope_pkg;
+                const uint8_t *scope_body_start = p + scope_pkg;
+                /* Parse the scope name */
+                ctx.aml_ptr = scope_body_start;
                 char scope_name[ACPI_DSDT_MAX_NAME_LEN];
-                ctx.aml_ptr = p;
                 if (acpi_aml_parse_name(&ctx, scope_name, sizeof(scope_name)) == 0) {
+                    /* Body starts after the name, body length = scope_len - pkg_bytes - name_bytes */
+                    size_t name_bytes = (size_t)(ctx.aml_ptr - scope_body_start);
+                    size_t body_len = scope_len - scope_pkg - name_bytes;
                     scope_push(scope_name);
-                    walk_namespace(ctx.aml_ptr, scope_len, &ctx);
+                    walk_namespace(ctx.aml_ptr, body_len, &ctx);
                     scope_pop();
                 }
+                /* Advance past the entire Scope object */
+                ctx.aml_ptr = p + scope_len;
             }
             continue;
         }
@@ -603,9 +679,9 @@ int acpi_dsdt_init(void)
         return -1;
     }
     klog_emit(KLOG_INFO, KLOG_FAC_KERNEL, "ACPI DSDT: Parsing DSDT table");
-    /* Start parsing the AML data (immediately after header) */
-    const uint8_t *aml_data = fadt_bytes + 36;
-    size_t aml_len = dsdt_header->length - 36;
+    /* Start parsing the AML data (immediately after the DSDT SDT header) */
+    const uint8_t *aml_data = (const uint8_t *)dsdt_header + sizeof(acpi_sdt_header_t);
+    size_t aml_len = dsdt_header->length - sizeof(acpi_sdt_header_t);
     /* Walk the namespace */
     scope_push("\\");
     int ret = walk_namespace(aml_data, aml_len, NULL);
