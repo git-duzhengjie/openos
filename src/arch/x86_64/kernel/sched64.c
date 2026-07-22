@@ -114,7 +114,7 @@ static inline void sched_pc_inc_preempts(void) {
 }
 
 static x86_64_context_t bootstrap_context;
-/* gamma.5-P3: made global so isr64.S can directly set swapgs_needed */
+/* Made global so isr64.S can access current_context for IRQ dispatch. */
 x86_64_context_t *current_context = &bootstrap_context;
 static uint8_t sched64_ready;
 

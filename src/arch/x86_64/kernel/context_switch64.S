@@ -21,7 +21,7 @@
  *   0x50 r9
  *   0x58 r10
  *   0x60 r11
- *   0x68 swapgs_needed  ; gamma.5 P3: 1 = thread was in ring3 when interrupted
+ *   0x68 swapgs_needed  ; reserved (γ.5 P3: currently unused, ISR path handles swapgs)
  */
 arch_x86_64_context_switch:
     test %rdi, %rdi
@@ -72,20 +72,6 @@ arch_x86_64_context_switch:
     mov 0x10(%rsi), %rax
     pushq %rax
     popfq
-
-    /* γ.5 P3: Restore swapgs state before returning to the interrupted context.
-     * If the thread was interrupted in ring3 (swapgs_needed == 1), the IRQ
-     * stub had already executed swapgs, so we need to swap back before
-     * the ISR return path executes iretq. This ensures GS.base points to
-     * the user TLS, not the percpu area, when iretq checks privilege levels.
-     *
-     * Note: We do this AFTER popfq because popfq is atomic and doesn't modify GS.
-     * We do this BEFORE the indirect jump because the return path expects the
-     * correct GS state to match the iret frame's CS privilege level. */
-    cmpq $0, 0x68(%rsi)
-    jz 1f
-    swapgs
-1:
 
     mov 0x08(%rsi), %rax
     jmp *%rax

@@ -24,13 +24,10 @@ typedef struct x86_64_context {
     uint64_t r10;
     uint64_t r11;
 
-    /* γ.5 P3: swapgs state tracking. When a thread is interrupted in ring3
-     * and the IRQ handler invokes the scheduler, the IRQ stub has already
-     * executed swapgs. We must preserve this state across context_switch:
-     *   0 = thread was in ring0 when interrupted (no swapgs performed)
-     *   1 = thread was in ring3 when interrupted (swapgs already done)
-     * On restore, if swapgs_needed==1, we must swapgs back before returning
-     * to the interrupted user context. */
+    /* γ.5 P3: swapgs state tracking field. Currently reserved/unused.
+     * The ISR entry/exit path handles swapgs via SWAPGS_IF_FROM_USER macro,
+     * which checks the saved CS.RPL directly. This field is kept for ABI
+     * stability and potential future use in kernel-preemption scenarios. */
     uint64_t swapgs_needed;
 } x86_64_context_t;
 
