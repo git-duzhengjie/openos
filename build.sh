@@ -914,7 +914,10 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         src/arch/x86_64/gui64/blockdev_hw.c \
         src/kernel/net/netstack.c \
         src/arch/x86_64/gui64/fat32_64.c \
-        src/arch/x86_64/gui64/ext4_64.c; do
+        src/arch/x86_64/gui64/ext4_64.c \
+        src/kernel/drivers/i2c/i2c.c \
+        src/kernel/drivers/i2c/intel_lpss_i2c.c \
+        src/kernel/drivers/i2c-hid/i2c_hid.c; do
         obj="$ARCH64_BUILD/$(basename "${cfile%.c}").o"
         gcc $GUI64_CFLAGS -c "$cfile" -o "$obj"
     done
@@ -1093,7 +1096,10 @@ if [ "$BUILD_ARCH" = "x86_64" ]; then
         "$ARCH64_BUILD/blockdev_hw.o" \
         "$ARCH64_BUILD/netstack.o" \
         "$ARCH64_BUILD/fat32_64.o" \
-        "$ARCH64_BUILD/ext4_64.o"
+        "$ARCH64_BUILD/ext4_64.o" \
+        "$ARCH64_BUILD/i2c.o" \
+        "$ARCH64_BUILD/intel_lpss_i2c.o" \
+        "$ARCH64_BUILD/i2c_hid.o"
     echo "[5/5] x86_64 kernel and hello64 user ELF linked."
 
     echo "[UEFI] Building x86_64 BOOTX64.EFI via mingw-w64 (native PE)..."

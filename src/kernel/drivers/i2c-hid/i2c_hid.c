@@ -308,13 +308,11 @@ fail:
 
 bool i2c_hid_present(void)
 {
-    /* 检查 PNP0C50 ACPI 设备 */
-    acpi_device_t *dev = acpi_find_device("PNP0C50");
-    if (!dev) {
-        /* 模拟模式: 返回 true 用于 selftest */
+    /* Check PNP0C50 ACPI device via DSDT parser */
+    if (acpi_dsdt_i2c_hid_device_count() > 0) {
         return true;
     }
-    
+    /* Simulated mode: return true for selftest */
     return true;
 }
 
@@ -329,16 +327,14 @@ i2c_hid_device_t *i2c_hid_get_device(void)
 
 int i2c_hid_global_init(void)
 {
-    i2c_adapter_t *adap;
-    
-    /* 先枚举并初始化 LPSS I²C 控制器 */
-    i2c_lpss_probe();
-    
+    i2c_bus_t *adap;
+
+    /* Try to get default I2C adapter */
     adap = i2c_get_default_adapter();
-    
+
     if (!adap) {
         DEBUG("I2C-HID: No I2C adapter available, using simulated mode\n");
-        /* 模拟模式: 仅初始化设备结构用于 selftest */
+        /* Simulated mode: initialize device struct for selftest */
         g_i2c_hid_dev.initialized = true;
         g_i2c_hid_dev.max_contacts = 10;
         g_i2c_hid_dev.max_x = 2736;
@@ -349,8 +345,9 @@ int i2c_hid_global_init(void)
         return 0;
     }
     
-    /* 真实硬件: I²C HID 标准地址 0x4C */
-    return i2c_hid_driver_init(adap, 0x4C);
+    /* adap is available but we use bus_id=0 as default
+     * Real hardware: I2C HID standard address 0x2C or 0x4C. */
+    return i2c_hid_init(0, 0x4C);
 }
 
 int i2c_hid_selftest(void)
@@ -403,7 +400,7 @@ int i2c_hid_enumerate_acpi(void)
     }
     
     /* 获取枚举结果 */
-    g_acpi_device_count = acpi_dsdt_get_i2c_hid_count();
+    g_acpi_device_count = acpi_dsdt_i2c_hid_device_count();
     g_acpi_enumerated = true;
     
     DEBUG("[I2C-HID] ACPI 枚举完成: 发现 %d 个 PNP0C50 设备\n",
@@ -415,7 +412,7 @@ int i2c_hid_enumerate_acpi(void)
         if (dev) {
             DEBUG("[I2C-HID]   设备 #%d: %s@%d (addr=0x%02X, desc=0x%08X)\n",
                    i, dev->hid_id, dev->i2c_bus_number,
-                   dev->i2c_device_addr, dev->hid_descriptor_address);
+                   dev->i2c_address, dev->hid_descriptor_address);
         }
     }
     
@@ -438,10 +435,10 @@ int i2c_hid_init_from_acpi(uint32_t acpi_index)
     
     DEBUG("[I2C-HID] 初始化 ACPI 设备 %s 总线 %d 地址 0x%02X\n",
            acpi_dev->hid_id, acpi_dev->i2c_bus_number,
-           acpi_dev->i2c_device_addr);
+           acpi_dev->i2c_address);
     
     /* 使用 ACPI 提供的总线地址和设备地址初始化 */
-    return i2c_hid_init(acpi_dev->i2c_bus_number, acpi_dev->i2c_device_addr);
+    return i2c_hid_init(acpi_dev->i2c_bus_number, acpi_dev->i2c_address);
 }
 
 uint32_t i2c_hid_get_acpi_device_count(void)

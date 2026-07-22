@@ -29,7 +29,6 @@
  * ====================================================================== */
 
 #define I2C_MAX_BUSES      8
-#define I2C_MAX_DEVICES    32
 
 static i2c_bus_t g_i2c_buses[I2C_MAX_BUSES];
 static i2c_device_t g_i2c_devices[I2C_MAX_DEVICES];
@@ -351,4 +350,19 @@ int i2c_scan_bus(i2c_bus_t *bus, uint8_t *device_list, int max_devices)
 const char *i2c_core_version(void)
 {
     return "I2C Core Framework v1.0 (openos)";
+}
+
+/* ========================================================================
+ * Default adapter accessor
+ * ======================================================================== */
+
+i2c_bus_t *i2c_get_default_adapter(void)
+{
+    int i;
+    for (i = 0; i < I2C_MAX_BUSES; i++) {
+        if (g_i2c_buses[i].registered) {
+            return &g_i2c_buses[i];
+        }
+    }
+    return NULL;
 }

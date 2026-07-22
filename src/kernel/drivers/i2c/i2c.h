@@ -347,7 +347,7 @@ int i2c_probe_device(i2c_adapter_t *adap, uint16_t addr);
  * ========================================================================== */
 
 /** 获取默认 I²C 适配器 */
-i2c_adapter_t *i2c_get_default_adapter(void);
+i2c_bus_t *i2c_get_default_adapter(void);
 
 /** 检查 I²C 总线是否就绪 */
 int i2c_bus_ready(void);
@@ -371,5 +371,12 @@ void i2c_lpss_init_all(void);
  * @return int 0 通过，<0 失败
  */
 int i2c_core_selftest(void);
+
+/**
+ * @brief Get the default (first registered) I2C adapter
+ *
+ * @return Pointer to adapter, or NULL if no bus is registered
+ */
+i2c_bus_t *i2c_get_default_adapter(void);
 
 #endif /* OPENOS_KERNEL_DRIVERS_I2C_I2C_H */

@@ -7,7 +7,7 @@
 #define OPENOS_KERNEL_DRIVERS_I2C_HID_I2C_HID_H
 
 #include <stdint.h>
-#include <stdbool.h>
+#include "../../../kernel/include/types.h"
 #include <stddef.h>
 
 #include "../i2c/i2c.h"

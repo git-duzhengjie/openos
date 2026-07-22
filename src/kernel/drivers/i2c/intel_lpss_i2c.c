@@ -92,7 +92,7 @@
 #define I2C_DATA_CMD_STOP               (1 << 9)
 #define I2C_DATA_CMD_RESTART            (1 << 10)
 #define I2C_DATA_CMD_NACK               (1 << 11)
-#define I2C_DATA_CMD_FIRST_DATA_BYTE    (1 << 12)
+/* I2C_DATA_CMD_FIRST_DATA_BYTE already defined in i2c.h */
 
 /* INTR_STAT 寄存器位定义 */
 #define I2C_INTR_RX_UNDER               (1 << 0)
@@ -219,7 +219,6 @@ static int intel_lpss_i2c_flush_fifos(intel_lpss_i2c_priv_t *priv)
 
 static int intel_lpss_i2c_set_bus_speed(intel_lpss_i2c_priv_t *priv)
 {
-    uint32_t hcnt, lcnt;
     uint32_t input_clk = priv->input_clk;
     uint32_t bus_speed = priv->bus_speed;
     uint32_t ss_hcnt, ss_lcnt, fs_hcnt, fs_lcnt;
@@ -237,22 +236,14 @@ static int intel_lpss_i2c_set_bus_speed(intel_lpss_i2c_priv_t *priv)
     fs_hcnt = (input_clk * 6) / 10000000;
     fs_lcnt = (input_clk * 13) / 10000000;
 
-    switch (bus_speed) {
-    case I2C_SPEED_STANDARD:
-        hcnt = ss_hcnt;
-        lcnt = ss_lcnt;
-        break;
-    case I2C_SPEED_FAST:
-    case I2C_SPEED_FAST_PLUS:
-        hcnt = fs_hcnt;
-        lcnt = fs_lcnt;
-        break;
-    default:
+    /* Check bus speed validity */
+    if (bus_speed != I2C_SPEED_STANDARD && bus_speed != I2C_SPEED_FAST &&
+        bus_speed != I2C_SPEED_FAST_PLUS) {
         DEBUG("I2C-LPSS: Unsupported bus speed %u Hz\n", bus_speed);
         return -I2C_ERR_UNSUPPORTED;
     }
 
-    /* 设置 SCL 计数 */
+    /* Write SCL count registers */
     intel_lpss_i2c_writel(priv, I2C_LPSS_SS_SCL_HCNT, ss_hcnt);
     intel_lpss_i2c_writel(priv, I2C_LPSS_SS_SCL_LCNT, ss_lcnt);
     intel_lpss_i2c_writel(priv, I2C_LPSS_FS_SCL_HCNT, fs_hcnt);
