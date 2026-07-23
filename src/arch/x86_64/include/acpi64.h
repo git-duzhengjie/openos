@@ -212,6 +212,9 @@ int arch_x86_64_acpi_gpe_clear_status(uint32_t gpe_number);
 /* Dispatch all pending GPE events (call from SCI handler) */
 void arch_x86_64_acpi_gpe_dispatch(void);
 
+/* Get the SCI interrupt vector from FADT (returns 0 if not initialized) */
+uint8_t arch_x86_64_acpi_get_sci_vector(void);
+
 /* General table lookup via XSDT/RSDT (signature-based)
  * Returns pointer to the table header, or NULL if not found.
  */

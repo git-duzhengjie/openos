@@ -800,3 +800,9 @@ void arch_x86_64_acpi_gpe_dispatch(void)
         }
     }
 }
+
+/* Get the SCI interrupt vector from FADT (M8-G.6) */
+uint8_t arch_x86_64_acpi_get_sci_vector(void)
+{
+    return g_fadt_info.sci_int;
+}

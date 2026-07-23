@@ -35,6 +35,8 @@
 #include "virtio_gpu.h"
 /* M8-D.4: I²C 驱动 */
 #include "../../kernel/drivers/i2c/i2c.h"
+/* M8-G: I²C HID 驱动 */
+#include "../../kernel/drivers/i2c-hid/i2c_hid.h"
 /* M8-D.5: ACPI DSDT parser for I2C HID enumeration */
 #include "../include/acpi64.h"
 /* M1.3 网络协议栈入口（netstack.c） */
@@ -84,6 +86,7 @@ extern void net_print_info(void);
 extern void x86_64_irq0(void);
 extern void x86_64_irq_lapic_timer(void);  /* G.6.5a: AP per-CPU LAPIC timer */
 extern void x86_64_irq_lapic_resched(void); /* G.6.6a: cross-CPU reschedule IPI */
+extern void x86_64_irq_sci(void);           /* M8-G.6: ACPI SCI interrupt stub */
 
 /* GUI 移植 (范围 B): i386 图形桌面已链入 x86_64 内核。
  * window_manager_start_desktop() 初始化 GUI 子系统并绘制桌面，
@@ -119,6 +122,15 @@ static const char x86_64_compat32_log[] = "[x86_64] compat32 evaluation ready\n"
 /* ext4_read_fn 适配器：将 ext 驱动的 32 位 LBA 回调转发到 AHCI 的 64 位读接口 */
 static int ext4_ahci_read_adapter(uint32_t lba, uint32_t count, void *buf) {
     return ahci_read_sectors((uint64_t)lba, count, buf);
+}
+
+/* M8-G.6: ACPI SCI interrupt C trampoline.
+ * Called from isr64.S x86_64_irq_sci stub.
+ * Dispatches all pending GPE events which may trigger
+ * I2C HID hotplug callbacks via input_report_hotplug(). */
+void arch_x86_64_sci_irq_trampoline(void)
+{
+    arch_x86_64_acpi_gpe_dispatch();
 }
 
 void arch_x86_64_early_init(const openos_bootinfo_t *bootinfo) {
@@ -459,7 +471,23 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
         }
     }
 
-    /* M8-D.4: I2C HID 驱动暂时从编译中移除，待I2C总线框架完善后重新集成 */
+    /* M8-G.5: I2C 总线驱动初始化 + I2C HID 设备枚举。
+     * 1. PCI 探测 Intel LPSS I2C 控制器，注册到 I2C 总线
+     * 2. ACPI DSDT 解析后枚举 PNP0C50 I2C HID 设备
+     * 3. 初始化找到的 I2C HID 设备并注册到 input 子系统 */
+    {
+        int i2c_n = i2c_lpss_init_all();
+        if (i2c_n > 0)
+            early_console64_write("[x86_64][i2c] Intel LPSS controllers initialized\n");
+        else
+            early_console64_write("[x86_64][i2c] no LPSS controller found\n");
+
+        int hid_n = i2c_hid_enumerate_acpi();
+        if (hid_n > 0)
+            early_console64_write("[x86_64][i2c-hid] PNP0C50 devices enumerated\n");
+        else
+            early_console64_write("[x86_64][i2c-hid] no PNP0C50 device found\n");
+    }
 
     /* M2.4：声卡 / 音频子系统（PCI 探测 AC97/HDA + PC Speaker + AC97 PCM 播放自检） */
     sound_init();
@@ -890,6 +918,19 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
      * their bus address and interrupt resources. Failure is non-fatal.
      * Must run AFTER power_init() so FADT is fully parsed. */
     (void)acpi_dsdt_init();
+
+    /* Step M8-G.6: Register SCI interrupt handler for ACPI GPE event dispatch.
+     * After DSDT parsing completes, install the SCI (System Control Interrupt)
+     * handler which dispatches GPE events. The SCI vector comes from FADT
+     * sci_int field. This enables I2C HID hotplug via ACPI GPE events.
+     * Failure is non-fatal: hotplug events simply won't fire. */
+    {
+        uint8_t sci_vec = arch_x86_64_acpi_get_sci_vector();
+        if (sci_vec > 0) {
+            arch_x86_64_idt_register_irq(sci_vec, x86_64_irq_sci);
+            early_console64_write("[x86_64][acpi] SCI handler registered\n");
+        }
+    }
 #ifdef M6_POWER_DIAG
     /* M6.1 end-to-end: actually trigger ACPI S5 soft-off. On QEMU this makes
      * the VM power off cleanly (exit rc 0) instead of hanging until timeout,

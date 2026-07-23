@@ -349,6 +349,37 @@ x86_64_irq_xhci:
     SWAPGS_IF_FROM_USER 8
     iretq
 
+/* M8-G.6: ACPI SCI interrupt stub (routed to FADT sci_int vector).
+ * External interrupt: no error code.
+ * Same caller-saved + EOI-in-C contract as other MSI stubs.
+ * The C handler dispatches GPE events which may trigger
+ * I2C HID hotplug callbacks. */
+.global x86_64_irq_sci
+x86_64_irq_sci:
+    SWAPGS_IF_FROM_USER 8
+    pushq %rax
+    pushq %rcx
+    pushq %rdx
+    pushq %rsi
+    pushq %rdi
+    pushq %r8
+    pushq %r9
+    pushq %r10
+    pushq %r11
+    cld
+    call arch_x86_64_sci_irq_trampoline
+    popq %r11
+    popq %r10
+    popq %r9
+    popq %r8
+    popq %rdi
+    popq %rsi
+    popq %rdx
+    popq %rcx
+    popq %rax
+    SWAPGS_IF_FROM_USER 8
+    iretq
+
 .global x86_64_isr_common
 x86_64_isr_common:
     /* G.7b: at this point the stack has err_code(0)/vector(8)/RIP(16)/CS(24).

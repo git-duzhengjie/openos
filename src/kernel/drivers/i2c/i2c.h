@@ -360,8 +360,9 @@ void i2c_set_default_adapter(i2c_adapter_t *adapter);
  * 
  * 调用链路: kernel64.c -> i2c_lpss_init_all() -> PCI 探测 -> 适配器初始化
  * 同时兼容 QEMU 模拟环境（无真实硬件时返回成功）
+ * @return 已初始化的控制器数量（0 表示无硬件，非负数表示成功）
  */
-void i2c_lpss_init_all(void);
+int i2c_lpss_init_all(void);
 
 /**
  * @brief I²C 核心 selftest

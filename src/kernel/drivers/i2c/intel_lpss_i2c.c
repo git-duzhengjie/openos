@@ -18,6 +18,9 @@
 
 /* M8-D.5: 使用klog替代debug.h */
 #include "klog64.h"
+
+/* M8-G.5: PCI枚举支持 */
+#include "pci.h"
 #define DEBUG(fmt, ...)  klog_emit(KLOG_DEBUG, KLOG_FAC_KERNEL, "[i2c-lpss] debug")
 
 /* ======================================================================
@@ -570,6 +573,59 @@ int intel_lpss_i2c_add_controller(void *base_addr, uint32_t input_clk,
           idx, base_addr, bus_speed);
 
     return idx;
+}
+
+/*
+ * i2c_lpss_init_all() — PCI 枚举并初始化所有 Intel LPSS I²C 控制器
+ *
+ * 扫描 PCI 总线，查找 vendor=0x8086 (Intel) 且 class=0x0C (serial bus),
+ * subclass=0x05 (SMBus/I²C) 的设备。对每个找到的控制器：
+ *   1. 启用设备（bus master + MMIO）
+ *   2. 从 BAR0 获取 MMIO 基地址
+ *   3. 调用 intel_lpss_i2c_add_controller() 注册到 I²C 总线
+ *
+ * 返回已初始化的控制器数量，<0 表示出错。
+ */
+int i2c_lpss_init_all(void)
+{
+    const pci_device_t *dev;
+    uint32_t total = 0;
+    uint32_t i;
+
+    /* 确保 PCI 枚举已完成 */
+    pci_scan_all();
+
+    /* 遍历所有已知 PCI 设备，查找 I²C 控制器 */
+    for (i = 0; (dev = pci_get_device(i)) != NULL; i++) {
+        /* 匹配 class=0x0C (Serial Bus), subclass=0x05 (SMBus/I²C) */
+        if (dev->class_code != PCI_CLASS_SERIAL_BUS ||
+            dev->subclass != PCI_SUBCLASS_I2C)
+            continue;
+
+        /* 启用设备：bus master + MMIO 空间 */
+        pci_enable_bus_master((pci_device_t *)dev);
+        pci_enable_mmio((pci_device_t *)dev);
+
+        /* 从 BAR0 获取 MMIO 基地址 */
+        if (dev->bars[0].size == 0 || !dev->bars[0].is_mmio) {
+            continue;
+        }
+
+        void *base = (void *)(uintptr_t)dev->bars[0].base;
+        uint32_t input_clk = 120000000;  /* Intel LPSS 默认输入时钟 120 MHz */
+        uint32_t bus_speed = 400000;     /* 标准模式 400 kHz */
+
+        int ret = intel_lpss_i2c_add_controller(base, input_clk, bus_speed);
+        if (ret < 0) {
+            DEBUG("I2C-LPSS: Controller at %p init failed (PCI %02x:%02x.%d)\n",
+                  base, dev->bus, dev->dev, dev->func);
+            continue;
+        }
+
+        total++;
+    }
+
+    return total;
 }
 
 /* ======================================================================

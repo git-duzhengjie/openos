@@ -89,6 +89,7 @@
 #define PCI_SUBCLASS_NVME    0x08u
 /* Subclass (serial bus) */
 #define PCI_SUBCLASS_USB     0x03u
+#define PCI_SUBCLASS_I2C     0x05u  /* SMBus / I²C controller */
 
 #define PCI_MAX_DEVICES      64u
 
