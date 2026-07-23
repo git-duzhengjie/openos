@@ -21,6 +21,8 @@ set SERIAL="E:\openos\logs\run.ser"
   -device qemu-xhci,id=xhci ^
   -device usb-tablet,bus=xhci.0 ^
   -device usb-kbd,bus=xhci.0 ^
+  -netdev user,id=net0 ^
+  -device virtio-net-pci,netdev=net0 ^
   -display sdl ^
   -boot c ^
   -serial file:%SERIAL% ^
