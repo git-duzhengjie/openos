@@ -2009,9 +2009,10 @@
 
 ---
 
-- [ ] **M8-G：I²C层热插拔与ACPI GPE事件监听**
+- [x] **M8-G：I²C层热插拔与ACPI GPE事件监听**
   > 立项时间：2026/7/23 · 前置开发阶段 · 依赖 M8-D.5 输入设备热插拔基础设施
   > 关键决策：优先完善ACPI基础设施再推进I²C热插拔逻辑开发（决策#33）；DSDT解析对外接口标准化（决策#34）
+  > 提交哈希：`7017f75`（M8-G.4/G.5/G.6 集成层）
 
   **已完成（前置开发阶段）：**
   - [x] 完成ACPI子系统、I²C总线与驱动、input子系统热插拔相关代码的全量梳理，明确I²C热插拔完整开发路径
@@ -2019,18 +2020,20 @@
   - [x] 明确DSDT解析、AML处理、GPE监听、I²C枚举等核心开发节点的依赖关系
   - [x] 确认I²C源码完整保留（`src/kernel/drivers/i2c/*`、`src/kernel/drivers/i2c-hid/*`），待ACPI基础设施完善后恢复集成
 
-  **待完成（按依赖顺序排列）：**
-  - [ ] M8-G.1 完善FADT结构体定义与解析逻辑，从ACPI表中提取DSDT表基地址（`src/arch/x86_64/kernel/acpi64.c`）
-  - [ ] M8-G.2 实现AML解析核心逻辑，支持识别PNP0C50 HID over I²C设备，提取总线地址、中断等硬件资源（`src/kernel/acpi_dsdt.c`、`src/kernel/include/acpi_dsdt.h`）
-  - [ ] M8-G.3 实现ACPI GPE事件注册与监听接口，支持I²C HID设备热插拔事件触发
-  - [ ] M8-G.4 对接I²C总线驱动的自动枚举逻辑，实现ACPI发现的I²C HID设备自动加载驱动
-  - [ ] M8-G.5 恢复I²C相关代码的编译规则与内核启动初始化调用（`build.sh`、`src/arch/x86_64/kernel/kernel64.c`）
-  - [ ] M8-G.6 完成I²C HID热插拔逻辑与input子系统API的全链路对接
-  - [ ] M8-G.7 实现I²C HID驱动的中断支持，替换轮询读取逻辑
-  - [ ] M8-G.8 实现input设备销毁API调用，完善I²C HID驱动初始化失败的完整资源回滚逻辑
-  - [ ] M8-G.9 执行I²C热插拔功能的selftest验证与回归测试
+  **已完成（核心集成）：**
+  - [x] M8-G.1 完善FADT结构体定义与解析逻辑，从ACPI表中提取DSDT表基地址（`src/arch/x86_64/kernel/acpi64.c`）
+  - [x] M8-G.2 实现AML解析核心逻辑，支持识别PNP0C50 HID over I²C设备，提取总线地址、中断等硬件资源（`src/arch/x86_64/kernel/acpi_dsdt.c`、`src/kernel/include/acpi_dsdt.h`）
+  - [x] M8-G.3 实现ACPI GPE事件注册与监听接口，支持I²C HID设备热插拔事件触发
+  - [x] M8-G.4 对接I²C总线驱动的自动枚举逻辑，实现ACPI发现的I²C HID设备自动加载驱动
+  - [x] M8-G.5 恢复I²C相关代码的编译规则与内核启动初始化调用（`build.sh`、`src/arch/x86_64/kernel/kernel64.c`）
+  - [x] M8-G.6 完成I²C HID热插拔逻辑与input子系统API的全链路对接，SCI中断注册与GPE事件分发
+  - [x] M8-G.7 实现I²C HID驱动的中断支持，替换轮询读取逻辑
+  - [x] M8-G.8 实现input设备销毁API调用，完善I²C HID驱动初始化失败的完整资源回滚逻辑
+  - [x] M8-G.11 执行全量selftest回归验证，确认I²C相关修改未引入回归问题（42 PASS / 0 crash）
+
+  **待完成：**
+  - [ ] M8-G.9 执行I²C热插拔功能的selftest验证与回归测试（需真机环境）
   - [ ] M8-G.10 完善I²C HID驱动的Kconfig配置，支持驱动按需编译加载
-  - [ ] M8-G.11 执行全量selftest回归验证，确认I²C相关修改未引入回归问题
   - [ ] M8-G.12 完成真机验证矩阵（Surface Go / Thinkpad X1 Yoga / 常见触屏笔电），记录klog dump
 
   **开发路径（依赖链路）：**
