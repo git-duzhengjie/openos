@@ -149,6 +149,16 @@ static uint32_t hid_mods_to_gui(uint8_t m) {
 
 /* HID Usage ID → ASCII（考虑 shift） */
 static int hid_usage_to_ascii(uint8_t usage, int shift) {
+    /* Direction keys & editing keys: HID Usage Page 0x07 */
+    switch (usage) {
+    case 0x4A: return 0x101;   /* Delete */
+    case 0x4B: return 0x104;   /* Home  */
+    case 0x4C: return 0x105;   /* End   */
+    case 0x4F: return 0x103;   /* Right */
+    case 0x50: return 0x102;   /* Left  */
+    case 0x51: return 0x107;   /* Down  */
+    case 0x52: return 0x106;   /* Up    */
+    }
     if ((int)usage >= HID_USAGE_MAX) return 0;
     char c = shift ? hid_usage_ascii_shift[usage] : hid_usage_ascii[usage];
     return (int)(unsigned char)c;

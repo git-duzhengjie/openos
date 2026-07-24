@@ -339,6 +339,10 @@ void gui_terminal_init(void) {
     g_gui.terminal.input_focused = 1;
     g_gui.terminal.cursor_visible = 1;
     g_gui.terminal.cursor_blink_ticks = 0;
+    g_gui.terminal.cmd_len = 0;
+    g_gui.terminal.cmd_pos = 0;
+    g_gui.terminal.history_count = 0;
+    g_gui.terminal.history_idx = -1;
     g_gui.terminal.cwd[0] = '/';
     g_gui.terminal.cwd[1] = 0;
     gui_terminal_clear();
@@ -423,6 +427,49 @@ void gui_terminal_view_write(gui_terminal_view_t *view, const char *text) {
     while (*text) {
         gui_terminal_view_putc(view, *text++, 0);
     }
+}
+
+/** 只移动光标左移一位，不清除字符内容（用于方向键LEFT） */
+static void gui_terminal_move_cursor_left(void) {
+    gui_terminal_view_t *view = &g_gui.terminal.view;
+    if (!g_gui.initialized || !g_gui.terminal.enabled) return;
+    if (view->cols == 0) return;
+    uint32_t old_x = view->cursor_x, old_y = view->cursor_y;
+    gui_terminal_invalidate_cursor_at(old_x, old_y);
+    if (view->cursor_x > 0) {
+        view->cursor_x--;
+    } else if (view->cursor_y > 0) {
+        view->cursor_y--;
+        view->cursor_x = view->cols - 1;
+    }
+    gui_terminal_invalidate_cell(old_x, old_y);
+    gui_terminal_invalidate_cursor_at(view->cursor_x, view->cursor_y);
+    g_gui.terminal.cursor_visible = 1;
+    g_gui.terminal.cursor_blink_ticks = 0;
+    g_gui.terminal.dirty = 1;
+}
+
+/** 只移动光标右移一位，不改变字符内容（用于方向键RIGHT） */
+static void gui_terminal_move_cursor_right(void) {
+    gui_terminal_view_t *view = &g_gui.terminal.view;
+    if (!g_gui.initialized || !g_gui.terminal.enabled) return;
+    if (view->cols == 0) return;
+    uint32_t old_x = view->cursor_x, old_y = view->cursor_y;
+    gui_terminal_invalidate_cursor_at(old_x, old_y);
+    view->cursor_x++;
+    if (view->cursor_x >= view->cols) {
+        view->cursor_x = 0;
+        view->cursor_y++;
+        if (view->cursor_y >= view->rows) {
+            gui_terminal_view_scroll(view);
+            gui_terminal_invalidate_body();
+        }
+    }
+    gui_terminal_invalidate_cell(old_x, old_y);
+    gui_terminal_invalidate_cursor_at(view->cursor_x, view->cursor_y);
+    g_gui.terminal.cursor_visible = 1;
+    g_gui.terminal.cursor_blink_ticks = 0;
+    g_gui.terminal.dirty = 1;
 }
 
 void gui_terminal_putc(char ch) {
@@ -1053,7 +1100,7 @@ static void gui_terminal_run_command(const char *cmd) {
     }
 }
 
-void gui_terminal_on_input(char ch) {
+void gui_terminal_on_input(int key) {
     serial_write("[TERMIN] on_input called\n");
     if (!g_gui.initialized || !g_gui.terminal.enabled || !g_gui.terminal.input_focused) {
         serial_write("[TERMIN] guard REJECT (init/enabled/focus)\n");
@@ -1064,6 +1111,122 @@ void gui_terminal_on_input(char ch) {
     if (!g_gui.terminal.prompt_shown) {
         gui_terminal_show_prompt();
     }
+
+    /* 方向键以负值传递：-1=UP -2=DOWN -3=LEFT -4=RIGHT -5=HOME -6=END -7=DELETE */
+    if (key < 0) {
+        switch (key) {
+        case -1: /* UP - 历史记录向上浏览 */
+            if (g_gui.terminal.history_count == 0) return;
+            if (g_gui.terminal.history_idx < 0)
+                g_gui.terminal.history_idx = g_gui.terminal.history_count - 1;
+            else if (g_gui.terminal.history_idx > 0)
+                g_gui.terminal.history_idx--;
+            /* 清除当前输入行，替换为历史记录 */
+            while (g_gui.terminal.cmd_len > 0) {
+                g_gui.terminal.cmd_len--;
+                gui_terminal_putc('\b');
+                gui_terminal_putc(' ');
+                gui_terminal_putc('\b');
+            }
+            {
+                const char *h = g_gui.terminal.history[g_gui.terminal.history_idx];
+                int n = 0;
+                while (h[n] && g_gui.terminal.cmd_len < (int)sizeof(g_gui.terminal.cmd_buf) - 1) {
+                    g_gui.terminal.cmd_buf[g_gui.terminal.cmd_len++] = h[n];
+                    gui_terminal_putc(h[n]);
+                    n++;
+                }
+            }
+            g_gui.terminal.cmd_pos = g_gui.terminal.cmd_len;
+            return;
+
+        case -2: /* DOWN - 历史记录向下浏览 */
+            if (g_gui.terminal.history_count == 0) return;
+            if (g_gui.terminal.history_idx < 0) return;
+            g_gui.terminal.history_idx++;
+            if (g_gui.terminal.history_idx >= g_gui.terminal.history_count) {
+                /* 回到空行 */
+                g_gui.terminal.history_idx = -1;
+                while (g_gui.terminal.cmd_len > 0) {
+                    g_gui.terminal.cmd_len--;
+                    gui_terminal_putc('\b');
+                    gui_terminal_putc(' ');
+                    gui_terminal_putc('\b');
+                }
+                g_gui.terminal.cmd_pos = 0;
+                return;
+            }
+            while (g_gui.terminal.cmd_len > 0) {
+                g_gui.terminal.cmd_len--;
+                gui_terminal_putc('\b');
+                gui_terminal_putc(' ');
+                gui_terminal_putc('\b');
+            }
+            {
+                const char *h = g_gui.terminal.history[g_gui.terminal.history_idx];
+                int n = 0;
+                while (h[n] && g_gui.terminal.cmd_len < (int)sizeof(g_gui.terminal.cmd_buf) - 1) {
+                    g_gui.terminal.cmd_buf[g_gui.terminal.cmd_len++] = h[n];
+                    gui_terminal_putc(h[n]);
+                    n++;
+                }
+            }
+            g_gui.terminal.cmd_pos = g_gui.terminal.cmd_len;
+            return;
+
+        case -3: /* LEFT - 光标左移 */
+            if (g_gui.terminal.cmd_pos > 0) {
+                g_gui.terminal.cmd_pos--;
+                gui_terminal_move_cursor_left();
+            }
+            return;
+
+        case -4: /* RIGHT - 光标右移 */
+            if (g_gui.terminal.cmd_pos < g_gui.terminal.cmd_len) {
+                g_gui.terminal.cmd_pos++;
+                gui_terminal_move_cursor_right();
+            }
+            return;
+
+        case -5: /* HOME - 移到行首 */
+            while (g_gui.terminal.cmd_pos > 0) {
+                g_gui.terminal.cmd_pos--;
+                gui_terminal_move_cursor_left();
+            }
+            return;
+
+        case -6: /* END - 移到行尾 */
+            while (g_gui.terminal.cmd_pos < g_gui.terminal.cmd_len) {
+                g_gui.terminal.cmd_pos++;
+                gui_terminal_move_cursor_right();
+            }
+            return;
+
+        case -7: /* DELETE - 删除光标后面的字符 */
+            if (g_gui.terminal.cmd_pos < g_gui.terminal.cmd_len) {
+                int i;
+                for (i = g_gui.terminal.cmd_pos; i < g_gui.terminal.cmd_len - 1; i++)
+                    g_gui.terminal.cmd_buf[i] = g_gui.terminal.cmd_buf[i + 1];
+                g_gui.terminal.cmd_len--;
+                g_gui.terminal.cmd_buf[g_gui.terminal.cmd_len] = '\0';
+                /* 重绘从光标到行尾 */
+                for (i = g_gui.terminal.cmd_pos; i < g_gui.terminal.cmd_len; i++)
+                    gui_terminal_putc(g_gui.terminal.cmd_buf[i]);
+                /* 末尾补空格覆盖旧字符 */
+                gui_terminal_putc(' ');
+                /* 光标回到原位 */
+                for (i = g_gui.terminal.cmd_len + 1; i > g_gui.terminal.cmd_pos; i--)
+                    gui_terminal_putc('\b');
+            }
+            return;
+
+        default:
+            return;
+        }
+    }
+
+    /* key >= 0: 处理普通字符 */
+    char ch = (char)key;
 
     if (ch == '\r' || ch == '\n') {
         /* commit command line */
@@ -1079,17 +1242,39 @@ void gui_terminal_on_input(char ch) {
             if (st > 0) { int d=0; while (cb[st]) cb[d++]=cb[st++]; cb[d]=0; cl=d; }
             g_gui.terminal.cmd_len = cl;
         }
+        /* 非空命令存入历史记录 */
+        if (g_gui.terminal.cmd_len > 0 && g_gui.terminal.history_count < 32) {
+            /* 避免与上一条重复 */
+            if (g_gui.terminal.history_count == 0 ||
+                strcmp(g_gui.terminal.history[g_gui.terminal.history_count - 1], g_gui.terminal.cmd_buf) != 0) {
+                memcpy(g_gui.terminal.history[g_gui.terminal.history_count], g_gui.terminal.cmd_buf, g_gui.terminal.cmd_len + 1);
+                g_gui.terminal.history_count++;
+            }
+        }
+        g_gui.terminal.history_idx = -1;  /* 重置历史浏览索引 */
         gui_terminal_run_command(g_gui.terminal.cmd_buf);
         g_gui.terminal.cmd_len = 0;
+        g_gui.terminal.cmd_pos = 0;
         gui_terminal_show_prompt();
         return;
     }
 
     if (ch == '\b' || ch == 127) {
-        /* backspace */
-        if (g_gui.terminal.cmd_len > 0) {
+        /* backspace: 删除光标前一个字符 */
+        if (g_gui.terminal.cmd_pos > 0) {
+            int i;
+            for (i = g_gui.terminal.cmd_pos - 1; i < g_gui.terminal.cmd_len - 1; i++)
+                g_gui.terminal.cmd_buf[i] = g_gui.terminal.cmd_buf[i + 1];
             g_gui.terminal.cmd_len--;
+            g_gui.terminal.cmd_pos--;
+            g_gui.terminal.cmd_buf[g_gui.terminal.cmd_len] = '\0';
+            /* 重绘：退格 + 从新光标位置重绘到行尾 + 空格覆盖 + 回退 */
             gui_terminal_putc('\b');
+            for (i = g_gui.terminal.cmd_pos; i < g_gui.terminal.cmd_len; i++)
+                gui_terminal_putc(g_gui.terminal.cmd_buf[i]);
+            gui_terminal_putc(' ');
+            for (i = g_gui.terminal.cmd_len + 1; i > g_gui.terminal.cmd_pos; i--)
+                gui_terminal_putc('\b');
         }
         return;
     }
@@ -1103,8 +1288,28 @@ void gui_terminal_on_input(char ch) {
     /* printable ASCII only */
     if ((unsigned char)ch >= 32 && (unsigned char)ch < 127) {
         if (g_gui.terminal.cmd_len < (int)sizeof(g_gui.terminal.cmd_buf) - 1) {
-            g_gui.terminal.cmd_buf[g_gui.terminal.cmd_len++] = ch;
-            gui_terminal_putc(ch);
+            int i;
+            /* 如果光标在行尾，直接追加 */
+            if (g_gui.terminal.cmd_pos == g_gui.terminal.cmd_len) {
+                g_gui.terminal.cmd_buf[g_gui.terminal.cmd_len++] = ch;
+                g_gui.terminal.cmd_buf[g_gui.terminal.cmd_len] = '\0';
+                g_gui.terminal.cmd_pos++;
+                gui_terminal_putc(ch);
+            } else {
+                /* 光标在行中：插入字符，右移后续字符 */
+                for (i = g_gui.terminal.cmd_len; i > g_gui.terminal.cmd_pos; i--)
+                    g_gui.terminal.cmd_buf[i] = g_gui.terminal.cmd_buf[i - 1];
+                g_gui.terminal.cmd_buf[g_gui.terminal.cmd_pos] = ch;
+                g_gui.terminal.cmd_len++;
+                g_gui.terminal.cmd_buf[g_gui.terminal.cmd_len] = '\0';
+                /* 重绘从插入点到行尾 */
+                for (i = g_gui.terminal.cmd_pos; i < g_gui.terminal.cmd_len; i++)
+                    gui_terminal_putc(g_gui.terminal.cmd_buf[i]);
+                /* 光标回到插入位置 */
+                for (i = g_gui.terminal.cmd_len; i > g_gui.terminal.cmd_pos + 1; i--)
+                    gui_terminal_putc('\b');
+                g_gui.terminal.cmd_pos++;
+            }
         }
     }
 }

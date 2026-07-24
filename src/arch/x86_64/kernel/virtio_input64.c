@@ -115,6 +115,15 @@ static int vin_map_key(uint16_t code, uint32_t mods) {
         case 15: return '\t';      /* TAB */
         case 14: return '\b';      /* BACKSPACE */
         case 1:  return 27;        /* ESC */
+        /* Arrow keys (evdev KEY_UP=103, KEY_DOWN=108, KEY_LEFT=105, KEY_RIGHT=106) */
+        case 103: return 0x106;    /* UP    */
+        case 108: return 0x107;    /* DOWN  */
+        case 105: return 0x102;    /* LEFT  */
+        case 106: return 0x103;    /* RIGHT */
+        /* Editing keys (evdev KEY_HOME=102, KEY_END=107, KEY_DELETE=111) */
+        case 102: return 0x104;    /* HOME  */
+        case 107: return 0x105;    /* END   */
+        case 111: return 0x101;    /* DELETE */
         default: return 0;         /* 未映射 */
     }
 }

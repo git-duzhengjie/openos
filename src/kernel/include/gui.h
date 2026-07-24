@@ -384,8 +384,13 @@ typedef struct gui_terminal {
     uint32_t cursor_blink_ticks;
     char cmd_buf[128];
     int cmd_len;
+    int cmd_pos;        /* 当前光标在 cmd_buf 中的位置（0~cmd_len） */
     int prompt_shown;
     char cwd[128];
+    /* 命令历史记录 */
+    char history[32][128];
+    int history_count;  /* 已存储的命令数量 */
+    int history_idx;    /* 浏览历史时的索引，-1表示当前输入行 */
 } gui_terminal_t;
 
 typedef struct gui_settings_row {
@@ -777,7 +782,7 @@ void gui_terminal_write(const char *text);
 void gui_terminal_enqueue_output(const char *text);
 void gui_terminal_clear(void);
 void gui_terminal_redraw(void);
-void gui_terminal_on_input(char ch);
+void gui_terminal_on_input(int key);
 void gui_terminal_set_input_focus(int focused);
 int gui_terminal_is_active(void);
 void gui_terminal_open(void);

@@ -6375,27 +6375,43 @@ void gui_process_events(void) {
                          g_gui.active_window == g_gui.terminal.window)) {
                 if (ev.modifiers & GUI_USER_KEYMOD_SHIFT) gui_focus_prev_widget();
                 else gui_focus_next_widget();
+            } else if (g_gui.terminal.enabled && g_gui.terminal.input_focused &&
+                       g_gui.active_window == g_gui.terminal.window) {
+                /* Terminal window is active: route keystrokes into the command line
+                 * BEFORE the generic focused-widget fallthrough swallows them.
+                 * 方向键以负值传道，避免与可打印字符冲突：
+                 *   -1=UP  -2=DOWN  -3=LEFT  -4=RIGHT  -5=HOME  -6=END  -7=DELETE */
+                int tkey = 0;
+                if (ev.key == GUI_KEY_ENTER || ev.key == '\n' || ev.key == '\r') {
+                    tkey = '\n';
+                } else if (ev.key == GUI_KEY_BACKSPACE || ev.key == 8 || ev.key == 127) {
+                    tkey = '\b';
+                } else if (ev.key == GUI_KEY_TAB || ev.key == '\t') {
+                    tkey = '\t';
+                } else if (ev.key == GUI_KEY_UP) {
+                    tkey = -1;
+                } else if (ev.key == GUI_KEY_DOWN) {
+                    tkey = -2;
+                } else if (ev.key == GUI_KEY_LEFT) {
+                    tkey = -3;
+                } else if (ev.key == GUI_KEY_RIGHT) {
+                    tkey = -4;
+                } else if (ev.key == GUI_KEY_HOME) {
+                    tkey = -5;
+                } else if (ev.key == GUI_KEY_END) {
+                    tkey = -6;
+                } else if (ev.key == GUI_KEY_DELETE) {
+                    tkey = -7;
+                } else if (ev.key >= 32 && ev.key < 127) {
+                    tkey = ev.key;
+                }
+                if (tkey) gui_terminal_on_input(tkey);
             } else if (g_gui.focused_widget && g_gui.focused_widget->focused &&
                        (g_gui.focused_widget->type == GUI_WIDGET_TEXTBOX ||
                         g_gui.focused_widget->type == GUI_WIDGET_TEXTAREA)) {
                 gui_textbox_on_key(g_gui.focused_widget, ev.key);
             } else if (browser_handle_address_enter(ev.key)) {
                 /* Browser address bar consumed Enter. */
-            } else if (g_gui.terminal.enabled && g_gui.terminal.input_focused &&
-                       g_gui.active_window == g_gui.terminal.window) {
-                /* Terminal window is active: route keystrokes into the command line
-                 * BEFORE the generic focused-widget fallthrough swallows them. */
-                char tch = 0;
-                if (ev.key == GUI_KEY_ENTER || ev.key == '\n' || ev.key == '\r') {
-                    tch = '\n';
-                } else if (ev.key == GUI_KEY_BACKSPACE || ev.key == 8 || ev.key == 127) {
-                    tch = '\b';
-                } else if (ev.key == GUI_KEY_TAB || ev.key == '\t') {
-                    tch = '\t';
-                } else if (ev.key >= 32 && ev.key < 127) {
-                    tch = (char)ev.key;
-                }
-                if (tch) gui_terminal_on_input(tch);
             } else if (g_gui.focused_widget && g_gui.focused_widget->focused &&
                        (g_gui.focused_widget->type == GUI_WIDGET_SELECT ||
                         g_gui.focused_widget->type == GUI_WIDGET_COMBOBOX) &&
@@ -8688,15 +8704,12 @@ int gui_should_capture_key_code_with_modifiers(int key, uint32_t modifiers) {
      * event queue. */
     if (g_gui.terminal.enabled && g_gui.terminal.input_focused &&
         g_gui.active_window == g_gui.terminal.window) {
-        serial_write("[TERMGATE] hit key\n");
         if (gui_is_enter_key(key) || key == GUI_KEY_BACKSPACE || key == GUI_KEY_TAB) return 1;
+        if (key == GUI_KEY_UP || key == GUI_KEY_DOWN ||
+            key == GUI_KEY_LEFT || key == GUI_KEY_RIGHT ||
+            key == GUI_KEY_HOME || key == GUI_KEY_END ||
+            key == GUI_KEY_DELETE) return 1;
         if (key >= 32 && key < 127) return 1;
-    } else if (g_gui.terminal.enabled) {
-        serial_write("[TERMGATE] miss: focus=");
-        serial_write(g_gui.terminal.input_focused ? "1" : "0");
-        serial_write(" activematch=");
-        serial_write(g_gui.active_window == g_gui.terminal.window ? "1" : "0");
-        serial_write("\n");
     }
 
     /* GUI Terminal is the Shell's graphical output window. Do not capture
@@ -8712,8 +8725,6 @@ int gui_should_capture_key_code_with_modifiers(int key, uint32_t modifiers) {
     if (key == GUI_KEY_TAB) return 1;
 
     if (wg->type == GUI_WIDGET_LISTVIEW || wg->type == GUI_WIDGET_TABLEVIEW || wg->type == GUI_WIDGET_MENUBAR || wg->type == GUI_WIDGET_CONTEXTMENU || wg->type == GUI_WIDGET_DIALOG || wg->type == GUI_WIDGET_TOAST || wg->type == GUI_WIDGET_TREEVIEW) return 1;
-
-    if (key == GUI_KEY_UP || key == GUI_KEY_DOWN) return 0;
 
     if (wg->type == GUI_WIDGET_TEXTBOX || wg->type == GUI_WIDGET_TEXTAREA) return 1;
 

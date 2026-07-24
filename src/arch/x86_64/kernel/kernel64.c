@@ -1104,8 +1104,10 @@ void kernel_main64_with_handoff(const uefi64_handoff_info_t *handoff) {
             early_console64_write("[x86_64][gui] lockscreen unlocked, entering desktop main loop\n");
             {
                 extern void usb_hid_poll(void);
+                extern void virtio_input_poll(void);
                 for (;;) {
                     usb_hid_poll();          /* M7.3: 消费 xHCI HID 事件（键鼠输入） */
+                    virtio_input_poll();     /* virtio-input 设备轮询（方向键等） */
                     window_manager_poll();
                     /* 不能 hlt：xHCI 完成事件目前未产生 CPU 中断，hlt 会永远睡下去 */
                     __asm__ __volatile__("pause");

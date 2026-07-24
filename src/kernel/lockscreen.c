@@ -195,6 +195,7 @@ void lockscreen_run(void)
          * 注意：此循环每 5ms 跑一次，切勿在此无限流地写串口日志，
          * 否则串口 I/O 会吃满时间片、饿死 usb_hid_poll，反而导致输入进不来。 */
         usb_hid_poll();
+        { extern void virtio_input_poll(void); virtio_input_poll(); }
 
         /* 推动 virtio-gpu 硬件光标（锁屏阶段不跑 gui_process_mouse_events，
          * 若不主动同步，QEMU 拿不到 guest 光标位图，宿主会回退到方块占位）。 */
