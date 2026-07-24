@@ -23,6 +23,7 @@
 #include "types.h"
 #include "login64.h"
 #include "mouse.h"
+#include "i18n.h"
 
 /* early_console64_write：把锁屏日志走串口，便于无显环境调试 */
 extern void early_console64_write(const char *s);
@@ -121,15 +122,15 @@ static void lock_render(void)
     gui_screen_draw_border(px, py, pw, ph, 2, LOCK_PANEL_BDR);
 
     /* 3) 标题 */
-    gui_draw_text(px + 40, py + 28, "OpenOS  \xe7\xb3\xbb\xe7\xbb\x9f\xe5\xb7\xb2\xe9\x94\x81\xe5\xae\x9a", LOCK_TEXT);
-    gui_draw_text(px + 40, py + 56, "Sign in to unlock  (Tab to switch)", LOCK_HINT);
+    gui_draw_text(px + 40, py + 28, i18n_t(I18N_KEY_LOCK_TITLE), LOCK_TEXT);
+    gui_draw_text(px + 40, py + 56, i18n_t(I18N_KEY_LOCK_SIGNIN_HINT), LOCK_HINT);
 
     /* 4) 用户名框 */
     gui_screen_fill_rect(bx, uby, bw, bh, LOCK_BOX_BG);
     gui_screen_draw_border(bx, uby, bw, bh, (g_lock_focus == 0) ? 3 : 2,
                            (g_lock_focus == 0) ? LOCK_DOT : LOCK_BOX_BDR);
     if (g_lock_user_len == 0) {
-        gui_draw_text(bx + 14, uby + bh / 2 - 8, "username", LOCK_HINT);
+        gui_draw_text(bx + 14, uby + bh / 2 - 8, i18n_t(I18N_KEY_LOCK_USERNAME), LOCK_HINT);
     } else {
         gui_draw_text(bx + 14, uby + bh / 2 - 8, g_lock_user, LOCK_TEXT);
     }
@@ -148,15 +149,15 @@ static void lock_render(void)
             dx += gap;
         }
         if (g_lock_pw_len == 0) {
-            gui_draw_text(bx + 14, pby + bh / 2 - 8, "password", LOCK_HINT);
+            gui_draw_text(bx + 14, pby + bh / 2 - 8, i18n_t(I18N_KEY_LOCK_PASSWORD), LOCK_HINT);
         }
     }
 
     /* 6) 提示行 */
     if (g_lock_wrong) {
-        gui_draw_text(bx, pby + bh + 16, "Login failed, try again", LOCK_ERR);
+        gui_draw_text(bx, pby + bh + 16, i18n_t(I18N_KEY_LOCK_LOGIN_FAILED), LOCK_ERR);
     } else {
-        gui_draw_text(bx, pby + bh + 16, "Default: openos / openos   (Enter to unlock)", LOCK_HINT);
+        gui_draw_text(bx, pby + bh + 16, i18n_t(I18N_KEY_LOCK_DEFAULT_HINT), LOCK_HINT);
     }
 
     /* 7) present */

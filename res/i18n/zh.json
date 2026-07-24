@@ -158,5 +158,11 @@
   "I18N_KEY_STATUS_CLICK_FILE_FIRST": "请先点击一个文件",
   "I18N_KEY_STATUS_REFRESHED": "已刷新",
   "I18N_KEY_STATUS_SAVED_PREFIX": "已保存：",
-  "I18N_KEY_APP_DEMO_NAME": "窗口演示"
+  "I18N_KEY_APP_DEMO_NAME": "窗口演示",
+  "I18N_KEY_LOCK_TITLE": "OpenOS  系统已锁定",
+  "I18N_KEY_LOCK_SIGNIN_HINT": "登录以解锁  (Tab 切换)",
+  "I18N_KEY_LOCK_USERNAME": "用户名",
+  "I18N_KEY_LOCK_PASSWORD": "密码",
+  "I18N_KEY_LOCK_LOGIN_FAILED": "登录失败，请重试",
+  "I18N_KEY_LOCK_DEFAULT_HINT": "默认账户：openos / openos   (回车解锁)"
 }

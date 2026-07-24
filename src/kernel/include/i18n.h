@@ -203,6 +203,14 @@ typedef enum {
     /* Demo registration name */
     I18N_KEY_APP_DEMO_NAME,
 
+    /* Lock screen */
+    I18N_KEY_LOCK_TITLE,
+    I18N_KEY_LOCK_SIGNIN_HINT,
+    I18N_KEY_LOCK_USERNAME,
+    I18N_KEY_LOCK_PASSWORD,
+    I18N_KEY_LOCK_LOGIN_FAILED,
+    I18N_KEY_LOCK_DEFAULT_HINT,
+
     I18N_KEY_COUNT
 } i18n_key_t;
 

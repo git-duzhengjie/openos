@@ -158,5 +158,11 @@
   "I18N_KEY_STATUS_CLICK_FILE_FIRST": "Click a file first",
   "I18N_KEY_STATUS_REFRESHED": "Refreshed",
   "I18N_KEY_STATUS_SAVED_PREFIX": "Saved: ",
-  "I18N_KEY_APP_DEMO_NAME": "Window Demo"
+  "I18N_KEY_APP_DEMO_NAME": "Window Demo",
+  "I18N_KEY_LOCK_TITLE": "OpenOS  System Locked",
+  "I18N_KEY_LOCK_SIGNIN_HINT": "Sign in to unlock  (Tab to switch)",
+  "I18N_KEY_LOCK_USERNAME": "username",
+  "I18N_KEY_LOCK_PASSWORD": "password",
+  "I18N_KEY_LOCK_LOGIN_FAILED": "Login failed, try again",
+  "I18N_KEY_LOCK_DEFAULT_HINT": "Default: openos / openos   (Enter to unlock)"
 }
