@@ -8603,7 +8603,7 @@ static void gui_handle_mouse_right_down(int x, int y) {
     }
 
     tw = gui_window_at(x, y);
-    if (tw == g_gui.terminal.window || (tw && (tw->flags & GUI_WINDOW_FLAG_TERMINAL))) {
+    if (tw && (tw == g_gui.terminal.window || (tw->flags & GUI_WINDOW_FLAG_TERMINAL))) {
         int has_selection = g_gui.terminal.view.has_selection ? 1 : 0;
         gui_set_active_window(tw);
         gui_set_focused_widget(0);
