@@ -21,7 +21,21 @@
  *   0x50 r9
  *   0x58 r10
  *   0x60 r11
- *   0x68 swapgs_needed  ; reserved (γ.5 P3: currently unused, ISR path handles swapgs)
+ *   0x68 swapgs_needed  ; γ.5 P3: 1=swapgs already executed, 0=not executed
+ *
+ * γ.5 P3 root cause: When an IRQ fires from user mode, the ISR entry does swapgs to
+ * switch to kernel GS. If the ISR handler triggers preemption and context_switch
+ * is called, the outgoing thread's swapgs state is NOT saved. When the thread is
+ * later resumed, the ISR exit path checks the *original* CS in the iretq frame,
+ * but GS may be in the wrong state (because another thread may have modified it).
+ *
+ * Solution: Save/restore swapgs state across context_switch. The ISR entry path
+ * records whether swapgs was executed into the per-CPU slot. Before context_switch,
+ * we save this state into the outgoing thread's context. After switching to the
+ * incoming thread, we restore its swapgs state.
+ *
+ * Note: swapgs is only meaningful for user threads; kernel threads always run
+ * with kernel GS, so their swapgs_needed is always 0.
  */
 arch_x86_64_context_switch:
     test %rdi, %rdi
@@ -51,6 +65,16 @@ arch_x86_64_context_switch:
     mov %r10, 0x58(%rdi)
     mov %r11, 0x60(%rdi)
 
+    /* γ.5 P3: Save swapgs_needed state from per-CPU slot.
+     * The ISR entry path sets this flag when swapgs is executed.
+     * We store it in the outgoing thread's context so that when
+     * the thread is later resumed, we know whether to expect
+     * swapgs to have been done for its ISR exit path. */
+    pushq %rsi
+    mov %gs:0, %rax          /* rax = arch_x86_64_this_cpu_ptr() */
+    mov 0x68(%rdi), %rax     /* swapgs_needed = percpu->swapgs_state */
+    popq %rsi
+
 1:
     pushq %rsi
     mov %rsi, %rdi
@@ -72,6 +96,22 @@ arch_x86_64_context_switch:
     mov 0x10(%rsi), %rax
     pushq %rax
     popfq
+
+    /* γ.5 P3: Restore swapgs_needed state to per-CPU slot.
+     * When the incoming thread is resumed, its ISR exit path
+     * needs to know whether swapgs was done at entry time.
+     * Note: For kernel threads and threads not in ISR, this is 0.
+     * Also, if the current swapgs state doesn't match the incoming
+     * thread's state, we need to execute swapgs here to synchronize.
+     *
+     * However: GS_BASE is the percpu pointer itself. If we swapgs
+     * here, the next %gs: access would read user GS which is NOT
+     * a valid percpu pointer. So we only restore the *flag* into
+     * the percpu slot for the ISR exit path to check; the actual
+     * GS state is handled by the paired ISR entry/exit swapgs.
+     */
+    mov 0x68(%rsi), %rax
+    mov %rax, %gs:8           /* percpu->swapgs_state = incoming swapgs_needed */
 
     mov 0x08(%rsi), %rax
     jmp *%rax
