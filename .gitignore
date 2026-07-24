@@ -52,3 +52,13 @@ logs/
 *.ser
 *.pcap
 .git_commit_msg.tmp
+
+# 助手工具相关
+node_modules/
+data/
+*.exe
+skills/
+boolean
+line
+tsc_output.txt
+teaseer_one_pager.html

@@ -45,6 +45,9 @@ typedef enum {
     I18N_KEY_CTXMENU_REFRESH,
     I18N_KEY_CTXMENU_SETTINGS,
     I18N_KEY_CTXMENU_ABOUT,
+    I18N_KEY_CTXMENU_COPY_SELECTION,
+    I18N_KEY_CTXMENU_CLEAR_SELECTION,
+    I18N_KEY_CTXMENU_CLEAR_TERMINAL,
 
     /* Phase 2: Window layer text */
     /* Window default title */

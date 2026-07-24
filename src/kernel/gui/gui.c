@@ -8119,14 +8119,7 @@ static void gui_desktop_run_action(uint32_t action) {
         return;
     }
     if (action == GUI_DESKTOP_ACTION_BROWSER) {
-        char *argv[] = { "/bin/browser", "example.com", "/", 0 };
-        int pid = spawn_user_process("/bin/browser", argv);
-        if (pid < 0) {
-            serial_write("[GUI] /bin/browser unavailable, falling back to kernel browser\n");
-            gui_browser_open();
-        } else {
-            serial_write("[GUI] launched /bin/browser\n");
-        }
+        gui_browser_open();
         return;
     }
     if (action == GUI_DESKTOP_ACTION_STICKY) {
@@ -8609,10 +8602,10 @@ static void gui_handle_mouse_right_down(int x, int y) {
         gui_set_focused_widget(0);
         gui_terminal_set_input_focus(1);
         gui_ctxmenu_reset();
-        gui_ctxmenu_add_ex("Copy selection", "Ctrl+C", 1, has_selection, 0);
-        gui_ctxmenu_add_ex("Clear selection", "Esc", 2, has_selection, 0);
+        gui_ctxmenu_add_ex(i18n_t(I18N_KEY_CTXMENU_COPY_SELECTION), "Ctrl+C", 1, has_selection, 0);
+        gui_ctxmenu_add_ex(i18n_t(I18N_KEY_CTXMENU_CLEAR_SELECTION), "Esc", 2, has_selection, 0);
         gui_ctxmenu_add_separator();
-        gui_ctxmenu_add_ex("Clear terminal", "", 3, g_gui.terminal.enabled ? 1 : 0, 0);
+        gui_ctxmenu_add_ex(i18n_t(I18N_KEY_CTXMENU_CLEAR_TERMINAL), "", 3, g_gui.terminal.enabled ? 1 : 0, 0);
         gui_ctxmenu_open_at(x, y, gui_ctxmenu_terminal_action, 0);
         return;
     }
